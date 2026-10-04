@@ -44,6 +44,34 @@ fn encoder_should_adapt_pi_responses_parameters_without_losing_codex_fields() {
 }
 
 #[test]
+fn encoder_should_strip_top_level_client_identity_fields() {
+    // 顶层 user / safety_identifier 只用于标识调用方，不转发上游；
+    // client_metadata 内的同名键属于业务 metadata，必须保持原样。
+    let encoded = encode_downstream_request(json!({
+        "model": "gpt-test",
+        "input": "hello",
+        "user": "downstream-user",
+        "safety_identifier": "downstream-safety",
+        "client_metadata": {
+            "user": "business-user",
+            "safety_identifier": "business-safety"
+        }
+    }));
+
+    let body = encoded.body();
+    assert!(!body.contains_key("user"), "顶层 user 必须剥离");
+    assert!(
+        !body.contains_key("safety_identifier"),
+        "顶层 safety_identifier 必须剥离"
+    );
+    assert_eq!(
+        body["client_metadata"],
+        json!({"user": "business-user", "safety_identifier": "business-safety"}),
+        "client_metadata 内同名键不属于调用方身份，保持原样"
+    );
+}
+
+#[test]
 fn encoder_should_expand_string_input_into_user_message_item() {
     // 公开 Responses API 的字符串 input 等价于一条 user 文本消息；
     // 目标形状对照 codex-rs/protocol/src/models.rs 的 ResponseItem::Message + ContentItem::InputText。

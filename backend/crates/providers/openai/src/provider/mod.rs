@@ -72,6 +72,7 @@ use crate::transport::catalog::{
 use crate::transport::diagnostics::{
     CodexFailureCategory, CodexUpstreamFailure, CodexUpstreamSendPhase,
 };
+use crate::transport::input_guard::{InputGuardConfig, InputGuardDecision, decide_input_guard};
 use crate::transport::profile::{
     APPCAST_POLL_INTERVAL, CodexDesktopReleaseService, CodexWireProfileState,
 };
@@ -86,6 +87,7 @@ use crate::transport::request::{
     CodexRequestEncodeError, RequestAccountScope, align_structured_location_fields,
     encode_generate_request, scope_request_to_account,
 };
+use crate::transport::review_override::{self, ReviewOverride};
 use crate::transport::session::CodexSessionIdentity;
 use crate::transport::usage::normalize_service_tier;
 use crate::transport::websocket::{
@@ -98,10 +100,13 @@ use crate::transport::{
     CodexClientError, CodexRateLimitUpdates, CodexRequestContext, CodexResponseMetadata,
     CodexResponseMetadataUpdates, CodexTransportMetrics, CodexUpstreamDiagnostics,
     CodexWebSocketPool, endpoint_url, normalize_selected_codex_downstream_body,
+    normalize_universal_history_cleanup,
 };
 
 mod execution;
 mod failure;
+#[doc(hidden)]
+pub use failure::context_length_exceeded_error;
 mod observation;
 mod upstream_adapter;
 mod workers;
@@ -160,6 +165,7 @@ pub struct CodexProvider {
     session_identity: Option<CodexSessionIdentity>,
     session_transport_recovery: CodexSessionTransportRecovery,
     stream_max_retries: u32,
+    input_guard: InputGuardConfig,
 }
 
 struct PreparedGenerateRequest {
@@ -275,11 +281,19 @@ impl CodexProvider {
             session_identity: None,
             session_transport_recovery: CodexSessionTransportRecovery::default(),
             stream_max_retries,
+            input_guard: InputGuardConfig::default(),
         })
     }
 
     pub(crate) fn with_session_identity(mut self, identity: CodexSessionIdentity) -> Self {
         self.session_identity = Some(identity);
+        self
+    }
+
+    /// 设置 GPT 长上下文输入守卫；默认关闭，由运行设置显式打开。
+    #[must_use]
+    pub fn with_input_guard(mut self, config: InputGuardConfig) -> Self {
+        self.input_guard = config;
         self
     }
 }
@@ -489,16 +503,29 @@ impl Provider for CodexProvider {
                     )
                 })?;
         }
+        // 审核子代理覆盖（§5）必须在选号前落到操作上：选号、计费与上游正文都读
+        // 模型名，只有先改写它们才会指向同一个模型。目录没有候选或不是审核请求时
+        // 保持客户端选择，绝不猜一个可能不存在的模型。
+        let review = review_request_override(&self.catalog, &operation);
+        if let Some(review) = review.as_ref() {
+            operation = apply_review_override(operation, review)?;
+        }
         let Operation::Generate(generate) = &operation else {
             unreachable!("generate settings keep the operation kind")
         };
-        let Some(upstream_model) = candidate.upstream_model() else {
+        let Some(routed_model) = candidate.upstream_model() else {
             return Err(provider_error(
                 ProviderErrorKind::Protocol,
                 UpstreamSendState::NotSent,
             ));
         };
-        let adapter = context.upstream_adapter(candidate.provider(), upstream_model)?;
+        let upstream_model = match review.as_ref() {
+            Some(review) => UpstreamModelId::new(review.upstream_model.clone()).map_err(|_| {
+                provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
+            })?,
+            None => routed_model.clone(),
+        };
+        let adapter = context.upstream_adapter(candidate.provider(), &upstream_model)?;
         if adapter.is_none()
             && generate
                 .provider_session_state(PROVIDER_NAME)
@@ -510,7 +537,7 @@ impl Provider for CodexProvider {
         // 把未知正文当成 OpenAI wire 解释会话、亲和或传输字段。
         let preselection = (adapter.is_none()
             && generate.protocol_payload().protocol() == PROVIDER_NAME)
-            .then(|| self.prepare_generate_request(generate, upstream_model, &context))
+            .then(|| self.prepare_generate_request(generate, &upstream_model, &context))
             .transpose()?;
         let (selection_session_affinity, selection_cyber_policy_key, requires_websocket) =
             preselection.map_or((None, None, false), |prepared| {
@@ -775,11 +802,63 @@ impl CodexProvider {
             lease.authentication(),
             crate::credential::CodexRuntimeAuthentication::OAuth(_)
         );
+        // 跨模型历史清洗：按最终上游模型族执行，API Key 与 OAuth 路径都覆盖（规范 §6 末条），
+        // 但只对 GPT 系列套用 GPT 的形状约束（§6-1「GPT 系列出站前」）。编码阶段已把最终
+        // 上游模型名写进正文，因此这里直接读正文即可，不需要再传一个可能漂移的副本。
+        let cleanup_model = upstream_request
+            .body()
+            .get("model")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
+        normalize_universal_history_cleanup(upstream_request.body_mut(), &cleanup_model);
         if codex_oauth {
             normalize_selected_codex_downstream_body(
                 upstream_request.body_mut(),
                 generate.protocol_payload().context(),
             );
+        }
+        // 网关本地压缩摘要（`cpr-local-v1:`）还原：带标记的历史项换回普通 user 摘要
+        // 消息；非法载荷直接按 InvalidRequest 拒绝。还原后旧续接链不再成立
+        // （摘要取代了此前全部历史），因此清掉 previous_response_id 及其作用域。
+        if let Some(input) = upstream_request
+            .body_mut()
+            .get_mut("input")
+            .and_then(serde_json::Value::as_array_mut)
+        {
+            match crate::transport::local_compaction::restore_local_compaction_history(input) {
+                Ok(true) => upstream_request.set_previous_response_id(None),
+                Ok(false) => {}
+                Err(error) => return Err(failure::invalid_local_compaction_error(error)),
+            }
+        }
+        // GPT 长上下文输入守卫（§4）：按**最终上游模型名**判定，压缩请求豁免。
+        // 判定放在本地压缩还原之后，估算的是真正要发出的历史，而不是被 base64
+        // 摘要放大的中间形态。拒绝发生在出站准备阶段，上游零请求。
+        let is_compaction = upstream_request.semantics().compact;
+        if let InputGuardDecision::Reject { estimated_tokens } = decide_input_guard(
+            self.input_guard,
+            upstream_request.body(),
+            upstream_model.as_str(),
+            is_compaction,
+        ) {
+            return Err(failure::context_length_exceeded_error(
+                estimated_tokens,
+                self.input_guard.threshold_tokens,
+            ));
+        }
+        // 出站前拒绝网关不支持的存储语义：`store=true` 会让上游保存响应，
+        // `background=true` 请求上游异步执行，两者都与网关的按次转发不符。
+        // 只检查显式 true；缺失值由编码阶段补齐为 false，`null` 与显式 false 照常放行。
+        for field in ["store", "background"] {
+            if upstream_request
+                .body()
+                .get(field)
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+            {
+                return Err(failure::unsupported_storage_error(field));
+            }
         }
         if let Some(location) = lease
             .account()
@@ -948,6 +1027,79 @@ fn native_request_requirements(request: &GenerateRequest) -> CapabilityRequireme
         request.protocol_payload().clone(),
     ))
     .capability_requirements()
+}
+
+/// 审核子代理请求要改写成的模型与推理强度；非审核请求返回 `None`。
+///
+/// `available_models` 取目录 cache：目录由 Core 在本请求路由前刷新，缺失说明目录还
+/// 没就绪，此时宁可不改写，也不猜一个上游可能不存在的审核模型。判族的模型名取客户
+/// 端在正文里声明的那个，而不是路由结果，因为"其它系列保持客户端选择"是按声明判的。
+fn review_request_override(
+    catalog: &CodexCredentialCatalogService,
+    operation: &Operation,
+) -> Option<ReviewOverride> {
+    let Operation::Generate(generate) = operation else {
+        return None;
+    };
+    let payload = generate.protocol_payload();
+    if payload.protocol() != PROVIDER_NAME {
+        return None;
+    }
+    if !review_override::is_review_request(payload.body(), payload.context()) {
+        return None;
+    }
+    let declared = payload.body().get("model").and_then(Value::as_str)?;
+    let available = catalog
+        .cached()
+        .ok()
+        .flatten()?
+        .models()
+        .iter()
+        .map(|model| model.request_model().as_str().to_owned())
+        .collect::<Vec<_>>();
+    review_override::review_override(declared, &available)
+}
+
+/// 把审核覆盖写回操作正文，让中间件、上游 wire 与观测看到同一个模型名与推理强度。
+fn apply_review_override(
+    operation: Operation,
+    review: &ReviewOverride,
+) -> Result<Operation, ProviderError> {
+    let Operation::Generate(generate) = &operation else {
+        return Ok(operation);
+    };
+    let mut body = generate.protocol_payload().body().clone();
+    body.insert(
+        "model".to_owned(),
+        Value::String(review.upstream_model.clone()),
+    );
+    // 审核请求必须带上覆盖后的强度；`reasoning` 形状不合规时整体替换，不保留客户端的非法值。
+    let reasoning = body
+        .entry("reasoning".to_owned())
+        .or_insert_with(|| Value::Object(Map::new()));
+    if !reasoning.is_object() {
+        *reasoning = Value::Object(Map::new());
+    }
+    if let Some(reasoning) = reasoning.as_object_mut() {
+        reasoning.insert(
+            "effort".to_owned(),
+            Value::String(review.reasoning_effort.to_owned()),
+        );
+    }
+    let encoded = serde_json::to_vec(&body).map_err(|_| {
+        provider_error(
+            ProviderErrorKind::InvalidRequest,
+            UpstreamSendState::NotSent,
+        )
+    })?;
+    operation
+        .replace_middleware_wire(PROVIDER_NAME, encoded.into())
+        .map_err(|_| {
+            provider_error(
+                ProviderErrorKind::InvalidRequest,
+                UpstreamSendState::NotSent,
+            )
+        })
 }
 
 fn validate_openai_reasoning(body: &Map<String, Value>) -> Result<(), ProviderError> {

@@ -140,30 +140,32 @@ fn client_scope(accounts: &[ProviderAccount]) -> FrozenAccountScope {
 }
 
 #[tokio::test]
-async fn client_catalog_is_account_and_version_scoped_and_keeps_original_objects() {
+async fn client_catalog_is_account_scoped_and_ignores_downstream_version() {
     let store = Arc::new(MemoryAccountStore::default());
     let first = seed_account(&store, "acct_client_a").await;
     let second = seed_account(&store, "acct_client_b").await;
     let server = MockServer::start().await;
-    for (account, version, text) in [
-        ("acct_client_a", "0.154.0", "a-original"),
-        ("acct_client_b", "0.154.0", "b-original"),
-        ("acct_client_a", "0.155.0", "a-new-client"),
+    // 出站 client_version 一律取服务端画像版本（本文件 fixture 为 0.144.0）：下游版本
+    // 只用于本地适配，因此 mock 按账号挂载，不再按下游版本分片。
+    for (account, text) in [
+        ("acct_client_a", "a-original"),
+        ("acct_client_b", "b-original"),
     ] {
         Mock::given(method("GET")).and(path("/codex/models"))
             .and(header("authorization", format!("Bearer access-{account}")))
             .and(header("chatgpt-account-id", format!("chatgpt-{account}")))
-            .and(query_param("client_version", version))
+            .and(query_param("client_version", "0.144.0"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"models":[{
                 "slug":"gpt-native", "display_name":"Native", "base_instructions":text,
                 "future_field":{"null":null,"list":[1,true]}, "model_messages":{"new_template":text}
             }]}))).expect(1).mount(&server).await;
     }
     let service = service_with_catalog_cache(&store, server.uri(), catalog_cache());
+    // 第 3 条是关键不变量：同一账号换下游版本仍命中同一条目（不再产生第三份缓存）。
     for (accounts, version, text) in [
         (vec![second.clone(), first.clone()], "0.154.0", "a-original"),
         (vec![second.clone()], "0.154.0", "b-original"),
-        (vec![first.clone()], "0.155.0", "a-new-client"),
+        (vec![first.clone()], "0.155.0", "a-original"),
         (vec![first], "0.154.0", "a-original"),
     ] {
         let models = service
@@ -334,15 +336,18 @@ async fn raw_instructions_only_change_advances_catalog_generation() {
 }
 
 #[tokio::test]
-async fn client_catalog_evicts_old_entries_after_32_distinct_versions() {
+async fn client_catalog_shares_one_entry_across_downstream_versions() {
     let store = Arc::new(MemoryAccountStore::default());
     let account = seed_account(&store, "acct_client_bounded").await;
     let scope = client_scope(&[account]);
     let server = MockServer::start().await;
+    // 下游 client_version 不再是缓存维度：客户端无论报哪个版本，上游都只按画像版本
+    // 取一次目录（32 条上限与淘汰逻辑改由画像/账号维度驱动，见下方 capacity 测试）。
     Mock::given(method("GET"))
         .and(path("/codex/models"))
+        .and(query_param("client_version", "0.144.0"))
         .respond_with(ResponseTemplate::new(200).set_body_raw(OFFICIAL_FIXTURE, "application/json"))
-        .expect(34)
+        .expect(1)
         .mount(&server)
         .await;
     let service = service_with_catalog_cache(&store, server.uri(), catalog_cache());
@@ -353,13 +358,50 @@ async fn client_catalog_evicts_old_entries_after_32_distinct_versions() {
             .expect("catalog");
     }
     service
-        .client_model_catalog(&scope, "0.154.32")
-        .await
-        .expect("newest is cached");
-    service
         .client_model_catalog(&scope, "0.154.0")
         .await
-        .expect("oldest was evicted");
+        .expect("最早的下游版本命中同一条目");
+    server.verify().await;
+}
+
+#[tokio::test]
+async fn client_catalog_evicts_old_entries_after_32_distinct_accounts() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let server = MockServer::start().await;
+    // 容量维度改为账号（下游版本已不再是维度）：33 个账号各取一次目录，容量上限 32，
+    // 最早的条目被淘汰；回访第 1 个账号会重新出站，因此它的 mock 期望两次请求。
+    let mut accounts = Vec::new();
+    for index in 0..33 {
+        let name = format!("acct_client_bounded_{index}");
+        let account = seed_account(&store, &name).await;
+        Mock::given(method("GET"))
+            .and(path("/codex/models"))
+            .and(header("authorization", format!("Bearer access-{name}")))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(OFFICIAL_FIXTURE, "application/json"),
+            )
+            .expect(if index == 0 { 2 } else { 1 })
+            .mount(&server)
+            .await;
+        accounts.push(account);
+    }
+    let service = service_with_catalog_cache(&store, server.uri(), catalog_cache());
+    for account in &accounts {
+        service
+            .client_model_catalog(&client_scope(std::slice::from_ref(account)), "0.154.0")
+            .await
+            .expect("catalog");
+    }
+    // 最新账号仍在缓存里：命中，不产生新的上游请求。
+    service
+        .client_model_catalog(&client_scope(&[accounts[32].clone()]), "0.154.0")
+        .await
+        .expect("最新账号仍被缓存");
+    // 最早账号已被淘汰：重新出站。
+    service
+        .client_model_catalog(&client_scope(&[accounts[0].clone()]), "0.154.0")
+        .await
+        .expect("最早账号已被淘汰");
     server.verify().await;
 }
 
@@ -871,7 +913,7 @@ async fn api_key_catalogs_are_isolated_and_join_oauth_without_claiming_native_me
 }
 
 #[tokio::test]
-async fn api_key_client_catalog_negotiates_and_preserves_versioned_native_objects() {
+async fn api_key_client_catalog_shares_native_objects_across_downstream_versions() {
     use gateway_core::routing::ProviderModelContent;
     use provider_openai::credential::ResponsesTransport;
     use serde_json::json;
@@ -899,52 +941,53 @@ async fn api_key_client_catalog_negotiates_and_preserves_versioned_native_object
         ["deepseek-flash"]
     );
     let scope = client_scope(&[account]);
-    for (version, effort) in [("0.155.0", "high"), ("0.156.0", "ultra")] {
-        let original = json!({
-            "slug":"deepseek-flash", "display_name":"DeepSeek Flash",
-            "default_reasoning_level":effort,
-            "supported_reasoning_levels":[
-                {"effort":"low", "description":"Fast"},
-                {"effort":effort, "description":"Upstream description"}
-            ],
-            "base_instructions":"Upstream model instructions",
-            "model_messages":{"instructions_template":"Original template"},
-            "context_window":128000, "future_field":{"null":null,"list":[1,true]}
-        });
-        Mock::given(method("GET"))
-            .and(path("/models"))
-            .and(query_param("client_version", version))
-            .and(header("authorization", "Bearer sk-api-test-only"))
-            .respond_with(
-                ResponseTemplate::new(200)
-                    .set_body_json(json!({"models":[original]}))
-                    .set_delay(std::time::Duration::from_millis(20)),
-            )
-            .expect(1)
-            .mount(&upstream)
-            .await;
-        let (first, concurrent) = tokio::join!(
-            service.client_model_catalog(&scope, version),
-            service.client_model_catalog(&scope, version)
+    // 下游版本不再是缓存维度：第一轮按画像版本取一次（并发双调用由 single-flight 合并），
+    // 第二轮换一个下游版本仍命中同一条目，返回的仍是同一份上游原生对象。
+    let original = json!({
+        "slug":"deepseek-flash", "display_name":"DeepSeek Flash",
+        "default_reasoning_level":"high",
+        "supported_reasoning_levels":[
+            {"effort":"low", "description":"Fast"},
+            {"effort":"high", "description":"Upstream description"}
+        ],
+        "base_instructions":"Upstream model instructions",
+        "model_messages":{"instructions_template":"Original template"},
+        "context_window":128000, "future_field":{"null":null,"list":[1,true]}
+    });
+    Mock::given(method("GET"))
+        .and(path("/models"))
+        .and(query_param("client_version", "0.144.0"))
+        .and(header("authorization", "Bearer sk-api-test-only"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"models":[original]}))
+                .set_delay(std::time::Duration::from_millis(20)),
+        )
+        .expect(1)
+        .mount(&upstream)
+        .await;
+    let (first, concurrent) = tokio::join!(
+        service.client_model_catalog(&scope, "0.155.0"),
+        service.client_model_catalog(&scope, "0.155.0")
+    );
+    for models in [first, concurrent] {
+        let models = models.expect("native client catalog");
+        assert_eq!(models.len(), 1);
+        let ProviderModelContent::Native(payload) = &models[0].content else {
+            panic!("API Key native metadata must not be replaced by an adapted ID")
+        };
+        assert_eq!(payload.protocol(), "codex");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(payload.body()).unwrap(),
+            original
         );
-        for models in [first, concurrent] {
-            let models = models.expect("native client catalog");
-            assert_eq!(models.len(), 1);
-            let ProviderModelContent::Native(payload) = &models[0].content else {
-                panic!("API Key native metadata must not be replaced by an adapted ID")
-            };
-            assert_eq!(payload.protocol(), "codex");
-            assert_eq!(
-                serde_json::from_slice::<serde_json::Value>(payload.body()).unwrap(),
-                original
-            );
-        }
     }
-    let cached = service
-        .client_model_catalog(&scope, "0.155.0")
+    // 换一个下游版本：命中同一条目（mock 的 expect(1) 保证上游没有被二次请求）。
+    let shared = service
+        .client_model_catalog(&scope, "0.156.0")
         .await
-        .expect("separate version cache");
-    let ProviderModelContent::Native(payload) = &cached[0].content else {
+        .expect("下游版本共享同一条目");
+    let ProviderModelContent::Native(payload) = &shared[0].content else {
         panic!("native cached model")
     };
     let document: serde_json::Value = serde_json::from_slice(payload.body()).unwrap();
@@ -1047,7 +1090,8 @@ async fn api_key_client_catalog_keeps_native_sources_stable_and_account_scoped()
         accounts.push(store.account(id).unwrap());
         Mock::given(method("GET"))
             .and(path(format!("/{id}/models")))
-            .and(query_param("client_version", "0.155.0"))
+            // 下游 client_version 只用于本地适配，出站一律使用服务端画像版本 0.144.0。
+            .and(query_param("client_version", "0.144.0"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_json(body)
@@ -1093,7 +1137,8 @@ async fn api_key_client_catalog_cache_is_invalidated_by_credential_revision() {
         upstream.reset().await;
         Mock::given(method("GET"))
             .and(path("/models"))
-            .and(query_param("client_version", "0.155.0"))
+            // 下游 client_version 只用于本地适配，出站一律使用服务端画像版本 0.144.0。
+            .and(query_param("client_version", "0.144.0"))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(serde_json::json!({"models":[{
                     "slug":model, "display_name":model

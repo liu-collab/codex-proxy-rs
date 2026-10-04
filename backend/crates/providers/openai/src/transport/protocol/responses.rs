@@ -8,6 +8,8 @@ use reqwest::header::HeaderMap;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use super::super::profile::identity::ClientEnvironment;
+
 /// 官方 Codex 客户端据此触发完整历史重放的稳定错误码。
 pub(crate) const PREVIOUS_RESPONSE_NOT_FOUND_CODE: &str = "previous_response_not_found";
 /// Responses WebSocket 用于回传同一 turn 不透明状态的官方 client metadata 键。
@@ -49,6 +51,8 @@ pub struct CodexResponsesRequest {
     pub client_ip: Option<String>,
     /// 客户端 User-Agent，仅用于管理端使用记录展示。
     pub client_user_agent: Option<String>,
+    /// 下游真实客户端的系统信息，已通过官方形状校验；出站 UA 只从这里取环境段。
+    pub(crate) client_environment: Option<ClientEnvironment>,
     /// 已鉴权客户端 API key 的稳定 ID，仅用于事实归因。
     pub client_api_key_id: Option<String>,
     /// 是否偏好 WebSocket 传输。
@@ -511,6 +515,7 @@ impl CodexResponsesRequest {
             variant_identity: None,
             client_ip: None,
             client_user_agent: None,
+            client_environment: None,
             client_api_key_id: None,
             use_websocket: false,
             force_http_sse: false,

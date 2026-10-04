@@ -42,6 +42,21 @@ export interface OutboundProxyRecord {
   updatedAt: string
 }
 
+/** 代理地址可选的协议；与后端 `OutboundProxy::parse` 的白名单一致。 */
+export const PROXY_PROTOCOL_OPTIONS = [
+  { label: 'SOCKS5', value: 'socks5' },
+  { label: 'SOCKS5H', value: 'socks5h' },
+  { label: 'HTTP', value: 'http' },
+  { label: 'HTTPS', value: 'https' },
+]
+
+/** 从已保存代理的脱敏地址里取回协议，用于编辑时回显；取不到时用 SOCKS5。 */
+export function proxyProtocolOf(endpoint: string): string {
+  const separator = endpoint.indexOf('://')
+  const protocol = separator > 0 ? endpoint.slice(0, separator).toLowerCase() : ''
+  return PROXY_PROTOCOL_OPTIONS.some(option => option.value === protocol) ? protocol : 'socks5'
+}
+
 interface ProxyPage {
   items: OutboundProxyRecord[]
   page: { page: number, pageSize: number, total: number, totalPages: number }
@@ -95,7 +110,7 @@ export function getProxies(data: { page: number, pageSize: number, search?: stri
   })
 }
 
-export function createProxy(data: { name: string, proxyUrl: string, autoLocation?: boolean, location?: RequestLocation | null }) {
+export function createProxy(data: { name: string, proxyUrl: string, proxyProtocol?: string, autoLocation?: boolean, location?: RequestLocation | null }) {
   return request<ProxyMutation>({
     url: '/api/admin/proxies/create',
     timeout: 25000,
@@ -104,7 +119,7 @@ export function createProxy(data: { name: string, proxyUrl: string, autoLocation
   })
 }
 
-export function updateProxy(data: { id: string, revision: number, name: string, proxyUrl?: string, autoLocation?: boolean, location?: RequestLocation | null }) {
+export function updateProxy(data: { id: string, revision: number, name: string, proxyUrl?: string, proxyProtocol?: string, autoLocation?: boolean, location?: RequestLocation | null }) {
   return request<ProxyMutation>({
     url: '/api/admin/proxies/update',
     timeout: 25000,
@@ -130,7 +145,7 @@ export function testProxy(data: { id: string, revision: number, detectLocation?:
   })
 }
 
-export function probeProxy(data: { proxyUrl: string, detectLocation?: boolean }) {
+export function probeProxy(data: { proxyUrl: string, proxyProtocol?: string, detectLocation?: boolean }) {
   return request<OutboundProxyTest>({
     url: '/api/admin/proxies/probe',
     method: 'POST',

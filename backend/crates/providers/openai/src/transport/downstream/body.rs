@@ -17,20 +17,57 @@ pub(crate) fn normalize_non_codex_request_body(body: &mut Map<String, Value>) {
         }
         // SDK 输出项的 status 不属于 Codex reasoning 输入合同；其他项的 status 可能合法。
         item.shift_remove("status");
-        // Codex 只接受空 content 数组；仅在加密历史仍可回填时去掉冗余明文，
-        // 没有加密内容的历史不自动丢弃，保留给上游明确拒绝。
+        // Codex 只接受空 content 数组，因此**非空数组一律移除**，不区分是否存在加密载荷：
+        // 纯明文的跨模型历史同样会被上游拒绝，留着只会让整条请求失败（不再使用
+        // "仅当 encrypted_content 非空才删"的旧规则）。非数组形状不属于 reasoning 内容
+        // 合同，保持原样。
         if item
-            .get("encrypted_content")
-            .and_then(Value::as_str)
-            .is_some_and(|content| !content.trim().is_empty())
-            && item
-                .get("content")
-                .and_then(Value::as_array)
-                .is_some_and(|content| !content.is_empty())
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|content| !content.is_empty())
         {
             item.shift_remove("content");
         }
+        // `UUID-序号` 形状的 encrypted_content 是占位值而非可回填密文：删掉它；
+        // 该项 id 也是 36 位 UUID 时一并删除（该 id 只标识占位项，回放无意义）。
+        if item
+            .get("encrypted_content")
+            .and_then(Value::as_str)
+            .is_some_and(is_placeholder_encrypted_content)
+        {
+            item.shift_remove("encrypted_content");
+            if item
+                .get("id")
+                .and_then(Value::as_str)
+                .is_some_and(is_uuid36)
+            {
+                item.shift_remove("id");
+            }
+        }
     }
+}
+
+/// `UUID-序号` 形状的占位密文：36 位 UUID 后接 `-` 与纯数字。
+fn is_placeholder_encrypted_content(value: &str) -> bool {
+    let Some((uuid, sequence)) = value.rsplit_once('-') else {
+        return false;
+    };
+    is_uuid36(uuid) && !sequence.is_empty() && sequence.bytes().all(|byte| byte.is_ascii_digit())
+}
+
+/// 36 位 UUID（8-4-4-4-12 十六进制）。
+fn is_uuid36(value: &str) -> bool {
+    const DASH_POSITIONS: [usize; 4] = [8, 13, 18, 23];
+    if value.len() != 36 {
+        return false;
+    }
+    value.bytes().enumerate().all(|(index, byte)| {
+        if DASH_POSITIONS.contains(&index) {
+            byte == b'-'
+        } else {
+            byte.is_ascii_hexdigit()
+        }
+    })
 }
 
 /// 补齐 Codex 请求缺省字段并适配已确认不兼容的请求形状，不递归清洗业务正文。
@@ -82,4 +119,17 @@ pub(in crate::transport) fn normalize_codex_request_body(body: &mut Map<String, 
     ] {
         body.remove(field);
     }
+
+    strip_client_identity_fields(body);
+}
+
+/// 剥离顶层客户端身份字段。
+///
+/// `user` 与 `safety_identifier` 是下游客户端/终端用户的标识，不随请求转发上游；
+/// `client_metadata` 内的同名键属于业务 metadata，保持原样。
+/// 这是"未知字段继续透传"原则的定向例外：这两个字段已知且只用于标识调用方，
+/// 不参与模型行为。
+pub(in crate::transport) fn strip_client_identity_fields(body: &mut Map<String, Value>) {
+    body.remove("user");
+    body.remove("safety_identifier");
 }

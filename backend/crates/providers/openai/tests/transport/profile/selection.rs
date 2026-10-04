@@ -31,7 +31,12 @@ fn six_presets_have_explicit_availability_and_cli_has_no_desktop_suffix() {
         assert_eq!(profile.os_type, platform.os_type());
         assert!(profile.desktop_version.is_empty());
         assert!(!profile.user_agent().contains("Desktop"));
-        assert!(profile.user_agent().ends_with("unknown"));
+        // CLI 档案的终端标记取平台默认正常值；unknown 不是官方客户端会出现的取值。
+        assert!(
+            profile.user_agent().ends_with(platform.default_terminal()),
+            "CLI 档案 UA 应以平台默认终端标记收尾：{}",
+            profile.user_agent()
+        );
     }
     for platform in [ClientPlatform::Linux, ClientPlatform::Windows] {
         for arch in ["arm64", "x86_64"] {
@@ -127,7 +132,7 @@ fn cli_entry_suffix_keeps_its_name_when_originator_is_overridden() {
     let profile = selection.resolve(&state).unwrap();
     assert_eq!(
         profile.user_agent(),
-        "my-agent/0.157.0 (Alpine Linux 3.24.1; x86_64) unknown (codex_exec; 0.157.0)"
+        "my-agent/0.157.0 (Alpine Linux 3.24.1; x86_64) xterm-256color (codex_exec; 0.157.0)"
     );
     assert_eq!(profile.originator, "my-agent");
 }

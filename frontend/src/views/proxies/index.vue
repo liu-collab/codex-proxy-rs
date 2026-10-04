@@ -4,7 +4,7 @@ import { BaseButton, BaseCard, BaseConfirmModal, BaseIconButton, BaseInput, Base
 import { LockKeyhole, MapPin, Pencil, Plus, Search, Trash2, Users, Wifi } from '@lucide/vue'
 import { watchDebounced } from '@vueuse/core'
 import { computed, onMounted, reactive, ref, shallowRef, watch } from 'vue'
-import { createProxy, deleteProxy, getProxies, probeProxy, testProxy, updateProxy } from '@/api'
+import { createProxy, deleteProxy, getProxies, probeProxy, proxyProtocolOf, testProxy, updateProxy } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { usePagedQuery } from '@/composables/usePagedQuery'
 import { normalizeRequestLocation, requestLocationError } from '@/utils/data'
@@ -34,6 +34,7 @@ const editing = shallowRef<OutboundProxyRecord | null>(null)
 const form = reactive({
   name: '',
   proxyUrl: '',
+  proxyProtocol: 'socks5',
   customLocation: false,
   location: { country: '', region: '', city: '', timezone: '' },
 })
@@ -56,6 +57,7 @@ function openForm(proxy: OutboundProxyRecord | null = null) {
   editing.value = proxy
   form.name = proxy?.name ?? ''
   form.proxyUrl = ''
+  form.proxyProtocol = proxy ? proxyProtocolOf(proxy.endpoint) : 'socks5'
   formTestResult.value = null
   const currentLocation = proxy?.autoLocation ? proxy.detectedLocation?.location ?? proxy.location : proxy?.location
   form.customLocation = currentLocation != null
@@ -101,7 +103,7 @@ async function testConnection() {
   }
   await formTestAction.run(async () => {
     // 新地址只做探测，保存前不修改代理及关联账号的连接配置。
-    const result = await probeProxy({ proxyUrl, detectLocation: false })
+    const result = await probeProxy({ proxyUrl, proxyProtocol: form.proxyProtocol, detectLocation: false })
     formTestResult.value = result
     if (!result.success)
       toast.error(result.message)
@@ -124,7 +126,7 @@ async function detectLocation() {
       let result: OutboundProxyTest | null
       if (proxyUrl) {
         // 新地址只解析草稿，不修改已保存代理或账号绑定。
-        result = await probeProxy({ proxyUrl, detectLocation: true })
+        result = await probeProxy({ proxyUrl, proxyProtocol: form.proxyProtocol, detectLocation: true })
       }
       else {
         const proxy = editing.value!
@@ -183,12 +185,14 @@ async function save() {
           name,
           autoLocation: false,
           proxyUrl: proxyUrl || undefined,
+          proxyProtocol: form.proxyProtocol,
           location,
         })
       : createProxy({
           name,
           autoLocation: false,
           proxyUrl,
+          proxyProtocol: form.proxyProtocol,
           location,
         }))
     showForm.value = false
@@ -341,6 +345,7 @@ onMounted(() => void query.execute())
       v-model="showForm"
       v-model:name="form.name"
       v-model:proxy-url="form.proxyUrl"
+      v-model:proxy-protocol="form.proxyProtocol"
       v-model:custom-location="form.customLocation"
       v-model:location="form.location"
       :test-result="formTestResult"

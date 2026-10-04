@@ -106,6 +106,8 @@ pub(super) struct AdminTestFixture {
     pub dashboard_summary_range: Arc<Mutex<Option<TimeRange>>>,
     pub provider_error: Arc<Mutex<Option<ProviderAdminError>>>,
     pub account: Arc<Mutex<Option<AccountPageItem>>>,
+    /// 代理用例核对实际落库的规范 URL：凭据只在存储层可见，响应里已脱敏。
+    pub proxies: Arc<proxies::MemoryProxies>,
 }
 
 impl AdminTestFixture {
@@ -155,12 +157,15 @@ impl AdminTestFixture {
         });
         let plugin_ports = Arc::new(plugins::TestPluginPorts::default());
         let published_snapshot = gateway_core::runtime::RuntimeSnapshotHandle::default();
+        let memory_proxies = Arc::new(proxies::MemoryProxies::default());
+        let proxy_store: Arc<dyn gateway_admin::ports::proxy::ProxyStore> =
+            Arc::clone(&memory_proxies) as Arc<dyn gateway_admin::ports::proxy::ProxyStore>;
         let stores = AdminStorePorts::new(
             AdminAccountStorePorts::new(
                 unused.clone(),
                 unused.clone(),
                 account_groups.clone(),
-                Arc::new(proxies::MemoryProxies::default()),
+                proxy_store,
             ),
             auth.clone(),
             client_keys.clone(),
@@ -219,6 +224,7 @@ impl AdminTestFixture {
             dashboard_summary_range,
             provider_error,
             account,
+            proxies: memory_proxies,
         }
     }
 

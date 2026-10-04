@@ -222,7 +222,6 @@ Linux/macOS 默认目录为 `~/.codex/`，Windows 为 `%USERPROFILE%\.codex\`；
 ```toml
 model_provider = "OpenAI"
 model = "gpt-5.6-terra"
-review_model = "gpt-5.6-terra"
 model_reasoning_effort = "max"
 service_tier = "default"
 
@@ -230,6 +229,9 @@ service_tier = "default"
 name = "OpenAI"
 base_url = "http://127.0.0.1:8080/v1"
 wire_api = "responses"
+# provider 覆盖 base_url 时客户端默认不拉远端目录，必须显式声明目录地址；
+# 否则模型选择器只显示内置预置，并跳过思考强度选择步骤。
+model_catalog_url = "http://127.0.0.1:8080/v1/models"
 supports_websockets = false
 requires_openai_auth = false
 # 填写代理密钥，真实账号由服务端管理。
@@ -242,15 +244,20 @@ X-OpenAI-Actor-Authorization = "proxy-managed"
 [features]
 image_generation = true
 goals = true
+# 客户端 0.156.0 起该开关默认关闭，显式打开才会使用上面的远端目录。
+api_key_model_discovery = true
 ```
 
 `OpenAI` 是自定义 Provider ID，大小写要与 `model_provider` 一致。合并配置时修改已有表，
 不要重复添加 `[features]` 或 Provider 表。更换模型时也要检查其支持的推理强度。
 密钥以明文保存，文件仅供本人读取，不要提交到 Git
 
-需要指定完整模型目录时，在账号的模型列表中导出所选 Codex 模型，并在 `config.toml` 顶层设置
-`model_catalog_json = "/absolute/path/to/cpr-model-catalog.json"`。导出文件不含账号凭据；
-它是一次目录快照，调整选择或上游模型能力变化后需重新导出
+审核请求的模型与推理强度由网关按模型系列改写，模板不要写死 `review_model`，
+让它跟随当前模型，再由网关决定实际使用的模型
+
+需要把模型目录固定成一次快照时，可在账号的模型列表中导出所选 Codex 模型，并在 `config.toml`
+顶层设置 `model_catalog_json = "/absolute/path/to/cpr-model-catalog.json"`（此时不再使用
+`model_catalog_url`）。导出文件不含账号凭据；它是一次目录快照，调整选择或上游模型能力变化后需重新导出
 
 ### auth.json
 

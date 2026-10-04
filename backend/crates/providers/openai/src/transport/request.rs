@@ -16,7 +16,11 @@ use sha2::{Digest, Sha256};
 
 use crate::transport::downstream::{is_non_codex_request_header, normalize_codex_request_body};
 use crate::transport::headers::is_managed_identity_header;
+use crate::transport::identity_pseudonym::{
+    IdentityPseudonym, pseudonymize_identity_fields, pseudonymize_workspaces,
+};
 use crate::transport::profile::CodexRequestLocation;
+use crate::transport::profile::identity::ClientEnvironment;
 use crate::transport::protocol::responses::{
     CodexResponsesRequest, X_CODEX_TURN_STATE_CLIENT_METADATA_KEY,
 };
@@ -68,6 +72,17 @@ const ACCOUNT_BOUND_STATE_KEYS: &[&str] = &[
 ];
 
 const TURN_METADATA_KEYS: &[&str] = &["turnMetadata", "turn_metadata", "x-codex-turn-metadata"];
+
+/// 出站只输出网关重建的会话身份头；下游原值不再作为业务头透传。
+///
+/// API 层的 `passthrough_header_name` 与这里的 Provider 侧名单必须一致：只在一处拦截
+/// 会让真名从另一条路径漏出去。
+pub(crate) const SESSION_IDENTITY_HEADER_NAMES: &[&str] = &[
+    "session-id",
+    "thread-id",
+    "x-client-request-id",
+    "x-codex-window-id",
+];
 
 const INSTALLATION_ID_KEYS: &[&str] = &[
     "installation_id",
@@ -461,6 +476,7 @@ pub(crate) fn scope_request_to_account(
     installation_id: &str,
     account_scope: RequestAccountScope,
 ) {
+    let pseudonym = IdentityPseudonym::for_account(installation_id);
     let reset_account_state = !account_scope.can_reuse_account_state();
     let client_metadata_turn_state = metadata_string(request, "x-codex-turn-state");
     let preserve_turn_state = !reset_account_state
@@ -473,12 +489,13 @@ pub(crate) fn scope_request_to_account(
     } else {
         None
     };
-    let turn_metadata = request
-        .turn_metadata
-        .as_deref()
-        .and_then(|metadata| scope_turn_metadata(metadata, installation_id, reset_account_state));
-    let client_metadata_turn_metadata = metadata_string(request, "x-codex-turn-metadata")
-        .and_then(|metadata| scope_turn_metadata(&metadata, installation_id, reset_account_state));
+    let turn_metadata = request.turn_metadata.as_deref().and_then(|metadata| {
+        scope_turn_metadata(metadata, installation_id, reset_account_state, &pseudonym)
+    });
+    let client_metadata_turn_metadata =
+        metadata_string(request, "x-codex-turn-metadata").and_then(|metadata| {
+            scope_turn_metadata(&metadata, installation_id, reset_account_state, &pseudonym)
+        });
 
     if reset_account_state {
         request.passthrough_headers.remove("x-codex-turn-state");
@@ -494,7 +511,7 @@ pub(crate) fn scope_request_to_account(
         for (name, value) in &mut request.passthrough_headers {
             if name == "x-codex-turn-metadata"
                 && let Ok(raw) = value.to_str()
-                && let Some(scoped) = scope_turn_metadata(raw, installation_id, false)
+                && let Some(scoped) = scope_turn_metadata(raw, installation_id, false, &pseudonym)
                 && let Ok(scoped) = HeaderValue::from_str(&scoped)
             {
                 *value = scoped;
@@ -510,8 +527,27 @@ pub(crate) fn scope_request_to_account(
             .body()
             .get(*key)
             .and_then(Value::as_str)
-            .and_then(|value| scope_turn_metadata(value, installation_id, reset_account_state));
+            .and_then(|value| {
+                scope_turn_metadata(value, installation_id, reset_account_state, &pseudonym)
+            });
         replace_existing_body_string(request, key, scoped.as_deref());
+    }
+
+    // 出站身份伪名（§2）：会话、线程、轮次与窗口身份在头与正文上都换成本账号的伪名。
+    // 伪名只按原值派生，因此头（下面的 request 字段）与正文（下面的 id 键、内嵌 turn
+    // metadata）拿到的是同一个值。必须在账号亲和与本地会话锚点派生之后执行：那些本地
+    // 语义按客户端原值计算，不能被伪名改写。
+    pseudonymize_identity_id(request.client_session_id.as_mut(), &pseudonym);
+    pseudonymize_identity_id(request.client_thread_id.as_mut(), &pseudonym);
+    pseudonymize_identity_id(request.client_request_id.as_mut(), &pseudonym);
+    pseudonymize_identity_id(request.codex_window_id.as_mut(), &pseudonym);
+    pseudonymize_identity_id(request.parent_thread_id.as_mut(), &pseudonym);
+    let body_identity = request.body_mut();
+    pseudonymize_identity_fields(body_identity, &pseudonym);
+    // 原始会话头不再作为业务头透传：出站值只能是上面重建的伪名，否则真名与伪名同时
+    // 出站等于没脱敏。名单与 API 层的 `passthrough_header_name` 保持一致。
+    for name in SESSION_IDENTITY_HEADER_NAMES {
+        request.passthrough_headers.remove(*name);
     }
 
     let client_metadata = request
@@ -525,7 +561,12 @@ pub(crate) fn scope_request_to_account(
                     (
                         key,
                         metadata.get(key).and_then(Value::as_str).and_then(|value| {
-                            scope_turn_metadata(value, installation_id, reset_account_state)
+                            scope_turn_metadata(
+                                value,
+                                installation_id,
+                                reset_account_state,
+                                &pseudonym,
+                            )
                         }),
                     )
                 });
@@ -540,6 +581,9 @@ pub(crate) fn scope_request_to_account(
                 // 扩展只是客户端关联信息，不能加入各层共用的清理名单。
                 metadata.remove("parent_response_id");
             }
+            // `client_metadata` 里的扁平会话/线程/轮次键与顶层正文属于同一份身份，
+            // 必须换成同一个伪名，否则头和正文会各说各话。
+            pseudonymize_identity_fields(&mut metadata, &pseudonym);
             // 官方 Core 在 client_metadata 使用带 x-codex 前缀的键，
             // turn metadata 内仍使用 installation_id；两处均取当前账号的安装身份。
             metadata.insert(
@@ -575,6 +619,50 @@ pub(crate) fn scope_request_to_account(
     request.turn_metadata = turn_metadata;
 }
 
+/// 收敛 Standalone raw JSON 正文（搜索等）里的安装身份。
+///
+/// 与主 Responses 正文同口径：顶层 `installation_id`/`installationId`/
+/// `x-codex-installation-id` 与 `client_metadata` 内的同名键只替换**已存在**的字符串值，
+/// 其余字节逐字保留（重复键、原始空白、大整数与 base64 都不动）。
+/// 正文里一个目标键都没有时返回 `None`，调用方保留原文。
+pub(crate) fn scope_standalone_body_installation_id(
+    body: &[u8],
+    installation_id: &str,
+) -> Option<Vec<u8>> {
+    use crate::transport::json_literal::replace_existing_string_at_path;
+
+    const CLIENT_METADATA_PATHS: [&[&str]; 3] = [
+        &["client_metadata", "x-codex-installation-id"],
+        &["client_metadata", "installation_id"],
+        &["client_metadata", "installationId"],
+    ];
+
+    let mut current = body.to_vec();
+    let mut changed = false;
+    for key in INSTALLATION_ID_KEYS {
+        if let Some(scoped) = replace_existing_string_at_path(&current, &[*key], installation_id) {
+            current = scoped;
+            changed = true;
+        }
+    }
+    for path in CLIENT_METADATA_PATHS {
+        if let Some(scoped) = replace_existing_string_at_path(&current, path, installation_id) {
+            current = scoped;
+            changed = true;
+        }
+    }
+    changed.then_some(current)
+}
+
+/// 原地把已有的非空身份值替换成伪名；空值不是身份，保持原样。
+fn pseudonymize_identity_id(value: Option<&mut String>, pseudonym: &IdentityPseudonym) {
+    if let Some(value) = value
+        && !value.is_empty()
+    {
+        *value = pseudonym.of(value);
+    }
+}
+
 fn metadata_string(request: &CodexResponsesRequest, key: &str) -> Option<String> {
     request
         .client_metadata()?
@@ -588,6 +676,7 @@ pub(crate) fn scope_turn_metadata(
     raw: &str,
     installation_id: &str,
     cross_account: bool,
+    pseudonym: &IdentityPseudonym,
 ) -> Option<String> {
     let Ok(Value::Object(mut metadata)) = serde_json::from_str::<Value>(raw) else {
         return (!cross_account).then(|| raw.to_owned());
@@ -602,9 +691,12 @@ pub(crate) fn scope_turn_metadata(
             changed |= metadata.remove(*key).is_some();
         }
     }
-    if raw.is_ascii()
-        && !cross_account
-        && !changed
+    // turn metadata 同时承载于 HTTP header 与 WS client_metadata，两处共用这一份改写，
+    // 头与正文里的会话身份因此不会分叉。
+    changed |= pseudonymize_identity_fields(&mut metadata, pseudonym);
+    changed |= pseudonymize_workspaces(&mut metadata, pseudonym);
+    if !changed
+        && raw.is_ascii()
         && !INSTALLATION_ID_KEYS
             .iter()
             .any(|key| metadata.contains_key(*key))
@@ -721,6 +813,12 @@ fn apply_protocol_context(request: &mut CodexResponsesRequest, context: &Map<Str
         context_string(context, "responses_lite").or_else(|| request.responses_lite.take());
     request.memgen_request =
         context_string(context, "memgen_request").or_else(|| request.memgen_request.take());
+    // 下游 UA 原值不进出站头：这里只保留通过官方形状校验的系统信息，UA 本体由画像
+    // 的产品名与版本重新拼装。
+    request.client_environment = context_string(context, "downstream_user_agent")
+        .as_deref()
+        .and_then(ClientEnvironment::parse)
+        .or_else(|| request.client_environment.take());
     match context.get("use_websocket").and_then(Value::as_bool) {
         Some(true) => {
             request.use_websocket = true;

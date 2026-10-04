@@ -6,7 +6,10 @@ use std::time::Duration;
 use serde::Deserialize;
 use url::Url;
 
+use gateway_core::metering::GPT_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD;
+
 use crate::credential::CodexQuotaRefreshPolicy;
+use crate::transport::input_guard::InputGuardConfig;
 use crate::transport::profile::CodexResidency;
 use crate::transport::session::{CodexSessionIdentity, CodexSessionIdentityError};
 use crate::transport::websocket::CodexWebSocketPoolConfig;
@@ -41,6 +44,8 @@ pub struct OpenAiConfig {
     pub stream_max_retries: u64,
     #[serde(default)]
     pub residency: Option<CodexResidency>,
+    #[serde(default)]
+    pub input_guard: CodexInputGuardSettings,
     #[serde(skip)]
     identity_secret_path: PathBuf,
 }
@@ -55,6 +60,7 @@ impl OpenAiConfig {
         self.ws_pool.validate()?;
         self.quota.validate()?;
         self.auth.validate()?;
+        self.input_guard.validate()?;
         self.identity_secret_path = runtime_data_dir.join("identity_hmac_secret");
         Ok(())
     }
@@ -72,6 +78,15 @@ impl OpenAiConfig {
     #[must_use]
     pub fn quota_refresh_policy(&self) -> CodexQuotaRefreshPolicy {
         self.quota.refresh_policy()
+    }
+
+    /// GPT 长上下文输入守卫配置；范围为启动校验所保证。
+    #[must_use]
+    pub fn input_guard(&self) -> InputGuardConfig {
+        InputGuardConfig {
+            enabled: self.input_guard.enabled,
+            threshold_tokens: self.input_guard.threshold_tokens,
+        }
     }
 
     #[must_use]
@@ -115,6 +130,7 @@ impl Default for OpenAiConfig {
             auth: CodexAuthSettings::default(),
             stream_max_retries: DEFAULT_STREAM_MAX_RETRIES,
             residency: None,
+            input_guard: CodexInputGuardSettings::default(),
             identity_secret_path: PathBuf::new(),
         }
     }
@@ -244,6 +260,38 @@ impl CodexAuthSettings {
             return Err(OpenAiConfigError::InvalidField("openai.auth"));
         }
         Ok(())
+    }
+}
+
+/// GPT 长上下文输入守卫的运行设置。
+///
+/// **默认关闭**：这是一条新增的拒绝路径，必须由运行设置显式打开。阈值默认取
+/// `gateway_core::metering` 的共用声明（与长上下文计费同源），允许范围由
+/// `InputGuardConfig` 一家规定。
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct CodexInputGuardSettings {
+    /// 是否启用守卫。
+    pub enabled: bool,
+    /// 允许的最大估算输入 token。
+    pub threshold_tokens: u64,
+}
+
+impl Default for CodexInputGuardSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            threshold_tokens: GPT_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD,
+        }
+    }
+}
+
+impl CodexInputGuardSettings {
+    /// 阈值越界时拒绝启动，而不是静默夹取到边界值。
+    fn validate(&self) -> Result<(), OpenAiConfigError> {
+        InputGuardConfig::from_settings(self.enabled, self.threshold_tokens)
+            .map(|_| ())
+            .map_err(|_| OpenAiConfigError::InvalidField("openai.input_guard.threshold_tokens"))
     }
 }
 

@@ -30,7 +30,7 @@ use crate::transport::{CodexWebSocketPool, build_reqwest_client};
 pub use config::{OpenAiConfig, OpenAiConfigError};
 pub use provider::{
     CodexProvider, CodexProviderConfigError, CodexProviderTransport, OFFICIAL_CODEX_BASE_PATH,
-    OFFICIAL_CODEX_BASE_URL, openai_failure_affects_account_score,
+    OFFICIAL_CODEX_BASE_URL, context_length_exceeded_error, openai_failure_affects_account_score,
 };
 
 pub mod credential;
@@ -178,6 +178,7 @@ pub async fn initialize(
             config.stream_max_retries(),
         )
         .map_err(OpenAiInitializeError::Provider)?
+        .with_input_guard(config.input_guard())
         .with_session_identity(session_identity),
     );
     let token_client = Arc::new(

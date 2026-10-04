@@ -1,6 +1,7 @@
 //! OpenAI 上游失败分类、恢复决策与稳定错误投影。
 
 use super::*;
+use crate::transport::local_compaction::LocalCompactionError;
 use gateway_core::diagnostics::TraceContext;
 
 /// OpenAI 失败对 Smart 账号分数的结构化 reason 闭集。
@@ -779,6 +780,95 @@ fn continuation_replay_error_detail() -> ClientVisibleUpstreamError {
         Some(PREVIOUS_RESPONSE_NOT_FOUND_CODE.to_owned()),
         Some("invalid_request_error".to_owned()),
     )
+}
+
+/// 输入守卫判定超限时的上下文超限失败。
+///
+/// 形状由规范固定：`code = context_length_exceeded`、`type = invalid_request_error`，
+/// 且**不挂** `client_visible_upstream_response`——超限必须由交付边界渲染成
+/// `response.failed` 事件（SSE 与 WebSocket 都是事件），HTTP 400 正文不会被客户端
+/// 识别为上下文超限，也就不会触发压缩。
+#[doc(hidden)]
+pub fn context_length_exceeded_error(
+    estimated_tokens: u64,
+    threshold_tokens: u64,
+) -> ProviderError {
+    let detail = ClientVisibleUpstreamError::new(
+        format!(
+            "Estimated input of {estimated_tokens} tokens exceeds the gateway limit of {threshold_tokens} tokens. Compact the conversation and retry."
+        ),
+        Some("context_length_exceeded".to_owned()),
+        Some("invalid_request_error".to_owned()),
+    );
+    provider_error(
+        ProviderErrorKind::InvalidRequest,
+        UpstreamSendState::NotSent,
+    )
+    .with_client_visible_upstream_error(detail)
+}
+
+/// 网关本地压缩摘要载荷非法时的稳定 400。
+///
+/// 这种载荷是网关自己写进历史的，解码失败说明数据已被损坏或篡改；按
+/// InvalidRequest/NotSent 拒绝整条请求，而不是把损坏的摘要发给上游。
+pub(super) fn invalid_local_compaction_error(error: LocalCompactionError) -> ProviderError {
+    let reason = match error {
+        LocalCompactionError::NotLocalCompaction => "payload is not a gateway local compaction",
+        LocalCompactionError::Empty => "payload is empty",
+        LocalCompactionError::InvalidBase64 => "payload is not valid base64",
+        LocalCompactionError::InvalidUtf8 => "payload is not valid UTF-8",
+    };
+    let detail = ClientVisibleUpstreamError::new(
+        format!("Invalid gateway local compaction summary: {reason}."),
+        Some("invalid_local_compaction".to_owned()),
+        Some("invalid_request_error".to_owned()),
+    );
+    let body = json!({"error": {
+        "message": detail.message(),
+        "code": detail.code(),
+        "type": detail.error_type(),
+    }});
+    provider_error(
+        ProviderErrorKind::InvalidRequest,
+        UpstreamSendState::NotSent,
+    )
+    .with_client_visible_upstream_error(detail)
+    .with_client_visible_upstream_response(ClientVisibleUpstreamResponse::new(
+        reqwest::StatusCode::BAD_REQUEST.as_u16(),
+        Some(b"application/json".to_vec()),
+        Bytes::from(body.to_string()),
+    ))
+}
+
+/// 客户端显式要求上游存储或后台执行时的稳定 400。
+///
+/// 网关按次转发，不提供上游侧存储语义：`store=true` 会让上游保存响应，
+/// `background=true` 会请求上游异步执行，两者都超出网关能力范围。
+/// 出站前直接拒绝，并给出可行动的错误码（`unsupported_storage`），
+/// 而不是把请求发出去、让客户端拿到一个语义不明的上游错误。
+pub(super) fn unsupported_storage_error(field: &str) -> ProviderError {
+    let detail = ClientVisibleUpstreamError::new(
+        format!(
+            "`{field}` is not supported by this gateway: requests are forwarded per call and are not stored upstream."
+        ),
+        Some("unsupported_storage".to_owned()),
+        Some("invalid_request_error".to_owned()),
+    );
+    let body = json!({"error": {
+        "message": detail.message(),
+        "code": detail.code(),
+        "type": detail.error_type(),
+    }});
+    provider_error(
+        ProviderErrorKind::InvalidRequest,
+        UpstreamSendState::NotSent,
+    )
+    .with_client_visible_upstream_error(detail)
+    .with_client_visible_upstream_response(ClientVisibleUpstreamResponse::new(
+        reqwest::StatusCode::BAD_REQUEST.as_u16(),
+        Some(b"application/json".to_vec()),
+        Bytes::from(body.to_string()),
+    ))
 }
 
 pub(super) fn map_stream_error(error: CodexClientError) -> MappedProviderFailure {

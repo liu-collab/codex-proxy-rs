@@ -19,6 +19,7 @@ const OPENAI_SUBAGENT_KEY: &str = "x-openai-subagent";
 const CODEX_TURN_METADATA_KEY: &str = "x-codex-turn-metadata";
 const PASSTHROUGH_HEADERS_CONTEXT_KEY: &str = "opaque_request_headers";
 const DOWNSTREAM_WEBSOCKET_CONNECTION_ID_CONTEXT_KEY: &str = "downstream_websocket_connection_id";
+const DOWNSTREAM_USER_AGENT_CONTEXT_KEY: &str = "downstream_user_agent";
 
 /// Responses 请求进入共享解码内核时的下游传输来源。
 #[derive(Clone, Copy)]
@@ -49,6 +50,8 @@ pub struct OpenAiRequestHeaders {
     responses_lite: Option<String>,
     memgen_request: Option<String>,
     subagent: Option<String>,
+    /// 下游 User-Agent 原值；出站身份只从中取真实系统信息，不整体透传。
+    user_agent: Option<String>,
     passthrough_headers: Vec<Value>,
 }
 
@@ -75,6 +78,9 @@ impl OpenAiRequestHeaders {
             responses_lite: header_string(headers, X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER),
             memgen_request: header_string(headers, X_OPENAI_MEMGEN_REQUEST_HEADER),
             subagent: header_string(headers, OPENAI_SUBAGENT_KEY),
+            // 与 `/v1/responses` 的诊断事实做同一份 UTF-8 校验与空白归一化：出站身份
+            // 从这个值里只取真实系统信息，原值本身不透传上游。
+            user_agent: normalized_header_string(headers, "user-agent"),
             passthrough_headers: passthrough_headers(headers),
         }
     }
@@ -153,6 +159,11 @@ impl OpenAiRequestHeaders {
         insert_protocol_context(&mut context, "turn_id", self.turn_id.as_ref());
         insert_protocol_context(&mut context, "responses_lite", self.responses_lite.as_ref());
         insert_protocol_context(&mut context, "memgen_request", self.memgen_request.as_ref());
+        insert_protocol_context(
+            &mut context,
+            DOWNSTREAM_USER_AGENT_CONTEXT_KEY,
+            self.user_agent.as_ref(),
+        );
         if !self.passthrough_headers.is_empty() {
             context.insert(
                 PASSTHROUGH_HEADERS_CONTEXT_KEY.to_owned(),
@@ -540,6 +551,16 @@ fn header_string(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
+/// 与诊断事实共用的归一化：UTF-8 可解码、去掉首尾空白后非空。
+fn normalized_header_string(headers: &HeaderMap, name: &str) -> Option<String> {
+    headers
+        .get(name)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+}
+
 fn passthrough_headers(headers: &HeaderMap) -> Vec<Value> {
     let connection_headers = headers
         .get_all("connection")
@@ -572,6 +593,17 @@ fn passthrough_header_name(name: &str, connection_headers: &[String]) -> bool {
         return false;
     }
 
+    // Cookie 族整体不继承：下游 cookie 描述的是客户端到网关这一段会话，
+    // 与上游账号身份无关。按前缀匹配，避免将来出现 cookie-* 变体时被当成普通业务头透传。
+    if name.starts_with("cookie") {
+        return false;
+    }
+    // 设备 attestation/integrity 头只能由官方客户端或网关自身生成；
+    // x-oai-is 系列同样按前缀匹配，覆盖未来新增的 x-oai-is-* 变体。
+    if name.starts_with("x-oai-is") {
+        return false;
+    }
+
     !matches!(
         name,
         // 下游鉴权和账号 cookie 绝不能成为上游账号身份。
@@ -579,8 +611,6 @@ fn passthrough_header_name(name: &str, connection_headers: &[String]) -> bool {
             | "x-api-key"
             // Codex 的服务端托管认证标记只用于客户端能力判断，不代表上游身份。
             | "x-openai-actor-authorization"
-            | "cookie"
-            | "cookie2"
             | "chatgpt-account-id"
             | "chatgpt-project-id"
             | "openai-organization"
@@ -592,11 +622,17 @@ fn passthrough_header_name(name: &str, connection_headers: &[String]) -> bool {
             | "originator"
             | "user-agent"
             | "version"
-            // 设备 attestation/integrity 头只能由官方客户端或网关自身生成，
-            // 客户端注入的 x-oai-attestation / X-OAI-IS 不得透传上游。
+            // 设备 attestation/integrity 头只能由官方客户端或网关自身生成。
             | "x-oai-attestation"
-            | "x-oai-is"
-            | "x-oai-is-update"
+            // 会话标识只由网关按入站语义重建后输出（出站值是账号内伪名），下游原值
+            // 不得作为业务头透传到上游。名单与 Provider 侧
+            // `SESSION_IDENTITY_HEADER_NAMES` 一致：只在一处拦截会让真名从另一条路径漏出去。
+            | "session-id"
+            | "thread-id"
+            | "x-client-request-id"
+            | "x-codex-window-id"
+            | "conversation-id"
+            | "conversation_id"
     )
 }
 

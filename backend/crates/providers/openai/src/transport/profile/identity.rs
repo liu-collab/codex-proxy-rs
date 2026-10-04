@@ -213,13 +213,62 @@ impl ExactIdentity {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct UaEnvironment {
     os_type: String,
     os_version: String,
     arch: String,
     terminal: String,
 }
+
+/// 下游真实客户端的系统信息，已通过官方形状校验。
+///
+/// 出站 UA 的产品名与版本始终取画像；只有这里的环境段来自下游。下游 UA 不是官方
+/// 形状（产品名不在白名单、含非可打印 ASCII、超长）时整体回退画像，不逐字段猜测。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ClientEnvironment(UaEnvironment);
+
+impl ClientEnvironment {
+    /// 解析下游 User-Agent；不是官方形状时返回 `None`。
+    ///
+    /// 复用完整自定义身份的同一条解析与校验边界：产品名白名单、可打印 ASCII、长度
+    /// 上限都由 [`ExactIdentity::parse`] 负责，这里只取它的环境段；环境段本身不成
+    /// 形状时同样返回 `None`。
+    #[must_use]
+    pub(crate) fn parse(user_agent: &str) -> Option<Self> {
+        ExactIdentity::parse(user_agent, None, None)
+            .ok()?
+            .environment
+            .map(Self)
+    }
+
+    /// 把环境段合并进画像快照。
+    ///
+    /// 画像已固定完整 UA 时原样返回：那是管理端显式配置的身份，不能重新拼接。
+    /// 终端标记为 `unknown` 时保留画像值——`unknown` 是 bundled Core 的实测缺省，
+    /// 不是可以从下游继承的正常终端。
+    #[must_use]
+    pub(crate) fn apply(&self, profile: &CodexWireProfile) -> CodexWireProfile {
+        if profile.exact_user_agent.is_some() {
+            return profile.clone();
+        }
+        let environment = &self.0;
+        CodexWireProfile {
+            os_type: environment.os_type.clone(),
+            os_version: environment.os_version.clone(),
+            arch: environment.arch.clone(),
+            terminal: if environment.terminal == UNKNOWN_TERMINAL {
+                profile.terminal.clone()
+            } else {
+                environment.terminal.clone()
+            },
+            ..profile.clone()
+        }
+    }
+}
+
+/// bundled Core app-server 的实测终端标记，不代表任何真实终端。
+const UNKNOWN_TERMINAL: &str = "unknown";
 
 impl UaEnvironment {
     fn parse(rest: &str) -> Option<Self> {

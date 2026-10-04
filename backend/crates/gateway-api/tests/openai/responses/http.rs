@@ -728,12 +728,16 @@ async fn request_context_should_resolve_forwarded_precedence_and_peer_fallback()
             operation_kind: OperationKind::Generate,
             input: Some(json!("hello")),
             client_metadata: None,
-            // 客户端 User-Agent 仅用于本地展示，不再透传给上游指纹上下文。
-            protocol_context: Some(json!({"opaque_request_headers": [
-                ["cf-connecting-ip", STANDARD.encode(b"198.51.100.1")],
-                ["x-real-ip", STANDARD.encode(b"198.51.100.2")],
-                ["x-forwarded-for", STANDARD.encode(b"10.0.0.2, 203.0.113.3")]
-            ]})),
+            // 下游 UA 不作为指纹头透传；它以非 wire 上下文事实交给 Provider，
+            // Provider 只从中取通过官方形状校验的系统信息，出站 UA 仍由画像重新拼装。
+            protocol_context: Some(json!({
+                "downstream_user_agent": "Codex-CLI/1.0",
+                "opaque_request_headers": [
+                    ["cf-connecting-ip", STANDARD.encode(b"198.51.100.1")],
+                    ["x-real-ip", STANDARD.encode(b"198.51.100.2")],
+                    ["x-forwarded-for", STANDARD.encode(b"10.0.0.2, 203.0.113.3")]
+                ]
+            })),
             prompt_cache_key: None,
             previous_response_id: None,
         }
@@ -769,11 +773,54 @@ async fn opaque_client_headers_should_not_change_local_client_observation() {
     assert_eq!(
         captured.protocol_context,
         Some(json!({
+            "downstream_user_agent": "pi/synthetic",
             "opaque_request_headers": [
                 ["x-stainless-runtime", STANDARD.encode(b"node")],
                 ["origin", STANDARD.encode(b"https://synthetic.invalid")]
             ]
         }))
+    );
+}
+
+#[tokio::test]
+async fn downstream_user_agent_context_keeps_only_a_usable_value() {
+    for (agent, expected) in [
+        (
+            Some("  codex_cli_rs/0.144.0 (Mac OS 15.7.1; arm64) xterm-256color  "),
+            Some("codex_cli_rs/0.144.0 (Mac OS 15.7.1; arm64) xterm-256color"),
+        ),
+        (Some("   "), None),
+        (None, None),
+    ] {
+        let mut headers = HeaderMap::new();
+        if let Some(agent) = agent {
+            headers.insert("user-agent", agent.parse().expect("user agent"));
+        }
+        let captured = captured_client_context(headers, "192.0.2.10:443".parse().unwrap()).await;
+        assert_eq!(
+            captured
+                .protocol_context
+                .as_ref()
+                .and_then(|context| context.get("downstream_user_agent"))
+                .and_then(Value::as_str),
+            expected,
+            "{agent:?}"
+        );
+    }
+
+    // 不能解码成 UTF-8 的头值没有可用语义，不能进入上下文。
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "user-agent",
+        HeaderValue::from_bytes(b"codex_cli_rs/\x80\xff").expect("invalid UTF-8 header"),
+    );
+    let captured = captured_client_context(headers, "192.0.2.10:443".parse().unwrap()).await;
+    assert!(
+        captured
+            .protocol_context
+            .as_ref()
+            .and_then(|context| context.get("downstream_user_agent"))
+            .is_none()
     );
 }
 

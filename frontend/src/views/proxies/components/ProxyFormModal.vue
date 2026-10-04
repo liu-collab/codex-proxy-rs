@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { OutboundProxyRecord, OutboundProxyTest, RequestLocation } from '@/api'
-import { BaseButton, BaseForm, BaseFormItem, BaseIconButton, BaseInput, BaseModal, BaseSwitch } from '@codex-proxy/ui'
+import { BaseButton, BaseForm, BaseFormItem, BaseIconButton, BaseInput, BaseModal, BaseSelect, BaseSwitch } from '@codex-proxy/ui'
 import { Eye, EyeOff, LocateFixed, Save, Wifi } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
+import { PROXY_PROTOCOL_OPTIONS } from '@/api'
 import RequestLocationFields from '@/components/RequestLocationFields.vue'
 
 const props = defineProps<{
@@ -20,6 +21,7 @@ const emit = defineEmits<{
 const open = defineModel<boolean>({ required: true })
 const name = defineModel<string>('name', { required: true })
 const proxyUrl = defineModel<string>('proxyUrl', { required: true })
+const proxyProtocol = defineModel<string>('proxyProtocol', { required: true })
 const customLocation = defineModel<boolean>('customLocation', { required: true })
 const location = defineModel<RequestLocation>('location', { required: true })
 const manualLocationWarning = computed(() => {
@@ -34,8 +36,8 @@ const showSecret = shallowRef(false)
 const busy = computed(() => props.saving || props.testingConnection || props.detectingLocation)
 const title = computed(() => props.proxy ? '编辑代理' : '新增代理')
 const connectionDescription = computed(() => props.proxy
-  ? '留空保留当前连接和认证信息，填写新地址时，请包含所需的用户名和密码'
-  : '支持 HTTP、HTTPS、SOCKS5 和 SOCKS5H，可在地址中包含用户名和密码')
+  ? '留空保留当前连接和认证信息；也可以直接粘贴「主机:端口:用户名:密码」并选择协议'
+  : '可直接粘贴代理商的「主机:端口:用户名:密码」，选择协议即可；也可填完整 URL')
 
 watch(open, () => {
   showSecret.value = false
@@ -48,6 +50,9 @@ watch(open, () => {
       <BaseFormItem label="代理名称" required>
         <BaseInput v-model="name" maxlength="100" :disabled="busy" aria-label="代理名称" placeholder="请输入代理名称" />
       </BaseFormItem>
+      <BaseFormItem label="协议" description="粘贴「主机:端口:用户名:密码」时必须选择；填完整 URL 时以 URL 里的协议为准">
+        <BaseSelect v-model="proxyProtocol" :options="PROXY_PROTOCOL_OPTIONS" :disabled="busy" aria-label="代理协议" class="w-40" />
+      </BaseFormItem>
       <BaseFormItem label="代理地址" :required="!proxy" :description="connectionDescription">
         <BaseInput
           v-model="proxyUrl"
@@ -55,7 +60,7 @@ watch(open, () => {
           autocomplete="new-password"
           :disabled="busy"
           aria-label="代理地址"
-          placeholder="请输入代理地址"
+          placeholder="主机:端口:用户名:密码 或 socks5://用户名:密码@主机:端口"
         >
           <template #suffix>
             <BaseIconButton :label="showSecret ? '隐藏代理地址' : '显示代理地址'" :disabled="busy" @click="showSecret = !showSecret">

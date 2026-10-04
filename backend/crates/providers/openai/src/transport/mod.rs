@@ -10,6 +10,10 @@ pub mod diagnostics;
 mod downstream;
 pub mod endpoints;
 pub mod headers;
+pub mod identity_pseudonym;
+pub mod input_guard;
+pub mod json_literal;
+pub mod local_compaction;
 pub mod profile;
 pub mod profile_avatar;
 pub mod profile_statistics;
@@ -17,10 +21,13 @@ pub mod protocol;
 pub mod request;
 pub mod reset_credits;
 mod response_meta;
+pub mod review_override;
 pub(crate) mod session;
 pub mod subscription;
 mod time;
-pub(crate) use downstream::normalize_selected_codex_downstream_body;
+pub(crate) use downstream::{
+    normalize_selected_codex_downstream_body, normalize_universal_history_cleanup,
+};
 pub(crate) use endpoints::valid_upstream_base_url;
 pub mod tls;
 pub mod usage;

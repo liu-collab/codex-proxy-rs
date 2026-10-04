@@ -62,6 +62,18 @@ impl ClientPlatform {
             Self::Linux | Self::Windows => "x86_64",
         }
     }
+
+    /// Codex Core UA 尾段的终端标记默认值。
+    ///
+    /// `unknown` 不是官方客户端会出现在 UA 里的取值，把它作为出站默认会给上游
+    /// 一个"这条请求不是真客户端发的"信号；这里按平台给出正常终端标记。
+    /// Windows 取 `WindowsTerminal`，与实测到的官方 Windows 客户端 UA 一致。
+    pub const fn default_terminal(self) -> &'static str {
+        match self {
+            Self::Macos | Self::Linux => "xterm-256color",
+            Self::Windows => "WindowsTerminal",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -238,7 +250,7 @@ impl ClientProfileSelection {
             terminal: self
                 .terminal
                 .clone()
-                .unwrap_or_else(|| "unknown".to_owned()),
+                .unwrap_or_else(|| self.platform.default_terminal().to_owned()),
             exact_user_agent: None,
             residency: state.snapshot().residency,
             verified_at: release.verified_at.unwrap_or(DateTime::UNIX_EPOCH),
@@ -321,7 +333,7 @@ impl CodexWireProfileState {
                     "configuration": configuration,
                     "automaticAvailable": available,
                     "reason": (!available).then_some("暂不支持自动更新"),
-                    "defaults": { "originator": configuration.default_originator(), "osType": platform.os_type(), "osVersion": platform.default_os_version(), "arch": platform.default_arch(), "terminal": "unknown" },
+                    "defaults": { "originator": configuration.default_originator(), "osType": platform.os_type(), "osVersion": platform.default_os_version(), "arch": platform.default_arch(), "terminal": platform.default_terminal() },
                 }));
             }
         }

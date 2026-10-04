@@ -385,15 +385,19 @@ impl CodexCredentialCatalogService {
     async fn cached_client_account_catalog(
         &self,
         account: &ProviderAccount,
-        client_version: &str,
+        _client_version: &str,
         profile: CodexWireProfile,
     ) -> ClientCatalogResult {
+        // 目录请求的出站 client_version 一律使用服务端画像版本：下游客户端版本只用于
+        // 本地适配（请求形状与响应合同分流），不透传上游。缓存键与查询参数同源，
+        // 因此目录缓存也不会按下游版本分片。
+        let profile_version = profile.codex_version.clone();
         let key = ClientCatalogKey {
             account_id: account.id().clone(),
             revision: account.revision(),
             plan: account.plan_type().map(str::to_owned),
             upstream_account_id: account.upstream_account_id().map(str::to_owned),
-            client_version: client_version.to_owned(),
+            client_version: profile_version.clone(),
             profile: profile.clone(),
         };
         let value = {
@@ -431,7 +435,7 @@ impl CodexCredentialCatalogService {
                     CodexWireProfileState::new(profile),
                 );
                 let result = self
-                    .fetch_account_models(&client, account, Some(client_version))
+                    .fetch_account_models(&client, account, Some(profile_version.as_str()))
                     .await
                     .map(|fetched| {
                         fetched

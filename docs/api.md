@@ -199,7 +199,12 @@ WebSocket message 和 frame 不设置网关私有长度上限；协议可接受�
 失败仍沿用数据面错误映射和已确认的上游状态/可见正文边界，不把非 2xx 成功封套当作成功
 
 Codex 的 review 等子代理请求仍使用 `/v1/responses`，并通过 `x-openai-subagent` 请求头携带子代理类型；
-网关不提供独立的子代理请求路径
+网关不提供独立的子代理请求路径。子代理类型同时认正文 `client_metadata["x-openai-subagent"]` 与
+`x-codex-turn-metadata` 的 `subagent_kind`（WebSocket 帧只有后者）。值为 `review` 时，网关在选号前按
+客户端声明的模型判族改写上游模型与推理强度：`deepseek*` → `deepseek-flash`/`max`、
+`mimo*` → `mimo-v2.6-flash`/`max`、`gpt*` → `gpt-5.6-luna`（目录缺失时依次回退 `terraform`、`terra`）/`xhigh`，
+其它系列保持客户端选择；目录里一个候选都没有时同样保持客户端选择。改写只作用于本次发送的副本，
+选号、计费与上游正文使用同一个模型名
 
 ### Responses 请求与传输
 
@@ -237,6 +242,27 @@ Responses 也不透传 `x-stainless-*`、`Origin`、`Referer`、`sec-ch-ua*` 和
 `thread-id`、turn metadata 等 Codex 协议字段及未知业务扩展不受下游环境头过滤规则影响；
 `traceparent`、`tracestate` 不因属于追踪字段而被删除
 
+出站 `User-Agent` 的产品名与版本取当前画像，系统信息取下游真实客户端：下游 UA 通过官方形状
+校验（产品名白名单 `Codex Desktop`/`codex-tui`/`codex_exec`/`codex_cli_rs`、可打印 ASCII、4096 字节
+上限）且解析出 `(系统 版本; 架构) 终端` 时，用它的系统、版本、架构与终端替换画像的环境段；任一步
+不成立就整体沿用画像值，不逐字段猜测。终端为 `unknown`（bundled Core app-server 的实测缺省）时回落
+画像终端。画像固定了完整自定义 UA 时不做合并：那串身份由管理端显式配置，不按预设重新拼装。
+下游 UA 本身不作为请求头透传；它随协议上下文进入 Provider，只用于上面的环境段合并
+
+出站会话身份是**账号内稳定的伪名**。`session`、`thread`、`parent_thread`、`root_thread`、
+`forked_from_thread`、`conversation`、`turn`、`parent_turn`、`root_turn`、`window`、
+`context_window` 这些键（含连字符与 camelCase 写法）以及 `prompt_cache_key` 的字符串值统一
+替换为 36 位 UUID 形状的伪名，种子取当前账号的安装身份：同一账号内同一原值始终得到同一个
+伪名，不同账号之间不可关联。伪名只按原值派生，因此同一个逻辑 id 在 `session-id`/`thread-id`/
+`x-client-request-id`/`x-codex-window-id` 等请求头、正文 `client_metadata` 扁平键、顶层正文键与内嵌
+`x-codex-turn-metadata`（HTTP 头与 WebSocket `client_metadata` 共用同一份改写）上都是同一个值。
+`workspaces` 的对象键（工作区根）与 `associated_remote_urls` 值同样按账号伪名，`label`、提交号
+等其余内容逐字保留。伪名改写只作用于本次发送的副本，本地会话亲和、会话锚点与管理端记录仍按
+客户端原值计算；turn metadata 的 ASCII 编码合同不变。
+原始会话头不再是透传项：`session-id`、`thread-id`、`x-client-request-id`、`x-codex-window-id`
+无论 API Key 还是 OAuth 上游都只输出网关重建的值（无会话语义时不输出），下游原值不会与伪名
+同时出站
+
 #### 正文兼容
 
 Responses 上游编码会移除 Codex 不接受的顶层 `temperature`、`max_output_tokens` 和
@@ -256,9 +282,51 @@ Grok 客户端经 Codex/OAuth 上游执行时，仅在带有 `x-grok-model-overr
 普通 Codex 请求与 API Key 上游不应用这条兼容规则
 
 Codex/OAuth 上游的历史回填按字段形状兼容，不以 User-Agent 品牌区分：显式 `type: "reasoning"`
-的 `input` 项移除顶层 `status`；该项具有非空字符串 `encrypted_content` 时，还会移除非空数组
-`content`。其他字段及顺序保持不变，缺少非空加密载荷的明文历史由上游判定。
+的 `input` 项移除顶层 `status`，并移除**非空数组** `content`——不论该项是否携带加密载荷，
+因为 Codex 只接受空数组，纯明文的跨模型历史同样会被上游拒绝。非数组形状的 `content`、
+`summary` 与其他字段保持原样。
+`UUID-序号` 形状（前段 36 位 UUID、后段纯数字）的 `encrypted_content` 是占位值而非可回填
+密文，会被删除；该项 `id` 也是 36 位 UUID 时一并删除。真实密文与非纯数字后缀保持原样。
 普通消息、工具项及未知类型不受此规则影响，API Key 上游不应用此规则
+
+顶层 `user` 与 `safety_identifier` 是调用方标识，出站前剥离；`client_metadata` 内的同名键
+属于业务 metadata，保持原样
+
+网关按次转发，不提供上游存储语义：请求显式设置 `store=true` 或 `background=true` 时，
+出站前直接以 HTTP 400 拒绝，错误码为 `unsupported_storage`（`type` 为 `invalid_request_error`），
+不会触达上游。`store=false`、`null` 与缺失值照常放行；raw JSON 端点（图像编辑等）的
+`background` 参数不受此限制
+
+GPT 长上下文输入守卫由运行设置 `openai.input_guard` 控制：`enabled`（**默认 false**）与
+`threshold_tokens`（默认 272000，与长上下文计费共用同一处声明）。阈值允许 1000–2_000_000，
+越界在启动校验阶段以 `openai.input_guard.threshold_tokens` 拒绝，**不静默夹取**。
+开启后，最终上游模型名属于 GPT 系列且不是压缩请求时，估算输入 token 超过阈值即以
+`context_length_exceeded` 拒绝；非 GPT 系列与压缩请求照常放行
+
+网关本地压缩摘要使用固定前缀 `cpr-local-v1:`（前缀之后是摘要正文的 Base64）。当前实现提供
+**还原端**：出站前扫描 `input`，把 `encrypted_content` 带该前缀的 `type: "reasoning"` 项严格
+解码（Base64 与 UTF-8 均校验），替换为普通 user 摘要消息，并清掉 `previous_response_id`
+及其作用域；载荷为空、Base64 非法或不是 UTF-8 时以 HTTP 400 `invalid_local_compaction`
+（`type` 为 `invalid_request_error`）拒绝，不触达上游。未命中该前缀的历史不受影响
+
+**写入端尚未实现**：仓库里目前没有产出该前缀载荷的代码，因此上述还原路径只在客户端或外部
+组件写入该前缀时生效。已知约束与待定项：`encrypted_content` 在 xAI 路径上承载真实的上游
+reasoning 密文（回放续接必需，缺失会被判为 `MissingEncryptedContent`），不能直接改写成网关
+标记；若放进 `summary[].text`，Codex 客户端会把 Base64 渲染给用户。因此在确认 Codex 客户端
+如何回带 reasoning item（是否保留类型化字段之外的字段）之前，不选定标记载体，以免改变
+客户端可见的摘要内容
+
+GPT 长上下文输入守卫在出站准备阶段判定，**默认关闭**。判定按最终上游模型名（去空白、取最后一个
+`/` 之后、ASCII 小写，等于 `gpt` 或以 `gpt-` 开头），估算按宁高不低口径（ASCII 约 4 字符/token、
+非 ASCII 约 1.2 token/字符、`input_image` 1500/张、输入条目 12/条、工具定义 24/个）。估算超过阈值
+时以 `InvalidRequest`/`NotSent` 拒绝，上游零请求；失败形状为 `error.code = context_length_exceeded`、
+`error.type = invalid_request_error`，且**不挂** HTTP 400 正文，由交付边界渲染成 `response.failed`
+事件，客户端才会按上下文超限触发压缩。`request_kind=compaction` 或 `input` 含 `compaction_trigger`
+的压缩请求豁免，默认阈值与长上下文计费共用
+`gateway_core::metering::GPT_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD`（272000）。阈值配置项的取值范围是
+1000–2_000_000，越界不静默夹取
+当前状态：Provider 以 `InputGuardConfig::default()`（关闭、272000）构造，**尚无运行时设置项可以
+打开守卫或改写阈值**，因此线上行为与未加入守卫一致
 
 请求头过滤不提供客户端匿名化；系统提示词、工具定义、工具结果、工作目录及其他业务 metadata
 保持原有语义，可能包含客户端环境信息。
@@ -319,9 +387,10 @@ HTML 或截断正文当作 message。
 `GET /v1/models` 默认返回 OpenAI 兼容列表 `{"object": "list", "data": [...]}`；请求携带非空
 `client_version` query 参数（Codex 客户端）时改为返回 Codex 专用目录合同 `{"models": [...]}`
 
-OpenAI Provider 按客户端传入的 `client_version` 请求上游目录，完整保留每个模型 JSON 对象，包括
-`base_instructions`、`model_messages`、`service_tiers`、工具与能力字段，以及未知嵌套字段、显式 `null`
-和字段缺失的区别。
+`client_version` query 参数只用于本地适配（决定上面返回哪种响应合同），不转发上游：OpenAI
+Provider 一律按服务端画像版本请求上游目录，因此同一账号的目录缓存不按下游客户端版本分片。
+上游返回的每个模型 JSON 对象完整保留，包括 `base_instructions`、`model_messages`、`service_tiers`、
+工具与能力字段，以及未知嵌套字段、显式 `null` 和字段缺失的区别。
 API Key 上游返回完整 Codex `models` 目录时沿用该合同；仅返回普通 `data` 模型列表时使用通用画像，
 未提供的推理能力保持未知，不补充推理档位。
 模型别名仅替换 `slug`，不替换上游展示名、提示词、能力或 `priority`；保持原生模型顺序，新增别名附在后面。
@@ -610,11 +679,18 @@ Images、独立 Search 及管理员连接测试不受该文本模型限制；连
 | `GET` | `/api/admin/proxies` | `page`、`pageSize`（1-200）、`search`（名称） | `{ items, page }` |
 | `GET` | `/api/admin/proxies/accounts` | `proxyId`、`page`、`pageSize`（1-200）、`search`（账号名称或邮箱） | `{ items, page }` |
 | `POST` | `/api/admin/proxies/accounts/remove` | `{ proxyId, accountId }` | `{ configRevision }` |
-| `POST` | `/api/admin/proxies/create` | `{ name, proxyUrl, location?, autoLocation? }` | `201 { record, configRevision }` |
-| `POST` | `/api/admin/proxies/update` | `{ id, revision, name, proxyUrl?, location?, autoLocation? }` | `{ record, configRevision }` |
-| `POST` | `/api/admin/proxies/probe` | `{ proxyUrl, detectLocation? }` | 测试未保存的地址，返回连通性及可选位置结果，不创建代理 |
+| `POST` | `/api/admin/proxies/create` | `{ name, proxyUrl, proxyProtocol?, location?, autoLocation? }` | `201 { record, configRevision }` |
+| `POST` | `/api/admin/proxies/update` | `{ id, revision, name, proxyUrl?, proxyProtocol?, location?, autoLocation? }` | `{ record, configRevision }` |
+| `POST` | `/api/admin/proxies/probe` | `{ proxyUrl, proxyProtocol?, detectLocation? }` | 测试未保存的地址，返回连通性及可选位置结果，不创建代理 |
 | `POST` | `/api/admin/proxies/test` | `{ id, revision, detectLocation? }` | 最新代理记录 / Proxy record with test result |
 | `POST` | `/api/admin/proxies/delete` | `{ id, revision }` | `{ configRevision }` |
+
+`proxyUrl` 的规范形态是 `scheme://[用户名:密码@]主机:端口`：`scheme` 只接受 `http`、`https`、`socks5`、
+`socks5h`，`socks5`/`socks5h` 必须带端口，路径只能是空或 `/`，不接受 query 与 fragment。也可以直接粘贴
+代理商常用的 `主机:端口:用户名:密码`、`主机:端口`、`用户名:密码@主机:端口`，此时必须用 `proxyProtocol`
+显式声明协议——同一个拼串既可能是 HTTP 也可能是 SOCKS5，网关不猜协议，缺 `proxyProtocol` 时返回 400。
+简写里的凭据按字面值处理并对保留字符做百分号编码；`proxyUrl` 已带 `scheme://` 时以 URL 为准，
+`proxyProtocol` 不参与
 
 `record` 包含 `id`、`name`、`endpoint`、`hasAuthentication`、`revision`、`accountCount`、`location`、
 `autoLocation`、`detectedLocation`、`lastTestAt`、

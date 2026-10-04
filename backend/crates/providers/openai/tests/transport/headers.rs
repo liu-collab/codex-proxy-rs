@@ -885,8 +885,9 @@ async fn tui_and_exec_send_the_same_complete_identity_over_http_and_websocket() 
     for (entry, name) in [(CliEntry::Tui, "codex-tui"), (CliEntry::Exec, "codex_exec")] {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let expected =
-            format!("{name}/0.157.0 (Alpine Linux 3.24.1; x86_64) unknown ({name}; 0.157.0)");
+        let expected = format!(
+            "{name}/0.157.0 (Alpine Linux 3.24.1; x86_64) xterm-256color ({name}; 0.157.0)"
+        );
         let server = tokio::spawn(async move {
             let (mut http, _) = listener.accept().await.unwrap();
             let headers = read_http_request(&mut http).await;

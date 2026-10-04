@@ -192,6 +192,18 @@ impl CodexProvider {
                 ));
             }
         }
+        // Standalone Provider 端点没有可证明的账号 owner：raw JSON 正文里已存在的安装身份
+        // 必须收敛到当前 lease，不能沿用下游声明的账号或 installation identity。只替换字符串
+        // 字面量、其余字节逐字保留；正文里没有这些键时保持原样。
+        let installation_id = lease.installation_id();
+        if !installation_id.is_empty()
+            && let Some(scoped) = crate::transport::request::scope_standalone_body_installation_id(
+                &request.body,
+                installation_id,
+            )
+        {
+            request.body = Bytes::from(scoped);
+        }
         let allows_account_state_mutation = lease.allows_account_state_mutation();
         let provider_kind = ProviderKind::new(PROVIDER_NAME)
             .map_err(|_| provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent))?;
@@ -209,7 +221,14 @@ impl CodexProvider {
         // Standalone Provider 端点没有可证明的账号 owner；Search metadata 必须按
         // 跨账号输入收敛到当前 lease，不能沿用下游声明的账号或 installation identity。
         let turn_metadata = request.turn_metadata.as_deref().and_then(|metadata| {
-            crate::transport::request::scope_turn_metadata(metadata, lease.installation_id(), true)
+            crate::transport::request::scope_turn_metadata(
+                metadata,
+                lease.installation_id(),
+                true,
+                &crate::transport::identity_pseudonym::IdentityPseudonym::for_account(
+                    lease.installation_id(),
+                ),
+            )
         });
         let events = cold_json_response_stream(ColdJsonResponse {
             client: self

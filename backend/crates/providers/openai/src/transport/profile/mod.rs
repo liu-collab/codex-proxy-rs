@@ -92,6 +92,8 @@ impl Default for CodexWireProfile {
             os_type: "Mac OS".to_owned(),
             os_version: "15.7.1".to_owned(),
             arch: "arm64".to_owned(),
+            // 捆绑的 Core app-server 不对应任何终端，实测 UA 尾段就是 unknown；
+            // 这里的字面量是实测值，不是"缺省没人填"。
             terminal: "unknown".to_owned(),
             exact_user_agent: None,
             residency: None,

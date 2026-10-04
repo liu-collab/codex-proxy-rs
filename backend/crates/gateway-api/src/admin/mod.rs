@@ -19,6 +19,7 @@ mod extract;
 pub mod observability;
 mod plugins;
 pub mod presenter;
+mod proxy_address;
 pub mod proxies;
 pub mod settings;
 pub mod system;

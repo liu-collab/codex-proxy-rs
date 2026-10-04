@@ -113,6 +113,45 @@ fn openai_stream_retry_budget_uses_the_official_hard_cap() {
     );
 }
 
+/// 守卫默认关闭、阈值取共用声明；越界在启动校验阶段被拒绝（不静默夹取）。
+#[test]
+fn openai_input_guard_is_disabled_by_default_and_rejects_out_of_range_thresholds() {
+    let config = OpenAiConfig::default();
+    assert!(!config.input_guard().enabled, "守卫必须默认关闭");
+    assert_eq!(config.input_guard().threshold_tokens, 272_000);
+
+    for threshold in [0, 999, 2_000_001, u64::MAX] {
+        let mut config: OpenAiConfig = serde_json::from_value(serde_json::json!({
+            "input_guard": {"enabled": true, "threshold_tokens": threshold}
+        }))
+        .expect("parse OpenAI config");
+        assert_eq!(
+            config.resolve_and_validate(Path::new("/srv/gateway/runtime-data")),
+            Err(provider_openai::OpenAiConfigError::InvalidField(
+                "openai.input_guard.threshold_tokens"
+            )),
+            "阈值 {threshold} 越界必须拒绝启动"
+        );
+    }
+}
+
+#[test]
+fn openai_input_guard_settings_reach_the_provider_config() {
+    for threshold in [1_000, 272_000, 2_000_000] {
+        let mut config: OpenAiConfig = serde_json::from_value(serde_json::json!({
+            "input_guard": {"enabled": true, "threshold_tokens": threshold}
+        }))
+        .expect("parse OpenAI config");
+        config
+            .resolve_and_validate(Path::new("/srv/gateway/runtime-data"))
+            .expect("valid guard settings");
+
+        let guard = config.input_guard();
+        assert!(guard.enabled);
+        assert_eq!(guard.threshold_tokens, threshold);
+    }
+}
+
 fn valid_config() -> OpenAiConfig {
     OpenAiConfig::default()
 }

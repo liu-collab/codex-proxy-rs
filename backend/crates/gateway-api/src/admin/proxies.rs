@@ -18,7 +18,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     AdminAuth, AdminEnvelope, AdminError, AdminJson, AdminQuery, AdminResponse, PageMeta,
-    accounts::{AccountGroupRefView, AccountProxyUpdate},
+    accounts::AccountGroupRefView,
+    proxy_address::parse_proxy_address,
 };
 
 #[derive(Debug, Deserialize)]
@@ -52,7 +53,9 @@ struct CreateRequest {
     auto_location: bool,
     location: Option<gateway_core::account::RequestLocation>,
     name: String,
-    proxy_url: AccountProxyUpdate,
+    /// 完整 URL，或带 `proxyProtocol` 的 `主机:端口:用户名:密码` 简写。
+    proxy_url: String,
+    proxy_protocol: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,7 +67,8 @@ struct UpdateRequest {
     id: String,
     revision: u64,
     name: String,
-    proxy_url: Option<AccountProxyUpdate>,
+    proxy_url: Option<String>,
+    proxy_protocol: Option<String>,
 }
 
 fn deserialize_location_update<'de, D>(
@@ -97,7 +101,9 @@ struct TestRequest {
 struct ProbeRequest {
     #[serde(default)]
     detect_location: bool,
-    proxy_url: AccountProxyUpdate,
+    /// 完整 URL，或带 `proxyProtocol` 的 `主机:端口:用户名:密码` 简写。
+    proxy_url: String,
+    proxy_protocol: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -336,10 +342,8 @@ async fn create<S>(
 where
     S: SessionState + Send + Sync,
 {
-    let proxy = request
-        .proxy_url
-        .0
-        .ok_or_else(|| AdminError::bad_request("代理 URL 不能为空"))?;
+    let proxy = parse_proxy_address(&request.proxy_url, request.proxy_protocol.as_deref())
+        .map_err(AdminError::bad_request)?;
     let result = state
         .admin_services()
         .proxies()
@@ -395,12 +399,10 @@ where
 {
     let proxy = request
         .proxy_url
-        .map(|value| {
-            value
-                .0
-                .ok_or_else(|| AdminError::bad_request("代理 URL 不能为空"))
-        })
-        .transpose()?;
+        .as_deref()
+        .map(|raw| parse_proxy_address(raw, request.proxy_protocol.as_deref()))
+        .transpose()
+        .map_err(AdminError::bad_request)?;
     let result = state
         .admin_services()
         .proxies()
@@ -456,10 +458,8 @@ async fn probe<S>(
 where
     S: SessionState + Send + Sync,
 {
-    let proxy = request
-        .proxy_url
-        .0
-        .ok_or_else(|| AdminError::bad_request("代理 URL 不能为空"))?;
+    let proxy = parse_proxy_address(&request.proxy_url, request.proxy_protocol.as_deref())
+        .map_err(AdminError::bad_request)?;
     let result = state
         .admin_services()
         .proxies()

@@ -17,15 +17,18 @@ use super::protocol::responses::CodexResponsesRequest;
 const CODEX_RESIDENCY_HEADER: &str = "x-openai-internal-codex-residency";
 
 /// 不透传下游携带的认证、账号及相关身份字段，避免影响网关选定的上游身份。
-/// 上游需要的官方身份头由网关构造；这里也包含通用认证和 Cookie 字段。
+/// 上游需要的官方身份头由网关构造；这里也包含通用认证、Cookie 与设备证明字段。
 pub(super) fn is_managed_identity_header(name: &str) -> bool {
+    // Cookie 族（cookie / cookie2 / 未来的 cookie-*）与 x-oai-is 系列
+    // （x-oai-is / x-oai-is-update / 未来的变体）整族归属网关，一律不继承下游。
+    if name.starts_with("cookie") || name.starts_with("x-oai-is") {
+        return true;
+    }
     matches!(
         name,
         "authorization"
             | "x-api-key"
             | "x-openai-actor-authorization"
-            | "cookie"
-            | "cookie2"
             | "chatgpt-account-id"
             | "chatgpt-project-id"
             | "openai-organization"
@@ -35,6 +38,11 @@ pub(super) fn is_managed_identity_header(name: &str) -> bool {
             | "x-openai-fedramp"
             // 安装身份由当前账号写入 client_metadata，不继承下游安装头。
             | "x-codex-installation-id"
+            // 设备证明头只能由官方客户端或网关自身生成。
+            | "x-oai-attestation"
+            // 会话标识由网关按入站语义重建，下游原值不作为身份头继承。
+            | "conversation-id"
+            | "conversation_id"
     )
 }
 
@@ -168,18 +176,27 @@ impl CodexBackendClient {
         request: &CodexResponsesRequest,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<HeaderMap> {
-        let mut headers = self.model_request_headers(&self.profile.snapshot(), context)?;
+        // 出站 UA 的产品名与版本取画像，系统信息取下游真实客户端；下游 UA 不合官方
+        // 形状时 `apply` 整体返回画像值。两条传输共用这条构造，不会出现身份分叉。
+        let profile = request.client_environment.as_ref().map_or_else(
+            || self.profile.snapshot(),
+            |environment| environment.apply(&self.profile.snapshot()),
+        );
+        let mut headers = self.model_request_headers(&profile, context)?;
+        // x-client-request-id 由网关重建：优先客户端逻辑请求 ID（官方客户端里与 session-id 同值），
+        // 其次 thread/session；客户端值无法表示为 HTTP 头时回落到代理请求 ID，
+        // 保证该头始终存在。下游原始 x-client-request-id 不参与（见跳过名单）。
+        let client_request_id = context
+            .client_request_id
+            .or(context.thread_id)
+            .or(context.session_id)
+            .and_then(|value| HeaderValue::from_str(value).ok());
         headers.insert(
             HeaderName::from_static("x-client-request-id"),
-            HeaderValue::from_str(context.request_id)?,
-        );
-        insert_optional_protocol_header(
-            &mut headers,
-            "x-client-request-id",
-            context
-                .client_request_id
-                .or(context.thread_id)
-                .or(context.session_id),
+            match client_request_id {
+                Some(value) => value,
+                None => HeaderValue::from_str(context.request_id)?,
+            },
         );
         for (name, value) in [
             ("session-id", context.session_id),
@@ -232,27 +249,35 @@ impl CodexBackendClient {
 
 fn append_passthrough_headers(headers: &mut HeaderMap, request: &CodexResponsesRequest) {
     for name in request.passthrough_headers.keys() {
-        // 身份与传输字段只由画像/正文生成；其余协议头保留原始多值字节。
-        if matches!(
-            name.as_str(),
-            "originator"
-                | "user-agent"
-                | "version"
-                | "authorization"
-                | "chatgpt-account-id"
-                | "cookie"
-                | "x-openai-internal-codex-residency"
-                | "openai-beta"
-                | "accept"
-                | "content-type"
-                | "content-encoding"
-                | "x-codex-routing-hint"
-                | "x-codex-turn-id"
-                | "x-oai-attestation"
-                | "x-oai-is"
-                | "x-oai-is-update"
-                | X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER
-        ) {
+        // 身份与传输字段只由画像/正文/网关重建生成；其余协议头保留原始多值字节。
+        // conversation-id/_id 属于"不得继承"清单：这类端点的会话语义走结构化字段
+        // （client_metadata、local_conversation_id），原始头不作为业务头透传上游。
+        let raw = name.as_str();
+        if raw.starts_with("cookie")
+            || raw.starts_with("x-oai-is")
+            // 会话身份只由网关重建的伪名承载（见 scope_request_to_account）：原始头改名
+            // 透传会让真名与伪名同时出站，等于没脱敏。
+            || crate::transport::request::SESSION_IDENTITY_HEADER_NAMES.contains(&raw)
+            || matches!(
+                raw,
+                "originator"
+                    | "user-agent"
+                    | "version"
+                    | "authorization"
+                    | "chatgpt-account-id"
+                    | "x-openai-internal-codex-residency"
+                    | "openai-beta"
+                    | "accept"
+                    | "content-type"
+                    | "content-encoding"
+                    | "x-codex-routing-hint"
+                    | "x-codex-turn-id"
+                    | "x-oai-attestation"
+                    | "conversation-id"
+                    | "conversation_id"
+                    | X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER
+            )
+        {
             continue;
         }
         headers.remove(name);

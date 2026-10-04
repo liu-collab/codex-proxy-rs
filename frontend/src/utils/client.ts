@@ -16,7 +16,6 @@ export function buildCodexConfigFiles(input: CodexConfigInput) {
   const auth = { OPENAI_API_KEY: input.apiKey }
   const configToml = `model_provider = "OpenAI"
 model = "${CODEX_DEFAULT_MODEL}"
-review_model = "${CODEX_DEFAULT_MODEL}"
 model_reasoning_effort = "max"
 service_tier = "default"
 
@@ -24,6 +23,9 @@ service_tier = "default"
 name = "OpenAI"
 base_url = ${JSON.stringify(baseUrl)}
 wire_api = "responses"
+# provider 覆盖 base_url 时客户端默认不拉远端目录，必须显式声明目录地址；
+# 否则模型选择器只显示内置预置，并跳过思考强度选择步骤。
+model_catalog_url = ${JSON.stringify(`${baseUrl}/models`)}
 supports_websockets = ${websocketEnabled}
 requires_openai_auth = false
 # 代理密钥仅用于网关鉴权，真实账号登录状态由服务端管理。
@@ -35,7 +37,9 @@ X-OpenAI-Actor-Authorization = "proxy-managed"
 
 [features]
 image_generation = true
-goals = true`
+goals = true
+# 客户端 0.156.0 起该开关默认关闭，显式打开才会使用上面的远端目录。
+api_key_model_discovery = true`
 
   return {
     auth,

@@ -243,8 +243,9 @@ fn decoder_should_preserve_connection_metadata_outside_the_openai_wire_body() {
                     [
                         "x-codex-turn-metadata",
                         STANDARD.encode(br#"{"kind":"review"}"#)
-                    ],
-                    ["conversation-id", STANDARD.encode(b"conversation")]
+                    ] // conversation-id 与 conversation_id 不继承下游原始头：
+                      // 会话语义由上面的结构化 conversation_id 承载，原始头不作为
+                      // 业务头透传到上游（见 request.rs 的 passthrough_header_name）。
                 ]),
             ),
         ])
@@ -548,16 +549,19 @@ fn downstream_client_headers_should_remain_opaque_without_losing_session_semanti
                     "source header {name} belongs to the Provider"
                 );
             }
-            for name in [
-                "thread-id",
-                "x-client-request-id",
-                "traceparent",
-                "tracestate",
-            ] {
+            for name in ["traceparent", "tracestate"] {
                 assert!(
                     entries
                         .iter()
                         .any(|entry| entry == &json!([name, STANDARD.encode(b"keep")]))
+                );
+            }
+            // 会话身份头不属于"未知业务扩展"：上游只接受网关重建的账号内伪名，
+            // 原始头不再进透传名单（见 Provider 的 SESSION_IDENTITY_HEADER_NAMES）。
+            for name in ["thread-id", "x-client-request-id"] {
+                assert!(
+                    entries.iter().all(|entry| entry[0] != name),
+                    "session identity header {name} must not stay opaque"
                 );
             }
             let future: Vec<_> = entries

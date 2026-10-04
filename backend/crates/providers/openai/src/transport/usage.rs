@@ -1,6 +1,6 @@
 use gateway_core::metering::{
     CalculatedCost, CalculatedCostAmounts, CalculatedCostBreakdown, CalculatedCostRates,
-    CurrencyCode, Decimal, Money,
+    CurrencyCode, Decimal, GPT_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD, Money,
 };
 use gateway_protocol::openai::events::{TokenUsage, retry_after_seconds_from_body};
 use reqwest::StatusCode;
@@ -13,7 +13,6 @@ use super::{
     response_meta,
 };
 
-const LONG_CONTEXT_THRESHOLD: u64 = 272_000;
 const WEB_SEARCH_CALL_TICKS: u128 = 100_000_000;
 const WEB_SEARCH_PREVIEW_NON_REASONING_CALL_TICKS: u128 = 250_000_000;
 const FILE_SEARCH_CALL_TICKS: u128 = 25_000_000;
@@ -505,7 +504,7 @@ pub fn openai_billing_breakdown(
         model,
         usage,
         service_tier,
-        usage.input_tokens > LONG_CONTEXT_THRESHOLD,
+        usage.input_tokens > GPT_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD,
         None,
     )
 }
@@ -522,7 +521,7 @@ pub fn openai_billing_breakdown_with_override(
         model,
         usage,
         service_tier,
-        usage.input_tokens > LONG_CONTEXT_THRESHOLD,
+        usage.input_tokens > GPT_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD,
         pricing,
     )
 }

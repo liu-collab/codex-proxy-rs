@@ -13,6 +13,12 @@ pub use pricing::{
 const DECIMAL_SCALE: u128 = 10_000_000_000;
 const MAX_SCALED_DECIMAL: u128 = 99_999_999_999_999_999_999;
 
+/// 长上下文输入阈值：请求侧守卫与长上下文计费**共用这一处声明**。
+///
+/// 输入 token 估算按「宁高不低」口径（见网关规范 §4），因此该阈值是保守值：
+/// 估算不超过它的一定不超限，超过它的再按最终上游模型名判定是否命中 GPT 系列。
+pub const GPT_LONG_CONTEXT_INPUT_TOKEN_THRESHOLD: u64 = 272_000;
+
 /// 与 PostgreSQL `numeric(20, 10)` 对齐的非负十进制定点值。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct Decimal(u128);

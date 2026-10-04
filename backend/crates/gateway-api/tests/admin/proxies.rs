@@ -85,7 +85,18 @@ async fn proxy_location_rejects_invalid_and_incomplete_input() {
 }
 
 #[derive(Default)]
-pub(super) struct MemoryProxies(Mutex<Option<ProxyRecord>>);
+pub(crate) struct MemoryProxies(Mutex<Option<ProxyRecord>>);
+
+impl MemoryProxies {
+    /// 落库的规范 URL（含凭据）：响应只给脱敏 endpoint，编码是否到位只能在这里核对。
+    pub(super) fn stored_url(&self) -> Option<String> {
+        self.0
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|record| record.proxy.expose_url().to_owned())
+    }
+}
 
 fn missing() -> AdminStoreError {
     AdminStoreError::new(AdminStoreErrorKind::NotFound, "proxy", "missing proxy")
@@ -461,7 +472,7 @@ async fn proxy_probe_rejects_empty_or_invalid_addresses() {
         (json!({}), StatusCode::UNPROCESSABLE_ENTITY),
         (
             json!({"proxyUrl": "ftp://test-user:private-password@proxy.example"}),
-            StatusCode::UNPROCESSABLE_ENTITY,
+            StatusCode::BAD_REQUEST,
         ),
         (
             json!({"proxyUrl": "http://proxy.example:8080", "name": "Not saved"}),
@@ -475,6 +486,150 @@ async fn proxy_probe_rejects_empty_or_invalid_addresses() {
             expected
         );
     }
+}
+
+#[tokio::test]
+async fn proxy_shorthand_requires_an_explicit_protocol_and_expands_before_storing() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+
+    // 代理商常见的「主机:端口:用户名:密码」不带协议：必须显式选择，网关不猜。
+    let (status, rejected) = request(
+        &fixture,
+        "/api/admin/proxies/create",
+        Some(json!({
+            "name": "Shorthand",
+            "proxyUrl": "198.65.103.90:8022:qeszxzcwxx:oqwmrtmopumqp"
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        rejected["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("协议")),
+        "{rejected}"
+    );
+
+    let (status, created) = request(
+        &fixture,
+        "/api/admin/proxies/create",
+        Some(json!({
+            "name": "Shorthand",
+            "proxyUrl": "198.65.103.90:8022:qeszxzcwxx:oqwmrtmopumqp",
+            "proxyProtocol": "socks5"
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(
+        created["data"]["record"]["endpoint"],
+        "socks5://198.65.103.90:8022"
+    );
+    assert_eq!(created["data"]["record"]["hasAuthentication"], true);
+    assert!(!created.to_string().contains("oqwmrtmopumqp"));
+    assert_eq!(
+        fixture.proxies.stored_url().as_deref(),
+        Some("socks5://qeszxzcwxx:oqwmrtmopumqp@198.65.103.90:8022")
+    );
+}
+
+#[tokio::test]
+async fn proxy_shorthand_covers_host_port_userinfo_and_encoding() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    for (raw, protocol, expected) in [
+        // 只有主机和端口。
+        ("203.0.113.9:1080", "http", "http://203.0.113.9:1080/"),
+        // 用户名:密码@主机:端口（密码按字面值处理，斜杠要编码）。
+        (
+            "user:pa/ss@203.0.113.9:1080",
+            "socks5",
+            "socks5://user:pa%2Fss@203.0.113.9:1080",
+        ),
+        // 简写里的保留字符必须编码，否则 URL 会被切错位置。
+        (
+            "203.0.113.9:1080:us@er:pa/ss",
+            "socks5h",
+            "socks5h://us%40er:pa%2Fss@203.0.113.9:1080",
+        ),
+        // IPv6 方括号写法。
+        (
+            "[2001:db8::1]:1080:user:secret",
+            "socks5",
+            "socks5://user:secret@[2001:db8::1]:1080",
+        ),
+        // 已是完整 URL 时以 URL 里的协议为准，选择器不参与。
+        (
+            "https://203.0.113.9:8443",
+            "socks5",
+            "https://203.0.113.9:8443/",
+        ),
+    ] {
+        let (status, created) = request(
+            &fixture,
+            "/api/admin/proxies/create",
+            Some(json!({"name": "Case", "proxyUrl": raw, "proxyProtocol": protocol})),
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED, "{raw} 应被接受");
+        assert_eq!(
+            fixture.proxies.stored_url().as_deref(),
+            Some(expected),
+            "{raw}"
+        );
+        assert!(created["data"]["record"].get("proxyUrl").is_none());
+    }
+
+    for (raw, protocol) in [
+        // 端口后多一段：形状无法确定，不逐字段猜。
+        ("203.0.113.9:1080:user:pass:extra", "socks5"),
+        ("203.0.113.9", "socks5"),
+        ("203.0.113.9:1080", "socks4"),
+    ] {
+        let (status, rejected) = request(
+            &fixture,
+            "/api/admin/proxies/create",
+            Some(json!({"name": "Bad", "proxyUrl": raw, "proxyProtocol": protocol})),
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{raw}");
+        assert!(!rejected.to_string().contains("pass:extra"), "{rejected}");
+    }
+}
+
+#[tokio::test]
+async fn proxy_probe_expands_the_same_shorthand_without_creating_records() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    // 探测走同一份展开：凭据仍是固定 fixture 地址，因此这里断言脱敏与状态即可。
+    let (status, probed) = request(
+        &fixture,
+        "/api/admin/proxies/probe",
+        Some(json!({
+            "proxyUrl": "http://test-user:private-password@proxy.example:8080"
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(probed["data"]["success"], true);
+    let (status, _) = request(
+        &fixture,
+        "/api/admin/proxies/probe",
+        Some(json!({
+            "proxyUrl": "proxy.example:8080:test-user:private-password",
+            "proxyProtocol": "http"
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(fixture.proxies.stored_url().is_none());
 }
 
 #[tokio::test]
@@ -567,14 +722,21 @@ async fn proxy_routes_require_auth_and_reject_invalid_input() {
             StatusCode::BAD_REQUEST
         );
     }
-    let (status, _) = request(
+    let (status, rejected) = request(
         &fixture,
         "/api/admin/proxies/create",
         Some(json!({"name":"Invalid","proxyUrl":"ftp://test-user:private-password@proxy.example"})),
         true,
     )
     .await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    // 不支持的协议由用例给出可行动的说明，而不是 Axum 的通用 422。
+    assert!(
+        rejected["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("代理地址")),
+        "{rejected}"
+    );
 }
 
 #[tokio::test]
