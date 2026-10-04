@@ -91,6 +91,15 @@ pub struct ProxyPage {
     pub page_size: u16,
 }
 
+/// 位置跟随规则：没有手填位置的代理默认跟随出口 IP 的时区。
+///
+/// 创建与更新共用这一处判定，两条写入路径不会给出不同的默认值；调用方显式给出的
+/// `autoLocation` 仍然优先。
+#[must_use]
+pub const fn default_auto_location(has_manual_location: bool) -> bool {
+    !has_manual_location
+}
+
 #[derive(Debug, Clone)]
 pub struct NewProxy {
     pub auto_location: bool,

@@ -740,15 +740,21 @@ Images、独立 Search 及管理员连接测试不受该文本模型限制；连
 `detected`、`failed` 或 `conflict`。`detected` 携带 `location`，`failed` 携带安全错误说明；
 位置查询失败不等同于代理连接失败。管理端的解析按钮把成功结果填入自定义位置表单，保存后生效；
 失败时保留已有输入，不自动启用持续跟随。
-API 的 `autoLocation` 默认为 `false`；开启时使用已检测位置，测试连接会刷新检测结果。
-`detectedLocation` 保存 `{ location, exitIpv4, exitIpv6, detectedAt }`，手动位置独立保留
+`autoLocation` 缺省时按「没有手填位置就跟随出口 IP」判定：创建时省略 `location` 即跟随，并在同一次
+请求里解析一次出口位置；写入 `location` 即固定为手填位置；更新时清空 `location` 回到跟随，省略
+`location` 不改变已有跟随状态。显式的 `autoLocation` 覆盖默认，`false` 表示该代理不声明位置
+（既不跟随也不使用手填位置，账号回落到全局运行设置）。跟随状态下生效位置是 `detectedLocation`，
+测试连接会刷新检测结果；`detectedLocation` 保存 `{ location, exitIpv4, exitIpv6, detectedAt }`，
+手动位置独立保留
 
 `location` 为 `null` 或完整对象 `{ country, region, city, timezone }`。国家代码为两位大写 ASCII 字母；
 地区、城市禁止控制字符，去除首尾空白后须为 1–128 个字符；时区必须是有效 IANA 名称，例如 `Asia/Tokyo`。
-创建时省略或 `null` 表示继承全局；更新时省略表示保留，`null` 清除覆盖，完整对象替换覆盖。
+创建时省略或 `null` 表示不写入手填位置；更新时省略表示保留，`null` 清除手填位置，完整对象替换。
+是否跟随出口 IP 由 `autoLocation` 决定。
 只改位置不清空连通性测试结果，也不更改账号凭据版本
 
-关联账号的 OpenAI/Codex Responses 请求（HTTP/SSE、WebSocket）优先使用代理位置，否则使用全局
+关联账号的 OpenAI/Codex Responses 请求（HTTP/SSE、WebSocket）优先使用代理位置（手填值，或
+`autoLocation` 跟随的出口位置），否则使用全局
 运行设置中已开启的 `requestLocation`；两者均未开启时保留客户端原有位置和时区。全局覆盖按请求冻结，
 新请求使用保存后的设置，无需重启；代理覆盖在每次执行时读取，
 换号或换出口按该次选定账号解析。位置只影响带来源标记的环境上下文日期/时区和 Web Search 的结构化位置，

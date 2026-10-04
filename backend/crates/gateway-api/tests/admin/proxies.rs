@@ -29,7 +29,8 @@ async fn proxy_location_round_trips_preserves_omitted_and_clears_null() {
         &fixture,
         "/api/admin/proxies/create",
         Some(json!({
-            "name":"Tokyo", "proxyUrl":"http://proxy.example:8080", "location":location
+            "name":"Tokyo", "proxyUrl":"http://proxy.example:8080", "location":location,
+            "autoLocation":false
         })),
         true,
     )
@@ -43,7 +44,9 @@ async fn proxy_location_round_trips_preserves_omitted_and_clears_null() {
         (2, Some(Value::Null), Value::Null),
         (3, Some(location.clone()), location.clone()),
     ] {
-        let mut body = json!({"id":"proxy_test", "revision":revision, "name":"Renamed"});
+        let mut body = json!({
+            "id":"proxy_test", "revision":revision, "name":"Renamed", "autoLocation":false
+        });
         if let Some(change) = change {
             body["location"] = change;
         }
@@ -76,12 +79,15 @@ async fn proxy_location_rejects_invalid_and_incomplete_input() {
     let (status, created) = request(
         &fixture,
         "/api/admin/proxies/create",
-        Some(json!({"name":"Legacy", "proxyUrl":"http://proxy.example:8080"})),
+        Some(json!({
+            "name":"Legacy", "proxyUrl":"http://proxy.example:8080", "autoLocation":false
+        })),
         true,
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
     assert!(created["data"]["record"]["location"].is_null());
+    assert_eq!(created["data"]["record"]["autoLocation"], false);
 }
 
 #[derive(Default)]
@@ -328,7 +334,8 @@ async fn proxy_routes_save_reload_test_rename_and_delete_without_exposing_creden
         &fixture,
         "/api/admin/proxies/create",
         Some(json!({
-            "name": "  Office  ", "proxyUrl": "http://test-user:private-password@proxy.example:8080"
+            "name": "  Office  ", "proxyUrl": "http://test-user:private-password@proxy.example:8080",
+            "autoLocation": false
         })),
         true,
     )
@@ -452,7 +459,9 @@ async fn proxy_probe_checks_unsaved_address_without_creating_or_changing_records
     let (_, created) = request(
         &fixture,
         "/api/admin/proxies/create",
-        Some(json!({"name": "Saved", "proxyUrl": "http://saved.example:8080"})),
+        Some(json!({
+            "name": "Saved", "proxyUrl": "http://saved.example:8080", "autoLocation": false
+        })),
         true,
     )
     .await;
@@ -518,7 +527,8 @@ async fn proxy_shorthand_requires_an_explicit_protocol_and_expands_before_storin
         Some(json!({
             "name": "Shorthand",
             "proxyUrl": "198.65.103.90:8022:qeszxzcwxx:oqwmrtmopumqp",
-            "proxyProtocol": "socks5"
+            "proxyProtocol": "socks5",
+            "autoLocation": false
         })),
         true,
     )
@@ -571,7 +581,7 @@ async fn proxy_shorthand_covers_host_port_userinfo_and_encoding() {
         let (status, created) = request(
             &fixture,
             "/api/admin/proxies/create",
-            Some(json!({"name": "Case", "proxyUrl": raw, "proxyProtocol": protocol})),
+            Some(json!({"name": "Case", "proxyUrl": raw, "proxyProtocol": protocol, "autoLocation": false})),
             true,
         )
         .await;
@@ -882,4 +892,78 @@ async fn manual_proxy_can_detect_location_once_without_enabling_auto_location() 
         record["lastTest"]["location"]["location"]["timezone"],
         "Asia/Tokyo"
     );
+}
+
+#[tokio::test]
+async fn proxy_without_manual_location_follows_the_detected_exit_location() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    // 省略 autoLocation 且没有手填位置：默认跟随出口 IP，保存时解析一次。
+    let (status, created) = request(
+        &fixture,
+        "/api/admin/proxies/create",
+        Some(json!({
+            "name":"Follow", "proxyUrl":"http://test-user:private-password@proxy.example:8080"
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let record = &created["data"]["record"];
+    assert_eq!(record["autoLocation"], true);
+    assert!(record["location"].is_null());
+    assert_eq!(
+        record["detectedLocation"]["location"]["timezone"],
+        "Asia/Tokyo"
+    );
+
+    // 写入手填位置即固定为手动；清空后回到跟随出口 IP。
+    let manual = json!({"country":"US", "region":"California", "city":"Los Angeles", "timezone":"America/Los_Angeles"});
+    let (status, frozen) = request(
+        &fixture,
+        "/api/admin/proxies/update",
+        Some(json!({
+            "id":"proxy_test", "revision":1, "name":"Follow", "location":manual
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(frozen["data"]["record"]["autoLocation"], false);
+    assert_eq!(frozen["data"]["record"]["location"], manual);
+
+    let (status, following) = request(
+        &fixture,
+        "/api/admin/proxies/update",
+        Some(json!({
+            "id":"proxy_test", "revision":2, "name":"Follow", "location":null
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(following["data"]["record"]["autoLocation"], true);
+    assert!(following["data"]["record"]["location"].is_null());
+}
+
+#[tokio::test]
+async fn proxy_explicit_auto_location_false_keeps_no_location_configured() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    // 显式 false 是唯一可以「只用代理、不声明位置」的入口，不能被默认规则覆盖。
+    let (status, created) = request(
+        &fixture,
+        "/api/admin/proxies/create",
+        Some(json!({
+            "name":"Bare",
+            "proxyUrl":"http://test-user:private-password@proxy.example:8080",
+            "autoLocation":false
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["data"]["record"]["autoLocation"], false);
+    assert!(created["data"]["record"]["location"].is_null());
+    assert!(created["data"]["record"]["detectedLocation"].is_null());
 }

@@ -11,7 +11,7 @@ use gateway_admin::model::{
     PageSize, Revision,
     proxies::{
         NewProxy, ProxyAccountListQuery, ProxyListQuery, ProxyMutation, ProxyRecord,
-        ProxyTestResult, UpdateProxy,
+        ProxyTestResult, UpdateProxy, default_auto_location,
     },
 };
 use serde::{Deserialize, Serialize};
@@ -48,8 +48,8 @@ struct RemoveAccountRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateRequest {
-    #[serde(default)]
-    auto_location: bool,
+    /// 缺省按 [`default_auto_location`] 判定；显式值覆盖默认。
+    auto_location: Option<bool>,
     location: Option<gateway_core::account::RequestLocation>,
     name: String,
     /// 完整 URL，或带 `proxyProtocol` 的 `主机:端口:用户名:密码` 简写。
@@ -358,12 +358,16 @@ where
     let time = crate::time::TimePresenter::new(state.admin_services().timezone());
     let proxy = parse_proxy_address(&request.proxy_url, request.proxy_protocol.as_deref())
         .map_err(AdminError::bad_request)?;
+    // 位置跟随：显式 `autoLocation` 优先，缺省时没有手填位置就跟随出口 IP。
+    let auto_location = request
+        .auto_location
+        .unwrap_or_else(|| default_auto_location(request.location.is_some()));
     let result = state
         .admin_services()
         .proxies()
         .create(
             NewProxy {
-                auto_location: request.auto_location,
+                auto_location,
                 test: None,
                 location: request.location,
                 name: request.name,

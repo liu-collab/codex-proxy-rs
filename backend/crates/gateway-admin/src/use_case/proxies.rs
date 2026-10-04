@@ -216,6 +216,15 @@ impl ProxiesService for DefaultProxiesService {
             .map(|location| location.map(|value| value.normalized()).transpose())
             .transpose()
             .map_err(|_| AdminError::invalid("代理位置不合法"))?;
+        // 位置跟随：显式 `autoLocation` 优先；清空手填位置时改为跟随出口 IP，写入手填位置时
+        // 保持手动，只改名字或连接时不触碰已有跟随状态。
+        if command.auto_location.is_none() {
+            command.auto_location = match &command.location {
+                Some(Some(_)) => Some(false),
+                Some(None) => Some(true),
+                None => None,
+            };
+        }
         // 只在开启自动模式或连接地址变化时检测，普通编辑不刷新已识别位置。
         command.test = None;
         if command.auto_location.is_some() || command.proxy.is_some() {

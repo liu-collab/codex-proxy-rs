@@ -88,6 +88,9 @@ watch(open, (value) => {
           </span>
         </BaseIconButton>
       </div>
+      <p class="m-0 text-cp-sm text-cp-text-secondary">
+        {{ customLocation ? '保存后按手填位置发送请求' : '关闭时跟随出口 IP 的时区，保存时解析一次' }}
+      </p>
       <p v-if="testResult?.success === false" class="m-0 text-cp-sm text-cp-error-text" role="alert">
         连接测试失败：{{ testResult.message }}
       </p>

@@ -58,9 +58,9 @@ function openForm(proxy: OutboundProxyRecord | null = null) {
   form.proxyUrl = ''
   form.proxyProtocol = proxy ? proxyProtocolOf(proxy.endpoint) : 'socks5'
   formTestResult.value = null
-  const currentLocation = proxy?.autoLocation ? proxy.detectedLocation?.location ?? proxy.location : proxy?.location
-  form.customLocation = currentLocation != null
-  form.location = currentLocation ? { ...currentLocation } : { country: '', region: '', city: '', timezone: '' }
+  // 表单只表达手填位置：关闭开关即跟随出口 IP，不把手填值伪装成已配置的覆盖。
+  form.customLocation = proxy?.location != null
+  form.location = proxy?.location ? { ...proxy.location } : { country: '', region: '', city: '', timezone: '' }
   showForm.value = true
 }
 
@@ -176,20 +176,22 @@ async function save() {
     return
   }
   await saveAction.run(async () => {
+    // 关闭自定义位置即跟随出口 IP（保存时解析一次）；开启时以手填位置为准。
+    const autoLocation = !form.customLocation
     // 编辑时留空保留已保存的地址和认证，不能用脱敏地址覆盖原连接。
     await (editing.value
       ? updateProxy({
           id: editing.value.id,
           revision: editing.value.revision,
           name,
-          autoLocation: false,
+          autoLocation,
           proxyUrl: proxyUrl || undefined,
           proxyProtocol: form.proxyProtocol,
           location,
         })
       : createProxy({
           name,
-          autoLocation: false,
+          autoLocation,
           proxyUrl,
           proxyProtocol: form.proxyProtocol,
           location,
