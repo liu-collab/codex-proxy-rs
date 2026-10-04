@@ -106,7 +106,7 @@ async fn plugin_process_manages_native_budget_through_client_key_service() {
                 "client_key_id":"key_budget", "daily_limit_usd":"10", "weekly_limit_usd":"20",
                 "daily_used_usd":"3", "weekly_used_usd":"0",
                 "daily_resets_at_ms":before.budget.daily_resets_at.map(|time| chrono::DateTime::<chrono::Utc>::from(time).timestamp_millis()),
-                "weekly_resets_at_ms":before.budget.weekly_resets_at.map(|time| chrono::DateTime::<chrono::Utc>::from(time).timestamp_millis()),
+                "weekly_resets_at_ms":null,
             });
             assert_eq!(results[6], expected);
             assert_eq!(results[7], json!({"client_key_id":"key_budget"}));
@@ -126,10 +126,7 @@ async fn plugin_process_manages_native_budget_through_client_key_service() {
                 1
             );
             assert_eq!(after.budget.daily_resets_at, before.budget.daily_resets_at);
-            assert_eq!(
-                after.budget.weekly_resets_at,
-                before.budget.weekly_resets_at
-            );
+            assert_eq!(after.budget.weekly_resets_at, None);
             assert_eq!(audits.len(), 1);
             assert!(audits[0].starts_with(&format!("plugin:{}:scope:", view.target.instance_id)));
         }

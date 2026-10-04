@@ -654,6 +654,114 @@ async fn ops_search_should_treat_sql_wildcards_as_literals() {
 }
 
 #[tokio::test]
+async fn ops_errors_should_use_each_event_accounts_current_subscription() {
+    let Some(database) = TestDatabase::create("ops_account_subscription").await else {
+        return;
+    };
+    let now = Utc::now();
+    seed_observability_facts(&database.pool, now)
+        .await
+        .expect("seed observability facts");
+    sqlx::query(
+        "insert into provider_accounts (
+           id, provider_kind, name, email, upstream_user_id, upstream_account_id,
+           plan_type, authentication_kind, provider_credentials_json,
+           credential_revision, credential_observed_at, has_refresh_token,
+           created_at, updated_at
+         ) select 'acct_retry', provider_kind, name, email, upstream_user_id,
+                  'retry-workspace', 'team', authentication_kind,
+                  provider_credentials_json, credential_revision, credential_observed_at,
+                  has_refresh_token, created_at, updated_at
+           from provider_accounts where id = 'acct_observe'",
+    )
+    .execute(&database.pool)
+    .await
+    .expect("seed same-email retry account");
+    sqlx::query(
+        "update ops_events set provider_account_id = 'acct_retry',
+                               provider_account_ref = 'acct_retry'
+         where id = 'ops_observe_retry'",
+    )
+    .execute(&database.pool)
+    .await
+    .expect("assign retry event to its own account");
+    let query = admin_observability::OpsErrorQuery {
+        range: admin_observability::TimeRange::new(
+            now - TimeDelta::hours(1),
+            now + TimeDelta::hours(1),
+        )
+        .expect("ops range"),
+        filter: admin_observability::OpsErrorFilter::default(),
+        current_page: 1,
+        page_size: PageSize::new(10).expect("page size"),
+    };
+    let store = admin_observability_store(&database.pool);
+    for plan in [Some("pro"), Some("plus"), None] {
+        sqlx::query("update provider_accounts set plan_type = $1 where id = 'acct_observe'")
+            .bind(plan)
+            .execute(&database.pool)
+            .await
+            .expect("update current subscription");
+        let page = store
+            .list_ops_errors(query.clone())
+            .await
+            .expect("ops page");
+        assert_eq!(page.total, 2);
+        assert_eq!(page.items.len(), 2);
+        let request = page
+            .items
+            .iter()
+            .find(|error| error.source == "model_request")
+            .expect("request error");
+        let event = page
+            .items
+            .iter()
+            .find(|error| error.source == "ops_event")
+            .expect("retry event");
+        assert_eq!(request.provider_account_email, event.provider_account_email);
+        assert_eq!(request.provider_account_plan_type.as_deref(), plan);
+        assert_eq!(event.provider_account_plan_type.as_deref(), Some("team"));
+    }
+    sqlx::query(
+        "update ops_events set model_request_id = null, attempt_index = null
+         where id = 'ops_observe_retry'",
+    )
+    .execute(&database.pool)
+    .await
+    .expect("detach event from request");
+    let page = store
+        .list_ops_errors(query.clone())
+        .await
+        .expect("ops page");
+    assert_eq!(
+        page.items
+            .iter()
+            .find(|error| error.source == "ops_event")
+            .expect("standalone event")
+            .provider_account_plan_type
+            .as_deref(),
+        Some("team")
+    );
+    sqlx::query("delete from provider_accounts where id = 'acct_retry'")
+        .execute(&database.pool)
+        .await
+        .expect("delete retry account");
+    let page = store
+        .list_ops_errors(query)
+        .await
+        .expect("deleted account history");
+    assert_eq!(page.total, 2);
+    let event = page
+        .items
+        .iter()
+        .find(|error| error.source == "ops_event")
+        .expect("deleted account event");
+    assert_eq!(event.provider_account_ref.as_deref(), Some("acct_retry"));
+    assert_eq!(event.provider_account_plan_type, None);
+    database.close().await;
+}
+
+#[tokio::test]
 async fn ops_should_include_incomplete_upstream_errors() {
     let Some(database) = TestDatabase::create("ops_incomplete_error").await else {
         return;
@@ -1202,7 +1310,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     );
     assert_eq!(dashboard.provider_accounts.total, 1);
     assert_eq!(dashboard.account_usage[0].request_count, 1);
-    assert_eq!(dashboard.account_usage[0].request_buckets.len(), 2);
+    assert_eq!(dashboard.account_usage[0].request_buckets.len(), 24);
     assert_eq!(
         dashboard.account_usage[0]
             .request_buckets
@@ -1663,7 +1771,7 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
     );
     assert_eq!(dashboard.provider_accounts.total, 1);
     assert_eq!(dashboard.account_usage[0].request_count, 1);
-    assert_eq!(dashboard.account_usage[0].request_buckets.len(), 2);
+    assert_eq!(dashboard.account_usage[0].request_buckets.len(), 24);
     assert_eq!(
         dashboard.account_usage[0]
             .request_buckets
@@ -1715,8 +1823,8 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
             .request_buckets
             .iter()
             .map(|bucket| bucket.request_count)
-            .collect::<Vec<_>>(),
-        vec![1, 0],
+            .sum::<u64>(),
+        1,
     );
     assert_eq!(
         (
@@ -2072,4 +2180,169 @@ async fn seed_calculated_billing_facts(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[tokio::test]
+async fn calendar_trends_share_exact_day_boundaries_for_requests_costs_and_empty_buckets() {
+    use gateway_core::time::DeploymentTimeZone;
+    for (name, at) in [
+        ("America/New_York", "2026-11-01T05:30:00Z"),
+        ("America/Havana", "2026-11-01T04:30:00Z"),
+        ("Asia/Kathmandu", "2026-10-01T00:00:00Z"),
+    ] {
+        let Some(database) = TestDatabase::create("calendar_trends").await else {
+            return;
+        };
+        let timezone: DeploymentTimeZone = name.parse().unwrap();
+        let at: chrono::DateTime<Utc> = at.parse().unwrap();
+        seed_observability_facts(&database.pool, at).await.unwrap();
+        seed_calculated_billing_facts(&database.pool, at)
+            .await
+            .unwrap();
+        sqlx::query(
+            "update model_requests set started_at = $1, completed_at = $1 + interval '1 second'",
+        )
+        .bind(at)
+        .execute(&database.pool)
+        .await
+        .unwrap();
+        let range =
+            admin_observability::TimeRange::new(at - TimeDelta::days(32), at + TimeDelta::days(1))
+                .unwrap();
+        let store = admin_observability_store(&database.pool).with_timezone(timezone);
+        let points = store
+            .usage_trend(range, Default::default())
+            .await
+            .expect("calendar trend");
+        let populated = points.iter().find(|p| p.metrics.request_count > 0).unwrap();
+        assert_eq!(
+            populated.bucket_start,
+            timezone.day_start(at).unwrap(),
+            "{name}"
+        );
+        assert_eq!(populated.metrics.request_count, 5);
+        assert_eq!(populated.costs[0].amount.as_str(), "2.5");
+        let mut boundary = timezone.day_start(range.start).unwrap();
+        for point in &points {
+            assert_eq!(point.bucket_start, boundary, "{name}");
+            boundary = timezone.days_after(boundary, 1).unwrap();
+        }
+        let facts = store
+            .usage_calculated_billing_facts(range, Default::default())
+            .try_collect::<Vec<_>>()
+            .await
+            .expect("calendar cost buckets");
+        // 只有已完整交付的 calculated 费用参与趋势事实；其他费用仍按相同边界聚合。
+        assert_eq!(facts.len(), 1);
+        assert!(
+            facts
+                .iter()
+                .all(|fact| fact.bucket_start == populated.bucket_start)
+        );
+        database.close().await;
+    }
+}
+
+#[tokio::test]
+async fn account_hourly_buckets_use_utc_hours_independently_of_calendar_metrics() {
+    use admin_observability::CalendarPeriod;
+    use gateway_core::time::DeploymentTimeZone;
+    for (name, end, early, metrics_count, hourly_count) in [
+        (
+            "America/New_York",
+            "2026-11-02T04:59:00Z",
+            "2026-11-01T04:10:00Z",
+            2,
+            1,
+        ),
+        (
+            "America/New_York",
+            "2026-03-09T03:59:00Z",
+            "2026-03-08T04:10:00Z",
+            1,
+            2,
+        ),
+        (
+            "Asia/Kathmandu",
+            "2026-10-01T04:20:00Z",
+            "2026-09-30T18:05:00Z",
+            1,
+            2,
+        ),
+        ("UTC", "2026-10-02T00:00:00Z", "2026-10-01T23:10:00Z", 0, 2),
+    ] {
+        let Some(database) = TestDatabase::create("account_hourly_calendar").await else {
+            return;
+        };
+        let timezone: DeploymentTimeZone = name.parse().unwrap();
+        let end: chrono::DateTime<Utc> = end.parse().unwrap();
+        let early: chrono::DateTime<Utc> = early.parse().unwrap();
+        seed_observability_facts(&database.pool, end).await.unwrap();
+        seed_calculated_billing_facts(&database.pool, end)
+            .await
+            .unwrap();
+        sqlx::query(
+            "update model_requests set started_at = $1, completed_at = $1 + interval '1 second',
+               downstream_committed_at = $1 where id = 'req_observe_success'",
+        )
+        .bind(early)
+        .execute(&database.pool)
+        .await
+        .unwrap();
+        let range =
+            admin_observability::TimeRange::calendar_at(CalendarPeriod::Today, end, timezone)
+                .unwrap();
+        let dashboard = admin_observability_store(&database.pool)
+            .with_timezone(timezone)
+            .dashboard_summary(range, end)
+            .await
+            .expect("calendar dashboard supports variable day lengths");
+        assert_eq!(
+            dashboard
+                .account_usage
+                .iter()
+                .map(|account| account.request_count)
+                .sum::<u64>(),
+            metrics_count,
+            "{name} {end}"
+        );
+        let accounts = observability_repository(&database.pool)
+            .provider_account_usage(
+                ProviderAccountUsageQuery::for_accounts(
+                    ObservabilityRange {
+                        start: range.start,
+                        end,
+                    },
+                    vec!["acct_observe".to_owned()],
+                )
+                .unwrap()
+                .with_hourly_request_buckets()
+                .unwrap(),
+            )
+            .await
+            .expect("hourly buckets are separate from calendar metrics");
+        assert_eq!(accounts[0].request_count, metrics_count, "{name}");
+        let buckets = &accounts[0].request_buckets;
+        assert_eq!(buckets.len(), 24);
+        assert_eq!(
+            buckets
+                .iter()
+                .map(|bucket| bucket.request_count)
+                .sum::<u64>(),
+            hourly_count,
+            "{name}"
+        );
+        let current_hour =
+            chrono::DateTime::from_timestamp(end.timestamp().div_euclid(3600) * 3600, 0).unwrap();
+        for (index, bucket) in buckets.iter().enumerate() {
+            assert_eq!(
+                bucket.bucket_start,
+                current_hour - TimeDelta::hours(23 - index as i64)
+            );
+        }
+        if end == current_hour {
+            assert_eq!(buckets.last().unwrap().request_count, 0);
+        }
+        database.close().await;
+    }
 }

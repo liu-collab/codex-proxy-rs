@@ -1949,6 +1949,9 @@ fn merge_passive_metadata(quota: &mut Map<String, Value>, rate_limits: &ParsedRa
         value.insert("unlimited".to_owned(), Value::Bool(credits.unlimited));
         if let Some(balance) = credits.balance.as_ref() {
             value.insert("balance".to_owned(), Value::String(balance.clone()));
+        } else {
+            // 点数对象明确更新但未提供余额时，不能把旧余额继续作为当前余额展示。
+            value.remove("balance");
         }
         quota.insert("credits".to_owned(), Value::Object(value));
     }

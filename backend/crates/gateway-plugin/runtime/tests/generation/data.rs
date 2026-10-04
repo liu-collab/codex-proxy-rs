@@ -115,6 +115,7 @@ impl PluginAccountAccess for Facts {
         self.0.fetch_add(1, Ordering::SeqCst);
         assert_eq!(account.as_str(), "acct_facts");
         Ok(ProviderQuota {
+            credits: None,
             plan_type: Some("private plan".into()),
             observed_at: None,
             refresh_token_expires_at: None,

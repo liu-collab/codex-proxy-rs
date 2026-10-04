@@ -5,6 +5,13 @@ use super::*;
 pub(crate) fn store_range(
     range: admin_observability::TimeRange,
 ) -> AdminStoreResult<ObservabilityRange> {
+    // 显式外部范围已经校验；自然日零点的空快照仍须返回零计数。
+    if range.start == range.end {
+        return Ok(ObservabilityRange {
+            start: range.start,
+            end: range.end,
+        });
+    }
     ObservabilityRange::new(range.start, range.end).map_err(observability_error)
 }
 
@@ -757,6 +764,8 @@ pub(crate) fn admin_ops_error(error: OpsErrorRecord) -> admin_observability::Ops
         provider_account_ref: error.provider_account_ref,
         provider_account_name: error.provider_account_name,
         provider_account_email: error.provider_account_email,
+        provider_account_plan_type: error.provider_account_plan_type,
+        provider_account_plan_type_display: None,
         provider_account_authentication_kind: error.provider_account_authentication_kind,
         upstream_model_id: error.upstream_model_id,
         upstream_transport: error.upstream_transport,
@@ -955,6 +964,7 @@ pub(crate) fn ops_error_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<Ops
         provider_account_ref: get(row, "provider_account_ref")?,
         provider_account_name: get(row, "provider_account_name")?,
         provider_account_email: get(row, "provider_account_email")?,
+        provider_account_plan_type: get(row, "provider_account_plan_type")?,
         provider_account_authentication_kind: get(row, "provider_account_authentication_kind")?,
         upstream_model_id: get(row, "upstream_model_id")?,
         upstream_transport: get(row, "upstream_transport")?,

@@ -78,14 +78,15 @@ impl ProviderSchedulingState {
 }
 
 /// 请求级账号 lease 的全部中立事实。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct ProviderSchedulingLeaseRequest {
     provider_kind: ProviderKind,
     account_id: ProviderAccountId,
     credential_revision: CredentialRevision,
     max_concurrent: AccountConcurrency,
     request_interval: Duration,
-    deadline: SystemTime,
+    deadline: crate::lifecycle::Deadline,
+    cancellation: crate::lifecycle::CancellationToken,
 }
 
 impl ProviderSchedulingLeaseRequest {
@@ -96,7 +97,7 @@ impl ProviderSchedulingLeaseRequest {
         credential_revision: CredentialRevision,
         max_concurrent: impl Into<AccountConcurrency>,
         request_interval: Duration,
-        deadline: SystemTime,
+        deadline: impl Into<crate::lifecycle::Deadline>,
     ) -> Self {
         Self {
             provider_kind,
@@ -104,8 +105,20 @@ impl ProviderSchedulingLeaseRequest {
             credential_revision,
             max_concurrent: max_concurrent.into(),
             request_interval,
-            deadline,
+            deadline: deadline.into(),
+            cancellation: crate::lifecycle::CancellationToken::new(),
         }
+    }
+
+    #[must_use]
+    pub fn with_cancellation(mut self, cancellation: crate::lifecycle::CancellationToken) -> Self {
+        self.cancellation = cancellation;
+        self
+    }
+
+    #[must_use]
+    pub fn cancellation(&self) -> crate::lifecycle::CancellationToken {
+        self.cancellation.clone()
     }
 
     #[must_use]
@@ -134,7 +147,7 @@ impl ProviderSchedulingLeaseRequest {
     }
 
     #[must_use]
-    pub const fn deadline(&self) -> SystemTime {
+    pub const fn deadline(&self) -> crate::lifecycle::Deadline {
         self.deadline
     }
 }
@@ -162,7 +175,7 @@ impl fmt::Debug for ProviderLeaseAcquisition {
 }
 
 /// Provider 运行时会持有的三类 lease；刷新必须同时持有全局容量与账号互斥 lease。
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ProviderLeaseRequest {
     Scheduling(ProviderSchedulingLeaseRequest),
     RefreshCapacity(ProviderRefreshCapacityRequest),
@@ -936,6 +949,19 @@ fn invalid_refresh_policy(operation: &'static str) -> ProviderStoreError {
 }
 
 pub trait ProviderRuntimePolicyPort: Send + Sync {
+    /// 原子推进预热执行游标，重启或时钟回拨后不重复领取已消费的时刻。
+    fn claim_warmup_slot<'a>(
+        &'a self,
+        _timezone: crate::time::DeploymentTimeZone,
+        _slot: chrono::NaiveDateTime,
+    ) -> BoxFuture<'a, Result<bool, ProviderStoreError>> {
+        Box::pin(async {
+            Err(ProviderStoreError::new(
+                ProviderStoreErrorKind::Unavailable,
+                "claim warmup slot",
+            ))
+        })
+    }
     /// 仅首次启动写入该 Provider 的默认选择；已保存的管理配置始终优先。
     fn initialize_request_profile<'a>(
         &'a self,

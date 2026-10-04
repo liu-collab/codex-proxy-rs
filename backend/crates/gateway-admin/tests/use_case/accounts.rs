@@ -1114,6 +1114,7 @@ impl SettingsStore for StaticSettingsStore {
             max_waiting_per_key: 0,
             max_waiting_per_account: 0,
             concurrency_wait_timeout_seconds: 30,
+            openai_guardian_reserved_concurrency: 0,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
             rotation_strategy: RotationStrategy::Smart,
@@ -1655,6 +1656,7 @@ async fn accounts_recover_disabled_should_only_enable_scheduling_and_preserve_qu
             );
         }
         let quota = ProviderQuota {
+            credits: None,
             observed_at: Some(Utc::now()),
             windows: vec![ProviderQuotaWindow {
                 key: "primary".to_owned(),
@@ -1993,6 +1995,7 @@ async fn accounts_list_should_degrade_quota_failure_to_empty_window_without_drop
     let events = events();
     let openai = FakeProviderAdmin::new("openai", events.clone());
     openai.set_quota(ProviderQuota {
+        credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
@@ -2125,6 +2128,7 @@ async fn accounts_list_should_map_unknown_credential_to_error_not_normal() {
 async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
@@ -2173,6 +2177,7 @@ async fn accounts_list_should_not_derive_rate_limited_from_provider_quota_view()
 async fn accounts_list_should_not_derive_exhaustion_from_provider_quota_view() {
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
@@ -2224,6 +2229,7 @@ async fn quota_forecast_reads_raw_snapshot_and_limits_usage_to_observation_time(
     let observed = now - TimeDelta::hours(1);
     let reset = now + TimeDelta::days(1);
     provider.set_quota(ProviderQuota {
+        credits: None,
         observed_at: Some(observed),
         limit_reached: true,
         windows: vec![ProviderQuotaWindow {
@@ -2378,6 +2384,7 @@ async fn quota_forecast_mid_cycle_sampling_accepts_small_reset_jitter_but_not_a_
     let added = now - TimeDelta::hours(5);
     let provider = FakeProviderAdmin::new("openai", events());
     provider.set_quota(ProviderQuota {
+        credits: None,
         plan_type: Some("pro".to_owned()),
         observed_at: Some(observed),
         windows: vec![ProviderQuotaWindow {
@@ -2524,6 +2531,7 @@ async fn accounts_list_should_attach_local_usage_to_quota_windows() {
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::hours(1);
     provider.set_quota(ProviderQuota {
+        credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
@@ -2681,6 +2689,7 @@ async fn accounts_list_should_not_attach_account_usage_to_model_specific_quota_w
     let provider = FakeProviderAdmin::new("openai", events());
     let reset_at = Utc::now() + TimeDelta::days(7);
     provider.set_quota(ProviderQuota {
+        credits: None,
         plan_type: None,
         observed_at: Some(Utc::now()),
         refresh_token_expires_at: None,
@@ -2982,6 +2991,7 @@ pub(super) fn document() -> ProviderDocument {
 
 fn empty_quota() -> ProviderQuota {
     ProviderQuota {
+        credits: None,
         plan_type: None,
         observed_at: None,
         refresh_token_expires_at: None,

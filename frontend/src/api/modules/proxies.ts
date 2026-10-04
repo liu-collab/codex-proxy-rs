@@ -37,9 +37,12 @@ export interface OutboundProxyRecord {
   revision: number
   accountCount: number
   lastTestAt: string | null
+  lastTestAtDisplay: string | null
   lastTest: OutboundProxyTest | null
   createdAt: string
+  createdAtDisplay: string
   updatedAt: string
+  updatedAtDisplay: string
 }
 
 /** 代理地址可选的协议；与后端 `OutboundProxy::parse` 的白名单一致。 */

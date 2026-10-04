@@ -791,3 +791,40 @@ async fn quota_refresh_preserves_disabled_and_credential_error_facts() {
         AccountStatus::Disabled
     );
 }
+
+#[tokio::test]
+async fn passive_credit_updates_replace_balance_without_changing_quota_access() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_passive_credits").await;
+    let account = store.account("acct_passive_credits").unwrap();
+    let service = quota_service(&store);
+    let initial = parse_rate_limits_event(&json!({
+        "type": "codex.rate_limits",
+        "rate_limits": {"primary": {"used_percent": 28, "window_minutes": 300}},
+        "credits": {"has_credits": true, "unlimited": false, "balance": "62500"}
+    }))
+    .unwrap();
+    service
+        .synchronize_passive_rate_limits(&account, &[initial])
+        .await
+        .unwrap();
+    for (wire, expected) in [
+        (
+            json!({"has_credits": false, "unlimited": false, "balance": "0"}),
+            Some("0"),
+        ),
+        (json!({"has_credits": true, "unlimited": false}), None),
+    ] {
+        let update =
+            parse_rate_limits_event(&json!({"type": "codex.rate_limits", "credits": wire}))
+                .unwrap();
+        service
+            .synchronize_passive_rate_limits(&account, &[update])
+            .await
+            .unwrap();
+        let snapshot = service.read_account(account.id()).await.unwrap().unwrap();
+        assert_eq!(snapshot.credits().unwrap().balance.as_deref(), expected);
+        assert_eq!(snapshot.windows()[0].used_percent(), Some(28.0));
+        assert_eq!(snapshot.quota().access(), QuotaAccessState::Allowed);
+    }
+}

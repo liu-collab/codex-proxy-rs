@@ -96,7 +96,7 @@ impl GrokAccountSessionSelector {
         let mut waiting = CapacityWait::new(
             &self.waiting,
             queue_policy,
-            request.deadline(),
+            request.deadline().at(),
             request.concurrency_wait_budget(),
         );
         'refresh: loop {
@@ -230,6 +230,7 @@ impl GrokAccountSessionSelector {
                 round_robin_cursor: scheduling.round_robin_cursor(),
                 eligibility: request.eligibility(),
                 account_scope: (!diagnostic).then(|| Arc::clone(request.account_scope())),
+                reserved_concurrency: 0,
             };
             let wait_candidates = AccountSelector.wait_candidates(&candidates, &context);
             let capacity_context = context.clone();
@@ -288,7 +289,8 @@ impl GrokAccountSessionSelector {
                             ),
                             request.account_selection_policy().request_interval(),
                             request.deadline(),
-                        ),
+                        )
+                        .with_cancellation(request.cancellation().clone()),
                     ))
                     .await
                     .map_err(|_| GrokSessionSelectorError::Unavailable)?;

@@ -1052,6 +1052,7 @@ fn map_reset_credits_error_after_refresh(
 /// 账号目录中单个账号 quota 读取失败时使用的空额度投影。
 fn empty_quota() -> ProviderQuota {
     ProviderQuota {
+        credits: None,
         plan_type: None,
         observed_at: None,
         refresh_token_expires_at: None,

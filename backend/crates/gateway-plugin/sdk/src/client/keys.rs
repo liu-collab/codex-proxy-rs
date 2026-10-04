@@ -53,7 +53,7 @@ impl HostClient {
         serde_json::from_value(reply.result).map_err(|_| invalid())
     }
 
-    /// 清零指定周期，保留限额和到期时间；结果未知时不能盲目重试。
+    /// 清零并关闭指定周期，保留限额，下次使用时重新开启；结果未知时不能盲目重试。
     ///
     /// # Errors
     /// 实例过期、Key 不存在、宿主写入失败时返回错误。

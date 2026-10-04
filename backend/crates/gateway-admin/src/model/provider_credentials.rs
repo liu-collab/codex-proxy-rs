@@ -826,9 +826,18 @@ pub struct ProviderQuota {
     pub observed_at: Option<DateTime<Utc>>,
     pub refresh_token_expires_at: Option<DateTime<Utc>>,
     pub windows: Vec<ProviderQuotaWindow>,
+    pub credits: Option<ProviderQuotaCredits>,
     /// 展示用快照级触顶事实（顶层或任一窗口触顶）；不参与账号五态派生。
     pub limit_reached: bool,
     pub provider_data: Option<ProviderDocument>,
+}
+
+/// 上游点数余额的展示事实，保留原始十进制文本以避免精度损失。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderQuotaCredits {
+    pub has_credits: bool,
+    pub unlimited: bool,
+    pub balance: Option<String>,
 }
 
 /// 空值和 `unknown` 代表未提供套餐；新的套餐标识仍按明确值保留。

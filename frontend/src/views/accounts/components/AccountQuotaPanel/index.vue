@@ -2,12 +2,13 @@
 import type { AccountRow } from '../../constants'
 import { BaseEmpty, BaseIconButton } from '@codex-proxy/ui'
 
-import { RefreshCw, UserRound } from '@lucide/vue'
+import { ChartNoAxesCombined, RefreshCw, UserRound } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { formatProviderLabel } from '@/utils/providers'
 import { groupedAccountQuotaWindows, orderedPanelQuotaWindows } from '../../constants'
 import AccountPlanBadge from '../AccountPlanBadge.vue'
 import AccountProfileModal from '../AccountProfileModal/index.vue'
+import AccountQuotaForecastModal from '../AccountQuotaForecastModal/index.vue'
 import AccountQuotaPanelEntry from './Entry.vue'
 import AccountResetCredits from './ResetCredits.vue'
 
@@ -17,6 +18,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
+  accountUpdated: [account: AccountRow]
   refreshQuota: [accountId: string]
   quotaReset: [accountId: string]
 }>()
@@ -25,8 +27,10 @@ const quotaEntries = computed(() => groupedAccountQuotaWindows(
   orderedPanelQuotaWindows(props.account.quota.windows),
 ))
 const profileOpen = shallowRef(false)
+const forecastOpen = shallowRef(false)
+const hasForecast = computed(() => props.account.authenticationKind !== 'api_key')
 const hasPersonalInfo = computed(() => props.account.capabilities.profile || props.account.capabilities.subscription)
-const hasActions = computed(() => hasPersonalInfo.value || props.account.capabilities.quotaRefresh || props.account.capabilities.resetCredits)
+const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || props.account.capabilities.quotaRefresh || props.account.capabilities.resetCredits)
 watch(hasPersonalInfo, (available) => {
   if (!available)
     profileOpen.value = false
@@ -44,7 +48,7 @@ watch(hasPersonalInfo, (available) => {
           v-if="account.capabilities.quota || quotaEntries.length > 0"
           class="m-0 mt-1 flex min-w-0 items-center gap-1.5 text-cp-xs font-emphasis text-cp-text-secondary"
         >
-          <span>{{ formatProviderLabel(account.provider) }} 额度</span>
+          <span>{{ account.provider === 'openai' ? 'Codex' : formatProviderLabel(account.provider) }} 额度</span>
           <template v-if="account.planType">
             <span>·</span>
             <AccountPlanBadge :plan-type="account.planType" :plan-type-display="account.planTypeDisplay" size="sm" />
@@ -53,7 +57,7 @@ watch(hasPersonalInfo, (available) => {
           <span>最近刷新: {{ account.quota.refreshedAtDisplay }}</span>
         </p>
       </div>
-      <div v-if="hasActions" class="flex shrink-0 items-center gap-0.5">
+      <div v-if="hasActions" class="flex shrink-0 items-center gap-0.5 [&_svg]:size-3.5 [&_svg]:stroke-2">
         <BaseIconButton
           v-if="hasPersonalInfo"
           label="查看个人信息"
@@ -69,6 +73,17 @@ watch(hasPersonalInfo, (available) => {
           :account="account"
           @consumed="emit('quotaReset', $event)"
         />
+        <BaseIconButton
+          v-if="hasForecast"
+          label="预测周/月额度"
+          size="sm"
+          variant="ghost"
+          aria-haspopup="dialog"
+          :pressed="forecastOpen"
+          @click="forecastOpen = true"
+        >
+          <ChartNoAxesCombined class="size-3.5" />
+        </BaseIconButton>
         <BaseIconButton
           v-if="account.capabilities.quotaRefresh"
           variant="ghost"
@@ -106,5 +121,11 @@ watch(hasPersonalInfo, (available) => {
     v-if="hasPersonalInfo"
     v-model="profileOpen"
     :account="account"
+  />
+  <AccountQuotaForecastModal
+    v-if="hasForecast"
+    v-model="forecastOpen"
+    :account="account"
+    @account-updated="emit('accountUpdated', $event)"
   />
 </template>

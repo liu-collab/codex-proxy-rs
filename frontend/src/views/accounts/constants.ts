@@ -37,7 +37,7 @@ export const accountColumns = defineTableColumns<AccountRow>([
     format: value => accountProviderLabel(typeof value === 'string' ? value : null),
   },
   { key: 'status', label: '状态', kind: 'status', align: 'left', sortable: true },
-  { key: 'planType', label: '套餐', kind: 'status', sortable: true },
+  { key: 'planType', label: '订阅', kind: 'status', sortable: true },
   { key: 'usage', label: '用量', kind: 'custom', size: '2xl', sortable: true },
   { key: 'groups', label: '账号分组', kind: 'status' },
   {

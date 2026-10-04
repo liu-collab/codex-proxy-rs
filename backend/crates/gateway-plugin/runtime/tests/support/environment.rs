@@ -529,6 +529,7 @@ impl Environment {
             ClientConfig::default(),
             self.store.admin_ports(),
             gateway_admin::AdminRuntimePorts {
+                timezone: Default::default(),
                 service_middleware: {
                     let snapshots = core.snapshots();
                     let middleware = runtime.middleware_registry();
@@ -644,8 +645,24 @@ impl Environment {
     }
 
     async fn create_with_store_mode(command_line: bool) -> Option<Self> {
-        let database = std::env::var("CPR_PLUGIN_TEST_DATABASE_URL").ok()?;
-        let redis = std::env::var("CPR_PLUGIN_TEST_REDIS_URL").expect("isolated plugin Redis URL");
+        // 插件专用服务优先；CI 的标准测试服务同样通过随机 schema 隔离数据库。
+        let (database, redis) = if let Ok(database) = std::env::var("CPR_PLUGIN_TEST_DATABASE_URL")
+        {
+            (
+                database,
+                std::env::var("CPR_PLUGIN_TEST_REDIS_URL").expect("isolated plugin Redis URL"),
+            )
+        } else {
+            let database = std::env::var("CPR_TEST_DATABASE_URL").ok();
+            assert!(
+                database.is_some() || std::env::var_os("CI").is_none(),
+                "CI requires plugin or standard test services"
+            );
+            (
+                database?,
+                std::env::var("CPR_TEST_REDIS_URL").expect("isolated test Redis URL"),
+            )
+        };
         let schema = format!("cpr_plugin_{}", uuid::Uuid::new_v4().simple());
         let admin = PgPoolOptions::new()
             .max_connections(1)

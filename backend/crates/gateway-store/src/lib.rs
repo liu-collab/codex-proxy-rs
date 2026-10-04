@@ -32,6 +32,7 @@ use serde_json::{Map, Value};
 mod admin_adapter;
 mod bundle;
 mod config;
+mod lease_renewal;
 mod value;
 mod workers;
 

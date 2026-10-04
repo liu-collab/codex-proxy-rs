@@ -10,6 +10,7 @@ const REQUEST_ERROR_SELECT: &str = "select 'model_request'::text as source,
        mr.endpoint, mr.provider_kind, mr.provider_account_ref,
        mr.provider_account_name_snapshot as provider_account_name,
        mr.provider_account_email_snapshot as provider_account_email,
+       account.plan_type as provider_account_plan_type,
        mr.provider_account_authentication_kind_snapshot
          as provider_account_authentication_kind,
        mr.upstream_model_id, mr.upstream_transport,
@@ -33,6 +34,7 @@ const REQUEST_ERROR_SELECT: &str = "select 'model_request'::text as source,
        'model_request:' || mr.id as stable_sort_id
 from model_requests mr
 left join client_api_keys client_key on client_key.id = mr.client_api_key_ref
+left join provider_accounts account on account.id = mr.provider_account_ref
 where true";
 
 const OPS_EVENT_SELECT: &str = "select 'ops_event'::text as source,
@@ -42,6 +44,7 @@ const OPS_EVENT_SELECT: &str = "select 'ops_event'::text as source,
        mr.endpoint, oe.provider_kind, oe.provider_account_ref,
        oe.provider_account_name_snapshot as provider_account_name,
        oe.provider_account_email_snapshot as provider_account_email,
+       account.plan_type as provider_account_plan_type,
        oe.provider_account_authentication_kind_snapshot
          as provider_account_authentication_kind,
        oe.upstream_model_id, null::text as upstream_transport, oe.failure_kind,
@@ -66,6 +69,7 @@ const OPS_EVENT_SELECT: &str = "select 'ops_event'::text as source,
 from ops_events oe
 left join model_requests mr on mr.id = oe.model_request_id
 left join client_api_keys client_key on client_key.id = mr.client_api_key_ref
+left join provider_accounts account on account.id = oe.provider_account_ref
 where true";
 
 pub(crate) async fn list_ops_errors(

@@ -39,8 +39,9 @@ const connectionDescription = computed(() => props.proxy
   ? '留空保留当前连接和认证信息；也可以直接粘贴「主机:端口:用户名:密码」并选择协议'
   : '可直接粘贴代理商的「主机:端口:用户名:密码」，选择协议即可；也可填完整 URL')
 
-watch(open, () => {
-  showSecret.value = false
+watch(open, (value) => {
+  if (value)
+    showSecret.value = false
 })
 </script>
 

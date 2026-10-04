@@ -56,7 +56,7 @@ const diagnosticColumns = computed(() => defineTableColumns<DiagnosticDisplayIte
   },
   ...(resultDimension.value === 'account'
     ? defineTableColumns<DiagnosticDisplayItem>([
-        { key: 'accountPlanType', label: '套餐', kind: 'status', size: 'sm', fixedWidth: true },
+        { key: 'accountPlanType', label: '订阅', kind: 'status', size: 'sm', fixedWidth: true },
       ])
     : []),
   {

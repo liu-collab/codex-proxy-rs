@@ -179,7 +179,8 @@ pub async fn initialize(
         )
         .map_err(OpenAiInitializeError::Provider)?
         .with_input_guard(config.input_guard())
-        .with_session_identity(session_identity),
+        .with_session_identity(session_identity)
+        .with_timezone(config.timezone),
     );
     let token_client = Arc::new(
         credential::token_client::openai_token_client(
@@ -234,6 +235,7 @@ pub async fn initialize(
         desktop_release_status,
     ));
     let worker_contributions = provider::worker_contributions(
+        config.timezone,
         refresh,
         quota,
         catalog,

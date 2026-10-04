@@ -24,9 +24,9 @@ use gateway_admin::model::provider_credentials::{
     ProviderExportCredentialInput, ProviderModel, ProviderModelCatalogDocument, ProviderModels,
     ProviderProfileActivityInsights, ProviderProfileAvatar, ProviderProfileAvatarStreamError,
     ProviderProfileDailyUsage, ProviderProfileInvocation, ProviderProfileStatistics,
-    ProviderProfileStatisticsSummary, ProviderQuota, ProviderQuotaRequest, ProviderQuotaWindow,
-    ProviderQuotaWindowRole, ProviderResetCredit, ProviderResetCreditResult, ProviderResetCredits,
-    ProviderSubscription, QuotaLocalUsageAttribution,
+    ProviderProfileStatisticsSummary, ProviderQuota, ProviderQuotaCredits, ProviderQuotaRequest,
+    ProviderQuotaWindow, ProviderQuotaWindowRole, ProviderResetCredit, ProviderResetCreditResult,
+    ProviderResetCredits, ProviderSubscription, QuotaLocalUsageAttribution,
 };
 use gateway_admin::model::quota_forecast_sampling::QuotaForecastObservation;
 use gateway_admin::ports::provider::{ProviderAdmin, ProviderAdminError, ProviderAdminErrorKind};
@@ -1109,6 +1109,7 @@ fn account_matches_record(account: &ProviderAccount, record: &AccountRecord) -> 
 
 fn empty_quota() -> ProviderQuota {
     ProviderQuota {
+        credits: None,
         plan_type: None,
         observed_at: None,
         refresh_token_expires_at: None,
@@ -1174,6 +1175,11 @@ fn project_quota_snapshot(snapshot: CodexAccountQuotaSnapshot) -> ProviderQuota 
         observed_at: Some(DateTime::<Utc>::from(snapshot.observed_at())),
         refresh_token_expires_at: None,
         windows,
+        credits: snapshot.credits().map(|credits| ProviderQuotaCredits {
+            has_credits: credits.has_credits,
+            unlimited: credits.unlimited,
+            balance: credits.balance.clone(),
+        }),
         limit_reached,
         provider_data: Some(ProviderDocument::new(OpaqueProviderData::new(
             provider_data,
