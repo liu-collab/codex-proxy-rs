@@ -1,3 +1,5 @@
+//! 验证 OpenAI 入口的 Bearer 认证与插件可见认证信息边界
+
 use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -477,6 +479,7 @@ async fn http_settings_freeze_before_plan_resolution_and_apply_before_admission(
         Arc::new(super::UnusedAdmissions),
         Arc::new(super::UnusedContinuation),
         Arc::new(super::IgnoredClientApiKeyUsage),
+        Arc::new(crate::support::RecordingDiagnostics::default()),
     ));
     let admin = crate::admin::AdminTestFixture::new().await;
     let bundle = gateway_api::initialize(
@@ -491,6 +494,7 @@ async fn http_settings_freeze_before_plan_resolution_and_apply_before_admission(
         vec![],
         Arc::new(super::EmptyWorkerHealth),
         Arc::new(super::TestLifecycle::default()),
+        Arc::new(crate::support::RecordingDiagnostics::default()),
     )
     .unwrap();
     let baseline = bundle.dispatcher();

@@ -1,4 +1,4 @@
-//! 管理控制面的用例实现。
+//! 管理控制面的用例实现
 
 pub mod account_groups;
 pub mod accounts;
@@ -51,7 +51,6 @@ fn map_store_error(error: AdminStoreError, resource: &'static str) -> AdminError
         | AdminStoreErrorKind::Conflict => AdminErrorKind::Conflict,
         AdminStoreErrorKind::Unavailable => AdminErrorKind::Unavailable,
     };
-    tracing::warn!(resource, error_kind = ?error.kind(), "admin store operation failed");
     let message = match kind {
         AdminErrorKind::Invalid => "请求参数不合法",
         AdminErrorKind::NotFound => "请求的资源不存在",
@@ -59,7 +58,10 @@ fn map_store_error(error: AdminStoreError, resource: &'static str) -> AdminError
         AdminErrorKind::Unavailable => "依赖服务暂不可用",
         _ => "服务内部错误",
     };
-    AdminError::new(kind, message)
+    AdminError::new(kind, message).with_source(OperationFailure {
+        operation: resource,
+        source: error.into(),
+    })
 }
 
 fn map_provider_error(
@@ -79,7 +81,6 @@ fn map_provider_error(
         ProviderAdminErrorKind::BadGateway => AdminErrorKind::BadGateway,
         ProviderAdminErrorKind::Internal => AdminErrorKind::Internal,
     };
-    tracing::warn!(resource, error_kind = ?error.kind(), "admin provider operation failed");
     let message = match kind {
         AdminErrorKind::Invalid => "Provider 请求不合法",
         AdminErrorKind::NotFound => "Provider 资源不存在",
@@ -90,7 +91,10 @@ fn map_provider_error(
         AdminErrorKind::Internal => "服务内部错误",
         _ => "Provider 操作失败",
     };
-    AdminError::new(kind, error.public_message().unwrap_or(message))
+    AdminError::new(kind, error.public_message().unwrap_or(message)).with_source(OperationFailure {
+        operation: resource,
+        source: error.into(),
+    })
 }
 
 async fn publish_committed(
@@ -113,7 +117,7 @@ async fn publish_credentials_and_observe_quota(
     provider.account_facts_changed(account_ids).await;
     publish_committed(snapshot, revision).await?;
 
-    // 凭据已经提交；额度只是可重建的观察，不能拖住管理请求或回滚提交结果。
+    // 凭据已经提交；额度只是可重建的观察，不能拖住管理请求或回滚提交结果
     let provider = provider.clone();
     let account_ids = account_ids.to_vec();
     let request_id = request_id.to_owned();
@@ -343,7 +347,7 @@ async fn commit_authorization(
             if let Some(guard) = authorization_guard
                 && let Err(error) = guard.commit().await
             {
-                // 账号与回执已经原子提交，Redis 清理失败不能把确定的成功改写为失败。
+                // 账号与回执已经原子提交，Redis 清理失败不能把确定的成功改写为失败
                 tracing::warn!(resource, settlement_error = %error, "authorization committed but pending cleanup failed");
             }
             Ok(result)
@@ -453,4 +457,12 @@ async fn delete_credentials(
         config_revision: revision,
         account_ids,
     })
+}
+
+// 用例的操作名补充端口资源上下文，底层分类与原始原因仍由来源持有
+#[derive(Debug, thiserror::Error)]
+#[error("admin operation failed: {operation}")]
+struct OperationFailure {
+    operation: &'static str,
+    source: gateway_core::error::ErrorSource,
 }

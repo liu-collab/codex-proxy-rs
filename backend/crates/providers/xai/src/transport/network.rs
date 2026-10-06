@@ -1,4 +1,4 @@
-//! Explicit account egress with redirects and business retries disabled.
+//! xAI 显式账号出口传输，禁用自动重定向与业务重试
 
 use gateway_core::diagnostics::{StreamCapture, StreamFormat, TraceContext};
 use std::fmt;
@@ -67,31 +67,31 @@ tokio::task_local! {
     static REQUEST_DNS_OBSERVER: Arc<RequestDnsObserver>;
 }
 
-/// 构建严格 reqwest transport 失败。
+/// 构建严格 reqwest transport 失败
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
 pub enum GrokReqwestTransportBuildError {
-    /// Reqwest TLS/client 初始化失败。
+    /// Reqwest TLS/client 初始化失败
     #[error("Grok reqwest transport initialization failed")]
     ClientInitialization,
 }
 
-/// 固定官方 host 的 DNS 解析路径；只有系统结果全部为公网地址时才直接使用。
+/// 固定官方 host 的 DNS 解析路径；只有系统结果全部为公网地址时才直接使用
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GrokDnsResolutionPlan {
-    /// 使用系统 resolver 返回的全部公网地址。
+    /// 使用系统 resolver 返回的全部公网地址
     System,
-    /// 系统解析失败、为空或包含非公网地址，改用固定 bootstrap 的可信 DoH。
+    /// 系统解析失败、为空或包含非公网地址，改用固定 bootstrap 的可信 DoH
     TrustedDoh,
 }
 
-/// xAI 官方 host 的 DNS rebinding 防护策略。
+/// xAI 官方 host 的 DNS rebinding 防护策略
 #[derive(Debug, Clone, Copy)]
 pub struct GrokDnsResolutionPolicy {
     allowed_host: &'static str,
 }
 
 impl GrokDnsResolutionPolicy {
-    /// OAuth、JWKS 与 user-info 官方 host 策略。
+    /// OAuth、JWKS 与 user-info 官方 host 策略
     #[must_use]
     pub const fn official_oauth() -> Self {
         Self {
@@ -99,7 +99,7 @@ impl GrokDnsResolutionPolicy {
         }
     }
 
-    /// 推理与模型目录官方 host 策略。
+    /// 推理与模型目录官方 host 策略
     #[must_use]
     pub const fn official_inference() -> Self {
         Self {
@@ -107,11 +107,11 @@ impl GrokDnsResolutionPolicy {
         }
     }
 
-    /// 决定系统解析结果可直接使用还是必须走可信 DoH。
+    /// 决定系统解析结果可直接使用还是必须走可信 DoH
     ///
     /// # Errors
     ///
-    /// 请求 host 不等于本策略固定的官方 host 时拒绝，且不会触发 fallback。
+    /// 请求 host 不等于本策略固定的官方 host 时拒绝，且不会触发 fallback
     pub fn plan_system_resolution(
         self,
         requested_host: &str,
@@ -127,11 +127,11 @@ impl GrokDnsResolutionPolicy {
         )
     }
 
-    /// 验证可信 DoH 返回的整个地址集合；任一非公网地址会拒绝全部结果。
+    /// 验证可信 DoH 返回的整个地址集合；任一非公网地址会拒绝全部结果
     ///
     /// # Errors
     ///
-    /// Host 不匹配、结果为空或任一地址非公网时拒绝。
+    /// Host 不匹配、结果为空或任一地址非公网时拒绝
     pub fn validate_trusted_doh_resolution(
         self,
         requested_host: &str,
@@ -158,12 +158,12 @@ impl GrokDnsResolutionPolicy {
     }
 }
 
-/// DNS policy 低基数错误；不保留请求 host、地址或 resolver 正文。
+/// DNS policy 低基数错误；不保留请求 host、地址或 resolver 正文
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("Grok official DNS resolution was rejected")]
 pub struct GrokDnsResolutionError;
 
-/// HTTP client 构造与端点校验合为一个可注入的安全边界。
+/// HTTP client 构造与端点校验合为一个可注入的安全边界
 pub trait GrokEndpointPolicy: fmt::Debug + Send + Sync {
     fn build_oauth_client(
         &self,
@@ -236,18 +236,19 @@ impl GrokEndpointPolicy for OfficialGrokEndpointPolicy {
     }
 }
 
-/// 官方 OAuth HTTP transport。只允许 `auth.x.ai:443`。
+/// 官方 OAuth HTTP transport
+/// 只允许 `auth.x.ai:443`
 pub struct ReqwestOAuthTransport {
     clients: EgressCache<Option<OutboundProxy>, Client>,
     endpoint_policy: Arc<dyn GrokEndpointPolicy>,
 }
 
 impl ReqwestOAuthTransport {
-    /// 使用系统原生根证书构建生产 transport。
+    /// 使用系统原生根证书构建生产 transport
     ///
     /// # Errors
     ///
-    /// TLS client 初始化失败时返回错误。
+    /// TLS client 初始化失败时返回错误
     pub fn new(
         endpoint_policy: Arc<dyn GrokEndpointPolicy>,
     ) -> Result<Self, GrokReqwestTransportBuildError> {
@@ -318,7 +319,7 @@ impl OAuthHttpTransport for ReqwestOAuthTransport {
     }
 }
 
-/// 官方 Grok Responses HTTP SSE transport。
+/// 官方 Grok Responses HTTP SSE transport
 pub struct ReqwestGrokInferenceTransport {
     clients: EgressCache<GrokSessionBinding, Client>,
     unbound_client: Mutex<Option<Client>>,
@@ -326,14 +327,14 @@ pub struct ReqwestGrokInferenceTransport {
 }
 
 impl ReqwestGrokInferenceTransport {
-    /// 单个进程缓存的账号隔离推理连接池上限。
+    /// 单个进程缓存的账号隔离推理连接池上限
     pub const MAX_CACHED_ACCOUNT_CLIENTS: usize = MAX_CACHED_EGRESS_STATES;
 
-    /// 构建只允许官方 CLI proxy 的生产 transport。
+    /// 构建只允许官方 CLI proxy 的生产 transport
     ///
     /// # Errors
     ///
-    /// TLS client 初始化失败时返回错误。
+    /// TLS client 初始化失败时返回错误
     pub fn new(
         endpoint_policy: Arc<dyn GrokEndpointPolicy>,
     ) -> Result<Self, GrokReqwestTransportBuildError> {
@@ -453,7 +454,7 @@ impl GrokInferenceTransport for ReqwestGrokInferenceTransport {
                                 .is_some_and(|total| total <= MAX_INFERENCE_BODY_BYTES) =>
                         {
                             *observed += chunk.len();
-                            // Bytes 直传，长流不再逐 chunk 复制到 Vec。
+                            // Bytes 直传，长流不再逐 chunk 复制到 Vec
                             Ok(chunk)
                         }
                         Ok(_) => Err(GrokInferenceTransportError::new(
@@ -461,7 +462,7 @@ impl GrokInferenceTransport for ReqwestGrokInferenceTransport {
                             UpstreamSendState::Sent,
                         )
                         .with_transport_metrics(transport_metrics)),
-                        Err(error) => Err(classify_inference_stream_error(&error)
+                        Err(error) => Err(classify_inference_stream_error(error)
                             .with_transport_metrics(transport_metrics)),
                     };
                     std::future::ready(Some(item))
@@ -518,18 +519,18 @@ fn inference_transport_metrics(
     metrics
 }
 
-/// 官方 Grok CLI proxy 模型目录 GET transport。
+/// 官方 Grok CLI proxy 模型目录 GET transport
 pub struct ReqwestGrokModelCatalogTransport {
     clients: EgressCache<Option<OutboundProxy>, Client>,
     endpoint_policy: Arc<dyn GrokEndpointPolicy>,
 }
 
 impl ReqwestGrokModelCatalogTransport {
-    /// 构建只允许官方 CLI proxy `/v1/models` 的生产 transport。
+    /// 构建只允许官方 CLI proxy `/v1/models` 的生产 transport
     ///
     /// # Errors
     ///
-    /// TLS client 初始化失败时返回错误。
+    /// TLS client 初始化失败时返回错误
     pub fn new(
         endpoint_policy: Arc<dyn GrokEndpointPolicy>,
     ) -> Result<Self, GrokReqwestTransportBuildError> {
@@ -684,7 +685,7 @@ fn build_official_client(
     proxy: Option<&OutboundProxy>,
 ) -> Result<Client, GrokReqwestTransportBuildError> {
     let mut builder = Client::builder()
-        // 工作区可能同时启用 native-tls；与官方 Grok CLI 一样显式固定 rustls，避免握手画像漂移。
+        // 工作区可能同时启用 native-tls；与官方 Grok CLI 一样显式固定 rustls，避免握手画像漂移
         .use_rustls_tls()
         .redirect(Policy::none())
         .no_proxy()
@@ -699,7 +700,7 @@ fn build_official_client(
         .https_only(true);
     if let Some(proxy) = proxy {
         // 保留 reqwest 的代理解析语义（socks5 本地解析、socks5h 远端解析）；
-        // 只允许官方 host 的直连 resolver 不能用于解析代理端点。
+        // 只允许官方 host 的直连 resolver 不能用于解析代理端点
         builder = builder.proxy(
             reqwest::Proxy::all(proxy.expose_url())
                 .map_err(|_| GrokReqwestTransportBuildError::ClientInitialization)?,
@@ -1017,8 +1018,19 @@ fn classify_inference_reqwest_error(error: reqwest::Error) -> GrokInferenceTrans
             UpstreamSendState::Ambiguous,
         )
     };
-    GrokInferenceTransportError::new(kind, send_state)
-        .with_diagnostic(inference_http_diagnostic(&error))
+    let failure = GrokInferenceTransportError::new(kind, send_state)
+        .with_diagnostic(inference_http_diagnostic(&error));
+    with_inference_reqwest_source(failure, error)
+}
+
+fn with_inference_reqwest_source(
+    mut failure: GrokInferenceTransportError,
+    source: reqwest::Error,
+) -> GrokInferenceTransportError {
+    if source.url().is_some() {
+        failure = failure.redact_sensitive_context("request URL");
+    }
+    failure.with_source(source.without_url())
 }
 
 fn classify_model_catalog_reqwest_error(error: reqwest::Error) -> GrokModelCatalogTransportError {
@@ -1043,8 +1055,8 @@ fn classify_billing_reqwest_error(error: reqwest::Error) -> GrokBillingTransport
     GrokBillingTransportError::new(kind)
 }
 
-fn classify_inference_stream_error(error: &reqwest::Error) -> GrokInferenceTransportError {
-    GrokInferenceTransportError::new(
+fn classify_inference_stream_error(error: reqwest::Error) -> GrokInferenceTransportError {
+    let failure = GrokInferenceTransportError::new(
         if error.is_timeout() {
             GrokInferenceTransportErrorKind::Timeout
         } else {
@@ -1052,7 +1064,8 @@ fn classify_inference_stream_error(error: &reqwest::Error) -> GrokInferenceTrans
         },
         UpstreamSendState::Sent,
     )
-    .with_diagnostic(inference_http_diagnostic(error))
+    .with_diagnostic(inference_http_diagnostic(&error));
+    with_inference_reqwest_source(failure, error)
 }
 
 async fn classify_inference_status(
@@ -1064,16 +1077,27 @@ async fn classify_inference_status(
     let http_version = upstream_http_version(response.version());
     let request_id = upstream_request_id(&response);
     let status_code = status.as_u16();
-    let body = match collect_bounded(response, MAX_ERROR_BODY_BYTES).await {
-        Ok(BoundedBody::Body(body)) => body,
-        Ok(BoundedBody::TooLarge) | Err(_) => {
+    let (body, body_error) = match collect_bounded(response, MAX_ERROR_BODY_BYTES).await {
+        Ok(BoundedBody::Body(body)) => (Some(body), None),
+        Ok(BoundedBody::TooLarge) => {
             trace.record(
                 "capture.gap",
-                serde_json::json!({"reason": "error_body_unavailable_or_too_large"}),
+                serde_json::json!({"reason": "error_body_too_large"}),
             );
-            Vec::new()
+            (None, None)
+        }
+        Err(source) => {
+            trace.record(
+                "capture.gap",
+                serde_json::json!({"reason": "error_body_read_failed"}),
+            );
+            (None, Some(source))
         }
     };
+    let raw = body.as_ref().map(|body| {
+        gateway_core::error::RawUpstreamError::new(String::from_utf8_lossy(body).into_owned())
+    });
+    let body = body.unwrap_or_default();
     trace.capture("upstream.error.body", &body);
     let metadata = inference_error_metadata(&body);
     let body_failure = classify_grok_body_failure(&metadata, &body);
@@ -1107,17 +1131,23 @@ async fn classify_inference_status(
     let credential_recovery_required = kind == GrokInferenceTransportErrorKind::Unauthorized;
     let mut error = GrokInferenceTransportError::new(kind, UpstreamSendState::Sent)
         .with_status(status_code)
-        .with_response_facts(http_version, request_id)
-        .redact_sensitive_context("upstream response body");
-    let upstream_code = if status == StatusCode::BAD_REQUEST && reasoning_decode_failed(&metadata) {
-        Some("reasoning_decode_failed".to_owned())
+        .with_response_facts(http_version, request_id);
+    if let Some(raw) = raw {
+        error = error.with_raw_upstream_error(raw);
+    }
+    let diagnostic_code = if status == StatusCode::BAD_REQUEST && reasoning_decode_failed(&metadata)
+    {
+        "reasoning_decode_failed"
     } else {
-        metadata
-            .code
-            .as_deref()
-            .and_then(normalize_failure_code)
-            .or_else(|| body_failure.map(GrokBodyFailure::marker).map(str::to_owned))
+        body_failure.map_or("upstream_failure", GrokBodyFailure::marker)
     };
+    error = error.with_diagnostic(
+        ProviderDiagnostic::new(format!(
+            "xAI upstream rejected request: status={status_code}"
+        ))
+        .with_classification("upstream", diagnostic_code),
+    );
+    let upstream_code = metadata.code;
     if let Some(message) = metadata.client_message.as_deref() {
         error = error.with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
             scrub_account_fingerprints(message),
@@ -1134,6 +1164,9 @@ async fn classify_inference_status(
     if let Some(retry_after) = retry_after {
         error = error.with_retry_after(retry_after);
     }
+    if let Some(source) = body_error {
+        error = with_inference_reqwest_source(error, source);
+    }
     error
 }
 
@@ -1142,7 +1175,7 @@ struct InferenceErrorMetadata {
     code: Option<String>,
     error_type: Option<String>,
     message: Option<String>,
-    // 仅结构化 JSON 的 message 可进入客户端协议；纯文本正文只参与内部分类。
+    // 仅结构化 JSON 的 message 可进入客户端协议；纯文本正文只参与内部分类
     client_message: Option<String>,
 }
 
@@ -1286,8 +1319,7 @@ fn first_string(object: &serde_json::Map<String, Value>, fields: &[&str]) -> Opt
     fields
         .iter()
         .find_map(|field| object.get(*field).and_then(Value::as_str))
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+        .filter(|value| !value.trim().is_empty())
         .map(ToOwned::to_owned)
 }
 
@@ -1453,22 +1485,6 @@ fn credential_rejected(value: &str) -> bool {
 
 fn contains_any(value: &str, signals: &[&str]) -> bool {
     signals.iter().any(|signal| value.contains(signal))
-}
-
-fn normalize_failure_code(value: &str) -> Option<String> {
-    let mut normalized = String::with_capacity(value.len().min(48));
-    for character in value.trim().to_ascii_lowercase().chars() {
-        if character.is_ascii_alphanumeric() {
-            normalized.push(character);
-        } else if matches!(character, '-' | '_' | '.' | ':') {
-            normalized.push('_');
-        }
-        if normalized.len() >= 48 {
-            break;
-        }
-    }
-    let normalized = normalized.trim_matches('_');
-    (!normalized.is_empty()).then(|| normalized.to_owned())
 }
 
 fn upstream_http_version(version: reqwest::Version) -> UpstreamHttpVersion {

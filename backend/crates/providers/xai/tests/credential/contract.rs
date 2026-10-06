@@ -1,3 +1,5 @@
+//! 验证 xAI 凭据持久化、主体身份与版本比较更新
+
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -315,12 +317,12 @@ async fn invalid_token_lifetime_is_rejected_before_store_write() {
     let (store, _) = repository();
     let mut input = create_input("lifetime", "subject-lifetime");
     input.account.refresh_token_expires_at = Some(input.account.access_token_expires_at);
-    assert_eq!(
+    assert!(matches!(
         GrokCredentialAdmin.prepare_import(&input),
         Err(GrokCredentialRepositoryError::InvalidInput(
             "token_lifetime"
         ))
-    );
+    ));
     assert_eq!(store.len(), 0);
 }
 

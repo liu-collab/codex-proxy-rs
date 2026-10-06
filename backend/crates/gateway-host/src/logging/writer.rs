@@ -1,8 +1,8 @@
-//! 按大小轮转、压缩已关闭分片、按部署时区自然日期组清理。
+//! 按大小轮转、压缩已关闭分片、按部署时区自然日期组清理
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -20,7 +20,7 @@ pub(super) struct RotatingLogWriter {
     date: NaiveDate,
     segment: usize,
     bytes_written: u64,
-    file: File,
+    file: BufWriter<File>,
     health: Arc<LogHealth>,
 }
 
@@ -58,10 +58,10 @@ impl RotatingLogWriter {
             date,
             segment,
             bytes_written,
-            file,
+            file: BufWriter::with_capacity(64 * 1024, file),
             health,
         };
-        // Recover unfinished archive work after restart; the active file is never compressed.
+        // 重启后恢复未完成归档，正在写入的文件不参与压缩
         for entry in managed_log_files(&writer.directory, prefix)? {
             if !entry.compressed
                 && entry.path != path
@@ -84,7 +84,7 @@ impl RotatingLogWriter {
         let previous = self
             .directory
             .join(log_file_name(self.prefix, self.date, self.segment));
-        self.file.sync_all()?;
+        self.sync()?;
         let segment = if day_changed {
             managed_log_files(&self.directory, self.prefix)?
                 .into_iter()
@@ -99,15 +99,15 @@ impl RotatingLogWriter {
             .directory
             .join(log_file_name(self.prefix, date, segment));
         let file = open_log_segment(&path)?;
-        // Commit rotation state only after opening the new file succeeds.
-        self.file = file;
+        // 新文件打开成功后才能提交轮转状态
+        self.file = BufWriter::with_capacity(64 * 1024, file);
         self.date = date;
         self.segment = segment;
-        self.bytes_written = self.file.metadata()?.len();
+        self.bytes_written = self.file.get_ref().metadata()?.len();
         if let Err(error) = compress_log_file(&previous) {
             self.health.maintenance_failed(error.kind());
         }
-        // Maintenance errors must not discard the record that triggered rotation.
+        // 维护失败不能丢弃触发轮转的日志记录
         if let Err(error) = cleanup_log_files(
             &self.directory,
             self.prefix,
@@ -121,7 +121,8 @@ impl RotatingLogWriter {
     }
 
     pub(super) fn sync(&mut self) -> io::Result<()> {
-        self.file.sync_all()
+        self.file.flush()?;
+        self.file.get_ref().sync_all()
     }
 }
 
@@ -129,7 +130,7 @@ impl Write for RotatingLogWriter {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         self.rotate_if_required(buffer.len())?;
         if let Err(error) = self.file.write_all(buffer) {
-            self.bytes_written = self.file.metadata()?.len();
+            self.bytes_written = self.file.get_ref().metadata()?.len();
             return Err(error);
         }
         self.bytes_written = self.bytes_written.saturating_add(buffer.len() as u64);
@@ -219,7 +220,7 @@ fn cleanup_log_files(
         if date >= cutoff {
             continue;
         }
-        // 用较近的文件名日期或实际写入日期保护整组，避免时区切换后提前清理。
+        // 用较近的文件名日期或实际写入日期保护整组，避免时区切换后提前清理
         let mut latest = date;
         for path in &paths {
             let modified: chrono::DateTime<Utc> = path.metadata()?.modified()?.into();
@@ -240,7 +241,7 @@ fn compress_log_file(path: &Path) -> io::Result<()> {
     let modified = source.metadata()?.modified()?;
     let archive = path.with_extension("log.gz");
     let temporary = path.with_extension("log.gz.tmp");
-    // Only a closed, owner-managed segment can have this temporary archive.
+    // 只有已关闭且由当前写入器管理的分段才能拥有此临时归档
     let output = File::create(&temporary)?;
     let mut encoder = GzEncoder::new(output, Compression::fast());
     io::copy(&mut source, &mut encoder)?;
@@ -248,6 +249,6 @@ fn compress_log_file(path: &Path) -> io::Result<()> {
     output.set_modified(modified)?;
     output.sync_all()?;
     fs::rename(&temporary, &archive)?;
-    // The original survives until a complete, synced archive has been published.
+    // 完整归档同步并发布后才能删除原文件
     fs::remove_file(path)
 }

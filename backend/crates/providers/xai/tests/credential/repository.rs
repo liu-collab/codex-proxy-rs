@@ -1,3 +1,5 @@
+//! 验证 xAI 凭据仓储的请求身份约束与安全生命周期投影
+
 use std::sync::Arc;
 
 use gateway_core::account::ProviderAccountStore;
@@ -10,10 +12,10 @@ fn repository_rejects_identity_that_cannot_be_sent_as_official_header() {
     let mut input = create_input("invalid", "subject");
     input.account.subject = "subject-with-非-ascii".to_owned();
 
-    assert_eq!(
+    assert!(matches!(
         GrokCredentialAdmin.prepare_import(&input),
         Err(GrokCredentialRepositoryError::InvalidInput("subject"))
-    );
+    ));
 }
 
 #[tokio::test]

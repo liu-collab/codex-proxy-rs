@@ -1,3 +1,5 @@
+//! 观测存储测试入口，以及查询范围、过滤与端口合同测试
+
 use futures::TryStreamExt;
 use std::{
     collections::BTreeMap,
@@ -409,7 +411,7 @@ async fn usage_search_should_preserve_account_snapshots_after_account_changes() 
     let range = ObservabilityRange::new(now - TimeDelta::hours(1), now + TimeDelta::hours(1))
         .expect("observability range");
 
-    // 搜索与列表都使用请求发生时的快照，不能随当前账号资料变化或删除而改变。
+    // 搜索与列表都使用请求发生时的快照，不能随当前账号资料变化或删除而改变
     for mutation in [
         "update provider_accounts set name = 'renamed', email = 'renamed@example.invalid'
          where id = 'acct_observe'",
@@ -775,7 +777,7 @@ async fn ops_should_include_incomplete_upstream_errors() {
                 client_transport = 'websocket', upstream_transport = 'websocket',
                 downstream_committed_at = completed_at,
                 client_status_code = null, upstream_status_code = 400,
-                provider_error_code = null, raw_upstream_error = $1
+                provider_error_code = null, error_details = $1
           where id = 'req_observe_failed'",
     )
     .bind(raw_error)
@@ -808,7 +810,7 @@ async fn ops_should_include_incomplete_upstream_errors() {
     assert_eq!(error.failure_kind, "invalid_request");
     assert_eq!(error.upstream_status_code, Some(400));
     assert_eq!(error.client_status_code, None);
-    assert_eq!(error.raw_upstream_error.as_deref(), Some(raw_error));
+    assert_eq!(error.error_details.as_deref(), Some(raw_error));
 }
 
 #[tokio::test]
@@ -2232,7 +2234,7 @@ async fn calendar_trends_share_exact_day_boundaries_for_requests_costs_and_empty
             .try_collect::<Vec<_>>()
             .await
             .expect("calendar cost buckets");
-        // 只有已完整交付的 calculated 费用参与趋势事实；其他费用仍按相同边界聚合。
+        // 只有已完整交付的 calculated 费用参与趋势事实；其他费用仍按相同边界聚合
         assert_eq!(facts.len(), 1);
         assert!(
             facts

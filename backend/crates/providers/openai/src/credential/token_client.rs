@@ -1,4 +1,4 @@
-//! OpenAI OAuth token exchange 与 Codex PAT 验证的 Reqwest 适配器。
+//! OpenAI OAuth token exchange 与 Codex PAT 验证的 Reqwest 适配器
 
 use super::types::CodexOAuthMetadata;
 
@@ -18,15 +18,15 @@ const MAX_OAUTH_RESPONSE_BYTES: usize = 64 * 1024;
 const TOKEN_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const TOKEN_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Codex Desktop 使用的官方 OAuth public client。
+/// Codex Desktop 使用的官方 OAuth public client
 pub const OFFICIAL_CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
-/// Codex Desktop 使用的官方 token endpoint。
+/// Codex Desktop 使用的官方 token endpoint
 pub const OFFICIAL_CODEX_TOKEN_ENDPOINT: &str = "https://auth.openai.com/oauth/token";
-/// Codex Desktop loopback callback；管理员复制完整回调 URL 交回固定 complete API。
-pub const OFFICIAL_CODEX_REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
+/// Codex Desktop loopback callback；管理员复制完整回调 URL 交回固定 complete API
+pub const OFFICIAL_CODEX_REDIRECT_URI: &str = "http://127.0.0.1:1455/auth/callback";
 const PERSONAL_ACCESS_TOKEN_WHOAMI_PATH: &str = "/api/accounts/v1/user-auth-credential/whoami";
 
-/// PAT 验证失败；不保留令牌、响应体或可能包含秘密的底层 HTTP 错误。
+/// PAT 验证失败；不保留令牌、响应体或可能包含秘密的底层 HTTP 错误
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum PersonalAccessTokenError {
     #[error("Codex PAT must be a non-empty at- token without whitespace or control characters")]
@@ -41,7 +41,7 @@ pub enum PersonalAccessTokenError {
     InvalidResponse,
 }
 
-// 与 Codex personal_access_token.rs 一致：email 可缺失，其余身份字段必填。
+// 与 Codex personal_access_token.rs 一致：email 可缺失，其余身份字段必填
 #[derive(Deserialize)]
 struct PersonalAccessTokenResponse {
     email: Option<String>,
@@ -52,14 +52,14 @@ struct PersonalAccessTokenResponse {
     _chatgpt_account_is_fedramp: bool,
 }
 
-/// Token 刷新成功后得到的认证材料。
+/// Token 刷新成功后得到的认证材料
 #[derive(Clone)]
 pub struct TokenPair {
-    /// 官方刷新响应省略时由持久化调用方保留当前 access token。
+    /// 官方刷新响应省略时由持久化调用方保留当前 access token
     pub access_token: Option<String>,
-    /// 官方刷新响应省略时由持久化调用方保留当前 refresh token。
+    /// 官方刷新响应省略时由持久化调用方保留当前 refresh token
     pub refresh_token: Option<String>,
-    /// 官方刷新响应省略时由持久化调用方保留当前 ID token。
+    /// 官方刷新响应省略时由持久化调用方保留当前 ID token
     pub id_token: Option<String>,
 }
 
@@ -80,8 +80,8 @@ impl fmt::Debug for TokenPair {
     }
 }
 
-/// Codex token 刷新的稳定失败分类。
-#[derive(Clone, PartialEq, Eq, thiserror::Error)]
+/// Codex token 刷新的稳定失败分类
+#[derive(Clone, thiserror::Error)]
 pub enum RefreshFailure {
     #[error("refresh token is invalid or expired")]
     InvalidGrant {
@@ -94,11 +94,19 @@ pub enum RefreshFailure {
         upstream: Option<Box<RefreshUpstreamFailure>>,
     },
     #[error("refresh transport failed before server processing")]
-    RetryableTransport { message: String },
+    RetryableTransport {
+        message: String,
+        #[source]
+        source: Option<gateway_core::error::ErrorSource>,
+        redacted: bool,
+    },
     #[error("refresh transport failed after possible server processing")]
     Transport {
         message: Option<String>,
         upstream: Option<Box<RefreshUpstreamFailure>>,
+        #[source]
+        source: Option<gateway_core::error::ErrorSource>,
+        redacted: bool,
     },
 }
 
@@ -120,7 +128,7 @@ impl RefreshFailure {
             Self::InvalidGrant { message, .. }
             | Self::Banned { message, .. }
             | Self::Transport { message, .. } => message.as_deref(),
-            Self::RetryableTransport { message } => Some(message),
+            Self::RetryableTransport { message, .. } => Some(message),
         }
     }
 
@@ -131,6 +139,47 @@ impl RefreshFailure {
             | Self::Banned { upstream, .. }
             | Self::Transport { upstream, .. } => upstream.as_deref(),
             Self::RetryableTransport { .. } => None,
+        }
+    }
+
+    pub(crate) fn redacted(&self) -> bool {
+        self.upstream()
+            .is_some_and(RefreshUpstreamFailure::redacted)
+            || match self {
+                Self::RetryableTransport { redacted, .. } | Self::Transport { redacted, .. } => {
+                    *redacted
+                }
+                _ => false,
+            }
+    }
+
+    fn redact_refresh_token(&mut self, secret: &str) {
+        if secret.is_empty() {
+            return;
+        }
+        match self {
+            Self::InvalidGrant { message, upstream }
+            | Self::Banned { message, upstream }
+            | Self::Transport {
+                message, upstream, ..
+            } => {
+                if let Some(message) = message {
+                    *message = message.replace(secret, "[REDACTED]");
+                }
+                if let Some(upstream) = upstream {
+                    for value in [&mut upstream.body]
+                        .into_iter()
+                        .chain(upstream.code.iter_mut())
+                        .chain(upstream.error_type.iter_mut())
+                    {
+                        if value.contains(secret) {
+                            *value = value.replace(secret, "[REDACTED]");
+                            upstream.redacted = true;
+                        }
+                    }
+                }
+            }
+            Self::RetryableTransport { .. } => {}
         }
     }
 
@@ -145,19 +194,30 @@ impl RefreshFailure {
     }
 }
 
-/// 当前 OAuth 刷新请求收到的完整非成功响应。
+/// 当前 OAuth 刷新请求收到的完整非成功响应
 ///
-/// 该值不持久化；`Debug` 不输出正文。调用方仅在受控刷新失败日志中显式记录正文。
+/// 原文只进入受控诊断详情；普通日志不展开正文或任意上游值
 #[derive(Clone, PartialEq, Eq)]
 pub struct RefreshUpstreamFailure {
     status: u16,
     code: Option<String>,
     error_type: Option<String>,
     body: String,
+    redacted: bool,
 }
 
 impl RefreshUpstreamFailure {
     fn new(status: StatusCode, body: &[u8], error: Option<&RefreshErrorResponse>) -> Self {
+        let mut text = String::from_utf8_lossy(body).into_owned();
+        let redacted = if let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(body) {
+            let changed = redact_oauth_tokens(&mut value);
+            if changed {
+                text = value.to_string();
+            }
+            changed
+        } else {
+            false
+        };
         Self {
             status: status.as_u16(),
             code: error
@@ -166,8 +226,14 @@ impl RefreshUpstreamFailure {
             error_type: error
                 .and_then(RefreshErrorResponse::error_type)
                 .map(str::to_owned),
-            body: String::from_utf8_lossy(body).into_owned(),
+            body: text,
+            redacted,
         }
+    }
+
+    #[must_use]
+    pub const fn redacted(&self) -> bool {
+        self.redacted
     }
 
     #[must_use]
@@ -196,14 +262,17 @@ impl fmt::Debug for RefreshUpstreamFailure {
         formatter
             .debug_struct("RefreshUpstreamFailure")
             .field("status", &self.status)
-            .field("code", &self.code)
-            .field("error_type", &self.error_type)
+            .field("code", &self.code.as_ref().map(|_| "<redacted>"))
+            .field(
+                "error_type",
+                &self.error_type.as_ref().map(|_| "<redacted>"),
+            )
             .field("body", &"<redacted>")
             .finish()
     }
 }
 
-/// Codex token 刷新端口。
+/// Codex token 刷新端口
 #[async_trait]
 pub trait TokenRefresher: Send + Sync + 'static {
     async fn refresh(&self, refresh_token: &str) -> Result<TokenPair, RefreshFailure>;
@@ -221,11 +290,13 @@ pub trait TokenRefresher: Send + Sync + 'static {
 
 fn proxy_refresh_failure() -> RefreshFailure {
     RefreshFailure::RetryableTransport {
+        redacted: false,
+        source: None,
         message: "account OAuth egress unavailable".to_owned(),
     }
 }
 
-/// Authorization Code + PKCE 的一次性 grant。
+/// Authorization Code + PKCE 的一次性 grant
 pub struct AuthorizationCodeGrant {
     pub code: SecretString,
     pub code_verifier: SecretString,
@@ -241,10 +312,11 @@ impl fmt::Debug for AuthorizationCodeGrant {
     }
 }
 
-/// 官方 token endpoint 返回的 token set。
+/// 官方 token endpoint 返回的 token set
 ///
 /// 与官方首次 authorization-code exchange 一致：`id_token`、`access_token` 与
-/// `refresh_token` 都是响应的必填字段。这里不检查 token 内容、签名或 claims。
+/// `refresh_token` 都是响应的必填字段
+/// 这里不检查 token 内容、签名或 claims
 pub struct AuthorizationTokenSet {
     pub secret: crate::credential::CodexOAuthSecret,
     pub id_token: SecretString,
@@ -260,7 +332,7 @@ impl fmt::Debug for AuthorizationTokenSet {
     }
 }
 
-/// Authorization Code exchange 的低基数失败。
+/// Authorization Code exchange 的低基数失败
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum AuthorizationCodeExchangeError {
     #[error("authorization code was rejected")]
@@ -289,16 +361,16 @@ pub trait AuthorizationCodeExchanger: Send + Sync + 'static {
     }
 }
 
-/// OpenAI token 续期客户端配置。
+/// OpenAI token 续期客户端配置
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TokenClientConfig {
-    /// OpenAI 客户端 ID。
+    /// OpenAI 客户端 ID
     pub client_id: String,
-    /// Token 交换入口。
+    /// Token 交换入口
     pub token_endpoint: String,
 }
 
-/// OpenAI token 续期客户端。
+/// OpenAI token 续期客户端
 #[derive(Clone)]
 pub struct OpenAiTokenClient {
     client: Client,
@@ -306,7 +378,7 @@ pub struct OpenAiTokenClient {
     profile: CodexWireProfileState,
 }
 
-/// 官方 Codex token client 无法安全构建。
+/// 官方 Codex token client 无法安全构建
 #[derive(Debug, thiserror::Error)]
 #[error("official Codex token client could not be built")]
 pub struct TokenClientBuildError;
@@ -329,7 +401,7 @@ impl OpenAiTokenClient {
             build_reqwest_client_with_custom_ca(builder).map_err(|_| TokenClientBuildError)?;
         Ok(Self::new(client, self.config.clone(), self.profile.clone()))
     }
-    /// 共享运行时画像；刷新时取快照，授权码交换仍使用 raw auth 请求。
+    /// 共享运行时画像；刷新时取快照，授权码交换仍使用 raw auth 请求
     pub fn new(client: Client, config: TokenClientConfig, profile: CodexWireProfileState) -> Self {
         Self {
             client,
@@ -352,7 +424,7 @@ impl OpenAiTokenClient {
         {
             return Err(PersonalAccessTokenError::InvalidToken);
         }
-        // 复用固定 auth origin 及其 TLS/超时/禁止重定向策略；导入文档不能指定验证地址。
+        // 复用固定 auth origin 及其 TLS/超时/禁止重定向策略；导入文档不能指定验证地址
         let mut endpoint = reqwest::Url::parse(&self.config.token_endpoint)
             .map_err(|_| PersonalAccessTokenError::Unavailable)?;
         endpoint.set_path(PERSONAL_ACCESS_TOKEN_WHOAMI_PATH);
@@ -406,11 +478,11 @@ impl OpenAiTokenClient {
     }
 }
 
-/// 构建禁止 redirect 且无自动重试的 Codex token client。
+/// 构建禁止 redirect 且无自动重试的 Codex token client
 ///
 /// # Errors
 ///
-/// 本地 TLS/HTTP client 初始化失败时返回脱敏错误。
+/// 本地 TLS/HTTP client 初始化失败时返回脱敏错误
 pub fn openai_token_client(
     config: TokenClientConfig,
     profile: CodexWireProfileState,
@@ -501,13 +573,19 @@ impl TokenRefresher for OpenAiTokenClient {
         proxy: Option<&gateway_core::account::OutboundProxy>,
     ) -> Result<TokenPair, RefreshFailure> {
         self.with_proxy(proxy)
-            .map_err(|_| proxy_refresh_failure())?
+            .map_err(|source| RefreshFailure::RetryableTransport {
+                redacted: false,
+                message: "account OAuth egress unavailable".to_owned(),
+                source: Some(source.into()),
+            })?
             .refresh(refresh_token)
             .await
     }
     async fn refresh(&self, refresh_token: &str) -> Result<TokenPair, RefreshFailure> {
-        let headers = build_codex_profile_headers(&self.profile.snapshot()).map_err(|_| {
+        let headers = build_codex_profile_headers(&self.profile.snapshot()).map_err(|source| {
             RefreshFailure::Transport {
+                redacted: false,
+                source: Some(source.into()),
                 message: Some("OpenAI OAuth refresh profile is invalid".to_owned()),
                 upstream: None,
             }
@@ -523,12 +601,16 @@ impl TokenRefresher for OpenAiTokenClient {
             })
             .send()
             .await
-            .map_err(|error| refresh_transport_failure(&error))?;
+            .map_err(refresh_transport_failure)?;
         let (status, body) = read_bounded_response(response).await?;
         if !status.is_success() {
-            return Err(classify_refresh_failure(status, &body));
+            let mut failure = classify_refresh_failure(status, &body);
+            failure.redact_refresh_token(refresh_token);
+            return Err(failure);
         }
-        parse_token_pair(&body).map_err(|()| RefreshFailure::Transport {
+        parse_token_pair(&body).map_err(|source| RefreshFailure::Transport {
+            redacted: true,
+            source: Some(source),
             message: Some("OpenAI OAuth refresh returned an invalid success response".to_owned()),
             upstream: None,
         })
@@ -602,8 +684,10 @@ async fn read_bounded_response(
         .chunk()
         .await
         .map_err(|error| RefreshFailure::Transport {
-            message: Some(error.to_string()),
+            redacted: error.url().is_some(),
+            message: Some("OpenAI OAuth response body read failed".to_owned()),
             upstream: None,
+            source: Some(error.without_url().into()),
         })?
     {
         let next_len = body
@@ -615,6 +699,8 @@ async fn read_bounded_response(
                     "OpenAI OAuth response exceeded {MAX_OAUTH_RESPONSE_BYTES} bytes"
                 )),
                 upstream: None,
+                source: None,
+                redacted: true,
             })?;
         body.reserve(next_len.saturating_sub(body.len()));
         body.extend_from_slice(&chunk);
@@ -622,27 +708,32 @@ async fn read_bounded_response(
     Ok((status, body))
 }
 
-fn parse_token_pair(body: &[u8]) -> Result<TokenPair, ()> {
-    let tokens = serde_json::from_slice::<RefreshTokenResponse>(body).map_err(|_| ())?;
+#[derive(Debug, thiserror::Error)]
+#[error("OpenAI OAuth ID token claims are invalid")]
+struct InvalidRefreshClaims;
+
+fn parse_token_pair(body: &[u8]) -> Result<TokenPair, gateway_core::error::ErrorSource> {
+    let tokens = serde_json::from_slice::<RefreshTokenResponse>(body)
+        .map_err(gateway_core::error::ErrorSource::new)?;
     if tokens
         .id_token
         .as_deref()
         .is_some_and(|token| super::types::parse_chatgpt_jwt_claims(token).is_err())
     {
-        return Err(());
+        return Err(InvalidRefreshClaims.into());
     }
     Ok(TokenPair {
         access_token: tokens.access_token,
-        // OAuth 刷新响应可能省略未变更的 RT；缺失时由调用方保留当前值。
+        // OAuth 刷新响应可能省略未变更的 RT；缺失时由调用方保留当前值
         refresh_token: tokens.refresh_token,
-        // 官方刷新响应允许省略 ID token；缺失时由调用方保留当前值。
+        // 官方刷新响应允许省略 ID token；缺失时由调用方保留当前值
         id_token: tokens.id_token,
     })
 }
 
 fn classify_refresh_failure(status: StatusCode, body: &[u8]) -> RefreshFailure {
     // 官方刷新错误的消息与错误码分别位于 `error.message`、`error.code`；
-    // `error` 字符串与顶层 `code` 仅用于兼容官方客户端自身的错误码提取契约。
+    // `error` 字符串与顶层 `code` 仅用于兼容官方客户端自身的错误码提取契约
     let error = serde_json::from_slice::<RefreshErrorResponse>(body).ok();
     let message = error.as_ref().and_then(RefreshErrorResponse::message);
     let upstream = || {
@@ -657,14 +748,16 @@ fn classify_refresh_failure(status: StatusCode, body: &[u8]) -> RefreshFailure {
         .and_then(RefreshErrorResponse::code)
         .map(str::to_ascii_lowercase);
     // 生产策略故意与官方 Codex 的“任意 401 立即终态”不同：
-    // 显式 401 先进入有界恢复退避，避免瞬时授权故障直接失效账号。
+    // 显式 401 先进入有界恢复退避，避免瞬时授权故障直接失效账号
     if status == StatusCode::UNAUTHORIZED {
         return RefreshFailure::Transport {
+            redacted: false,
+            source: None,
             message,
             upstream: upstream(),
         };
     }
-    // 非 401 响应仍与官方一致：三个明确的 RT 原因是永久失败。
+    // 非 401 响应仍与官方一致：三个明确的 RT 原因是永久失败
     if matches!(
         normalized_code.as_deref(),
         Some("refresh_token_expired" | "refresh_token_reused" | "refresh_token_invalidated")
@@ -685,19 +778,30 @@ fn classify_refresh_failure(status: StatusCode, body: &[u8]) -> RefreshFailure {
         };
     }
     RefreshFailure::Transport {
+        redacted: false,
+        source: None,
         message,
         upstream: upstream(),
     }
 }
 
-fn refresh_transport_failure(error: &reqwest::Error) -> RefreshFailure {
-    let message = error.to_string();
-    if is_safe_to_retry_refresh_transport(error) {
-        RefreshFailure::RetryableTransport { message }
+fn refresh_transport_failure(error: reqwest::Error) -> RefreshFailure {
+    let retryable = is_safe_to_retry_refresh_transport(&error);
+    let redacted = error.url().is_some();
+    let source = Some(error.without_url().into());
+    let message = "OpenAI OAuth transport failed".to_owned();
+    if retryable {
+        RefreshFailure::RetryableTransport {
+            message,
+            source,
+            redacted,
+        }
     } else {
         RefreshFailure::Transport {
             message: Some(message),
             upstream: None,
+            source,
+            redacted,
         }
     }
 }
@@ -715,4 +819,37 @@ fn is_safe_to_retry_refresh_transport(error: &reqwest::Error) -> bool {
         || message.contains("connection refused")
         || message.contains("network is unreachable")
         || message.contains("tls handshake")
+}
+
+fn redact_oauth_tokens(value: &mut serde_json::Value) -> bool {
+    let mut redacted = false;
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                let sensitive = [
+                    "access_token",
+                    "refresh_token",
+                    "id_token",
+                    "client_secret",
+                    "authorization",
+                    "cookie",
+                ]
+                .iter()
+                .any(|field| key.eq_ignore_ascii_case(field));
+                if sensitive && !value.is_null() {
+                    *value = serde_json::Value::String("[REDACTED]".to_owned());
+                    redacted = true;
+                } else {
+                    redacted |= redact_oauth_tokens(value);
+                }
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                redacted |= redact_oauth_tokens(value);
+            }
+        }
+        _ => {}
+    }
+    redacted
 }

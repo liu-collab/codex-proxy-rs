@@ -1,4 +1,4 @@
-//! PostgreSQL 业务表的 adapters。
+//! PostgreSQL 业务表的 adapters
 
 use async_trait::async_trait;
 use sqlx::{
@@ -8,7 +8,7 @@ use sqlx::{
 
 use crate::{
     POSTGRES_IDLE_TRANSACTION_TIMEOUT, POSTGRES_LOCK_TIMEOUT, POSTGRES_STATEMENT_TIMEOUT, Revision,
-    StoreBackend, StoreError, StorePoolConfig, StoreResult, postgres_unavailable,
+    StoreError, StorePoolConfig, StoreResult, postgres_unavailable,
 };
 
 mod account_groups;
@@ -53,18 +53,22 @@ pub(crate) use usage_facts::{
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
-/// 建立 PostgreSQL pool 并只执行冻结的 migration 集。
+/// 建立 PostgreSQL pool 并只执行冻结的 migration 集
 pub async fn connect_and_migrate(
     database_url: &str,
     pool_config: StorePoolConfig,
 ) -> StoreResult<PgPool> {
     if database_url.trim().is_empty() {
-        return Err(postgres_unavailable("connect PostgreSQL"));
+        return Err(StoreError::InvalidData {
+            source: None,
+            entity: "PostgreSQL configuration",
+            message: "database URL is empty".to_owned(),
+        });
     }
     pool_config.validate()?;
     let connect_options = database_url
         .parse::<PgConnectOptions>()
-        .map_err(|_| postgres_unavailable("parse PostgreSQL connection options"))?;
+        .map_err(|source| postgres_unavailable("parse PostgreSQL connection options", source))?;
     let migration_pool = PgPoolOptions::new()
         .max_connections(1)
         .connect_with(
@@ -73,20 +77,17 @@ pub async fn connect_and_migrate(
                 .application_name("codex-proxy-rs:migration"),
         )
         .await
-        .map_err(|_| postgres_unavailable("connect PostgreSQL for migrations"))?;
+        .map_err(|source| postgres_unavailable("connect PostgreSQL for migrations", source))?;
     if let Err(error) = MIGRATOR.run(&migration_pool).await {
         migration_pool.close().await;
-        return Err(StoreError::Unavailable {
-            backend: StoreBackend::PostgreSql,
-            message: format!("apply PostgreSQL migrations: {error}"),
-        });
+        return Err(postgres_unavailable("apply PostgreSQL migrations", error));
     }
     migration_pool.close().await;
 
     connect_pool(connect_options, pool_config, false).await
 }
 
-/// 帮助查询不执行迁移，并用连接默认只读事务阻止意外业务写入。
+/// 帮助查询不执行迁移，并用连接默认只读事务阻止意外业务写入
 pub(crate) async fn connect_read_only(
     database_url: &str,
     pool_config: StorePoolConfig,
@@ -94,7 +95,7 @@ pub(crate) async fn connect_read_only(
     pool_config.validate()?;
     let options = database_url
         .parse::<PgConnectOptions>()
-        .map_err(|_| postgres_unavailable("parse PostgreSQL connection options"))?;
+        .map_err(|source| postgres_unavailable("parse PostgreSQL connection options", source))?;
     connect_pool(options, pool_config, true).await
 }
 
@@ -135,7 +136,7 @@ async fn connect_pool(
         })
         .connect_with(connect_options.application_name("codex-proxy-rs"))
         .await
-        .map_err(|_| postgres_unavailable("connect PostgreSQL"))?;
+        .map_err(|source| postgres_unavailable("connect PostgreSQL", source))?;
     Ok(pool)
 }
 
@@ -164,7 +165,7 @@ pub trait ControlPlaneRepository: Send + Sync {
         replacement: ControlPlaneReplacement,
     ) -> StoreResult<ControlPlaneSnapshot>;
 
-    /// 更新 admin_api_key 字段并推进 config revision。
+    /// 更新 admin_api_key 字段并推进 config revision
     async fn replace_admin_api_key(
         &self,
         admin_api_key: Option<String>,
@@ -221,21 +222,21 @@ impl ControlPlaneRepository for PgControlPlaneRepository {
         replacement: ControlPlaneReplacement,
     ) -> StoreResult<ControlPlaneSnapshot> {
         replacement.settings.validate()?;
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|_| postgres_unavailable("begin control plane replacement"))?;
-        let result = async {
-            // 锁住所有配置写入共同使用的行，版本检查与修改不能被其他事务穿插。
+        let mut transaction =
+            self.pool.begin().await.map_err(|source| {
+                postgres_unavailable("begin control plane replacement", source)
+            })?;
+        let result: StoreResult<_> = async {
+            // 锁住所有配置写入共同使用的行，版本检查与修改不能被其他事务穿插
             let current = sqlx::query_scalar::<_, i64>(
                 "select config_revision from runtime_settings where id = 1 for update",
             )
             .fetch_one(&mut *transaction)
             .await
-            .map_err(|_| postgres_unavailable("lock control plane revision"))?;
+            .map_err(|source| postgres_unavailable("lock control plane revision", source))?;
             if u64::try_from(current).ok() != Some(replacement.expected_revision.get()) {
                 return Err(StoreError::Conflict {
+                    source: None,
                     entity: "runtime settings",
                     id: "1".to_owned(),
                     kind: crate::ConflictKind::StaleRevision,
@@ -251,17 +252,16 @@ impl ControlPlaneRepository for PgControlPlaneRepository {
         .await;
         match result {
             Ok(snapshot) => {
-                transaction
-                    .commit()
-                    .await
-                    .map_err(|_| postgres_unavailable("commit control plane replacement"))?;
+                transaction.commit().await.map_err(|source| {
+                    postgres_unavailable("commit control plane replacement", source)
+                })?;
                 Ok(snapshot)
             }
             Err(error) => {
-                transaction
-                    .rollback()
-                    .await
-                    .map_err(|_| postgres_unavailable("rollback control plane replacement"))?;
+                let error = match transaction.rollback().await {
+                    Ok(()) => error,
+                    Err(cleanup) => error.with_cleanup(cleanup),
+                };
                 Err(error)
             }
         }
@@ -337,12 +337,10 @@ impl PgControlPlaneRepository {
         mutation: ControlPlaneMutation,
         mut audit: AdminAuditEvent,
     ) -> StoreResult<Revision> {
-        let mut transaction = self
-            .pool
-            .begin()
-            .await
-            .map_err(|_| postgres_unavailable("begin targeted control plane mutation"))?;
-        let result = async {
+        let mut transaction = self.pool.begin().await.map_err(|source| {
+            postgres_unavailable("begin targeted control plane mutation", source)
+        })?;
+        let result: StoreResult<_> = async {
             let revision = bump_config_revision_in_transaction(&mut transaction).await?;
             match mutation {
                 ControlPlaneMutation::CreateClientApiKey(key) => {
@@ -362,8 +360,8 @@ impl PgControlPlaneRepository {
                     .bind(&key.id)
                     .fetch_one(&mut *transaction)
                     .await
-                    .map_err(|_| {
-                        postgres_unavailable("load client API key routing scope for audit")
+                    .map_err(|source| {
+                        postgres_unavailable("load client API key routing scope for audit", source)
                     })?;
                     if previously_restricted && key.group_ids.is_empty() {
                         audit
@@ -393,16 +391,16 @@ impl PgControlPlaneRepository {
         .await;
         match result {
             Ok(revision) => {
-                transaction
-                    .commit()
-                    .await
-                    .map_err(|_| postgres_unavailable("commit targeted control plane mutation"))?;
+                transaction.commit().await.map_err(|source| {
+                    postgres_unavailable("commit targeted control plane mutation", source)
+                })?;
                 Ok(revision)
             }
             Err(error) => {
-                transaction.rollback().await.map_err(|_| {
-                    postgres_unavailable("rollback targeted control plane mutation")
-                })?;
+                let error = match transaction.rollback().await {
+                    Ok(()) => error,
+                    Err(cleanup) => error.with_cleanup(cleanup),
+                };
                 Err(error)
             }
         }

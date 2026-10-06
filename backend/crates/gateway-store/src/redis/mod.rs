@@ -1,4 +1,4 @@
-//! 可丢失、可从 PostgreSQL 或 Provider 重建的 Redis 协调状态。
+//! 可丢失、可从 PostgreSQL 或 Provider 重建的 Redis 协调状态
 
 use sha2::{Digest, Sha256};
 
@@ -48,6 +48,7 @@ pub(crate) fn namespace(value: &str) -> StoreResult<String> {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
     {
         return Err(StoreError::InvalidData {
+            source: None,
             entity: "Redis namespace",
             message: "namespace contains unsupported characters".to_owned(),
         });

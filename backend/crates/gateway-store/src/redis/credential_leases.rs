@@ -1,4 +1,4 @@
-//! Provider、账号与 OAuth refresh 的 Redis lease/fencing。
+//! Provider、账号与 OAuth refresh 的 Redis lease/fencing
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -162,7 +162,7 @@ impl CredentialLeaseRequest {
     }
 }
 
-/// 对任意明确资源施加并发数和启动间隔约束的计数 lease。
+/// 对任意明确资源施加并发数和启动间隔约束的计数 lease
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CredentialBoundedLeaseRequest {
     pub scope: CredentialLeaseScope,
@@ -202,7 +202,7 @@ pub struct CredentialLeaseGrant {
     pub expires_at: DateTime<Utc>,
 }
 
-/// Redis 可丢失的账号调度信号。
+/// Redis 可丢失的账号调度信号
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CredentialRuntimeSignal {
     pub resource_id: String,
@@ -227,7 +227,7 @@ impl fmt::Debug for CredentialBoundedLeaseAcquisition {
     }
 }
 
-/// Drop 时在当前 Tokio runtime 上尽力释放；进程崩溃由 Redis TTL 回收。
+/// Drop 时在当前 Tokio runtime 上尽力释放；进程崩溃由 Redis TTL 回收
 pub struct CredentialLeaseGuard {
     repository: RedisCredentialLeaseRepository,
     request: CredentialLeaseRequest,
@@ -235,7 +235,7 @@ pub struct CredentialLeaseGuard {
 }
 
 impl CredentialLeaseGuard {
-    /// 自动续期仅属于返回 guard；丢失租约会取消依赖该槽位的请求。
+    /// 自动续期仅属于返回 guard；丢失租约会取消依赖该槽位的请求
     pub fn maintain(
         self,
         deadline: gateway_core::lifecycle::Deadline,
@@ -247,6 +247,7 @@ impl CredentialLeaseGuard {
             .grant
             .clone()
             .ok_or_else(|| crate::StoreError::InvalidData {
+                source: None,
                 entity: "credential lease",
                 message: "lease has already been released".to_owned(),
             })?;
@@ -285,7 +286,7 @@ impl CredentialLeaseGuard {
 }
 
 struct RenewingSchedulingLease {
-    // 先停止续期再释放 Redis 成员，防止释放与续期交错。
+    // 先停止续期再释放 Redis 成员，防止释放与续期交错
     _renewal: crate::lease_renewal::LeaseRenewal,
     _guard: CredentialLeaseGuard,
 }
@@ -357,7 +358,7 @@ impl RedisCredentialLeaseRepository {
         })
     }
 
-    /// 获取带 Drop 释放语义的通用 lease guard，供 Provider refresh/task 组合器使用。
+    /// 获取带 Drop 释放语义的通用 lease guard，供 Provider refresh/task 组合器使用
     pub async fn try_acquire_guard(
         &self,
         request: CredentialLeaseRequest,
@@ -370,7 +371,7 @@ impl RedisCredentialLeaseRepository {
         }))
     }
 
-    /// 原子推进跨进程共享、按 Client Key 与 Provider 隔离的调度游标。
+    /// 原子推进跨进程共享、按 Client Key 与 Provider 隔离的调度游标
     pub async fn advance_scheduling_cursor(
         &self,
         client_api_key_id: &ClientApiKeyId,
@@ -384,10 +385,10 @@ impl RedisCredentialLeaseRepository {
             .arg(SIGNAL_TTL_MILLIS)
             .invoke_async::<String>(&mut connection)
             .await
-            .map_err(|_| redis_unavailable("advance provider scheduling cursor"))?;
-        cursor
-            .parse::<u64>()
-            .map_err(|_| invalid("Redis returned an invalid scheduling cursor"))
+            .map_err(|source| redis_unavailable("advance provider scheduling cursor", source))?;
+        cursor.parse::<u64>().map_err(|source| {
+            invalid("Redis returned an invalid scheduling cursor").with_source(source)
+        })
     }
 
     fn keys(&self, request: &CredentialLeaseRequest) -> StoreResult<[String; 3]> {
@@ -458,7 +459,7 @@ impl RedisCredentialLeaseRepository {
                 .arg(signal_ttl)
                 .invoke_async(&mut connection)
                 .await
-                .map_err(|_| redis_unavailable("acquire credential lease"))?;
+                .map_err(|source| redis_unavailable("acquire credential lease", source))?;
         if acquired == 0 {
             return Ok(LeaseAttempt {
                 grant: None,
@@ -485,10 +486,10 @@ impl RedisCredentialLeaseRepository {
             .key(&keys[2])
             .invoke_async(&mut connection)
             .await
-            .map_err(|_| redis_unavailable("load credential runtime signal"))?;
-        let in_flight = in_flight
-            .parse::<u32>()
-            .map_err(|_| invalid("Redis returned an invalid in-flight count"))?;
+            .map_err(|source| redis_unavailable("load credential runtime signal", source))?;
+        let in_flight = in_flight.parse::<u32>().map_err(|source| {
+            invalid("Redis returned an invalid in-flight count").with_source(source)
+        })?;
         let last_started_at = if last_started == "0" {
             None
         } else {
@@ -502,7 +503,7 @@ impl RedisCredentialLeaseRepository {
     }
 }
 
-/// Store-owned 的通用 Provider lease 能力；具体 Provider 不感知 Redis。
+/// Store-owned 的通用 Provider lease 能力；具体 Provider 不感知 Redis
 pub(crate) struct RedisProviderLeaseCoordinator {
     repository: RedisCredentialLeaseRepository,
     process_id: String,
@@ -532,7 +533,7 @@ impl RedisProviderLeaseCoordinator {
         self.repository
             .advance_scheduling_cursor(client_api_key_id, provider_kind)
             .await
-            .map_err(|_| provider_unavailable("advance scheduling cursor"))
+            .map_err(|source| crate::provider_unavailable("advance scheduling cursor", source))
     }
 
     async fn load_signals(
@@ -547,7 +548,7 @@ impl RedisProviderLeaseCoordinator {
             .repository
             .credential_runtime_signals(&ids)
             .await
-            .map_err(|_| provider_unavailable("load scheduling signals"))?;
+            .map_err(|source| crate::provider_unavailable("load scheduling signals", source))?;
         signals
             .into_iter()
             .map(|signal| {
@@ -579,7 +580,10 @@ impl RedisProviderLeaseCoordinator {
     ) -> Result<ProviderLeaseAcquisition, ProviderStoreError> {
         let ttl = request.deadline().bounded(REQUEST_LEASE_TTL);
         if ttl.is_zero() {
-            return Err(provider_unavailable("acquire expired scheduling lease"));
+            return Err(ProviderStoreError::new(
+                ProviderStoreErrorKind::Unavailable,
+                "acquire expired scheduling lease",
+            ));
         }
         let acquisition = self
             .repository
@@ -592,13 +596,15 @@ impl RedisProviderLeaseCoordinator {
                 ttl,
             })
             .await
-            .map_err(|_| provider_unavailable("acquire scheduling lease"))?;
+            .map_err(|source| crate::provider_unavailable("acquire scheduling lease", source))?;
         Ok(match acquisition {
             CredentialBoundedLeaseAcquisition::Acquired(guard) => {
                 ProviderLeaseAcquisition::Acquired(Box::new(
                     guard
                         .maintain(request.deadline(), request.cancellation())
-                        .map_err(|_| provider_unavailable("maintain scheduling lease"))?,
+                        .map_err(|source| {
+                            crate::provider_unavailable("maintain scheduling lease", source)
+                        })?,
                 ))
             }
             CredentialBoundedLeaseAcquisition::Busy { retry_after } => {
@@ -622,7 +628,7 @@ impl RedisProviderLeaseCoordinator {
                 ttl: OAUTH_REFRESH_LEASE_TTL,
             })
             .await
-            .map_err(|_| provider_unavailable("acquire refresh capacity"))?;
+            .map_err(|source| crate::provider_unavailable("acquire refresh capacity", source))?;
         Ok(match acquisition {
             CredentialBoundedLeaseAcquisition::Acquired(guard) => {
                 ProviderLeaseAcquisition::Acquired(Box::new(guard))
@@ -676,7 +682,9 @@ impl ProviderLeasePort for RedisProviderLeaseCoordinator {
                             Some(guard) => ProviderLeaseAcquisition::Acquired(Box::new(guard)),
                             None => ProviderLeaseAcquisition::Busy { retry_after: None },
                         })
-                        .map_err(|_| provider_unavailable("acquire refresh lease"))
+                        .map_err(|source| {
+                            crate::provider_unavailable("acquire refresh lease", source)
+                        })
                 }
             }
         })
@@ -701,7 +709,9 @@ impl ProviderLeasePort for RedisProviderLeaseCoordinator {
                 .repository
                 .credential_runtime_signals(&ids)
                 .await
-                .map_err(|_| provider_unavailable("load account in-flight signals"))?;
+                .map_err(|source| {
+                    crate::provider_unavailable("load account in-flight signals", source)
+                })?;
             Ok(signals
                 .into_iter()
                 .filter_map(|signal| {
@@ -711,10 +721,6 @@ impl ProviderLeasePort for RedisProviderLeaseCoordinator {
                 .collect())
         })
     }
-}
-
-fn provider_unavailable(operation: &'static str) -> ProviderStoreError {
-    ProviderStoreError::new(ProviderStoreErrorKind::Unavailable, operation)
 }
 
 #[async_trait]
@@ -743,7 +749,7 @@ impl CredentialLeaseRepository for RedisCredentialLeaseRepository {
             .arg(duration_millis(request.ttl)?)
             .invoke_async(&mut connection)
             .await
-            .map_err(|_| redis_unavailable("renew credential lease"))?;
+            .map_err(|source| redis_unavailable("renew credential lease", source))?;
         if renewed == 0 {
             return Ok(None);
         }
@@ -768,7 +774,7 @@ impl CredentialLeaseRepository for RedisCredentialLeaseRepository {
             .arg(member)
             .invoke_async::<i64>(&mut connection)
             .await
-            .map_err(|_| redis_unavailable("release credential lease"))?;
+            .map_err(|source| redis_unavailable("release credential lease", source))?;
         Ok(released == 1)
     }
 
@@ -825,7 +831,7 @@ struct LeaseAttempt {
 fn grant(lease_id: String, fence: &str, expires_at: &str) -> StoreResult<CredentialLeaseGrant> {
     let fence = fence
         .parse::<u64>()
-        .map_err(|_| invalid("Redis returned an invalid fencing token"))?;
+        .map_err(|source| invalid("Redis returned an invalid fencing token").with_source(source))?;
     Ok(CredentialLeaseGrant {
         lease_id,
         fencing_token: Revision::new(fence)?,
@@ -836,7 +842,7 @@ fn grant(lease_id: String, fence: &str, expires_at: &str) -> StoreResult<Credent
 fn timestamp(value: &str) -> StoreResult<DateTime<Utc>> {
     let milliseconds = value
         .parse::<i64>()
-        .map_err(|_| invalid("Redis returned an invalid timestamp"))?;
+        .map_err(|source| invalid("Redis returned an invalid timestamp").with_source(source))?;
     DateTime::from_timestamp_millis(milliseconds)
         .ok_or_else(|| invalid("Redis returned an out-of-range timestamp"))
 }
@@ -845,7 +851,7 @@ fn duration(value: &str) -> StoreResult<Duration> {
     value
         .parse::<u64>()
         .map(Duration::from_millis)
-        .map_err(|_| invalid("Redis returned an invalid retry interval"))
+        .map_err(|source| invalid("Redis returned an invalid retry interval").with_source(source))
 }
 
 fn supported_duration(value: Duration, allow_zero: bool, field: &'static str) -> StoreResult<()> {
@@ -858,11 +864,13 @@ fn supported_duration(value: Duration, allow_zero: bool, field: &'static str) ->
 
 fn duration_millis(value: Duration) -> StoreResult<u64> {
     supported_duration(value, true, "duration")?;
-    u64::try_from(value.as_millis()).map_err(|_| invalid("duration is too large"))
+    u64::try_from(value.as_millis())
+        .map_err(|source| invalid("duration is too large").with_source(source))
 }
 
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidData {
+        source: None,
         entity: "credential lease",
         message: message.to_owned(),
     }

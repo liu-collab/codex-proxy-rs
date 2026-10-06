@@ -1,4 +1,4 @@
-//! 请求调度用的可丢失 Provider 级 cooldown Redis 存储。
+//! 请求调度用的可丢失 Provider 级 cooldown Redis 存储
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -65,7 +65,7 @@ if #KEYS > 1 then redis.call('ZREM', KEYS[2], ARGV[2]) end
 return 1
 "#;
 
-// 普通推理成功只能清除临时限流和未形成冻结的证据，判断与删除必须原子执行。
+// 普通推理成功只能清除临时限流和未形成冻结的证据，判断与删除必须原子执行
 const SUCCESS_SCRIPT: &str = r#"
 local current = tonumber(redis.call('HGET', KEYS[1], 'revision') or '0')
 local kind = redis.call('HGET', KEYS[1], 'kind') or 'rate_limit'
@@ -75,7 +75,7 @@ redis.call('ZREM', KEYS[2], ARGV[2])
 return 1
 "#;
 
-// 探测结果只能修改读到的这一代冻结；删除后重建同 revision 的冻结也不匹配。
+// 探测结果只能修改读到的这一代冻结；删除后重建同 revision 的冻结也不匹配
 const FINISH_FREEZE_SCRIPT: &str = r#"
 if redis.call('HGET', KEYS[1], 'generation') ~= ARGV[2]
   or redis.call('HGET', KEYS[1], 'revision') ~= ARGV[1] then return 0 end
@@ -100,7 +100,7 @@ return 1
 "#;
 
 // 每次容量失败都顺延窗口 TTL（与刷新退避计数同语义），并把本次观测到的
-// 在途并发并入峰值证据；峰值与计数共享同一窗口生命周期。
+// 在途并发并入峰值证据；峰值与计数共享同一窗口生命周期
 const RECORD_CAPACITY_FAILURE_SCRIPT: &str = r#"
 local count = redis.call('INCR', KEYS[1])
 local ttl_ms = tonumber(ARGV[1])
@@ -137,7 +137,7 @@ pub trait CredentialCooldownRepository: Send + Sync {
         provider_account_id: &str,
         through_revision: Revision,
     ) -> StoreResult<bool>;
-    /// 删除账号时清除该账号全部 account/model scope cooldown key。
+    /// 删除账号时清除该账号全部 account/model scope cooldown key
     async fn delete_account_cooldowns(&self, provider_account_id: &str) -> StoreResult<bool>;
 }
 
@@ -229,7 +229,7 @@ impl RedisCredentialCooldownRepository {
                 .invoke_async::<i64>(&mut connection)
                 .await
         }
-        .map_err(|_| redis_unavailable("cache credential cooldown"))?;
+        .map_err(|source| redis_unavailable("cache credential cooldown", source))?;
         Ok(written == 1)
     }
 
@@ -254,16 +254,16 @@ impl RedisCredentialCooldownRepository {
                 .await
         };
         let (present, revision, until_ms, kind, generation): (i64, String, String, String, String) =
-            result.map_err(|_| redis_unavailable("read credential cooldown"))?;
+            result.map_err(|source| redis_unavailable("read credential cooldown", source))?;
         if present == 0 {
             return Ok(None);
         }
         let revision = revision
             .parse::<u64>()
-            .map_err(|_| invalid("cached cooldown revision is invalid"))?;
+            .map_err(|source| invalid("cached cooldown revision is invalid").with_source(source))?;
         let until_ms = until_ms
             .parse::<i64>()
-            .map_err(|_| invalid("cached cooldown expiry is invalid"))?;
+            .map_err(|source| invalid("cached cooldown expiry is invalid").with_source(source))?;
         let cooldown_until = DateTime::from_timestamp_millis(until_ms)
             .ok_or_else(|| invalid("cached cooldown expiry is invalid"))?;
         let kind = ProviderCooldownKind::parse(&kind).unwrap_or(ProviderCooldownKind::RateLimit);
@@ -298,7 +298,7 @@ impl RedisCredentialCooldownRepository {
                 .invoke_async::<i64>(&mut connection)
                 .await
         }
-        .map_err(|_| redis_unavailable("invalidate credential cooldown"))?;
+        .map_err(|source| redis_unavailable("invalidate credential cooldown", source))?;
         Ok(removed == 1)
     }
 
@@ -310,7 +310,7 @@ impl RedisCredentialCooldownRepository {
             .arg(-1)
             .query_async(&mut connection)
             .await
-            .map_err(|_| redis_unavailable("list indexed cooldowns"))
+            .map_err(|source| redis_unavailable("list indexed cooldowns", source))
     }
 
     pub(crate) async fn active_cooldowns(&self) -> StoreResult<AccountRuntimeSnapshot> {
@@ -335,7 +335,7 @@ impl RedisCredentialCooldownRepository {
         })
     }
 
-    /// 包含已到探测时间但尚未确认恢复的冻结；到期不能从 worker 工作集中移除。
+    /// 包含已到探测时间但尚未确认恢复的冻结；到期不能从 worker 工作集中移除
     pub(crate) async fn active_freezes(
         &self,
     ) -> StoreResult<BTreeMap<String, gateway_admin::model::accounts::AccountFreeze>> {
@@ -350,7 +350,7 @@ impl RedisCredentialCooldownRepository {
                     account_id,
                     gateway_admin::model::accounts::AccountFreeze {
                         credential_revision: gateway_admin::model::Revision::new(revision.get())
-                            .map_err(|_| invalid("freeze revision"))?,
+                            .map_err(|source| invalid("freeze revision").with_source(source))?,
                         until,
                         generation,
                         requires_probe: kind.requires_probe(),
@@ -384,11 +384,11 @@ impl RedisCredentialCooldownRepository {
             .arg(uuid::Uuid::new_v4().to_string())
             .invoke_async(&mut connection)
             .await
-            .map_err(|_| redis_unavailable("finish capacity freeze"))?;
+            .map_err(|source| redis_unavailable("finish capacity freeze", source))?;
         Ok(changed == 1)
     }
 
-    /// 读取窗口内观测到的在途并发峰值；key 随窗口 TTL 过期，无需额外清理。
+    /// 读取窗口内观测到的在途并发峰值；key 随窗口 TTL 过期，无需额外清理
     pub(crate) async fn read_capacity_peak(
         &self,
         provider_account_id: &str,
@@ -398,10 +398,10 @@ impl RedisCredentialCooldownRepository {
             .arg(self.capacity_peak_key(provider_account_id)?)
             .query_async(&mut connection)
             .await
-            .map_err(|_| redis_unavailable("read capacity peak in-flight"))?;
+            .map_err(|source| redis_unavailable("read capacity peak in-flight", source))?;
         peak.map(u32::try_from)
             .transpose()
-            .map_err(|_| invalid("capacity peak in-flight is invalid"))
+            .map_err(|source| invalid("capacity peak in-flight is invalid").with_source(source))
     }
 }
 
@@ -470,8 +470,8 @@ impl CredentialCooldownRepository for RedisCredentialCooldownRepository {
             "provider_account_id",
             provider_account_id,
         )?;
-        // 账号删除：清除该账号的 account key 与全部 model-scoped key。
-        // 用 SCAN 精确匹配命名空间内该账号前缀，避免 KEYS 阻塞。
+        // 账号删除：清除该账号的 account key 与全部 model-scoped key
+        // 用 SCAN 精确匹配命名空间内该账号前缀，避免 KEYS 阻塞
         let mut connection = self.connection.clone();
         let mut keys = vec![
             self.key(provider_account_id)?,
@@ -493,14 +493,14 @@ impl CredentialCooldownRepository for RedisCredentialCooldownRepository {
                 .arg(100)
                 .query_async(&mut connection)
                 .await
-                .map_err(|_| redis_unavailable("scan account cooldown keys"))?;
+                .map_err(|source| redis_unavailable("scan account cooldown keys", source))?;
             keys.extend(found);
             cursor = next;
             if cursor == 0 {
                 break;
             }
         }
-        // 删除与索引移除同属一个原子边界；否则新冻结可能在两步之间写入后丢失索引。
+        // 删除与索引移除同属一个原子边界；否则新冻结可能在两步之间写入后丢失索引
         let removed: i64 = Script::new(
             r#"
             local removed = 0
@@ -513,7 +513,7 @@ impl CredentialCooldownRepository for RedisCredentialCooldownRepository {
         .arg(provider_account_id)
         .invoke_async(&mut connection)
         .await
-        .map_err(|_| redis_unavailable("delete account cooldowns and index"))?;
+        .map_err(|source| redis_unavailable("delete account cooldowns and index", source))?;
         Ok(removed > 0)
     }
 }
@@ -533,7 +533,7 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
             };
             CredentialCooldownRepository::cache_credential_cooldown(self, &record)
                 .await
-                .map_err(|_| provider_unavailable("cache credential cooldown"))
+                .map_err(|source| crate::provider_unavailable("cache credential cooldown", source))
         })
     }
 
@@ -544,7 +544,7 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
         Box::pin(async move {
             CredentialCooldownRepository::read_credential_cooldown(self, account_id.as_str())
                 .await
-                .map_err(|_| provider_unavailable("read credential cooldown"))?
+                .map_err(|source| crate::provider_unavailable("read credential cooldown", source))?
                 .map(|record| {
                     let account_id = ProviderAccountId::new(record.provider_account_id)
                         .map_err(|_| provider_invalid("decode credential cooldown"))?;
@@ -575,7 +575,7 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
                 revision,
             )
             .await
-            .map_err(|_| provider_unavailable("clear credential cooldown"))
+            .map_err(|source| crate::provider_unavailable("clear credential cooldown", source))
         })
     }
 
@@ -595,7 +595,9 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
                 None,
             )
             .await
-            .map_err(|_| provider_unavailable("cache scoped credential cooldown"))
+            .map_err(|source| {
+                crate::provider_unavailable("cache scoped credential cooldown", source)
+            })
         })
     }
 
@@ -612,7 +614,9 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
                 None,
             )
             .await
-            .map_err(|_| provider_unavailable("read scoped credential cooldown"))?
+            .map_err(|source| {
+                crate::provider_unavailable("read scoped credential cooldown", source)
+            })?
             .map(|(revision, until, _, _)| {
                 Ok(ProviderScopedCooldown::new(
                     account_id.clone(),
@@ -642,7 +646,9 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
                 None,
             )
             .await
-            .map_err(|_| provider_unavailable("clear scoped credential cooldown"))
+            .map_err(|source| {
+                crate::provider_unavailable("clear scoped credential cooldown", source)
+            })
         })
     }
 
@@ -653,7 +659,9 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
         Box::pin(async move {
             self.delete_account_cooldowns(account_id.as_str())
                 .await
-                .map_err(|_| provider_unavailable("clear all credential cooldowns"))
+                .map_err(|source| {
+                    crate::provider_unavailable("clear all credential cooldowns", source)
+                })
         })
     }
 
@@ -680,7 +688,7 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
                 .arg(i64::from(in_flight))
                 .invoke_async(&mut connection)
                 .await
-                .map_err(|_| provider_unavailable("record capacity failure"))?;
+                .map_err(|source| crate::provider_unavailable("record capacity failure", source))?;
             u32::try_from(count).map_err(|_| provider_invalid("decode capacity failure count"))
         })
     }
@@ -710,7 +718,9 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
                 .arg(account_id.as_str())
                 .invoke_async(&mut connection)
                 .await
-                .map_err(|_| provider_unavailable("clear cooldown after success"))?;
+                .map_err(|source| {
+                    crate::provider_unavailable("clear cooldown after success", source)
+                })?;
             Ok(())
         })
     }
@@ -722,20 +732,19 @@ impl ProviderCooldownPort for RedisCredentialCooldownRepository {
         Box::pin(async move {
             self.read_capacity_peak(account_id.as_str())
                 .await
-                .map_err(|_| provider_unavailable("read capacity peak in-flight"))
+                .map_err(|source| {
+                    crate::provider_unavailable("read capacity peak in-flight", source)
+                })
         })
     }
 }
 
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidData {
+        source: None,
         entity: "credential cooldown",
         message: message.to_owned(),
     }
-}
-
-fn provider_unavailable(operation: &'static str) -> ProviderStoreError {
-    ProviderStoreError::new(ProviderStoreErrorKind::Unavailable, operation)
 }
 
 fn provider_invalid(operation: &'static str) -> ProviderStoreError {

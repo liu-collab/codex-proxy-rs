@@ -1,3 +1,5 @@
+//! 验证 Responses WebSocket 中断向当前执行传递并释放相关资源
+
 use super::*;
 use gateway_core::engine::response_control::{ResponseControl, ResponseInterruptError};
 
@@ -160,6 +162,7 @@ async fn interrupt_is_live_scoped_and_keeps_queued_creates_serial() {
         admissions.clone(),
         Arc::new(UnusedContinuation),
         Arc::new(IgnoredClientApiKeyUsage),
+        Arc::new(crate::support::RecordingDiagnostics::default()),
     ));
     let app = api_router(execution).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -1,3 +1,5 @@
+//! 验证插件上游适配的认证、续接、事件交付与计费边界
+
 use std::{
     num::NonZeroU32,
     sync::{
@@ -100,12 +102,18 @@ async fn setup(
     Arc<super::Store>,
     gateway_plugin_runtime::PluginRuntime,
 ) {
-    let contributes = Contributions::from([crate::support::contribution(
+    let mut contributes = Contributions::from([crate::support::contribution(
         Capability::UpstreamAdapter,
         vec![Stage::Upstream],
         vec!["openai".into()],
         vec!["openai".into()],
     )]);
+    if let Some(version) = config["upstream_version"].as_u64() {
+        contributes
+            .get_mut(&Capability::UpstreamAdapter)
+            .unwrap()
+            .version = version.try_into().unwrap();
+    }
     let (cache, store, runtime) =
         super::setup_with_contributions_and_restart_circuit(contributes, Default::default()).await;
     {
@@ -129,12 +137,21 @@ async fn setup(
 }
 
 fn context(generation: &ExtensionSetReference, key: &str) -> AttemptContext {
+    context_with_fast_mode(generation, key, gateway_core::account::FastMode::Default)
+}
+
+fn context_with_fast_mode(
+    generation: &ExtensionSetReference,
+    key: &str,
+    mode: gateway_core::account::FastMode,
+) -> AttemptContext {
     AttemptContext::new(
         RequestAttemptContext::new(
             ModelRequestId::new("req_one").unwrap(),
             ClientApiKeyId::new(key).unwrap(),
         )
-        .with_upstream_adapters(generation.upstream_adapters()),
+        .with_upstream_adapters(generation.upstream_adapters())
+        .with_fast_mode(mode),
         NonZeroU32::new(1).unwrap(),
         SystemTime::now() + Duration::from_secs(5),
         AccountSelectionPolicy::new(
@@ -155,6 +172,14 @@ fn execute(
     previous: Option<ProviderSessionState>,
 ) -> EventStream {
     let context = context(generation, key);
+    execute_with_context(account, context, previous)
+}
+
+fn execute_with_context(
+    account: Arc<Account>,
+    context: AttemptContext,
+    previous: Option<ProviderSessionState>,
+) -> EventStream {
     let provider = ProviderKind::new("openai").unwrap();
     let model = UpstreamModelId::new("native-model").unwrap();
     let adapter = context
@@ -187,6 +212,47 @@ fn execute(
         metadata,
         account,
     })
+}
+
+#[tokio::test]
+async fn legacy_adapter_decodes_exact_v1_metadata_for_all_fast_modes() {
+    use gateway_core::account::FastMode;
+    for mode in [FastMode::Default, FastMode::Enabled, FastMode::Disabled] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/adapter/responses"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let mut config = configuration(&server.uri(), false);
+        config["upstream_version"] = json!(1);
+        config["expected_disable_fast"] = json!(mode == FastMode::Disabled);
+        let (cache, _, runtime) = setup(config).await;
+        let generation =
+            ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(1).unwrap())
+                .await
+                .unwrap();
+        let mut stream = execute_with_context(
+            Account::new(),
+            context_with_fast_mode(&generation, "key-one", mode),
+            None,
+        );
+        let mut completed = 0;
+        while let Some(event) = stream.next().await {
+            completed += event
+                .unwrap()
+                .canonical_facts()
+                .iter()
+                .filter(|fact| matches!(fact, GatewayEvent::Completed(_)))
+                .count();
+        }
+        assert_eq!(completed, 1);
+        drop(stream);
+        drop(generation);
+        runtime.shutdown().await;
+        super::wait_until_empty(cache.path()).await;
+    }
 }
 
 #[tokio::test]
@@ -312,6 +378,17 @@ async fn adapter_failure_preserves_upstream_diagnostics_and_native_feedback() {
         "rate_limit_exceeded"
     );
     assert_eq!(error.retry_after(), Some(Duration::from_millis(1500)));
+    let snapshot = error.stable_snapshot();
+    let raw: Value = serde_json::from_str(snapshot.raw_upstream_error().unwrap().as_str()).unwrap();
+    assert_eq!(raw["message"], "fixture rate limit");
+    assert_eq!(raw["code"], "rate_limit_exceeded");
+    assert_eq!(raw["status"], 429);
+    let diagnostic = snapshot.diagnostic().unwrap();
+    assert_eq!(diagnostic.code(), Some("plugin_upstream_failure"));
+    assert!(!diagnostic.as_str().contains("fixture rate limit"));
+    assert!(!format!("{snapshot:?}").contains("fixture rate limit"));
+    assert!(generation.is_ready(), "上游 429 不能停止插件");
+    assert!(generation.can_serve());
     assert_eq!(account.failures.load(Ordering::SeqCst), 1);
     drop(stream);
     assert_eq!(Arc::strong_count(&account), 1);
@@ -396,6 +473,18 @@ async fn adapter_does_not_publish_completed_when_rpc_fails_after_terminal_frame(
     assert_eq!(error.kind(), ProviderErrorKind::Unavailable);
     assert_eq!(error.send_state(), UpstreamSendState::Sent);
     let mut error = error;
+    let raw: Value = serde_json::from_str(error.raw_upstream_error().unwrap().as_str()).unwrap();
+    assert_eq!(raw["source"], "plugin_upstream_adapter");
+    assert_eq!(raw["fault"]["message"], "fixture terminal fault");
+    assert_eq!(error.diagnostic().unwrap().stage(), Some("plugin_rpc"));
+    assert!(
+        !error
+            .diagnostic()
+            .unwrap()
+            .as_str()
+            .contains("fixture terminal fault")
+    );
+    assert!(!format!("{error:?}").contains("fixture terminal fault"));
     let facts = error
         .take_atomic_client_events()
         .into_iter()
@@ -813,7 +902,7 @@ async fn adapter_reconfiguration_disable_and_rollback_keep_inflight_generation_a
     let restored = ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(4).unwrap())
         .await
         .unwrap();
-    // 恢复同一配置仍是新代次，不能复活旧进程中的续接身份。
+    // 恢复同一配置仍是新代次，不能复活旧进程中的续接身份
     let error = execute(&restored, account.clone(), "key-one", Some(old_state))
         .next()
         .await
@@ -887,4 +976,61 @@ async fn upstream_adapter_can_dispatch_http_after_its_instance_entered_the_scope
     drop(generation);
     drop(dispatcher);
     runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn malformed_adapter_events_stop_only_the_plugin_session() {
+    use gateway_admin::ports::plugins::PluginRuntimeDiagnostics as _;
+    use std::error::Error as _;
+    for (fact, has_sequence_error) in [
+        (
+            json!({"type":"completed","id":"never-started","model":"native-model","reason":"stop"}),
+            false,
+        ),
+        (
+            json!({"type":"text_delta","index":0,"text":"delta before start"}),
+            true,
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let mut config = configuration(&server.uri(), false);
+        config["upstream_events"] = json!([{"event":{"facts":[fact]}}]);
+        let (cache, store, runtime) = setup(config).await;
+        let generation =
+            ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(1).unwrap())
+                .await
+                .unwrap();
+        let mut stream = execute(&generation, Account::new(), "key-one", None);
+        let error = stream.next().await.unwrap().unwrap_err();
+        assert_eq!(error.kind(), ProviderErrorKind::Protocol);
+        if has_sequence_error {
+            assert!(
+                error
+                    .source()
+                    .unwrap()
+                    .is::<gateway_core::event::EventSequenceError>()
+            );
+        }
+        assert_eq!(error.diagnostic().unwrap().code(), Some("invalid_event"));
+        assert!(!generation.is_ready());
+        assert!(generation.can_serve());
+        let snapshot = store.snapshot.lock().unwrap().clone();
+        assert!(snapshot.instances[0].enabled);
+        let diagnostics = runtime
+            .runtime_diagnostics(&snapshot, Some(1), Some(&generation))
+            .await
+            .unwrap();
+        assert_eq!(
+            diagnostics["instance-one"].failure.as_ref().unwrap().code,
+            "invalid_response"
+        );
+        drop(stream);
+        drop(generation);
+        runtime.shutdown().await;
+        super::wait_until_empty(cache.path()).await;
+    }
 }

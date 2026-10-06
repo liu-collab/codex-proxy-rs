@@ -1,3 +1,5 @@
+//! 验证 xAI 原生执行的协议转换、账号选择与交付状态隔离
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -886,7 +888,7 @@ impl GrokSessionSelector for StubSelector {
                 GrokSessionBinding::new("acct_provider").expect("binding"),
                 (),
             )
-            .map_err(|_| GrokSessionSelectorError::InvalidSession)
+            .map_err(|_| GrokSessionSelectorError::InvalidSession(None))
         })
     }
 
@@ -936,7 +938,7 @@ impl GrokSessionSelector for SequencedAccountSelector {
                 GrokSessionBinding::new("acct_provider").expect("binding"),
                 (),
             )
-            .map_err(|_| GrokSessionSelectorError::InvalidSession)
+            .map_err(|_| GrokSessionSelectorError::InvalidSession(None))
         })
     }
 
@@ -1691,7 +1693,7 @@ async fn execute_successfully(provider: &Arc<GrokBuildProvider>, operation: Oper
     assert!(events.iter().all(Result::is_ok));
 }
 
-/// 与 Postgres 调度列表一致：常规选择不返回停用账号，只有诊断能取回。
+/// 与 Postgres 调度列表一致：常规选择不返回停用账号，只有诊断能取回
 struct DiagnosticLeasePort;
 
 impl ProviderLeasePort for DiagnosticLeasePort {
@@ -2748,7 +2750,10 @@ async fn model_quota_transport_failure_preserves_model_scoped_feedback() {
             GrokInferenceTransportErrorKind::ModelQuotaExhausted,
             UpstreamSendState::Sent,
         )
-        .with_status(403),
+        .with_status(403)
+        .with_raw_upstream_error(gateway_core::error::RawUpstreamError::new(
+            "PRIVATE_QUOTA_ERROR",
+        )),
     );
     let provider = provider(selector.clone(), transport).await;
     let mut stream = provider
@@ -2762,6 +2767,11 @@ async fn model_quota_transport_failure_preserves_model_scoped_feedback() {
     let error = next_provider_error(&mut stream).await;
 
     assert_eq!(error.kind(), ProviderErrorKind::QuotaExhausted);
+    assert_eq!(
+        error.raw_upstream_error().unwrap().as_str(),
+        "PRIVATE_QUOTA_ERROR"
+    );
+    assert!(!format!("{error:?} {error}").contains("PRIVATE_QUOTA_ERROR"));
     assert!(error.replay_is_safe());
     assert_eq!(
         selector.feedback.lock().expect("feedback").as_slice(),
@@ -3130,7 +3140,7 @@ async fn selection_failures_carry_a_distinguishable_client_error_code() {
             "no_eligible_account",
         ),
         (
-            GrokSessionSelectorError::Unavailable,
+            GrokSessionSelectorError::Unavailable(None),
             "account_selector_unavailable",
         ),
     ];
@@ -3162,6 +3172,57 @@ async fn selection_failures_carry_a_distinguishable_client_error_code() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn selection_failure_preserves_native_cause_without_exposing_it_to_clients() {
+    use gateway_core::error::{ErrorSource, StoreError, StoreErrorKind};
+    let source = StoreError::caused_by(
+        StoreErrorKind::Unavailable,
+        std::io::Error::other("PRIVATE_XAI_DATABASE_CAUSE"),
+    );
+    let transport = StubInferenceTransport::success();
+    let provider = provider(
+        StubSelector::failing(GrokSessionSelectorError::Unavailable(Some(
+            ErrorSource::new(source),
+        ))),
+        transport.clone(),
+    )
+    .await;
+    let error = match provider
+        .execute(
+            provider_request("xai"),
+            context(CancellationToken::new(), None),
+        )
+        .await
+    {
+        Ok(_) => panic!("selection must fail"),
+        Err(error) => error,
+    };
+    assert_eq!(error.kind(), ProviderErrorKind::Unavailable);
+    assert_eq!(error.send_state(), UpstreamSendState::NotSent);
+    assert!(
+        error
+            .error_details()
+            .expect("protected details")
+            .contains("PRIVATE_XAI_DATABASE_CAUSE")
+    );
+    let mut cause = std::error::Error::source(&error);
+    let mut native = false;
+    while let Some(error) = cause {
+        native |= error.downcast_ref::<std::io::Error>().is_some();
+        cause = error.source();
+    }
+    assert!(native);
+    assert!(!format!("{error:?} {error}").contains("PRIVATE_XAI_DATABASE_CAUSE"));
+    assert!(
+        !error
+            .client_visible_upstream_error()
+            .expect("safe detail")
+            .message()
+            .contains("PRIVATE_XAI_DATABASE_CAUSE")
+    );
+    assert_eq!(transport.calls.load(Ordering::SeqCst), 0);
 }
 
 #[tokio::test]

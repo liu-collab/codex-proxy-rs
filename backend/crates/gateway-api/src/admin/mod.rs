@@ -1,4 +1,4 @@
-//! 管理端 HTTP adapter、wire contract 与固定路由。
+//! 管理端 HTTP adapter、wire contract 与固定路由
 
 use crate::auth::SessionState;
 
@@ -15,6 +15,7 @@ pub mod accounts;
 pub mod auth;
 pub mod backups;
 pub mod client_keys;
+pub(crate) mod diagnostics;
 mod extract;
 pub mod observability;
 mod plugins;
@@ -36,7 +37,7 @@ pub(crate) fn model_router() -> Router<crate::ApiState> {
     plugins::model_router().layer(middleware::map_response(no_store))
 }
 
-/// 构造管理用例路由；模型执行桥由完整 API 组合单独装配。
+/// 构造管理用例路由；模型执行桥由完整 API 组合单独装配
 pub fn router<S>() -> Router<S>
 where
     S: SessionState + Clone + Send + Sync + 'static,

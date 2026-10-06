@@ -1,4 +1,4 @@
-//! 在 transport 边界采集的上游响应诊断信息。
+//! 在 transport 边界采集的上游响应诊断信息
 
 use super::client::CodexClientVisibleUpstreamResponse;
 use super::protocol::responses::ResponsesSseFailure;
@@ -25,75 +25,25 @@ const UPSTREAM_TRACE_HEADERS: &[&str] = &[
 ];
 const IDENTITY_AUTHORIZATION_ERROR_HEADER: &str = "x-openai-authorization-error";
 const IDENTITY_ERROR_JSON_HEADER: &str = "x-error-json";
-const PERSISTABLE_UPSTREAM_CODES: &[&str] = &[
-    "access_token_expired",
-    "account_banned",
-    "account_deactivated",
-    "account_disabled",
-    "account_suspended",
-    "authentication_error",
-    "billing_limit",
-    "cyber_policy",
-    "deactivated_workspace",
-    "identity_verification_required",
-    "insufficient_quota",
-    "invalid_api_key",
-    "invalid_encrypted_content",
-    "invalid_prompt",
-    "invalid_request",
-    "missing_tool_output",
-    "model_not_available",
-    "model_not_supported",
-    "no_tool_output",
-    "organization_disabled",
-    "payment_required",
-    "permission_denied",
-    "previous_response_not_found",
-    "quota_exceeded",
-    "quota_exhausted",
-    "rate_limit_error",
-    "rate_limit_exceeded",
-    "rate_limit_reached",
-    "refresh_token_invalidated",
-    "server_error",
-    "server_is_overloaded",
-    "slow_down",
-    "token_expired",
-    "token_invalid",
-    "token_invalidated",
-    "token_revoked",
-    "unauthorized",
-    "unsupported",
-    "unsupported_feature",
-    "usage_limit_reached",
-    "verification_required",
-    "websocket_connection_limit_reached",
-    "workspace_deactivated",
-    "workspace_member_credits_depleted",
-    "workspace_member_usage_limit_reached",
-    "workspace_owner_credits_depleted",
-    "workspace_owner_usage_limit_reached",
-];
-
-/// 上游拒绝相对业务 payload 的发送阶段。
+/// 上游拒绝相对业务 payload 的发送阶段
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexUpstreamSendPhase {
-    /// DNS/TCP/TLS/WS opening 阶段，业务 payload 尚未发送。
+    /// DNS/TCP/TLS/WS opening 阶段，业务 payload 尚未发送
     BeforePayload,
-    /// 上游已收到业务 payload，并返回了明确拒绝。
+    /// 上游已收到业务 payload，并返回了明确拒绝
     AfterPayload,
-    /// 无法证明 payload 是否到达上游。
+    /// 无法证明 payload 是否到达上游
     Ambiguous,
 }
 
-/// Transport 边界对上游失败的账号级分类。
+/// Transport 边界对上游失败的账号级分类
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CodexFailureCategory {
     ModelUnsupported,
     CredentialExpired,
     IdentityVerificationRequired,
     Banned,
-    /// 当前用量窗口已经耗尽，但存在自动恢复的重置时间。
+    /// 当前用量窗口已经耗尽，但存在自动恢复的重置时间
     UsageLimitExhausted,
     RateLimited,
     QuotaExhausted,
@@ -102,24 +52,26 @@ pub enum CodexFailureCategory {
     InvalidRequest,
     PermissionDenied,
     Timeout,
-    /// 模型容量暂时不足，只影响当前请求，不证明账号健康异常。
+    /// 模型容量暂时不足，只影响当前请求，不证明账号健康异常
     CapacityUnavailable,
+    /// Flex 容量不足是当前请求的终止错误，不冷却账号或自动重放
+    FlexUnavailable,
     Unavailable,
     Transport,
 }
 
-/// 一次已分类的上游拒绝及其可持久化事实。
+/// 一次已分类的上游拒绝及其可持久化事实
 pub struct CodexUpstreamFailure {
     pub(crate) status: Option<StatusCode>,
     pub(crate) code: Option<String>,
     pub(crate) client_message: Option<String>,
     pub(crate) client_code: Option<String>,
     pub(crate) client_error_type: Option<String>,
-    /// HTTP 错误正文或 SSE error/response.failed 的原始 JSON data。
+    /// HTTP 错误正文或 SSE error/response.failed 的原始 JSON data
     pub(crate) raw_body: String,
     pub(crate) client_response: Option<Box<CodexClientVisibleUpstreamResponse>>,
     pub(crate) identity_error_code: Option<String>,
-    /// 官方 `usage_limit_reached` 错误体携带的窗口重置时间（Unix 秒）。
+    /// 官方 `usage_limit_reached` 错误体携带的窗口重置时间（Unix 秒）
     pub(crate) usage_limit_resets_at: Option<i64>,
     pub(crate) retry_after_seconds: Option<u64>,
     pub(crate) request_id: Option<String>,
@@ -130,7 +82,7 @@ pub struct CodexUpstreamFailure {
 }
 
 impl CodexUpstreamFailure {
-    /// 用完整 HTTP 响应事实构造并分类一次上游拒绝。
+    /// 用完整 HTTP 响应事实构造并分类一次上游拒绝
     #[expect(
         clippy::too_many_arguments,
         reason = "the classifier consumes one flat set of transport response facts"
@@ -222,15 +174,18 @@ impl CodexUpstreamFailure {
         }
     }
 
-    /// 返回账号级失败分类。
+    /// 返回账号级失败分类
     #[must_use]
     pub const fn category(&self) -> CodexFailureCategory {
         self.category
     }
 
-    /// 返回该拒绝是否允许换号重放。
+    /// 返回该拒绝是否允许换号重放
     #[must_use]
     pub const fn replay_is_safe(&self) -> bool {
+        if matches!(self.category, CodexFailureCategory::FlexUnavailable) {
+            return false;
+        }
         match self.send_phase {
             CodexUpstreamSendPhase::BeforePayload => true,
             CodexUpstreamSendPhase::Ambiguous => false,
@@ -250,15 +205,8 @@ impl CodexUpstreamFailure {
         }
     }
 
-    pub(crate) fn persistable_code(&self) -> Option<&'static str> {
-        self.code
-            .as_deref()
-            .and_then(persistable_upstream_code)
-            .or_else(|| {
-                self.identity_error_code
-                    .as_deref()
-                    .and_then(persistable_upstream_code)
-            })
+    pub(crate) fn upstream_code(&self) -> Option<&str> {
+        self.code.as_deref().or(self.identity_error_code.as_deref())
     }
 }
 
@@ -297,7 +245,10 @@ impl ParsedUpstreamError {
             .or_else(|| value.get("message"))
             .and_then(Value::as_str)
             .and_then(non_empty_owned);
-        let code = code_value.and_then(Value::as_str).and_then(non_empty_owned);
+        let code = code_value
+            .and_then(Value::as_str)
+            .filter(|code| !code.trim().is_empty())
+            .map(str::to_owned);
         let message = client_message
             .clone()
             .or_else(|| error.as_str().and_then(non_empty_owned))
@@ -342,7 +293,7 @@ impl CodexUpstreamDiagnostics {
             if !UPSTREAM_REQUEST_ID_HEADERS.contains(&name.as_str()) {
                 continue;
             }
-            // 与官方 wrapped error 一致，只接受合法 HTTP 标量头；任意对象和数组不作 ID。
+            // 与官方 wrapped error 一致，只接受合法 HTTP 标量头；任意对象和数组不作 ID
             let value = match value {
                 Value::String(value) => value.clone(),
                 Value::Number(_) | Value::Bool(_) => value.to_string(),
@@ -411,8 +362,7 @@ fn decode_identity_error_code(encoded: &str) -> Option<String> {
         .ok()?
         .pointer("/error/code")?
         .as_str()
-        .map(str::trim)
-        .filter(|code| !code.is_empty())
+        .filter(|code| !code.trim().is_empty())
         .map(ToString::to_string)
 }
 
@@ -431,7 +381,11 @@ fn classify_upstream_failure(
     let message = fields.message.to_ascii_lowercase();
     let body = body.to_ascii_lowercase();
 
-    // 容量拒绝可能带 400/429/503；仅用结构化错误字段识别，不能扫描任意正文。
+    if code == "flex_unavailable" {
+        return CodexFailureCategory::FlexUnavailable;
+    }
+
+    // 容量拒绝可能带 400/429/503；仅用结构化错误字段识别，不能扫描任意正文
     if is_capacity_error(
         fields.code.as_deref(),
         fields.error_type.as_deref(),
@@ -441,8 +395,8 @@ fn classify_upstream_failure(
     }
 
     // 与官方 Codex HTTP/WS 路径一致：429 只有结构化
-    // `error.type=usage_limit_reached` 才能确认额度窗口耗尽；其余 429 都是临时限流。
-    // SSE `response.failed` 的结构化字段形态不同，保留其 code/type 语义单独分类。
+    // `error.type=usage_limit_reached` 才能确认额度窗口耗尽；排除容量错误后才按临时限流处理
+    // SSE `response.failed` 的结构化字段形态不同，保留其 code/type 语义单独分类
     if matches!(source, UpstreamFailureSource::HttpResponse)
         && status == Some(StatusCode::TOO_MANY_REQUESTS)
     {
@@ -453,7 +407,7 @@ fn classify_upstream_failure(
         };
     }
 
-    // 官方 Codex 将流内 invalid_prompt 归为请求错误，不依赖 HTTP 状态码。
+    // 官方 Codex 将流内 invalid_prompt 归为请求错误，不依赖 HTTP 状态码
     if matches!(source, UpstreamFailureSource::SseFailure) && code == "invalid_prompt" {
         return CodexFailureCategory::InvalidRequest;
     }
@@ -482,7 +436,7 @@ fn classify_upstream_failure(
         return CodexFailureCategory::Banned;
     }
     // message/body 是自由文本，正文里偶然出现 "unauthorized" 不能证明凭证过期；
-    // 只有结构化 code/type、身份错误头，或配合 401/403 状态的文本才算数。
+    // 只有结构化 code/type、身份错误头，或配合 401/403 状态的文本才算数
     let structured_auth_signals = [
         identity_code.as_str(),
         identity_authorization.as_str(),
@@ -559,13 +513,6 @@ fn normalized(value: Option<&str>) -> String {
 fn non_empty_owned(value: &str) -> Option<String> {
     let value = value.trim();
     (!value.is_empty()).then(|| value.to_owned())
-}
-
-fn persistable_upstream_code(value: &str) -> Option<&'static str> {
-    PERSISTABLE_UPSTREAM_CODES
-        .iter()
-        .copied()
-        .find(|known| value.trim().eq_ignore_ascii_case(known))
 }
 
 fn is_model_unsupported(value: &str) -> bool {
@@ -683,7 +630,7 @@ pub(crate) fn is_capacity_error(
 ) -> bool {
     let code = normalized(code);
     let error_type = normalized(error_type);
-    // 明确额度窗口/账号错误保留原分类，不能被描述中的容量词覆盖。
+    // 明确额度窗口/账号错误保留原分类，不能被描述中的容量词覆盖
     if !matches!(
         error_type.as_str(),
         "" | "server_error"

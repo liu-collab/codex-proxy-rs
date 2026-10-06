@@ -1,3 +1,5 @@
+//! 插件 RPC 帧的异步读写循环与入站消息分派
+
 use std::sync::Arc;
 
 use gateway_plugin_sdk::{
@@ -44,10 +46,10 @@ async fn write_loop<W: AsyncWrite + Unpin>(
             frame = data.recv() => frame,
         };
         let Some(frame) = frame else {
-            shared.fail(RpcError::Closed);
+            shared.fail(RpcError::Closed(None));
             return;
         };
-        // 撤销尚未发送的调用时丢弃排队帧；已开始写入的 Call 必须先于 Cancel。
+        // 撤销尚未发送的调用时丢弃排队帧；已开始写入的 Call 必须先于 Cancel
         if let Message::Call { id, .. } = &frame.message {
             if !shared.mark_transmitted(*id) {
                 continue;
@@ -62,8 +64,10 @@ async fn write_loop<W: AsyncWrite + Unpin>(
             _ = stopped.changed() => return,
             result = write_frame(&mut writer, &frame) => result,
         };
-        if written.is_err() {
-            shared.fail(RpcError::Closed);
+        if let Err(source) = written {
+            shared.fail(RpcError::Closed(Some(
+                gateway_core::error::ErrorSource::new(source),
+            )));
             return;
         }
     }
@@ -85,9 +89,14 @@ async fn read_loop<R: AsyncRead + Unpin>(
             _ = stopped.changed() => return,
             frame = read_frame(&mut reader) => frame,
         };
-        let Ok(frame) = frame else {
-            shared.fail(RpcError::Closed);
-            return;
+        let frame = match frame {
+            Ok(frame) => frame,
+            Err(source) => {
+                shared.fail(RpcError::Closed(Some(
+                    gateway_core::error::ErrorSource::new(source),
+                )));
+                return;
+            }
         };
         let result = match frame.message {
             Message::Cancelled { id } if frame.payload.is_empty() => {
@@ -112,7 +121,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
                 params,
             } => {
                 if id == 0 || id % 2 != 0 || id <= last_callback {
-                    Err(RpcError::Protocol)
+                    Err(RpcError::Protocol(None))
                 } else if let Some(context) = shared.context(parent_id) {
                     last_callback = id;
                     if let Some(permit) = shared.try_callback_slot() {
@@ -120,7 +129,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
                         let response = Arc::clone(&shared);
                         let (ready, started) = oneshot::channel();
                         let task = tokio::spawn(async move {
-                            // 先把任务归属登记到父调用，再允许执行宿主操作。
+                            // 先把任务归属登记到父调用，再允许执行宿主操作
                             if started.await.is_err() {
                                 return;
                             }
@@ -135,7 +144,7 @@ async fn read_loop<R: AsyncRead + Unpin>(
                                 },
                                 Err(error) => Frame::control(Message::Error { id, error }),
                             };
-                            // 宿主回调的局部编码错误只能结束该调用，不能关闭共享写通道。
+                            // 宿主回调的局部编码错误只能结束该调用，不能关闭共享写通道
                             if validate_frame(&reply).is_err() {
                                 reply = Frame::control(Message::Error {
                                     id,
@@ -169,10 +178,10 @@ async fn read_loop<R: AsyncRead + Unpin>(
                     }));
                     Ok(())
                 } else {
-                    Err(RpcError::Protocol)
+                    Err(RpcError::Protocol(None))
                 }
             }
-            _ => Err(RpcError::Protocol),
+            _ => Err(RpcError::Protocol(None)),
         };
         if let Err(error) = result {
             shared.fail(error);

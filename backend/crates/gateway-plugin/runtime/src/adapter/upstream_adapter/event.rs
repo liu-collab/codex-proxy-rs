@@ -1,22 +1,22 @@
-use std::time::Duration;
+//! 校验插件流式事件，生成领域事件并保持序列约束
+
+use super::failure::{failure_error, invalid};
 
 use bytes::Bytes;
 use gateway_core::{
     engine::upstream_adapter::UpstreamAccountConnection,
-    error::{ClientVisibleUpstreamError, ProviderError, ProviderErrorKind},
+    error::ProviderError,
     event::{
         ContentItem, ContentKind, EventSequenceValidator, FinishReason, GatewayEvent,
         ProtocolWireEvent, ProviderEvent, ProviderResponseObservation, ReasoningDelta,
         ResponseMeta, TextDelta, ToolCallDelta,
     },
     metering::Usage,
-    upstream::{OpaqueUpstreamValue, UpstreamSendState, UpstreamTransport},
+    upstream::{UpstreamSendState, UpstreamTransport},
 };
 use gateway_plugin_sdk::call::{
     model::{CanonicalEvent, WireEvent, WirePayload},
-    upstream_adapter::{
-        UpstreamAdapterEvent, UpstreamContinuation, UpstreamFailure, UpstreamFailureKind,
-    },
+    upstream_adapter::{UpstreamAdapterEvent, UpstreamContinuation},
 };
 use gateway_protocol::openai::sse::SseEventDecoder;
 
@@ -35,6 +35,17 @@ pub(super) struct DecodedEvent {
     pub(super) continuation: Option<UpstreamContinuation>,
 }
 
+pub(super) enum EventDecodeError {
+    Invalid(ProviderError),
+    Upstream(ProviderError),
+}
+
+impl From<ProviderError> for EventDecodeError {
+    fn from(error: ProviderError) -> Self {
+        Self::Invalid(error)
+    }
+}
+
 impl EventDecoder {
     pub(super) fn decode(
         &mut self,
@@ -43,10 +54,11 @@ impl EventDecoder {
         transport: &str,
         account: &dyn UpstreamAccountConnection,
         sent: UpstreamSendState,
-    ) -> Result<DecodedEvent, ProviderError> {
-        let message = UpstreamAdapterEvent::decode(payload).map_err(|_| invalid(sent))?;
+    ) -> Result<DecodedEvent, EventDecodeError> {
+        let message = UpstreamAdapterEvent::decode(payload)
+            .map_err(|source| invalid(sent).with_source(source))?;
         if self.completed || message.event.facts.len() > 64 {
-            return Err(invalid(sent));
+            return Err(invalid(sent).into());
         }
         let wire = message
             .event
@@ -55,19 +67,19 @@ impl EventDecoder {
             .transpose()?;
         if let Some(failure) = message.failure {
             if !message.event.facts.is_empty() || message.continuation.is_some() {
-                return Err(invalid(sent));
+                return Err(invalid(sent).into());
             }
             let mut error = failure_error(failure, sent)?;
             if let Some(wire) = wire {
                 error = error.with_atomic_client_events(vec![ProviderEvent::wire(wire)]);
             }
-            return Err(error);
+            return Err(EventDecodeError::Upstream(error));
         }
         if let Some(tier) = message.service_tier {
             if tier.is_empty() || tier.len() > 64 || tier.chars().any(char::is_control) {
-                return Err(invalid(sent));
+                return Err(invalid(sent).into());
             }
-            // 上游可能在完成时才把 auto 解析为实际档位；与原生观测一样保留最新值。
+            // 上游可能在完成时才把 auto 解析为实际档位；与原生观测一样保留最新值
             self.service_tier = Some(tier);
         }
         let mut facts = Vec::new();
@@ -82,7 +94,7 @@ impl EventDecoder {
                 CanonicalEvent::ContentAdded { index, kind } => {
                     self.contents += 1;
                     if self.contents > 4096 {
-                        return Err(invalid(sent));
+                        return Err(invalid(sent).into());
                     }
                     GatewayEvent::ContentAdded(ContentItem::new(
                         index,
@@ -124,7 +136,7 @@ impl EventDecoder {
                         .as_ref()
                         .is_some_and(|name| name.len() > 512 || name.chars().any(char::is_control))
                     {
-                        return Err(invalid(sent));
+                        return Err(invalid(sent).into());
                     }
                     GatewayEvent::ToolCallDelta(ToolCallDelta {
                         content_index: index,
@@ -148,7 +160,7 @@ impl EventDecoder {
                     .flatten()
                     .any(|count| count > i64::MAX as u64)
                     {
-                        return Err(invalid(sent));
+                        return Err(invalid(sent).into());
                     }
                     let usage = Usage {
                         input_tokens: usage.input_tokens,
@@ -166,13 +178,15 @@ impl EventDecoder {
                 CanonicalEvent::Completed { id, model, reason } => {
                     validate_model(model.as_deref(), sent)?;
                     if self.response_id.as_deref() != Some(id.as_str()) {
-                        return Err(invalid(sent));
+                        return Err(invalid(sent).into());
                     }
                     if let Some(cost) =
                         account.calculate_cost(self.service_tier.as_deref(), &self.usage)
                     {
                         let cost = GatewayEvent::CalculatedCost(cost);
-                        self.sequence.observe(&cost).map_err(|_| invalid(sent))?;
+                        self.sequence
+                            .observe(&cost)
+                            .map_err(|source| invalid(sent).with_source(source))?;
                         facts.push(cost);
                     }
                     self.completed = true;
@@ -191,11 +205,13 @@ impl EventDecoder {
                     }))
                 }
             };
-            self.sequence.observe(&fact).map_err(|_| invalid(sent))?;
+            self.sequence
+                .observe(&fact)
+                .map_err(|source| invalid(sent).with_source(source))?;
             facts.push(fact);
         }
         if message.continuation.is_some() && !self.completed {
-            return Err(invalid(sent));
+            return Err(invalid(sent).into());
         }
         let mut event = if let Some(wire) = wire {
             ProviderEvent::canonical_with_wire(facts, wire)
@@ -206,10 +222,11 @@ impl EventDecoder {
         };
         if let Some(tier) = &self.service_tier {
             let observation = ProviderResponseObservation::new(
-                UpstreamTransport::new(transport).map_err(|_| invalid(sent))?,
+                UpstreamTransport::new(transport)
+                    .map_err(|source| invalid(sent).with_source(source))?,
             )
             .try_with_service_tier(tier.clone())
-            .map_err(|_| invalid(sent))?;
+            .map_err(|source| invalid(sent).with_source(source))?;
             event.attach_observation(observation);
         }
         Ok(DecodedEvent {
@@ -219,7 +236,9 @@ impl EventDecoder {
     }
 
     pub(super) fn finish(&self, sent: UpstreamSendState) -> Result<(), ProviderError> {
-        self.sequence.finish().map_err(|_| invalid(sent))
+        self.sequence
+            .finish()
+            .map_err(|source| invalid(sent).with_source(source))
     }
 }
 
@@ -294,14 +313,15 @@ fn decode_wire(
             ProtocolWireEvent::raw_sse(protocol, Bytes::from(frame))
         }
         WirePayload::RawJson { body } => {
-            serde_json::from_slice::<serde_json::Value>(&body).map_err(|_| invalid(sent))?;
+            serde_json::from_slice::<serde_json::Value>(&body)
+                .map_err(|source| invalid(sent).with_source(source))?;
             ProtocolWireEvent::raw_json(protocol, Bytes::from(body))
         }
         WirePayload::RawBody { body } => {
             ProtocolWireEvent::raw_http_body(protocol, Bytes::from(body))
         }
     };
-    result.map_err(|_| invalid(sent))
+    result.map_err(|source| invalid(sent).with_source(source))
 }
 
 fn single_sse(
@@ -313,52 +333,4 @@ fn single_sse(
         return Err(invalid(sent));
     }
     frames.pop().ok_or_else(|| invalid(sent))
-}
-
-fn failure_error(
-    failure: UpstreamFailure,
-    sent: UpstreamSendState,
-) -> Result<ProviderError, ProviderError> {
-    if failure.message.len() > 64 * 1024
-        || failure.code.as_ref().is_some_and(|code| code.len() > 256)
-        || failure
-            .status
-            .is_some_and(|status| !(400..=599).contains(&status))
-        || failure
-            .retry_after_ms
-            .is_some_and(|delay| delay > 24 * 60 * 60 * 1000)
-    {
-        return Err(invalid(sent));
-    }
-    let kind = match failure.kind {
-        UpstreamFailureKind::InvalidRequest => ProviderErrorKind::InvalidRequest,
-        UpstreamFailureKind::Unsupported => ProviderErrorKind::Unsupported,
-        UpstreamFailureKind::Unauthorized => ProviderErrorKind::Unauthorized,
-        UpstreamFailureKind::PermissionDenied => ProviderErrorKind::PermissionDenied,
-        UpstreamFailureKind::RateLimited => ProviderErrorKind::RateLimited,
-        UpstreamFailureKind::QuotaExhausted => ProviderErrorKind::QuotaExhausted,
-        UpstreamFailureKind::Timeout => ProviderErrorKind::Timeout,
-        UpstreamFailureKind::Unavailable => ProviderErrorKind::Unavailable,
-        UpstreamFailureKind::Protocol => ProviderErrorKind::Protocol,
-    };
-    let mut error = ProviderError::new(kind, sent);
-    if let Some(code) = &failure.code {
-        error = error.with_upstream_code(OpaqueUpstreamValue::new(code.clone()));
-    }
-    error = error.with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
-        failure.message,
-        failure.code,
-        None,
-    ));
-    if let Some(status) = failure.status {
-        error = error.with_status(status);
-    }
-    if let Some(delay) = failure.retry_after_ms {
-        error = error.with_retry_after(Duration::from_millis(delay));
-    }
-    Ok(error)
-}
-
-pub(super) fn invalid(sent: UpstreamSendState) -> ProviderError {
-    ProviderError::new(ProviderErrorKind::Protocol, sent)
 }

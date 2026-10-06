@@ -1,4 +1,4 @@
-//! PostgreSQL revision 提交后的可丢失 Redis Pub/Sub 通知。
+//! PostgreSQL revision 提交后的可丢失 Redis Pub/Sub 通知
 
 use std::pin::Pin;
 
@@ -54,11 +54,11 @@ impl RuntimeChangeRepository for RedisRuntimeChangeRepository {
             .client
             .get_connection_manager()
             .await
-            .map_err(|_| redis_unavailable("connect runtime change publisher"))?;
+            .map_err(|source| redis_unavailable("connect runtime change publisher", source))?;
         connection
             .publish::<_, _, i64>(&self.channel, payload)
             .await
-            .map_err(|_| redis_unavailable("publish runtime change"))?;
+            .map_err(|source| redis_unavailable("publish runtime change", source))?;
         Ok(())
     }
 
@@ -67,15 +67,15 @@ impl RuntimeChangeRepository for RedisRuntimeChangeRepository {
             .client
             .get_async_pubsub()
             .await
-            .map_err(|_| redis_unavailable("connect runtime change subscriber"))?;
+            .map_err(|source| redis_unavailable("connect runtime change subscriber", source))?;
         pubsub
             .subscribe(&self.channel)
             .await
-            .map_err(|_| redis_unavailable("subscribe runtime changes"))?;
+            .map_err(|source| redis_unavailable("subscribe runtime changes", source))?;
         let stream = pubsub.into_on_message().map(|message| {
-            let payload = message
-                .get_payload::<String>()
-                .map_err(|_| invalid("runtime change payload is not UTF-8"))?;
+            let payload = message.get_payload::<String>().map_err(|source| {
+                invalid("runtime change payload is not UTF-8").with_source(source)
+            })?;
             let wire: RuntimeChangeWire =
                 serde_json::from_str(&payload).map_err(|error| invalid(&error.to_string()))?;
             wire.try_into()
@@ -154,6 +154,7 @@ impl TryFrom<RuntimeChangeWire> for RuntimeChange {
 
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidData {
+        source: None,
         entity: "runtime change",
         message: message.to_owned(),
     }

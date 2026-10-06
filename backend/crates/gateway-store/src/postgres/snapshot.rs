@@ -1,9 +1,9 @@
-//! 终态配置表的一致性 `RuntimeSnapshot` 输入读取。
+//! 终态配置表的一致性 `RuntimeSnapshot` 输入读取
 
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use gateway_core::account::ProviderAccountId;
+use gateway_core::account::{FastMode, ProviderAccountId};
 use gateway_core::routing::{
     AccountGroupId, ConfigRevision,
     snapshot::{
@@ -54,7 +54,7 @@ pub struct RuntimeSnapshotData {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotAccountGroupData {
-    pub disable_fast: bool,
+    pub fast_mode: FastMode,
     pub id: AccountGroupId,
     pub name: String,
     pub enabled: bool,
@@ -98,11 +98,13 @@ impl RuntimeSnapshotRepository for PgRuntimeSnapshotRepository {
             .pool
             .begin()
             .await
-            .map_err(|_| postgres_unavailable("begin runtime snapshot"))?;
+            .map_err(|source| postgres_unavailable("begin runtime snapshot", source))?;
         sqlx::query("set transaction isolation level repeatable read read only")
             .execute(&mut *transaction)
             .await
-            .map_err(|_| postgres_unavailable("configure runtime snapshot transaction"))?;
+            .map_err(|source| {
+                postgres_unavailable("configure runtime snapshot transaction", source)
+            })?;
 
         let (config_revision, settings) = load_settings(&mut transaction).await?;
         let client_api_keys = load_client_keys(&mut transaction).await?;
@@ -112,7 +114,7 @@ impl RuntimeSnapshotRepository for PgRuntimeSnapshotRepository {
         transaction
             .commit()
             .await
-            .map_err(|_| postgres_unavailable("commit runtime snapshot"))?;
+            .map_err(|source| postgres_unavailable("commit runtime snapshot", source))?;
 
         let observed_current_revision =
             RuntimeSnapshotRepository::current_config_revision(self).await?;
@@ -133,8 +135,9 @@ impl RuntimeSnapshotRepository for PgRuntimeSnapshotRepository {
         )
         .fetch_optional(&self.pool)
         .await
-        .map_err(|_| postgres_unavailable("read current config revision"))?
+        .map_err(|source| postgres_unavailable("read current config revision", source))?
         .ok_or_else(|| StoreError::NotFound {
+            source: None,
             entity: "runtime settings",
             id: "1".to_owned(),
         })?;
@@ -197,7 +200,7 @@ impl SnapshotStorePort for PgRuntimeSnapshotRepository {
                 .into_iter()
                 .map(|group| {
                     SnapshotAccountGroupFacts::new(group.id, group.name, group.enabled)
-                        .with_disable_fast(group.disable_fast)
+                        .with_fast_mode(group.fast_mode)
                 })
                 .collect();
             let provider_accounts = data
@@ -284,8 +287,9 @@ async fn load_settings(
     )
     .fetch_optional(&mut **transaction)
     .await
-    .map_err(|_| postgres_unavailable("load snapshot settings"))?
+    .map_err(|source| postgres_unavailable("load snapshot settings", source))?
     .ok_or_else(|| StoreError::NotFound {
+        source: None,
         entity: "runtime settings",
         id: "1".to_owned(),
     })?;
@@ -349,7 +353,7 @@ async fn load_client_keys(
     )
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|_| postgres_unavailable("load snapshot client policies"))?;
+    .map_err(|source| postgres_unavailable("load snapshot client policies", source))?;
     rows.into_iter()
         .map(|row| {
             let mut key = ClientApiKeySnapshot::from_persisted(row.0, row.1, row.2, row.3, row.4)?;
@@ -362,17 +366,19 @@ async fn load_client_keys(
 async fn load_account_groups(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<Vec<SnapshotAccountGroupData>> {
-    let rows = sqlx::query_as::<_, (String, String, bool, bool)>(
-        "select id, name, enabled, disable_fast from account_groups order by id",
+    let rows = sqlx::query_as::<_, (String, String, bool, String)>(
+        "select id, name, enabled, fast_mode from account_groups order by id",
     )
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|_| postgres_unavailable("load snapshot account groups"))?;
+    .map_err(|source| postgres_unavailable("load snapshot account groups", source))?;
     rows.into_iter()
-        .map(|(id, name, enabled, disable_fast)| {
+        .map(|(id, name, enabled, fast_mode)| {
             Ok(SnapshotAccountGroupData {
-                disable_fast,
-                id: AccountGroupId::new(id).map_err(|_| invalid("invalid account group id"))?,
+                fast_mode: FastMode::parse(&fast_mode)
+                    .ok_or_else(|| invalid("invalid fast_mode"))?,
+                id: AccountGroupId::new(id)
+                    .map_err(|source| invalid("invalid account group id").with_source(source))?,
                 name,
                 enabled,
             })
@@ -393,7 +399,7 @@ async fn load_provider_accounts(
     >("select id, provider_kind, model_access_json from provider_accounts order by id")
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|_| postgres_unavailable("load snapshot provider accounts"))
+    .map_err(|source| postgres_unavailable("load snapshot provider accounts", source))
     .map(|rows| {
         rows.into_iter()
             .map(
@@ -416,12 +422,12 @@ async fn load_group_memberships(
     )
     .fetch_all(&mut **transaction)
     .await
-    .map_err(|_| postgres_unavailable("load snapshot group memberships"))?;
+    .map_err(|source| postgres_unavailable("load snapshot group memberships", source))?;
     rows.into_iter()
         .map(|(group_id, account_id)| {
             Ok(SnapshotGroupMembershipData {
                 group_id: AccountGroupId::new(group_id)
-                    .map_err(|_| invalid("invalid membership group id"))?,
+                    .map_err(|source| invalid("invalid membership group id").with_source(source))?,
                 account_id,
             })
         })
@@ -433,15 +439,18 @@ fn revision_from_i64(value: i64) -> StoreResult<Revision> {
 }
 
 fn to_u64(value: i64) -> StoreResult<u64> {
-    u64::try_from(value).map_err(|_| invalid("numeric snapshot field is negative"))
+    u64::try_from(value)
+        .map_err(|source| invalid("numeric snapshot field is negative").with_source(source))
 }
 
 fn to_u32(value: i64) -> StoreResult<u32> {
-    u32::try_from(value).map_err(|_| invalid("numeric snapshot field is outside u32"))
+    u32::try_from(value)
+        .map_err(|source| invalid("numeric snapshot field is outside u32").with_source(source))
 }
 
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidData {
+        source: None,
         entity: "runtime snapshot",
         message: message.to_owned(),
     }
@@ -456,8 +465,9 @@ fn decode_request_profiles(
         .into_iter()
         .map(|(kind, document)| {
             Ok((
-                gateway_core::routing::ProviderKind::new(kind)
-                    .map_err(|_| invalid("invalid request profile provider"))?,
+                gateway_core::routing::ProviderKind::new(kind).map_err(|source| {
+                    invalid("invalid request profile provider").with_source(source)
+                })?,
                 gateway_core::account::OpaqueProviderData::new(document),
             ))
         })

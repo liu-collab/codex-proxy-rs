@@ -1,4 +1,4 @@
-//! 明文 `client_api_keys` 的 PostgreSQL owner。
+//! 明文 `client_api_keys` 的 PostgreSQL owner
 
 use gateway_admin::model::audit::MutationAuditOperation;
 use std::{
@@ -74,13 +74,17 @@ impl ClientApiKeySnapshot {
     ) -> StoreResult<Self> {
         Ok(Self {
             request_profiles: std::collections::BTreeMap::new(),
-            id: ClientApiKeyId::new(id).map_err(|_| invalid("persisted key ID is invalid"))?,
-            plaintext_key: PlaintextClientApiKey::new(key)
-                .map_err(|_| invalid("persisted plaintext key is invalid"))?,
+            id: ClientApiKeyId::new(id)
+                .map_err(|source| invalid("persisted key ID is invalid").with_source(source))?,
+            plaintext_key: PlaintextClientApiKey::new(key).map_err(|source| {
+                invalid("persisted plaintext key is invalid").with_source(source)
+            })?,
             group_ids: group_ids
                 .into_iter()
                 .map(|id| {
-                    AccountGroupId::new(id).map_err(|_| invalid("persisted group ID is invalid"))
+                    AccountGroupId::new(id).map_err(|source| {
+                        invalid("persisted group ID is invalid").with_source(source)
+                    })
                 })
                 .collect::<StoreResult<Vec<_>>>()?,
             limits: RateLimits {
@@ -391,7 +395,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
             .build()
             .fetch_all(&self.pool)
             .await
-            .map_err(|_| postgres_unavailable("list client API keys"))?;
+            .map_err(|source| postgres_unavailable("list client API keys", source))?;
         let mut items = rows
             .iter()
             .map(client_record_from_row)
@@ -425,7 +429,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|_| postgres_unavailable("reveal client API key"))?
+        .map_err(|source| postgres_unavailable("reveal client API key", source))?
         .map(client_secret_from_row)
         .transpose()
     }
@@ -469,7 +473,7 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|_| postgres_unavailable("get client API key"))?
+        .map_err(|source| postgres_unavailable("get client API key", source))?
         .as_ref()
         .map(client_record_from_row)
         .transpose()?;
@@ -503,14 +507,14 @@ impl ClientApiKeyRepository for PgClientApiKeyRepository {
         .bind(timestamps)
         .execute(&self.pool)
         .await
-        .map_err(|_| postgres_unavailable("touch client API keys"))?;
+        .map_err(|source| postgres_unavailable("touch client API keys", source))?;
         Ok(result.rows_affected())
     }
 }
 
-/// 认证成功后按一秒窗口合并写回 API Key 最后使用时间。
+/// 认证成功后按一秒窗口合并写回 API Key 最后使用时间
 ///
-/// 该 adapter 仅记录稳定 Key ID；认证材料从不进入异步队列或日志。
+/// 该 adapter 仅记录稳定 Key ID；认证材料从不进入异步队列或日志
 #[derive(Clone)]
 pub struct PgClientApiKeyUsageSink {
     state: Arc<ClientApiKeyUsageBuffer>,
@@ -654,7 +658,7 @@ fn lock_unpoisoned<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Admin 用例所需的 Client Key 事务能力。
+/// Admin 用例所需的 Client Key 事务能力
 #[derive(Clone)]
 pub struct PgAdminClientKeyStore {
     keys: PgClientApiKeyRepository,
@@ -670,7 +674,7 @@ impl PgAdminClientKeyStore {
         }
     }
 
-    /// 会话恢复只读启用状态，不加载明文凭据或其他 Key 的资料。
+    /// 会话恢复只读启用状态，不加载明文凭据或其他 Key 的资料
     pub async fn is_enabled(&self, id: &ClientApiKeyId) -> AdminStoreResult<bool> {
         sqlx::query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM client_api_keys WHERE id = $1 AND enabled)",
@@ -678,7 +682,12 @@ impl PgAdminClientKeyStore {
         .bind(id.as_str())
         .fetch_one(&self.keys.pool)
         .await
-        .map_err(|_| admin_store_error(ENTITY, postgres_unavailable("read client key status")))
+        .map_err(|source| {
+            admin_store_error(
+                ENTITY,
+                postgres_unavailable("read client key status", source),
+            )
+        })
     }
 
     async fn revision(&self) -> AdminStoreResult<gateway_admin::model::Revision> {
@@ -698,6 +707,7 @@ impl PgAdminClientKeyStore {
                 admin_store_error(
                     ENTITY,
                     StoreError::NotFound {
+                        source: None,
                         entity: ENTITY,
                         id: id.as_str().to_owned(),
                     },
@@ -718,37 +728,42 @@ impl ClientKeyStore for PgAdminClientKeyStore {
         use gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin;
         let map_error = |error| admin_store_error(ENTITY, error);
         let mut tx = match &origin {
-            ClientKeyBudgetMutationOrigin::Admin => self
-                .keys
-                .pool
-                .begin()
-                .await
-                .map_err(|_| map_error(postgres_unavailable("begin budget limits update")))?,
+            ClientKeyBudgetMutationOrigin::Admin => {
+                self.keys.pool.begin().await.map_err(|source| {
+                    map_error(postgres_unavailable("begin budget limits update", source))
+                })?
+            }
             ClientKeyBudgetMutationOrigin::Plugin(owner) => {
                 super::plugins::begin_plugin_mutation(&self.keys.pool, owner).await?
             }
         };
-        // 保持与完整 Key 编辑相同的锁顺序；绝不读出整份配置再覆盖写回。
+        // 保持与完整 Key 编辑相同的锁顺序；绝不读出整份配置再覆盖写回
         sqlx::query("select config_revision from runtime_settings where id=1 for update")
             .execute(&mut *tx)
             .await
-            .map_err(|_| map_error(postgres_unavailable("lock budget limits configuration")))?;
+            .map_err(|source| {
+                map_error(postgres_unavailable(
+                    "lock budget limits configuration",
+                    source,
+                ))
+            })?;
         let current: Option<(String, String)> = sqlx::query_as(
             "select daily_limit_usd::text, weekly_limit_usd::text from client_api_keys where id=$1 for update"
         ).bind(command.id.as_str()).fetch_optional(&mut *tx).await
-            .map_err(|_| map_error(postgres_unavailable("lock budget limits key")))?;
+            .map_err(|source| map_error(postgres_unavailable("lock budget limits key", source)))?;
         let (daily, weekly) = current.ok_or_else(|| {
             map_error(StoreError::NotFound {
+                source: None,
                 entity: ENTITY,
                 id: command.id.as_str().to_owned(),
             })
         })?;
-        let daily: Decimal = daily
-            .parse()
-            .map_err(|_| map_error(postgres_unavailable("decode daily budget limit")))?;
-        let weekly: Decimal = weekly
-            .parse()
-            .map_err(|_| map_error(postgres_unavailable("decode weekly budget limit")))?;
+        let daily: Decimal = daily.parse().map_err(|source| {
+            map_error(postgres_unavailable("decode daily budget limit", source))
+        })?;
+        let weekly: Decimal = weekly.parse().map_err(|source| {
+            map_error(postgres_unavailable("decode weekly budget limit", source))
+        })?;
         let mut fields = Vec::new();
         if command.daily_limit_usd.is_some_and(|value| value != daily) {
             fields.push("daily_limit_usd".to_owned());
@@ -760,9 +775,12 @@ impl ClientKeyStore for PgAdminClientKeyStore {
             fields.push("weekly_limit_usd".to_owned());
         }
         if fields.is_empty() {
-            tx.commit()
-                .await
-                .map_err(|_| map_error(postgres_unavailable("finish unchanged budget limits")))?;
+            tx.commit().await.map_err(|source| {
+                map_error(postgres_unavailable(
+                    "finish unchanged budget limits",
+                    source,
+                ))
+            })?;
             return Ok(None);
         }
         sqlx::query(
@@ -776,7 +794,7 @@ impl ClientKeyStore for PgAdminClientKeyStore {
         .bind(command.weekly_limit_usd.map(|value| value.canonical()))
         .execute(&mut *tx)
         .await
-        .map_err(|_| map_error(postgres_unavailable("update budget limits")))?;
+        .map_err(|source| map_error(postgres_unavailable("update budget limits", source)))?;
         let revision = super::bump_config_revision_in_transaction(&mut tx)
             .await
             .map_err(map_error)?;
@@ -792,9 +810,9 @@ impl ClientKeyStore for PgAdminClientKeyStore {
         )
         .await
         .map_err(map_error)?;
-        tx.commit()
-            .await
-            .map_err(|_| map_error(postgres_unavailable("commit budget limits update")))?;
+        tx.commit().await.map_err(|source| {
+            map_error(postgres_unavailable("commit budget limits update", source))
+        })?;
         Ok(Some(admin_revision(revision)?))
     }
 
@@ -1147,12 +1165,13 @@ pub(crate) async fn insert_client_api_key_in_transaction(
                 && database.constraint() == Some("client_api_keys_key_sha256_idx")
         }) {
             StoreError::Conflict {
+        source: None,
                 entity: ENTITY,
                 id: key.id.clone(),
                 kind: crate::ConflictKind::InvalidTransition,
             }
         } else {
-            postgres_unavailable("insert client API key in transaction")
+            postgres_unavailable("insert client API key in transaction", error)
         }
     })?;
     replace_client_api_key_groups_in_transaction(transaction, &key.id, &key.group_ids).await?;
@@ -1203,7 +1222,7 @@ pub(crate) async fn update_client_api_key_in_transaction(
     .bind(sqlx::types::Json(replacement_profiles))
     .execute(&mut **transaction)
     .await
-    .map_err(|_| postgres_unavailable("update client API key in transaction"))?;
+    .map_err(|source| postgres_unavailable("update client API key in transaction", source))?;
     require_changed(result.rows_affected(), &key.id)?;
     replace_client_api_key_groups_in_transaction(transaction, &key.id, &key.group_ids).await
 }
@@ -1213,8 +1232,8 @@ async fn ensure_client_key_name_available(
     id: &str,
     name: &str,
 ) -> StoreResult<()> {
-    // 调用方已通过递增配置版本持有控制面行锁，查重与写入在同一事务内串行执行。
-    // 不回填历史重名数据；创建和保存时统一校验，更新排除当前记录。
+    // 调用方已通过递增配置版本持有控制面行锁，查重与写入在同一事务内串行执行
+    // 不回填历史重名数据；创建和保存时统一校验，更新排除当前记录
     let duplicate: bool = sqlx::query_scalar(
         "select exists(select 1 from client_api_keys
          where lower(btrim(name)) = lower($1) and id <> $2)",
@@ -1223,9 +1242,10 @@ async fn ensure_client_key_name_available(
     .bind(id)
     .fetch_one(&mut **transaction)
     .await
-    .map_err(|_| postgres_unavailable("check client API key name"))?;
+    .map_err(|source| postgres_unavailable("check client API key name", source))?;
     if duplicate {
         return Err(StoreError::Conflict {
+            source: None,
             entity: ENTITY,
             id: id.to_owned(),
             kind: crate::ConflictKind::DuplicateName,
@@ -1246,7 +1266,9 @@ pub(crate) async fn set_client_api_key_enabled_in_transaction(
             .bind(enabled)
             .execute(&mut **transaction)
             .await
-            .map_err(|_| postgres_unavailable("set client API key state in transaction"))?;
+            .map_err(|source| {
+                postgres_unavailable("set client API key state in transaction", source)
+            })?;
     require_changed(result.rows_affected(), id)
 }
 
@@ -1259,7 +1281,7 @@ pub(crate) async fn delete_client_api_key_in_transaction(
         .bind(id)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| postgres_unavailable("delete client API key in transaction"))?;
+        .map_err(|source| postgres_unavailable("delete client API key in transaction", source))?;
     require_changed(result.rows_affected(), id)
 }
 
@@ -1268,6 +1290,7 @@ fn require_changed(rows_affected: u64, id: &str) -> StoreResult<()> {
         Ok(())
     } else {
         Err(StoreError::NotFound {
+            source: None,
             entity: ENTITY,
             id: id.to_owned(),
         })
@@ -1287,9 +1310,10 @@ async fn replace_client_api_key_groups_in_transaction(
         .bind(group_ids)
         .fetch_one(&mut **transaction)
         .await
-        .map_err(|_| postgres_unavailable("validate client API key groups"))?;
+        .map_err(|source| postgres_unavailable("validate client API key groups", source))?;
         if usize::try_from(count).ok() != Some(group_ids.len()) {
             return Err(StoreError::NotFound {
+                source: None,
                 entity: "account group",
                 id: "client API key group selection".to_owned(),
             });
@@ -1299,7 +1323,7 @@ async fn replace_client_api_key_groups_in_transaction(
         .bind(key_id)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| postgres_unavailable("delete client API key groups"))?;
+        .map_err(|source| postgres_unavailable("delete client API key groups", source))?;
     if !group_ids.is_empty() {
         sqlx::query(
             "insert into client_api_key_groups
@@ -1310,7 +1334,7 @@ async fn replace_client_api_key_groups_in_transaction(
         .bind(group_ids)
         .execute(&mut **transaction)
         .await
-        .map_err(|_| postgres_unavailable("insert client API key groups"))?;
+        .map_err(|source| postgres_unavailable("insert client API key groups", source))?;
     }
     Ok(())
 }
@@ -1328,8 +1352,9 @@ fn validate_group_ids(group_ids: &[String]) -> StoreResult<()> {
 }
 
 fn validate_key(key: &str) -> StoreResult<()> {
-    PlaintextClientApiKey::validate(key)
-        .map_err(|_| invalid("key must contain nonempty visible ASCII characters"))
+    PlaintextClientApiKey::validate(key).map_err(|source| {
+        invalid("key must contain nonempty visible ASCII characters").with_source(source)
+    })
 }
 
 fn validate_request_profiles<'a>(
@@ -1367,7 +1392,8 @@ fn decode_request_profiles(
         .into_iter()
         .map(|(provider, profile)| {
             Ok((
-                ProviderKind::new(provider).map_err(|_| invalid("invalid request profile key"))?,
+                ProviderKind::new(provider)
+                    .map_err(|source| invalid("invalid request profile key").with_source(source))?,
                 OpaqueProviderData::new(profile),
             ))
         })
@@ -1390,7 +1416,7 @@ fn client_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<ClientApiK
     use sqlx::Row as _;
     let groups: serde_json::Value = row
         .try_get("groups")
-        .map_err(|_| invalid("invalid groups"))?;
+        .map_err(|source| invalid("invalid groups").with_source(source))?;
     Ok(
         ClientApiKeyRecord {
             request_profile_overrides:
@@ -1398,40 +1424,47 @@ fn client_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<ClientApiK
                     row.try_get::<sqlx::types::Json<
                         BTreeMap<String, serde_json::Map<String, serde_json::Value>>,
                     >, _>("request_profile_overrides")
-                        .map_err(|_| invalid("invalid request profiles"))?
+                        .map_err(|source| invalid("invalid request profiles").with_source(source))?
                         .0,
                 )?,
-            id: row.try_get("id").map_err(|_| invalid("invalid id"))?,
-            name: row.try_get("name").map_err(|_| invalid("invalid name"))?,
-            label: row.try_get("label").map_err(|_| invalid("invalid label"))?,
-            groups: serde_json::from_value(groups).map_err(|_| invalid("invalid groups"))?,
+            id: row
+                .try_get("id")
+                .map_err(|source| invalid("invalid id").with_source(source))?,
+            name: row
+                .try_get("name")
+                .map_err(|source| invalid("invalid name").with_source(source))?,
+            label: row
+                .try_get("label")
+                .map_err(|source| invalid("invalid label").with_source(source))?,
+            groups: serde_json::from_value(groups)
+                .map_err(|source| invalid("invalid groups").with_source(source))?,
             provider_kinds: row
                 .try_get("provider_kinds")
-                .map_err(|_| invalid("invalid provider kinds"))?,
+                .map_err(|source| invalid("invalid provider kinds").with_source(source))?,
             prefix: row
                 .try_get("prefix")
-                .map_err(|_| invalid("invalid prefix"))?,
+                .map_err(|source| invalid("invalid prefix").with_source(source))?,
             enabled: row
                 .try_get("enabled")
-                .map_err(|_| invalid("invalid enabled"))?,
+                .map_err(|source| invalid("invalid enabled").with_source(source))?,
             max_concurrency: to_u64(
                 row.try_get("max_concurrency")
-                    .map_err(|_| invalid("invalid max concurrency"))?,
+                    .map_err(|source| invalid("invalid max concurrency").with_source(source))?,
             )?,
             requests_per_minute: to_u64(
                 row.try_get("requests_per_minute")
-                    .map_err(|_| invalid("invalid requests per minute"))?,
+                    .map_err(|source| invalid("invalid requests per minute").with_source(source))?,
             )?,
             budget: ClientBudgetStatus::default(),
             last_used_at: row
                 .try_get("last_used_at")
-                .map_err(|_| invalid("invalid last used at"))?,
+                .map_err(|source| invalid("invalid last used at").with_source(source))?,
             created_at: row
                 .try_get("created_at")
-                .map_err(|_| invalid("invalid created at"))?,
+                .map_err(|source| invalid("invalid created at").with_source(source))?,
             updated_at: row
                 .try_get("updated_at")
-                .map_err(|_| invalid("invalid updated at"))?,
+                .map_err(|source| invalid("invalid updated at").with_source(source))?,
         },
     )
 }
@@ -1444,7 +1477,7 @@ async fn count_client_api_keys(pool: &PgPool, search: Option<&str>) -> StoreResu
         .build_query_scalar::<i64>()
         .fetch_one(pool)
         .await
-        .map_err(|_| postgres_unavailable("count client API keys"))?;
+        .map_err(|source| postgres_unavailable("count client API keys", source))?;
     to_u64(count)
 }
 
@@ -1504,41 +1537,45 @@ async fn load_client_key_memberships(
     .bind(ids)
     .fetch_all(pool)
     .await
-    .map_err(|_| postgres_unavailable("load client API key memberships"))?;
+    .map_err(|source| postgres_unavailable("load client API key memberships", source))?;
     let mut groups = BTreeMap::<String, Vec<ClientApiKeyGroupRecord>>::new();
     let mut providers = BTreeMap::<String, BTreeSet<String>>::new();
     for row in rows {
         use sqlx::Row as _;
         let key_id: String = row
             .try_get("key_id")
-            .map_err(|_| invalid("invalid client API key membership"))?;
+            .map_err(|source| invalid("invalid client API key membership").with_source(source))?;
         let group_id: Option<String> = row
             .try_get("group_id")
-            .map_err(|_| invalid("invalid client API key group"))?;
+            .map_err(|source| invalid("invalid client API key group").with_source(source))?;
         if let Some(group_id) = group_id {
             groups
                 .entry(key_id.clone())
                 .or_default()
                 .push(ClientApiKeyGroupRecord {
                     id: group_id,
-                    name: row
-                        .try_get("group_name")
-                        .map_err(|_| invalid("invalid client API key group name"))?,
-                    color: row
-                        .try_get("group_color")
-                        .map_err(|_| invalid("invalid client API key group color"))?,
-                    enabled: row
-                        .try_get("group_enabled")
-                        .map_err(|_| invalid("invalid client API key group state"))?,
+                    name: row.try_get("group_name").map_err(|source| {
+                        invalid("invalid client API key group name").with_source(source)
+                    })?,
+                    color: row.try_get("group_color").map_err(|source| {
+                        invalid("invalid client API key group color").with_source(source)
+                    })?,
+                    enabled: row.try_get("group_enabled").map_err(|source| {
+                        invalid("invalid client API key group state").with_source(source)
+                    })?,
                 });
             providers.entry(key_id).or_default().extend(
                 row.try_get::<Vec<String>, _>("group_provider_kinds")
-                    .map_err(|_| invalid("invalid client API key provider kinds"))?,
+                    .map_err(|source| {
+                        invalid("invalid client API key provider kinds").with_source(source)
+                    })?,
             );
         } else {
             providers.entry(key_id).or_default().extend(
                 row.try_get::<Vec<String>, _>("global_provider_kinds")
-                    .map_err(|_| invalid("invalid global provider kinds"))?,
+                    .map_err(|source| {
+                        invalid("invalid global provider kinds").with_source(source)
+                    })?,
             );
         }
     }
@@ -1635,15 +1672,18 @@ fn push_client_key_order(statement: &mut QueryBuilder<Postgres>, sort: ClientApi
 }
 
 fn to_i64(value: u64) -> StoreResult<i64> {
-    i64::try_from(value).map_err(|_| invalid("numeric limit exceeds PostgreSQL bigint"))
+    i64::try_from(value)
+        .map_err(|source| invalid("numeric limit exceeds PostgreSQL bigint").with_source(source))
 }
 
 fn to_u64(value: i64) -> StoreResult<u64> {
-    u64::try_from(value).map_err(|_| invalid("persisted numeric limit is negative"))
+    u64::try_from(value)
+        .map_err(|source| invalid("persisted numeric limit is negative").with_source(source))
 }
 
 fn invalid(message: &str) -> StoreError {
     StoreError::InvalidData {
+        source: None,
         entity: ENTITY,
         message: message.to_owned(),
     }

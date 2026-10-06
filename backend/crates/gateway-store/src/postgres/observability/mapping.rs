@@ -1,11 +1,11 @@
-//! Store 与 Admin 领域之间的无格式化转换及 row 解析。
+//! Store 与 Admin 领域之间的无格式化转换及 row 解析
 
 use super::*;
 
 pub(crate) fn store_range(
     range: admin_observability::TimeRange,
 ) -> AdminStoreResult<ObservabilityRange> {
-    // 显式外部范围已经校验；自然日零点的空快照仍须返回零计数。
+    // 显式外部范围已经校验；自然日零点的空快照仍须返回零计数
     if range.start == range.end {
         return Ok(ObservabilityRange {
             start: range.start,
@@ -212,6 +212,7 @@ pub(crate) fn admin_latency_percentiles(
 
 pub(crate) fn invalid_admin_percentile() -> gateway_admin::ports::store::AdminStoreError {
     observability_error(StoreError::InvalidData {
+        source: None,
         entity: "observability latency percentile",
         message: "latency percentile is outside the admin contract".to_owned(),
     })
@@ -265,6 +266,7 @@ pub(crate) fn admin_decimal_amount(
 ) -> AdminStoreResult<admin_observability::DecimalAmount> {
     admin_observability::DecimalAmount::from_str(amount.as_str()).map_err(|_| {
         observability_error(StoreError::InvalidData {
+            source: None,
             entity: "observability decimal amount",
             message: "amount is outside the admin numeric contract".to_owned(),
         })
@@ -449,6 +451,7 @@ pub(crate) fn admin_usage_list_record(
         (None, None) => None,
         _ => {
             return Err(observability_error(StoreError::InvalidData {
+                source: None,
                 entity: "observability request billing",
                 message: "cost amount and currency must be present together".to_owned(),
             }));
@@ -522,6 +525,7 @@ pub(crate) fn admin_usage_record(
         (None, None) => None,
         _ => {
             return Err(observability_error(StoreError::InvalidData {
+                source: None,
                 entity: "observability request billing",
                 message: "cost amount and currency must be present together".to_owned(),
             }));
@@ -610,6 +614,7 @@ pub(crate) fn admin_request_outcome(
 ) -> AdminStoreResult<admin_observability::RequestOutcome> {
     admin_observability::RequestOutcome::new(outcome.to_owned()).map_err(|_| {
         observability_error(StoreError::InvalidData {
+            source: None,
             entity: "observability request outcome",
             message: "invalid request outcome".to_owned(),
         })
@@ -778,7 +783,7 @@ pub(crate) fn admin_ops_error(error: OpsErrorRecord) -> admin_observability::Ops
         upstream_request_id: error.upstream_request_id,
         latency_ms: error.latency_ms,
         message: error.message,
-        raw_upstream_error: error.raw_upstream_error,
+        error_details: error.error_details,
         client_ip: error.client_ip,
         user_agent: error.user_agent,
         reasoning_effort: error.reasoning_effort,
@@ -890,7 +895,7 @@ pub(crate) fn usage_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<
         provider_metadata_json: get::<Option<serde_json::Value>>(row, "provider_observation_json")?
             .map(|value| serde_json::to_string(&value))
             .transpose()
-            .map_err(|_| postgres_unavailable("encode provider observation"))?,
+            .map_err(|source| postgres_unavailable("encode provider observation", source))?,
         attempt_count: to_u32(get(row, "attempt_count")?)?,
         upstream_send_state: get(row, "upstream_send_state")?,
         downstream_committed_at: get(row, "downstream_committed_at")?,
@@ -977,7 +982,7 @@ pub(crate) fn ops_error_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<Ops
         upstream_request_id: get(row, "upstream_request_id")?,
         latency_ms: optional_unsigned(row, "latency_ms")?,
         message: get(row, "message")?,
-        raw_upstream_error: get(row, "raw_upstream_error")?,
+        error_details: get(row, "error_details")?,
         client_ip: get(row, "client_ip")?,
         user_agent: get(row, "user_agent")?,
         reasoning_effort: get(row, "reasoning_effort")?,
@@ -1042,7 +1047,7 @@ pub(crate) fn opaque_response_id(
     get::<Option<Vec<u8>>>(row, column)?
         .map(String::from_utf8)
         .transpose()
-        .map_err(|_| invalid(column))
+        .map_err(|source| invalid(column).with_source(source))
 }
 
 pub(crate) fn validate_account_ids(account_ids: &[String]) -> StoreResult<()> {
@@ -1075,7 +1080,8 @@ pub(crate) fn get<'r, T>(row: &'r sqlx::postgres::PgRow, column: &'static str) -
 where
     T: sqlx::Decode<'r, Postgres> + sqlx::Type<Postgres>,
 {
-    row.try_get(column).map_err(|_| invalid(column))
+    row.try_get(column)
+        .map_err(|source| invalid(column).with_source(source))
 }
 
 pub(crate) fn unsigned(row: &sqlx::postgres::PgRow, column: &'static str) -> StoreResult<u64> {
@@ -1104,15 +1110,18 @@ pub(crate) fn optional_status(
 }
 
 pub(crate) fn to_u64(value: i64) -> StoreResult<u64> {
-    u64::try_from(value).map_err(|_| invalid("numeric observation is negative"))
+    u64::try_from(value)
+        .map_err(|source| invalid("numeric observation is negative").with_source(source))
 }
 
 pub(crate) fn to_u32(value: i32) -> StoreResult<u32> {
-    u32::try_from(value).map_err(|_| invalid("integer observation is negative"))
+    u32::try_from(value)
+        .map_err(|source| invalid("integer observation is negative").with_source(source))
 }
 
 pub(crate) fn invalid(message: &str) -> StoreError {
     StoreError::InvalidData {
+        source: None,
         entity: "observability",
         message: message.to_owned(),
     }

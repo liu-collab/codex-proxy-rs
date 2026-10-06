@@ -1,3 +1,5 @@
+//! 验证 OpenAI 令牌刷新、凭据状态与失败反馈的持久化
+
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -95,6 +97,8 @@ impl TokenRefresher for SingleUseRefresher {
             .expect("refresh response lock")
             .take()
             .ok_or_else(|| RefreshFailure::Transport {
+                redacted: false,
+                source: None,
                 message: Some("test refresh response is exhausted".to_owned()),
                 upstream: None,
             })
@@ -218,6 +222,7 @@ fn refresh_service(
         Arc::new(RefreshLeases),
         Arc::new(RefreshCredentialState),
         runtime_policy,
+        Arc::new(crate::RecordingDiagnostics::default()),
     )
 }
 
@@ -300,6 +305,7 @@ async fn scheduled_refresh_stops_retrying_rejected_disabled_credentials() {
         Arc::new(RefreshLeases),
         Arc::new(RefreshCredentialState),
         MutableRuntimePolicy::new(Duration::from_secs(5 * 60)),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let account_id = "acct_disabled_rejected";
     seed_refreshable_account(&store, account_id, SystemTime::now(), None).await;
@@ -386,6 +392,50 @@ async fn scheduled_refresh_uses_the_current_margin_without_persisting_a_normal_s
 }
 
 #[tokio::test]
+async fn scheduled_refresh_staggers_accounts_sharing_the_same_expiry() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let policy = MutableRuntimePolicy::new(Duration::from_secs(5 * 60));
+    let refresher = SingleUseRefresher::new();
+    let service = refresh_service(&store, Arc::clone(&refresher), policy);
+    // margin=300s：寻找一个错峰偏移覆盖到 exp、一个未覆盖的账号，两者共享同一到期时刻。
+    let policy_value = refresh_policy(Duration::from_secs(5 * 60));
+    let mut covered = None;
+    let mut pending = None;
+    for index in 0..64 {
+        let candidate =
+            ProviderAccountId::new(format!("acct_stagger_{index}")).expect("valid account");
+        let stagger = policy_value.refresh_stagger(&candidate).as_secs();
+        if stagger >= 150 && covered.is_none() {
+            covered = Some(candidate.clone());
+        }
+        if stagger < 60 && pending.is_none() {
+            pending = Some(candidate);
+        }
+    }
+    let covered = covered.expect("an account covered by its stagger");
+    let pending = pending.expect("an account not yet covered by its stagger");
+    // exp = now+400s：covered 的有效提前量 ≥ 450s（到期）；pending 的 ≤ 360s，
+    // 即使种子与扫描之间存在秒级耗时也不会提前触发。
+    let expires_at = SystemTime::now()
+        .checked_add(Duration::from_secs(400))
+        .expect("test expiry");
+    seed_refreshable_account(&store, covered.as_str(), expires_at, None).await;
+    seed_refreshable_account(&store, pending.as_str(), expires_at, None).await;
+
+    let outcomes = service.refresh_due().await.expect("refresh cycle");
+
+    assert!(matches!(
+        outcomes.as_slice(),
+        [CodexCredentialRefreshOutcome::Refreshed { account_id, .. }] if account_id == covered.as_str()
+    ));
+    assert_eq!(refresher.calls(), 1);
+    // 未到错峰窗口的账号本轮零接触：不刷新、也不落退避计划。
+    let pending_account = store.account(pending.as_str()).expect("seeded account");
+    assert!(pending_account.next_refresh_at().is_none());
+    assert_eq!(pending_account.credential_state(), CredentialState::Ready);
+}
+
+#[tokio::test]
 async fn scheduled_refresh_rotates_tokens_while_quota_is_exhausted() {
     let store = Arc::new(MemoryAccountStore::default());
     let policy = MutableRuntimePolicy::new(Duration::from_secs(5 * 60));
@@ -461,6 +511,7 @@ async fn scheduled_refresh_persists_the_original_upstream_error_message() {
         Arc::new(RefreshLeases),
         Arc::new(RefreshCredentialState),
         policy,
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let account_id = "acct_invalid_refresh_token";
     seed_refreshable_account(
@@ -524,6 +575,7 @@ async fn scheduled_refresh_persists_retryable_message_inside_the_two_hour_window
         Arc::new(RefreshLeases),
         Arc::new(RefreshCredentialState),
         policy,
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let account_id = "acct_retryable_unauthorized";
     let expires_at = SystemTime::now()
@@ -568,6 +620,8 @@ async fn scheduled_refresh_uses_the_final_message_after_the_two_hour_window() {
         store.repository(),
         Arc::new(FailingRefresher {
             failure: RefreshFailure::Transport {
+                redacted: false,
+                source: None,
                 message: Some(upstream_message.to_owned()),
                 upstream: None,
             },
@@ -575,6 +629,7 @@ async fn scheduled_refresh_uses_the_final_message_after_the_two_hour_window() {
         Arc::new(RefreshLeases),
         Arc::new(RefreshCredentialState),
         policy,
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let account_id = "acct_exhausted_unauthorized";
     seed_refreshable_account(
@@ -829,7 +884,7 @@ struct QuotaRejectionDuringRefresh {
 #[async_trait]
 impl TokenRefresher for QuotaRejectionDuringRefresh {
     async fn refresh(&self, _: &str) -> Result<TokenPair, RefreshFailure> {
-        // 模拟 RT 请求在途时，手动或周期额度查询先收到 401。
+        // 模拟 RT 请求在途时，手动或周期额度查询先收到 401
         if self.background_quota {
             assert_eq!(
                 self.quota
@@ -889,6 +944,7 @@ async fn quota_rejection_during_oauth_refresh_preserves_terminal_result() {
             Arc::new(RefreshLeases),
             Arc::new(RefreshCredentialState),
             MutableRuntimePolicy::new(Duration::from_secs(5 * 60)),
+            Arc::new(crate::RecordingDiagnostics::default()),
         );
         let outcomes = service.refresh_due().await.expect("refresh cycle");
         assert!(
@@ -905,4 +961,47 @@ async fn quota_rejection_during_oauth_refresh_preserves_terminal_result() {
             Some("refresh token invalidated")
         );
     }
+}
+
+#[tokio::test]
+async fn scheduled_refresh_records_native_failure_once_and_keeps_retry_state() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let diagnostics = Arc::new(crate::RecordingDiagnostics::default());
+    let service = CodexCredentialRefreshService::new(
+        store.repository(),
+        Arc::new(FailingRefresher {
+            failure: RefreshFailure::Transport {
+                redacted: false,
+                message: Some("safe transport summary".to_owned()),
+                upstream: None,
+                source: Some(std::io::Error::other("PRIVATE_OAUTH_NATIVE_CAUSE").into()),
+            },
+        }),
+        Arc::new(RefreshLeases),
+        Arc::new(RefreshCredentialState),
+        MutableRuntimePolicy::new(Duration::from_secs(300)),
+        diagnostics.clone(),
+    );
+    seed_refreshable_account(&store, "acct_diagnostic", SystemTime::now(), None).await;
+    let outcomes = service.refresh_due().await.unwrap();
+    assert!(matches!(
+        outcomes.as_slice(),
+        [CodexCredentialRefreshOutcome::Transient { .. }]
+    ));
+    let failures = diagnostics.0.lock().unwrap();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        failures[0].account_id.as_ref().unwrap().as_str(),
+        "acct_diagnostic"
+    );
+    assert_eq!(failures[0].operation, "scheduled_refresh");
+    assert!(
+        failures[0]
+            .details
+            .as_ref()
+            .unwrap()
+            .as_str()
+            .contains("PRIVATE_OAUTH_NATIVE_CAUSE")
+    );
+    assert!(!format!("{:?}", failures[0]).contains("PRIVATE_OAUTH_NATIVE_CAUSE"));
 }

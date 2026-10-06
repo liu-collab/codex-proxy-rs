@@ -1,4 +1,4 @@
-//! `provider_accounts` row 模型、解码与校验。
+//! `provider_accounts` row 模型、解码与校验
 
 use super::*;
 use gateway_core::routing::AccountGroupId;
@@ -9,8 +9,9 @@ pub(crate) const QUOTA_MAX_BYTES: usize = 128 * 1024;
 pub(crate) const MAX_ADMIN_IMPORT_BATCH: usize = 200;
 pub(crate) const ADMIN_USAGE_CHUNK_SIZE: usize = 200;
 
-/// 四种窗口投影通过一组 `GROUPING SETS` 从同一批匹配请求派生。`grouping_* = 1`
-/// 表示对应维度未参与该行聚合，调用方据此区分窗口、模型与成本行。
+/// 四种窗口投影通过一组 `GROUPING SETS` 从同一批匹配请求派生
+/// `grouping_* = 1`
+/// 表示对应维度未参与该行聚合，调用方据此区分窗口、模型与成本行
 pub(crate) fn account_usage_by_windows_sql() -> String {
     let completed_usage = completed_usage_fact_predicate("mr");
     format!(
@@ -247,7 +248,7 @@ pub struct ImportProviderAccounts {
 pub struct ProviderAccountAdminImport {
     pub config_revision: Revision,
     pub account_ids: Vec<String>,
-    /// 与导入同一事务返回的最终凭据版本，避免提交后再查到另一轮写入。
+    /// 与导入同一事务返回的最终凭据版本，避免提交后再查到另一轮写入
     pub credential_revisions: std::collections::BTreeMap<String, Revision>,
 }
 
@@ -445,12 +446,12 @@ pub(crate) fn account_record_from_row(
     let credentials = JsonObject::try_from_value(
         "provider_credentials_json",
         row.try_get("provider_credentials_json")
-            .map_err(|_| invalid("invalid credentials JSON"))?,
+            .map_err(|source| invalid("invalid credentials JSON").with_source(source))?,
         CREDENTIALS_MAX_BYTES,
     )?;
     let quota = row
         .try_get::<Option<serde_json::Value>, _>("provider_quota_json")
-        .map_err(|_| invalid("invalid quota JSON"))?
+        .map_err(|source| invalid("invalid quota JSON").with_source(source))?
         .map(|value| JsonObject::try_from_value("provider_quota_json", value, QUOTA_MAX_BYTES))
         .transpose()?;
     Ok(ProviderAccountRecord {
@@ -464,11 +465,11 @@ pub(crate) fn core_account_from_summary(
     summary: ProviderAccountSummary,
 ) -> Result<CoreProviderAccount, CoreStoreError> {
     let id = CoreProviderAccountId::new(summary.id)
-        .map_err(|_| CoreStoreError::new(CoreStoreErrorKind::InvalidData))?;
+        .map_err(|source| CoreStoreError::caused_by(CoreStoreErrorKind::InvalidData, source))?;
     let provider = ProviderKind::new(summary.provider_kind)
-        .map_err(|_| CoreStoreError::new(CoreStoreErrorKind::InvalidData))?;
+        .map_err(|source| CoreStoreError::caused_by(CoreStoreErrorKind::InvalidData, source))?;
     let revision = CoreCredentialRevision::new(summary.credential_revision.get())
-        .map_err(|_| CoreStoreError::new(CoreStoreErrorKind::InvalidData))?;
+        .map_err(|source| CoreStoreError::caused_by(CoreStoreErrorKind::InvalidData, source))?;
     Ok(CoreProviderAccount::new(
         id,
         provider,
@@ -500,17 +501,6 @@ pub(crate) fn core_account_from_summary(
     ))
 }
 
-pub(crate) fn core_store_error(error: StoreError) -> CoreStoreError {
-    let kind = match error {
-        StoreError::Unavailable { .. } => CoreStoreErrorKind::Unavailable,
-        StoreError::Conflict { .. } => CoreStoreErrorKind::Conflict,
-        StoreError::NotFound { .. } | StoreError::InvalidData { .. } => {
-            CoreStoreErrorKind::InvalidData
-        }
-    };
-    CoreStoreError::new(kind)
-}
-
 pub(crate) fn require_core_update(updated: bool) -> Result<(), CoreStoreError> {
     if updated {
         Ok(())
@@ -524,10 +514,10 @@ pub(crate) fn account_summary_from_row(
 ) -> StoreResult<ProviderAccountSummary> {
     let revision = row
         .try_get::<i64, _>("credential_revision")
-        .map_err(|_| invalid("invalid credential revision"))?;
+        .map_err(|source| invalid("invalid credential revision").with_source(source))?;
     let credential_state = row
         .try_get::<String, _>("credential_state")
-        .map_err(|_| invalid("invalid credential_state"))?;
+        .map_err(|source| invalid("invalid credential_state").with_source(source))?;
     let quota_access_state = parse_quota_access_state(&get::<String>(&row, "quota_access_state")?)?;
     let quota_evidence = parse_quota_evidence(get(&row, "quota_evidence")?)?;
     let quota_access_observed_at = get::<Option<DateTime<Utc>>>(&row, "quota_access_observed_at")?;
@@ -556,7 +546,7 @@ pub(crate) fn account_summary_from_row(
         outbound_proxy: get::<Option<String>>(&row, "outbound_proxy_url")?
             .map(|url| {
                 gateway_core::account::OutboundProxy::parse(&url)
-                    .map_err(|_| invalid("invalid outbound proxy"))
+                    .map_err(|source| invalid("invalid outbound proxy").with_source(source))
             })
             .transpose()?,
         id: get(&row, "id")?,
@@ -594,7 +584,8 @@ pub(crate) fn get<'r, T>(row: &'r sqlx::postgres::PgRow, column: &'static str) -
 where
     T: sqlx::Decode<'r, sqlx::Postgres> + sqlx::Type<sqlx::Postgres>,
 {
-    row.try_get(column).map_err(|_| invalid(column))
+    row.try_get(column)
+        .map_err(|source| invalid(column).with_source(source))
 }
 
 pub(crate) fn validate_object_size(
@@ -604,8 +595,9 @@ pub(crate) fn validate_object_size(
 ) -> StoreResult<()> {
     let size = serde_json::to_vec(&object.as_value())
         .map_err(|error| StoreError::InvalidData {
+            source: Some(error.into()),
             entity: ENTITY,
-            message: error.to_string(),
+            message: "JSON encoding failed".to_owned(),
         })?
         .len();
     if size > max {
@@ -616,15 +608,16 @@ pub(crate) fn validate_object_size(
 }
 
 pub(crate) fn to_i64(value: u64) -> StoreResult<i64> {
-    i64::try_from(value).map_err(|_| invalid("revision is too large"))
+    i64::try_from(value).map_err(|source| invalid("revision is too large").with_source(source))
 }
 
 pub(crate) fn to_u64(value: i64) -> StoreResult<u64> {
-    u64::try_from(value).map_err(|_| invalid("revision must be positive"))
+    u64::try_from(value).map_err(|source| invalid("revision must be positive").with_source(source))
 }
 
 pub(crate) fn invalid(message: &str) -> StoreError {
     StoreError::InvalidData {
+        source: None,
         entity: ENTITY,
         message: message.to_owned(),
     }

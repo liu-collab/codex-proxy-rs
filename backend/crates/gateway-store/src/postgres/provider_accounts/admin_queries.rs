@@ -1,4 +1,4 @@
-//! 管理账号目录的数据库分页 read model。
+//! 管理账号目录的数据库分页 read model
 
 use super::*;
 
@@ -147,7 +147,7 @@ pub(crate) async fn load_admin_account_page(
            left join outbound_proxies p on p.id = a.outbound_proxy_id
           order by page.page_position"
     );
-    // 动态片段只来自上面的封闭排序枚举与固定 usage predicate；所有请求值仍使用 bind。
+    // 动态片段只来自上面的封闭排序枚举与固定 usage predicate；所有请求值仍使用 bind
     let rows = sqlx::query(sqlx::AssertSqlSafe(statement))
         .bind(active_rate_limited_ids)
         .bind(now)
@@ -160,7 +160,12 @@ pub(crate) async fn load_admin_account_page(
         .bind(offset)
         .fetch_all(pool)
         .await
-        .map_err(|_| admin_store_error(ENTITY, postgres_unavailable("load admin account page")))?;
+        .map_err(|source| {
+            admin_store_error(
+                ENTITY,
+                postgres_unavailable("load admin account page", source),
+            )
+        })?;
     let metadata = rows.first().ok_or_else(|| {
         AdminStoreError::new(
             AdminStoreErrorKind::Unavailable,
@@ -211,10 +216,10 @@ async fn validate_group_filter(
             .bind(group_id.as_str())
             .fetch_one(pool)
             .await
-            .map_err(|_| {
+            .map_err(|source| {
                 admin_store_error(
                     ENTITY,
-                    postgres_unavailable("validate admin account group filter"),
+                    postgres_unavailable("validate admin account group filter", source),
                 )
             })?;
     if exists {
@@ -223,6 +228,7 @@ async fn validate_group_filter(
         Err(admin_store_error(
             ENTITY,
             StoreError::NotFound {
+                source: None,
                 entity: "account group",
                 id: group_id.as_str().to_owned(),
             },

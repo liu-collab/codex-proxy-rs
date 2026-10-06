@@ -1,3 +1,5 @@
+//! 将插件 RPC 流消息桥接为有界接收流，并归还消费信用
+
 use std::sync::Arc;
 
 use tokio::{
@@ -41,7 +43,7 @@ impl StreamIngress {
         self.window.receive(sequence, payload.len())?;
         self.chunks
             .try_send(payload)
-            .map_err(|_| RpcError::Protocol)
+            .map_err(|_| RpcError::Protocol(None))
     }
 
     pub fn release(&mut self, bytes: u32) -> Result<(), RpcError> {
@@ -53,7 +55,7 @@ impl StreamIngress {
     }
 }
 
-/// 消费者读取后才补充窗口；终态走独立通道，不会排在满数据队列后等待。
+/// 消费者读取后才补充窗口；终态走独立通道，不会排在满数据队列后等待
 pub struct RpcStream {
     pub initial: RpcReply,
     pub(crate) chunks: mpsc::Receiver<Vec<u8>>,
@@ -84,7 +86,7 @@ impl RpcStream {
                 let Some(terminal) = self.terminal.take() else {
                     return Ok(None);
                 };
-                terminal.await.map_err(|_| RpcError::Closed)??;
+                terminal.await.map_err(|_| RpcError::Closed(None))??;
                 Ok(None)
             }
             Err(_) => {

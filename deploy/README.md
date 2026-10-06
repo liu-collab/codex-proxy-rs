@@ -8,7 +8,7 @@
 | --- | --- |
 | 安装与启动 | [手动安装](#手动安装) · [启动](#启动) · [公网访问](#公网访问) |
 | 接入客户端 | [客户端配置](#客户端配置) · [登录与生图排查](#登录与生图排查) |
-| 日常运维 | [运行设置](#启动后的运行设置) · [持久化与日志](#持久化与备份) · [请求排查](#请求错误排查) · [密码轮换](#密码语义) |
+| 日常运维 | [运行设置](#启动后的运行设置) · [小内存优化](#小内存优化) · [持久化与日志](#持久化与备份) · [请求排查](#请求错误排查) · [密码轮换](#密码语义) |
 | 更新与恢复 | [镜像升级](#镜像升级与源码构建) · [在线更新](#管理端在线更新) · [备份与恢复](#备份与恢复) · [优雅关停](#优雅关停) |
 | 运行源码 | [开发与源码联调](../docs/development.md) |
 
@@ -18,12 +18,13 @@
 
 | 位置 | 内容 | 修改方式 |
 | --- | --- | --- |
-| `deploy/config.yaml` | 监听、数据库/Redis 连接、部署凭据、时区与日志等启动配置 | 从模板创建，已有部署合并修改，不覆盖原文件 |
+| `deploy/config.yaml` | 监听、数据库/Redis 连接、部署凭据、时区、日志与可选内存分配策略等启动配置 | 从模板创建，已有部署合并修改，不覆盖原文件 |
 | `deploy/compose.yaml` | 镜像、容器网络、端口、挂载与资源限制 | 调整 Compose 并重建受影响容器 |
 | PostgreSQL | 账号、Key、运行设置、上游身份、插件配置等业务数据 | 管理端或管理 API |
 | 浏览器本地 | 主题和界面偏好 | 当前浏览器的主题设置 |
 
-项目不使用 `.env` 配置文件。Compose 环境变量用于容器地址、镜像选择和构建发布。
+项目不使用 `.env` 配置文件。Compose 环境变量用于容器地址、镜像选择和构建发布；
+可选的内存分配策略由 `config.yaml` 的 `services.app-runtime` 桥接到应用容器。
 配置加载会忽略未知字段，并在启动控制台提示字段名；不输出对应值。缺少必填字段时会指出缺项并停止启动，
 已知字段的类型和取值仍需合法；可选字段省略时使用默认值
 
@@ -50,6 +51,44 @@ host:
 切换时区保留已打开限额窗口的 UTC 边界与用量，到期后按新时区续接；不会因重启立即清零。
 备份调度从切换后的当前时刻计算未来执行点，不补跑旧时区漏过的任务，已入队任务保持原状态。
 夏令时中不存在的预热或 Cron 时刻跳过，重复时刻只选较早一次。日志日期与保留规则见[日志与保留窗口](#日志与保留窗口)
+
+### 小内存优化
+
+Linux/glibc 部署可选择更积极地归还请求结束后的空闲内存，适合内存紧张且请求后 RSS 长时间偏高的机器。
+该选项默认关闭，官方 Linux 镜像支持；更频繁的映射与回收可能增加 CPU 开销，应结合实际负载观察
+
+在 `deploy/config.yaml` 的 `services.app-runtime.environment` 中设置 `GLIBC_TUNABLES`，空字符串表示不启用额外调优：
+
+```yaml
+services:
+  app-runtime:
+    environment:
+      GLIBC_TUNABLES: 'glibc.malloc.mmap_threshold=131072:glibc.malloc.trim_threshold=131072'
+```
+
+已有部署使用当前 Compose 模板时，需将 `config.example.yaml` 的 `app-runtime` 段合并到现有 `services` 下，保留 PostgreSQL 和 Redis 的桥接配置。
+即使不开启优化，也保留该段并将值设为 `''`；Compose 从这里取得参数，无需在 `compose.yaml` 重复填写
+
+校验并重建应用容器使配置生效；`docker compose restart` 不会更新容器环境变量：
+
+```bash
+docker compose -f deploy/compose.yaml config --quiet
+docker compose -f deploy/compose.yaml up -d --no-build --no-deps --force-recreate codex-proxy-rs
+```
+
+此配置将 glibc 的 mmap 与 trim 阈值固定为 128 KiB，关闭对应的动态阈值调整。
+如已有 `GLIBC_TUNABLES`，用冒号合并这两个参数，避免重复同名项；同时检查是否另设了 `MALLOC_MMAP_THRESHOLD_` 或 `MALLOC_TRIM_THRESHOLD_`，统一在一处维护。
+参数含义见 [glibc 文档](https://sourceware.org/glibc/manual/latest/html_node/Memory-Allocation-Tunables.html)
+
+关闭时删除这两个参数；没有其他 tunable 时将值恢复为 `''`，然后再次重建应用容器。
+`services` 是 Compose 桥接区，直接运行二进制不会读取这一段。Linux/glibc 二进制部署需由启动器在进程启动前设置同一环境变量，例如：
+
+```bash
+GLIBC_TUNABLES=glibc.malloc.mmap_threshold=131072:glibc.malloc.trim_threshold=131072 ./codex-proxy-rs
+```
+
+该变量由 glibc 在进程启动时读取，不支持管理端热更新。
+它不设置内存上限，不释放仍被请求或连接持有的缓冲，也不处理容器文件缓存；观察时分别比较进程 RSS、cgroup 的 `anon` 与 `file`
 
 ## 部署结构
 
@@ -105,8 +144,12 @@ openssl rand -hex 24
 - `store.redis.password`
 
 另行设置 `admin.default_password`。它至少需要 12 个字符，不能是常见弱口令，也不能包含 `$`。
-`client.session_ttl_minutes` 控制统一登录中密钥身份的固定会话有效期，默认 1440 分钟；管理员有效期仍由
-`admin.session_ttl_minutes` 控制。两种身份共用一个 Cookie，成功登录替换旧会话；不改变 `/v1/*` 鉴权和限额
+管理员的 `admin.session_ttl_minutes` 控制不活动期限，`admin.session_absolute_ttl_minutes` 控制从登录起计算的最长有效期，
+后者省略时为 43200 分钟（30 天）。配置模板分别为 10080 分钟（7 天）和 43200 分钟；已有配置保留自己的不活动期限。
+使用管理页面时会自动续期，最终到期时间不超过最长有效期；修改配置需重启，已有会话的最长有效期不会因此延长。
+缺少最长有效期记录的会话保持原有固定期限，重新登录后应用续期策略。
+`client.session_ttl_minutes` 控制密钥身份的固定有效期，默认 1440 分钟，不随活动续期。
+两种身份共用一个 Cookie，成功登录替换当前浏览器的旧会话；不改变 `/v1/*` 鉴权和限额
 
 PostgreSQL 与 Redis 密码必须是 48 位十六进制字符。Compose 通过 `config.yaml` 的凭据桥接区
 引用同一密码；三个值都不需要额外导出为环境变量，数据库和 Redis 密码也不能嵌入连接 URL
@@ -214,7 +257,9 @@ HTTP 传输不加密，公网部署仍建议使用 HTTPS。
 并设置 `X-Accel-Buffering: no` 和 `Cache-Control: no-cache, no-transform`。
 反向代理仍需允许这些响应头生效；首个事件到达前的等待也需要足够的读取超时
 
-网关默认不限制模型请求的总执行时长。OpenAI 上游流默认有 300 秒空闲超时，持续收到数据不会因总时长超过 600 秒而中断
+网关默认不限制模型请求的总执行时长。OpenAI 上游流默认有 300 秒空闲超时，持续收到数据不会因总时长超过 600 秒而中断。
+`api.request_timeout_seconds` 默认 `null`，只控制 HTTP 路由返回响应前的等待，不是流式正文或 WebSocket 每轮执行的总时限。
+排队、插件显式执行期限与客户端断开的边界见 [请求期限](../docs/api.md#请求期限)
 
 OpenAI 上游池化 WebSocket 默认每 25 秒发送一次 Ping，发出后允许等待 30 秒；
 收到 Pong 或其他入站帧即解除本次心跳截止，持续无响应则以 `pong_timeout` 关闭连接。
@@ -401,18 +446,22 @@ Provider schema 以明文 JSON 保存于 PostgreSQL。Redis 只保存可重建�
 关闭的分片压缩为 `.log.gz`；成功压缩、同步并发布归档后才删除原文件，保留原修改时间。
 清理发生在启动和轮转时；空闲期间过期文件可能暂时多保留。检索时须同时读取 `.log` 与 `.log.gz`
 
-报文开关为 `host.logging.request_dump`，默认关闭；开启时原始报文按块完整写入独立文件，
+报文开关为 `host.logging.request_dump`，默认关闭；开启时原始报文按块写入独立文件，
+缓冲拒收或写入失败可能造成缺块，需结合 `file_logging` 健康状态判断完整性。
 数据库请求诊断仍是有界摘要，不能用摘要事件数代替全量报文完整性
 
 OAuth 恢复开关为 `host.logging.oauth_recovery`，默认关闭，与普通文件日志开关分别控制：
 
 - 开启后，OpenAI 每次成功取得 AT 和可用 RT 时，在资料补全及数据库写入前写入独立的 `oauth-recovery` 文件集
-- 该通道不受普通日志级别过滤，关闭时也不会改写到普通日志或 stdout；有界队列满时等待写入
+- 该通道不受普通日志级别过滤，关闭时也不会改写到普通日志或 stdout；接收端不等待后台写入
 
 恢复记录和请求转储含原始凭据，`.runtime/logs` 须按敏感数据控制访问和备份
 
-文件写入使用有界队列背压，正常退出会排空队列并同步文件。`file_logging` 健康探针在写入/同步失败后
-报告 `Unhealthy`，本次进程内恢复写入也不会清除已有缺口；压缩或清理失败报告 `Degraded`。
+每个文件输出使用非阻塞队列，普通额度为 4096 条 / 64 MiB，WARN / ERROR 另有 512 条 / 8 MiB 预留，
+额度包含正在写入的记录。后台批量缓冲写文件，正常退出会排空已接收的队列并同步。
+持续拥堵、超大记录或输出关闭导致的拒收会损失整条记录，所有接口均不会为日志等待；
+`file_logging` 健康探针在拒收或写入/同步失败后报告 `Unhealthy`，
+本次进程内恢复写入也不会清除已有缺口；压缩或清理失败报告 `Degraded`。
 断电、强杀或磁盘故障可能造成日志丢失；需要恢复已删除文件时，应使用独立备份。
 容量不足时不会提前删除保留窗口内日志，必须根据完整日期的压缩后实际用量规划空间，并监控磁盘余量和
 健康探针。Docker stdout 的独立轮转不承担应用文件日志的完整保留承诺
@@ -483,6 +532,7 @@ OAuth 恢复开关为 `host.logging.oauth_recovery`，默认关闭，与普通�
 | --- | --- |
 | `config.yaml` 含 `openai.wire_profile.location` | 该字段会被忽略，可删除；如需继续覆盖请求位置，将值填入管理端全局请求位置并开启开关，数据库初始化不会自动导入 |
 | `config.yaml` 含 `host.logging.file.max_files` | 该字段会被忽略，可删除；日志按 `retention_days` 保留，`max_file_size_mb` 只控制分片大小 |
+| 使用带 `app-runtime` 继承的 Compose，现有 `config.yaml` 缺少对应段 | 合并模板中的 `services.app-runtime`，保留原凭据桥接；不开启内存优化时将 `GLIBC_TUNABLES` 设为 `''`，见 [小内存优化](#小内存优化) |
 | 使用旧管理员认证接口或 Cookie | 改用 `/api/auth/*` 并重新登录；会话合同见 [认证 API](../docs/api.md#4-浏览器认证) |
 
 更新部署文件后，从安装目录拉取目标版本镜像并重建应用容器：
@@ -603,8 +653,8 @@ Release 必须提供当前 OS/架构的 `codex-proxy-rs_<version>_<os>_<arch>.ta
 | `plugin-release-manifest.json` | 固定宿主版本、提交、平台与支持的插件合同；插件列表当前为空 |
 | 可执行文件同目录的 `plugins/official` | 随受信宿主发行物部署的只读目录，与二进制、Web 资源成套更新或恢复 |
 
-- 下载更新时校验发行身份，插件合同不兼容不阻止安装。点击重启时检查已安装目标版本，列出不兼容插件的名称和原因；确认后批量停用并重启，保留包体、配置、密钥和私有数据，取消不修改插件状态
-- 回滚仍检查启用插件与旧宿主的兼容性，不兼容时先停用对应插件。更新或回滚期间的并发配置变更会阻止切换，文件替换失败或取消时恢复整组文件
+- 下载更新时校验发行身份，插件合同不兼容不阻止安装。点击重启时检查已安装目标版本，列出不兼容插件的名称和原因；确认后保留启用配置并重启，逐个尝试启动插件，版本警告持续显示
+- 回滚同样在重启前提示插件兼容风险，不因版本不匹配批量停用插件。更新或回滚期间的并发配置变更会阻止切换，文件替换失败或取消时恢复整组文件
 - 非空官方清单中的包经身份、平台和摘要校验后幂等导入；导入不确认信任、不创建配置、不启用，也不删除旧包。管理员确认信任后才执行默认配置流程；重复摘要保留首次安装出处
 - `sealed` 是构建封口标记，不是密码学签名。普通上传、URL 或 GitHub 安装不能获得 `builtin` 身份，独立教学示例也不例外
 

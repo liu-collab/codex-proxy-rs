@@ -1,4 +1,4 @@
-//! 外置的 reqwest 网络策略契约。
+//! 外置的 reqwest 网络策略契约
 
 use std::cell::Cell;
 use std::net::IpAddr;
@@ -28,6 +28,58 @@ use provider_xai::{
 use crate::support::{loopback_endpoint_policy, rejecting_account_proxy};
 
 #[tokio::test]
+async fn inference_transport_preserves_verbatim_unknown_codes_without_changing_classification() {
+    for code in [
+        " Vendor.Future:v2-UNRECOGNIZED ",
+        "长错误码",
+        "Vendor.".repeat(20).as_str(),
+    ] {
+        let server = MockServer::start().await;
+        let body = json!({"error": {"code": code, "message": "private response detail"}});
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(ResponseTemplate::new(503).set_body_json(&body))
+            .mount(&server)
+            .await;
+        let origin = Url::parse(&server.uri()).unwrap();
+        let error = inference_transport(&origin)
+            .execute(inference_request(&origin))
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), GrokInferenceTransportErrorKind::Unavailable);
+        assert_eq!(error.upstream_code().unwrap().as_str(), code);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(error.raw_upstream_error().unwrap().as_str())
+                .unwrap(),
+            body
+        );
+        assert_eq!(error.diagnostic().unwrap().code(), Some("upstream_failure"));
+        assert!(!format!("{error:?} {error}").contains(code));
+    }
+}
+
+#[tokio::test]
+async fn inference_transport_keeps_native_network_causes_without_request_urls() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    drop(listener);
+    let origin = Url::parse(&format!("http://{address}")).unwrap();
+    let error = inference_transport(&origin)
+        .execute(inference_request(&origin))
+        .await
+        .unwrap_err();
+    assert_eq!(error.send_state(), UpstreamSendState::NotSent);
+    let source = std::error::Error::source(&error)
+        .unwrap()
+        .downcast_ref::<reqwest::Error>()
+        .unwrap();
+    assert!(source.is_connect());
+    assert!(source.url().is_none());
+    assert!(error.sensitive_context_was_redacted());
+    assert!(std::error::Error::source(source).is_some());
+}
+
+#[tokio::test]
 async fn official_inference_tls_should_advertise_grok_cli_alpn() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy = gateway_core::account::OutboundProxy::parse(&format!(
@@ -47,7 +99,7 @@ async fn official_inference_tls_should_advertise_grok_cli_alpn() {
             .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
             .await
             .unwrap();
-        // 只读取公开的 ClientHello 后关闭连接，不发送证书，也不接收认证和模型请求。
+        // 只读取公开的 ClientHello 后关闭连接，不发送证书，也不接收认证和模型请求
         let mut handshake = Vec::new();
         loop {
             assert_eq!(socket.read_u8().await.unwrap(), 22);
@@ -98,10 +150,10 @@ fn client_hello_alpn(mut hello: &[u8]) -> Vec<Vec<u8>> {
             .fold(0_usize, |len, byte| len * 256 + usize::from(*byte));
         take(input, len)
     }
-    take(&mut hello, 34); // 跳过版本号与随机值。
-    vector(&mut hello, 1); // 跳过会话 ID。
-    vector(&mut hello, 2); // 跳过密码套件列表。
-    vector(&mut hello, 1); // 跳过压缩方法列表。
+    take(&mut hello, 34); // 跳过版本号与随机值
+    vector(&mut hello, 1); // 跳过会话 ID
+    vector(&mut hello, 2); // 跳过密码套件列表
+    vector(&mut hello, 1); // 跳过压缩方法列表
     let mut extensions = vector(&mut hello, 2);
     while !extensions.is_empty() {
         let kind = u16::from_be_bytes(take(&mut extensions, 2).try_into().unwrap());
@@ -349,7 +401,7 @@ async fn inference_proxy_client_is_built_once_for_concurrent_same_binding() {
     for task in tasks {
         assert!(task.await.unwrap().iter().all(Result::is_ok));
     }
-    // 启动时的直连 client + 一个代理 client；不再先构建并丢弃另一个直连 client。
+    // 启动时的直连 client + 一个代理 client；不再先构建并丢弃另一个直连 client
     assert_eq!(builds.load(Ordering::SeqCst), 2);
     assert!(origin_server.received_requests().await.unwrap().is_empty());
 }
@@ -536,7 +588,7 @@ async fn inference_connect_failure_keeps_safe_diagnosis_without_endpoint_or_payl
 }
 
 #[tokio::test]
-async fn inference_transport_should_classify_http_failures_without_retaining_bodies() {
+async fn inference_transport_should_retain_http_failure_bodies_only_in_explicit_details() {
     let cases = [
         (400, GrokInferenceTransportErrorKind::InvalidRequest),
         (401, GrokInferenceTransportErrorKind::Unauthorized),
@@ -578,7 +630,7 @@ async fn inference_transport_should_classify_http_failures_without_retaining_bod
                 expected_kind,
                 Some(status),
                 UpstreamSendState::Sent,
-                true,
+                false,
                 Some(gateway_core::event::UpstreamHttpVersion::Http11),
             )
         );
@@ -588,6 +640,7 @@ async fn inference_transport_should_classify_http_failures_without_retaining_bod
         );
         assert!(error.transport_metrics().headers_ms().is_some());
         assert!(error.client_visible_upstream_error().is_none());
+        assert_eq!(error.raw_upstream_error().unwrap().as_str(), secret);
         assert!(!rendered.contains(&secret));
     }
 }
@@ -621,7 +674,7 @@ async fn inference_transport_should_expose_safe_flat_json_error_details() {
     );
     assert_eq!(
         (detail.message(), detail.code(), detail.error_type()),
-        (message, Some("personal_team_blocked_spending_limit"), None,)
+        (message, Some("personal-team-blocked:spending-limit"), None,)
     );
     assert!(!rendered.contains(message));
 }
@@ -656,7 +709,7 @@ async fn inference_transport_should_scrub_nested_json_error_details() {
         (detail.message(), detail.code(), detail.error_type()),
         (
             "team [redacted] rate limited",
-            Some("rate_limit_burst"),
+            Some("rate-limit:burst"),
             Some("rate_limit_error"),
         )
     );
@@ -789,7 +842,7 @@ async fn inference_transport_should_classify_model_quota_for_403_and_429() {
 #[tokio::test]
 async fn inference_transport_should_prefer_structured_quota_fields_over_conflicting_message() {
     for (code, error_type) in [
-        ("quota_exceeded", Some("subscription_free_usage_exhausted")),
+        ("quota_exceeded", Some("subscription:free-usage-exhausted")),
         ("rate_limit_exceeded", Some("quota_exceeded")),
     ] {
         let server = MockServer::start().await;
@@ -845,7 +898,7 @@ async fn inference_transport_should_classify_free_usage_429_as_account_free_quot
     assert_eq!(error.status(), Some(429));
     assert_eq!(
         error.upstream_code().map(|code| code.as_str()),
-        Some("subscription_free_usage_exhausted")
+        Some("subscription:free-usage-exhausted")
     );
 }
 
@@ -855,7 +908,7 @@ async fn inference_transport_should_apply_body_aware_400_failures() {
         (
             json!({"error": {"code": "subscription:free-usage-exhausted", "message": "free usage exhausted"}}),
             GrokInferenceTransportErrorKind::FreeQuotaExhausted,
-            Some("subscription_free_usage_exhausted"),
+            Some("free_usage_exhausted"),
         ),
         (
             json!({"error": {"message": "selected model is at capacity"}}),
@@ -900,7 +953,10 @@ async fn inference_transport_should_apply_body_aware_400_failures() {
 
         assert_eq!(error.kind(), expected_kind);
         assert_eq!(
-            error.upstream_code().map(|code| code.as_str()),
+            error
+                .diagnostic()
+                .and_then(|diagnostic| diagnostic.code())
+                .filter(|code| *code != "upstream_failure"),
             expected_code
         );
     }
@@ -961,8 +1017,9 @@ async fn inference_transport_should_classify_reasoning_decode_rejections() {
             error.kind(),
             GrokInferenceTransportErrorKind::InvalidRequest
         );
+        assert!(error.upstream_code().is_none());
         assert_eq!(
-            error.upstream_code().map(|code| code.as_str()),
+            error.diagnostic().and_then(|diagnostic| diagnostic.code()),
             Some("reasoning_decode_failed")
         );
     }

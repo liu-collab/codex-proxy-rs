@@ -1,3 +1,5 @@
+//! 插件 RPC 会话的调用登记、超时取消、故障传播与关闭管理
+
 use std::{
     collections::BTreeMap,
     sync::{
@@ -10,7 +12,7 @@ use std::{
 use futures::future::BoxFuture;
 use gateway_host::process::{ProcessControl, ProcessSpec, ProcessStartError, ProcessSupervisor};
 use gateway_plugin_sdk::{
-    CallContext, Frame, Handshake, Message, PROTOCOL_VERSION, PluginFault,
+    CallContext, Frame, Handshake, Message, PROTOCOL_VERSION, PluginFault, Stage,
     client::{read_frame, validate_frame, write_frame},
 };
 use tokio::sync::{Mutex as AsyncMutex, Semaphore, mpsc, oneshot, watch};
@@ -21,7 +23,7 @@ use super::dispatch;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RpcLimits {
-    /// 受管回调与观察队列的缓冲预算，不是请求正文或 IPC 消息总量上限。
+    /// 受管回调与观察队列的缓冲预算，不是请求正文或 IPC 消息总量上限
     pub maximum_buffered_body_bytes: usize,
     pub maximum_calls: usize,
     pub maximum_callbacks: usize,
@@ -43,16 +45,18 @@ impl Default for RpcLimits {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum RpcError {
     #[error("plugin process could not be started: {0}")]
     Start(#[source] ProcessStartError),
     #[error("plugin handshake does not match the prepared instance")]
-    Handshake,
+    Handshake(#[source] Option<gateway_core::error::ErrorSource>),
     #[error("plugin protocol is invalid")]
-    Protocol,
+    Protocol(#[source] Option<gateway_core::error::ErrorSource>),
+    #[error("plugin returned an invalid response at {0:?}")]
+    InvalidResponse(Stage, #[source] Option<gateway_core::error::ErrorSource>),
     #[error("plugin process or transport has stopped")]
-    Closed,
+    Closed(#[source] Option<gateway_core::error::ErrorSource>),
     #[error("plugin call exceeded its deadline")]
     Timeout,
     #[error("plugin session was cancelled")]
@@ -60,9 +64,47 @@ pub enum RpcError {
     #[error("plugin call capacity is exhausted")]
     Capacity,
     #[error("plugin call context is invalid")]
-    Context,
+    Context(#[source] Option<gateway_core::error::ErrorSource>),
     #[error("plugin returned an error")]
     Remote(PluginFault),
+}
+
+impl RpcError {
+    /// 会话状态与请求错误共用安全分类，不展开插件返回正文
+    pub(crate) fn diagnostic(&self) -> (&'static str, &'static str) {
+        match self {
+            RpcError::Start(_) => ("process_start", "插件进程启动失败"),
+            RpcError::Handshake(_) => ("handshake", "插件握手失败"),
+            RpcError::Protocol(_) => ("protocol", "插件协议错误"),
+            RpcError::InvalidResponse(stage, _) => (
+                "invalid_response",
+                match stage {
+                    Stage::Registration => "注册阶段：插件返回了无效响应",
+                    Stage::Configuration => "配置阶段：插件返回了无效响应",
+                    Stage::Authentication => "认证阶段：插件返回了无效响应",
+                    Stage::Routing => "路由阶段：插件返回了无效响应",
+                    Stage::Scheduling => "调度阶段：插件返回了无效响应",
+                    Stage::Retry => "重试阶段：插件返回了无效响应",
+                    Stage::Http => "HTTP 中间件：插件返回了无效响应",
+                    Stage::Service => "服务中间件：插件返回了无效响应",
+                    Stage::WebSocket => "WebSocket 中间件：插件返回了无效响应",
+                    Stage::Request => "请求中间件：插件返回了无效响应",
+                    Stage::Attempt => "尝试中间件：插件返回了无效响应",
+                    Stage::Upstream => "上游适配阶段：插件返回了无效响应",
+                    Stage::Observation => "观察阶段：插件返回了无效响应",
+                    Stage::Management | Stage::PublicManagement => "管理阶段：插件返回了无效响应",
+                    Stage::CommandLine => "命令行阶段：插件返回了无效响应",
+                    Stage::Maintenance => "维护阶段：插件返回了无效响应",
+                },
+            ),
+            RpcError::Closed(_) => ("closed", "插件进程或传输已停止"),
+            RpcError::Timeout => ("timeout", "插件调用超时"),
+            RpcError::Cancelled => ("cancelled", "插件会话已取消"),
+            RpcError::Capacity => ("capacity", "插件调用容量已耗尽"),
+            RpcError::Context(_) => ("context", "插件调用上下文无效"),
+            RpcError::Remote(_) => ("remote", "插件返回错误"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,21 +146,21 @@ impl Drop for RpcSessionLifecycle {
     }
 }
 
-/// 不派生 Debug，防止原始请求、凭据或模型输出进入宿主诊断。
+/// 不派生 Debug，防止原始请求、凭据或模型输出进入宿主诊断
 pub struct RpcReply {
     pub result: serde_json::Value,
     pub payload: Vec<u8>,
 }
 
-/// 具体回调在领域适配器校验账号、出站与执行身份；上下文只取自宿主在途调用表。
+/// 具体回调在领域适配器校验账号、出站与执行身份；上下文只取自宿主在途调用表
 pub trait CallbackHandler: Send + Sync {
-    /// 在 Call 可见之前建立资源范围；不得执行 I/O 或调用 RPC。
+    /// 在 Call 可见之前建立资源范围；不得执行 I/O 或调用 RPC
     fn begin(&self, _context: &CallContext) {}
 
-    /// 调用结束或取消时立即撤销其句柄；实现必须幂等且不能阻塞。
+    /// 调用结束或取消时立即撤销其句柄；实现必须幂等且不能阻塞
     fn finish(&self, _context: &CallContext) {}
 
-    /// 首个流式结果已到达；资源仍绑定原调用并在终态统一回收。
+    /// 首个流式结果已到达；资源仍绑定原调用并在终态统一回收
     fn streaming(&self, _context: &CallContext) {}
 
     fn call(
@@ -139,6 +181,40 @@ pub struct RpcSession {
     limits: RpcLimits,
     callbacks: Arc<dyn CallbackHandler>,
     _lifecycle: Option<RpcSessionLifecycle>,
+}
+
+impl RpcSession {
+    /// 只用于已确认来自插件的合同错误，不接收业务错误或原始响应内容
+    pub(crate) fn invalid_response(&self, stage: Stage) -> RpcError {
+        let error = RpcError::InvalidResponse(stage, None);
+        self.shared.fail(error.clone());
+        error
+    }
+
+    pub(crate) fn decode_response<T: serde::de::DeserializeOwned>(
+        &self,
+        stage: Stage,
+        value: serde_json::Value,
+    ) -> Result<T, RpcError> {
+        serde_json::from_value(value).map_err(|source| {
+            let error = RpcError::InvalidResponse(
+                stage,
+                Some(gateway_core::error::ErrorSource::new(source)),
+            );
+            self.shared.fail(error.clone());
+            error
+        })
+    }
+
+    pub(crate) fn capability_version(
+        &self,
+        capability: gateway_plugin_sdk::Capability,
+    ) -> Option<u32> {
+        self.handshake
+            .contributes
+            .get(&capability)
+            .map(|declaration| declaration.version)
+    }
 }
 
 pub(crate) struct Shared {
@@ -223,16 +299,16 @@ impl Shared {
 
     pub fn finish(&self, id: u64, result: Result<RpcReply, RpcError>) -> Result<(), RpcError> {
         let mut state = self.state();
-        let call = state.calls.get_mut(&id).ok_or(RpcError::Protocol)?;
+        let call = state.calls.get_mut(&id).ok_or(RpcError::Protocol(None))?;
         if call.cancellation.is_some() {
             return Ok(());
         }
         if call.stream.is_some() && result.is_ok() {
-            let initial = call.result.take().ok_or(RpcError::Protocol)?;
+            let initial = call.result.take().ok_or(RpcError::Protocol(None))?;
             call.handler.streaming(&call.context);
             let _ = initial.send(result);
         } else {
-            let pending = state.calls.remove(&id).ok_or(RpcError::Protocol)?;
+            let pending = state.calls.remove(&id).ok_or(RpcError::Protocol(None))?;
             drop(state);
             pending.finish(result);
         }
@@ -241,16 +317,16 @@ impl Shared {
 
     pub fn stream_chunk(&self, id: u64, sequence: u64, payload: Vec<u8>) -> Result<(), RpcError> {
         let mut state = self.state();
-        let call = state.calls.get_mut(&id).ok_or(RpcError::Protocol)?;
+        let call = state.calls.get_mut(&id).ok_or(RpcError::Protocol(None))?;
         if call.cancellation.is_some() {
             return Ok(());
         }
         if call.result.is_some() {
-            return Err(RpcError::Protocol);
+            return Err(RpcError::Protocol(None));
         }
         call.stream
             .as_mut()
-            .ok_or(RpcError::Protocol)?
+            .ok_or(RpcError::Protocol(None))?
             .receive(sequence, payload)
     }
 
@@ -263,11 +339,11 @@ impl Shared {
         {
             return Ok(());
         }
-        let call = state.calls.remove(&id).ok_or(RpcError::Protocol)?;
+        let call = state.calls.remove(&id).ok_or(RpcError::Protocol(None))?;
         drop(state);
         if call.stream.is_none() || call.result.is_some() {
-            call.finish(Err(RpcError::Protocol));
-            return Err(RpcError::Protocol);
+            call.finish(Err(RpcError::Protocol(None)));
+            return Err(RpcError::Protocol(None));
         }
         let result = error.map_or_else(
             || {
@@ -284,13 +360,13 @@ impl Shared {
 
     pub fn release_stream_credit(&self, id: u64, bytes: u32) -> Result<(), RpcError> {
         let mut state = self.state();
-        // 完成后仍可消费已排队数据，无须再给已关闭的流发信用。
+        // 完成后仍可消费已排队数据，无须再给已关闭的流发信用
         let Some(call) = state.calls.get_mut(&id) else {
             return Ok(());
         };
         call.stream
             .as_mut()
-            .ok_or(RpcError::Protocol)?
+            .ok_or(RpcError::Protocol(None))?
             .release(bytes)?;
         drop(state);
         self.send_control(Frame::control(Message::Credit {
@@ -328,7 +404,7 @@ impl Shared {
         true
     }
 
-    /// 先撤销调用权限，再等待对端确认；只有无响应对端才终止整个 incarnation。
+    /// 先撤销调用权限，再等待对端确认；只有无响应对端才终止整个 incarnation
     pub fn cancel(self: &Arc<Self>, id: u64, error: RpcError) {
         let mut state = self.state();
         let Some(call) = state.calls.get_mut(&id) else {
@@ -372,7 +448,7 @@ impl Shared {
             .get(&id)
             .is_some_and(|call| call.cancellation.is_some())
         {
-            return Err(RpcError::Protocol);
+            return Err(RpcError::Protocol(None));
         }
         state.calls.remove(&id);
         Ok(())
@@ -385,7 +461,7 @@ impl Shared {
             .get_mut(&parent_id)
             .filter(|call| call.cancellation.is_none())
         {
-            // 已完成回调的句柄不继续占用请求预算。
+            // 已完成回调的句柄不继续占用请求预算
             call.callbacks.retain(|handle| !handle.is_finished());
             call.callbacks.push(callback);
             true
@@ -471,10 +547,12 @@ impl RpcSession {
             || limits.handshake_timeout.is_zero()
             || limits.maximum_call_timeout.is_zero()
         {
-            return Err(RpcError::Context);
+            return Err(RpcError::Context(None));
         }
         let manifest = package.package().manifest();
-        let plugin_id = manifest.plugin_id().map_err(|_| RpcError::Handshake)?;
+        let plugin_id = manifest.plugin_id().map_err(|source| {
+            RpcError::Handshake(Some(gateway_core::error::ErrorSource::new(source)))
+        })?;
         if handshake.protocol_version != PROTOCOL_VERSION
             || manifest
                 .package
@@ -488,7 +566,7 @@ impl RpcSession {
             || handshake.incarnation.is_empty()
             || handshake.generation == 0
         {
-            return Err(RpcError::Handshake);
+            return Err(RpcError::Handshake(None));
         }
         let deadline = tokio::time::Instant::now() + limits.handshake_timeout;
         let process = loop {
@@ -504,8 +582,8 @@ impl RpcSession {
                         ..
                     },
                 ) => {
-                    // Unix 并发 fork 可能短暂继承解包时的写句柄（rust-lang/rust#114554）。
-                    // 仅重试尚未执行的文件忙错误，并与握手共享启动期限。
+                    // Unix 并发 fork 可能短暂继承解包时的写句柄（rust-lang/rust#114554）
+                    // 仅重试尚未执行的文件忙错误，并与握手共享启动期限
                     let retry_at = tokio::time::Instant::now() + Duration::from_millis(10);
                     if retry_at >= deadline {
                         return Err(RpcError::Start(error));
@@ -528,10 +606,12 @@ impl RpcSession {
                 }),
             )
             .await
-            .map_err(|_| RpcError::Handshake)?;
-            let reply = read_frame(&mut output)
-                .await
-                .map_err(|_| RpcError::Handshake)?;
+            .map_err(|source| {
+                RpcError::Handshake(Some(gateway_core::error::ErrorSource::new(source)))
+            })?;
+            let reply = read_frame(&mut output).await.map_err(|source| {
+                RpcError::Handshake(Some(gateway_core::error::ErrorSource::new(source)))
+            })?;
             match reply.message {
                 Message::Ready {
                     protocol_version,
@@ -542,7 +622,7 @@ impl RpcSession {
                 {
                     Ok(())
                 }
-                _ => Err(RpcError::Handshake),
+                _ => Err(RpcError::Handshake(None)),
             }
         })
         .await
@@ -550,7 +630,7 @@ impl RpcSession {
         .and_then(|result| result);
         if let Err(error) = ready {
             if let Some(lifecycle) = &lifecycle {
-                // 只有 Ready 之后的存活才可复位预算；长时间卡在握手不等于稳定运行。
+                // 只有 Ready 之后的存活才可复位预算；长时间卡在握手不等于稳定运行
                 lifecycle.fail(Duration::ZERO);
             }
             process.stop();
@@ -592,8 +672,8 @@ impl RpcSession {
             if !monitor.expected_stop.load(Ordering::Acquire) {
                 tracing::warn!(instance_id, exit = ?reason, "插件进程意外停止");
             }
-            monitor.fail(RpcError::Closed);
-            // 等进程退出后再回收其文件，避免 Windows 上删除正在执行的制品。
+            monitor.fail(RpcError::Closed(None));
+            // 等进程退出后再回收其文件，避免 Windows 上删除正在执行的制品
             drop(package);
         });
         Ok(Self {
@@ -618,7 +698,7 @@ impl RpcSession {
             .is_none()
     }
 
-    /// 仅返回稳定分类与固定文案，绝不展开插件 fault、stderr 或请求内容。
+    /// 仅返回稳定分类与固定文案，绝不展开插件 fault、stderr 或请求内容
     pub(crate) fn diagnostic(&self) -> RpcSessionDiagnostic {
         let state = self
             .shared
@@ -626,17 +706,7 @@ impl RpcSession {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(error) = &state.failure {
-            let (code, message) = match error {
-                RpcError::Start(_) => ("process_start", "插件进程启动失败"),
-                RpcError::Handshake => ("handshake", "插件握手失败"),
-                RpcError::Protocol => ("protocol", "插件协议错误"),
-                RpcError::Closed => ("closed", "插件进程或传输已停止"),
-                RpcError::Timeout => ("timeout", "插件调用超时"),
-                RpcError::Cancelled => ("cancelled", "插件会话已取消"),
-                RpcError::Capacity => ("capacity", "插件调用容量已耗尽"),
-                RpcError::Context => ("context", "插件调用上下文无效"),
-                RpcError::Remote(_) => ("remote", "插件返回错误"),
-            };
+            let (code, message) = error.diagnostic();
             return RpcSessionDiagnostic::Failed { code, message };
         }
         if self.slots.is_closed() {
@@ -648,7 +718,7 @@ impl RpcSession {
 
     #[must_use]
     pub fn context(&self, stage: gateway_plugin_sdk::Stage, timeout: Duration) -> CallContext {
-        // 宿主生成的上下文受本会话预算约束；固定注册期限不能使较小的总预算无法启动。
+        // 宿主生成的上下文受本会话预算约束；固定注册期限不能使较小的总预算无法启动
         let timeout = timeout.min(self.limits.maximum_call_timeout);
         CallContext {
             call_id: 0,
@@ -679,7 +749,7 @@ impl RpcSession {
             || method.is_empty()
             || method.len() > 128
         {
-            return Err(RpcError::Context);
+            return Err(RpcError::Context(None));
         }
         Ok(tokio::time::Instant::now() + Duration::from_millis(context.timeout_ms))
     }
@@ -730,7 +800,7 @@ impl RpcSession {
     ) -> Result<CompletedCall, RpcError> {
         let deadline = self.call_deadline(method, &context)?;
         // FIFO 锁同时拥有 ID 与 data 入队顺序；Call/初始 Credit 入队后必须立即释放，
-        // 不能把插件回复或重入回调纳入串行区，也不能为等待锁重置调用期限。
+        // 不能把插件回复或重入回调纳入串行区，也不能为等待锁重置调用期限
         let mut next_call = tokio::time::timeout_at(deadline, self.next_call.lock())
             .await
             .map_err(|_| RpcError::Timeout)?;
@@ -747,8 +817,10 @@ impl RpcSession {
             },
             payload,
         };
-        // 本地元数据错误不能进入写队列并关闭整个会话。
-        validate_frame(&frame).map_err(|_| RpcError::Context)?;
+        // 本地元数据错误不能进入写队列并关闭整个会话
+        validate_frame(&frame).map_err(|source| {
+            RpcError::Context(Some(gateway_core::error::ErrorSource::new(source)))
+        })?;
         let started = self.begin_call(context, deadline, stream)?;
         let mut guard = CallGuard {
             shared: Arc::clone(&self.shared),
@@ -756,9 +828,12 @@ impl RpcSession {
             armed: true,
         };
         let sent = tokio::time::timeout_at(started.deadline, async {
-            self.data.send(frame).await.map_err(|_| RpcError::Closed)?;
+            self.data
+                .send(frame)
+                .await
+                .map_err(|_| RpcError::Closed(None))?;
             if let Some((bytes, frames)) = credit {
-                // 初始信用跟在 Call 后走同一有序队列，不能被控制队列提前发送。
+                // 初始信用跟在 Call 后走同一有序队列，不能被控制队列提前发送
                 self.data
                     .send(Frame::control(Message::Credit {
                         id: started.id,
@@ -766,7 +841,7 @@ impl RpcSession {
                         frames,
                     }))
                     .await
-                    .map_err(|_| RpcError::Closed)?;
+                    .map_err(|_| RpcError::Closed(None))?;
             }
             Ok::<(), RpcError>(())
         })
@@ -792,9 +867,9 @@ impl RpcSession {
                 result?
             }
             Ok(Err(_)) => {
-                self.shared.cancel(started.id, RpcError::Closed);
+                self.shared.cancel(started.id, RpcError::Closed(None));
                 guard.armed = false;
-                return Err(RpcError::Closed);
+                return Err(RpcError::Closed(None));
             }
             Err(_) => {
                 self.shared.cancel(started.id, RpcError::Timeout);
@@ -876,16 +951,16 @@ impl RpcSession {
             .await
             .is_err()
         {
-            self.shared.fail(RpcError::Closed);
-            // 强制停止没有第二段宽限；退出和回调析构是返回前必须确认的事实。
+            self.shared.fail(RpcError::Closed(None));
+            // 强制停止没有第二段宽限；退出和回调析构是返回前必须确认的事实
             self.settle_shutdown().await;
         }
     }
 
     async fn settle_shutdown(&self) {
         self.shared.process.exited().await;
-        // 不等待监控任务调度；先撤销父调用并中止其回调，再确认回调 future 已析构。
-        self.shared.fail(RpcError::Closed);
+        // 不等待监控任务调度；先撤销父调用并中止其回调，再确认回调 future 已析构
+        self.shared.fail(RpcError::Closed(None));
         self.shared
             .wait_for_callbacks(self.limits.maximum_callbacks)
             .await;
@@ -895,7 +970,7 @@ impl RpcSession {
 impl Drop for RpcSession {
     fn drop(&mut self) {
         self.shared.expect_stop();
-        self.shared.fail(RpcError::Closed);
+        self.shared.fail(RpcError::Closed(None));
     }
 }
 

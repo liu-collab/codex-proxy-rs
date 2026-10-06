@@ -1,4 +1,4 @@
-//! 首部与最近事件同时保留，流式 delta 合并，所有淘汰均有计数。
+//! 首部与最近事件同时保留，流式 delta 合并，所有淘汰均有计数
 
 use std::{
     collections::VecDeque,
@@ -10,6 +10,8 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::error::ProviderError;
+
 use super::capture::{bounded, diagnostic_event_json, diagnostic_event_type};
 use super::{body_fingerprint, diagnostic_headers};
 
@@ -18,7 +20,7 @@ const HEAD_EVENTS: usize = 8;
 const MAX_DATA_BYTES: usize = 4096;
 const MAX_BUFFER_BYTES: usize = 64 * 1024;
 
-/// 显式传给异步任务的关联上下文；默认值禁用捕获，避免全局请求映射。
+/// 显式传给异步任务的关联上下文；默认值禁用捕获，避免全局请求映射
 #[derive(Clone, Default)]
 pub struct TraceContext {
     state: Option<Arc<Mutex<TraceState>>>,
@@ -65,13 +67,13 @@ struct TraceEvent {
 }
 
 impl TraceContext {
-    /// 是否已启用请求诊断，供调用方避免构造不会保存的事实。
+    /// 是否已启用请求诊断，供调用方避免构造不会保存的事实
     #[must_use]
     pub const fn is_enabled(&self) -> bool {
         self.state.is_some()
     }
 
-    /// 一个模型请求只创建一次，所有 attempt 共享同一有界时间线。
+    /// 一个模型请求只创建一次，所有 attempt 共享同一有界时间线
     #[must_use]
     pub fn new(request_id: &str) -> Self {
         Self {
@@ -103,7 +105,7 @@ impl TraceContext {
         }
     }
 
-    /// 一个 attempt 中的每次实际 transport exchange 也有独立编号。
+    /// 一个 attempt 中的每次实际 transport exchange 也有独立编号
     #[must_use]
     pub fn exchange(&self, transport: &'static str) -> Self {
         let mut context = self.clone();
@@ -118,13 +120,29 @@ impl TraceContext {
         context
     }
 
-    /// details 只允许调用方构造的诊断事实；不接收原始请求/响应正文。
+    /// details 只允许调用方构造的诊断事实；不接收原始请求/响应正文
     pub fn record(&self, stage: &'static str, data: Value) {
         self.push(stage, data, false);
     }
 
-    /// 同一个头部边界只采集一次：默认脱敏，显式开启 dump 时另存完整字节。
-    /// facts 必须为调用方构造的安全对象；仅受控诊断头可明文保留，完整头部另存 dump。
+    /// 诊断正文与导出分类来自同一失败，导出路径不接收任意 JSON 或上游文案
+    pub fn record_provider_failure(&self, error: &ProviderError) {
+        if !self.is_enabled() {
+            return;
+        }
+        let data = json!({
+            "kind": error.kind().as_str(), "sendState": error.send_state().as_str(),
+            "diagnostic": error.diagnostic().map(|diagnostic| json!({
+                "stage": diagnostic.stage(), "code": diagnostic.code(), "message": diagnostic.as_str(),
+            })),
+            "upstreamStatus": error.upstream_status(),
+            "upstreamRequestId": error.upstream_request_id().map(|id| id.as_str()),
+        });
+        self.push("attempt.failed", data, false);
+    }
+
+    /// 同一个头部边界只采集一次：默认脱敏，显式开启 dump 时另存完整字节
+    /// facts 必须为调用方构造的安全对象；仅受控诊断头可明文保留，完整头部另存 dump
     pub fn headers<'a>(
         &self,
         stage: &'static str,
@@ -156,14 +174,14 @@ impl TraceContext {
         }
     }
 
-    /// 入站 JSON 先记录再解析业务语义，包括未知事件和 metadata。
-    /// 原文仅在现有 request_dump 开关打开时写入其独立文件。
+    /// 入站 JSON 先记录再解析业务语义，包括未知事件和 metadata
+    /// 原文仅在现有 request_dump 开关打开时写入其独立文件
     pub fn capture(&self, stage: &'static str, bytes: &[u8]) {
         self.dump(stage, bytes);
         self.capture_event(stage, bytes);
     }
 
-    /// StreamCapture 已转储原始 chunk 时，只提取完整事件的安全摘要。
+    /// StreamCapture 已转储原始 chunk 时，只提取完整事件的安全摘要
     pub fn capture_event(&self, stage: &'static str, bytes: &[u8]) {
         self.capture_named_event(stage, bytes, None);
     }
@@ -183,7 +201,7 @@ impl TraceContext {
             .and_then(|v| v.get("type"))
             .and_then(Value::as_str)
             .or(name);
-        // 后缀只用于观测合并，不授予明文权限；未知事件用摘要区分，避免合并成同一类。
+        // 后缀只用于观测合并，不授予明文权限；未知事件用摘要区分，避免合并成同一类
         let delta = event_type.is_some_and(|kind| kind.ends_with(".delta"));
         let data = json!({
             "body": fingerprint,
@@ -195,7 +213,7 @@ impl TraceContext {
         self.push(stage, data, delta);
     }
 
-    /// 只记录业务解析边界；metadata 已由 transport 在解析前捕获。
+    /// 只记录业务解析边界；metadata 已由 transport 在解析前捕获
     pub fn wire_event(&self, protocol: &str, event_type: Option<&str>) {
         let delta = event_type.is_some_and(|kind| kind.ends_with(".delta"));
         self.push(
@@ -208,7 +226,7 @@ impl TraceContext {
         );
     }
 
-    /// 完整报文捕获与摘要使用相同 request / attempt / exchange ID。
+    /// 完整报文捕获与摘要使用相同 request / attempt / exchange ID
     pub fn dump(&self, stage: &'static str, bytes: &[u8]) {
         if !tracing::enabled!(target: "request_dump", tracing::Level::INFO) {
             return;
@@ -221,7 +239,7 @@ impl TraceContext {
             state.wire_bytes = state.wire_bytes.saturating_add(bytes.len() as u64);
             let wire_sequence = state.wire_frames;
             let chunk_count = bytes.len().div_ceil(32 * 1024).max(1);
-            // Each log entry stays bounded even for images or very large WebSocket frames.
+            // 图像或大型 WebSocket 帧也必须遵守单条日志的大小上限
             for chunk_index in 0..chunk_count {
                 let start = chunk_index * 32 * 1024;
                 let chunk = &bytes[start..bytes.len().min(start + 32 * 1024)];
@@ -234,7 +252,7 @@ impl TraceContext {
         }
     }
 
-    /// 与请求终态原子持久化；旧记录没有此字段，不伪造历史时间线。
+    /// 与请求终态原子持久化；旧记录没有此字段，不伪造历史时间线
     #[must_use]
     pub fn snapshot(&self) -> Option<Value> {
         let state = self
@@ -243,7 +261,7 @@ impl TraceContext {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         Some(json!({
-            "schemaVersion": 1, "requestId": state.request_id,
+            "schemaVersion": 2, "requestId": state.request_id,
             "startedAtUnixMs": state.started_at_ms, "totalEvents": state.sequence,
             "droppedEvents": state.dropped_events, "maxEvents": MAX_EVENTS,
             "captureMode": "sanitized", "events": state.events,
@@ -258,10 +276,35 @@ impl TraceContext {
         let Some(state) = &self.state else { return };
         let mut encoded = serde_json::to_vec(&data).unwrap_or_default();
         if encoded.len() > MAX_DATA_BYTES {
-            data = json!({"truncated": true, "summary": body_fingerprint(&encoded),
+            let mut summary = json!({"truncated": true, "summary": body_fingerprint(&encoded),
                 "eventType": data.get("eventType"), "body": data.get("body"),
                 "jsonValid": data.get("jsonValid"),
             });
+            if stage == "attempt.failed" {
+                // 过长诊断的指纹不能挤掉已经由 Provider 分类的失败原因
+                // 保持有界，完整诊断仍由终态错误记录保存
+                summary = json!({"truncated": true, "summary": body_fingerprint(&encoded)});
+                for key in ["kind", "sendState"] {
+                    if let Some(value) = data.get(key).and_then(Value::as_str) {
+                        summary[key] = json!(bounded(value, 64));
+                    }
+                }
+                summary["upstreamStatus"] =
+                    json!(data.get("upstreamStatus").and_then(Value::as_u64));
+                if let Some(diagnostic) = data.get("diagnostic").and_then(Value::as_object) {
+                    let mut kept = json!({});
+                    for (key, limit) in [("stage", 96), ("code", 96), ("message", 256)] {
+                        if let Some(value) = diagnostic.get(key).and_then(Value::as_str) {
+                            kept[key] = json!(bounded(value, limit));
+                            if value.chars().count() > limit {
+                                kept["truncated"] = json!(true);
+                            }
+                        }
+                    }
+                    summary["diagnostic"] = kept;
+                }
+            }
+            data = summary;
             encoded = serde_json::to_vec(&data).unwrap_or_default();
         }
         let mut state = state
@@ -286,7 +329,7 @@ impl TraceContext {
             last.last_elapsed_ms = elapsed_ms;
             return;
         }
-        // 普通日志只输出有界安全事实；进程意外退出时仍可按 ID 检索已发生阶段。
+        // 普通日志只输出有界安全事实；进程意外退出时仍可按 ID 检索已发生阶段
         tracing::info!(target: "request_trace", request_id = %state.request_id,
             attempt_index = self.attempt_index, exchange_id = self.exchange_id,
             sequence, elapsed_ms, stage, data = %data, "request trace");
@@ -305,8 +348,8 @@ impl TraceContext {
             bytes,
         });
         while state.events.len() > MAX_EVENTS || state.bytes > MAX_BUFFER_BYTES {
-            // Preserve failures and retry decisions ahead of routine middle-of-stream events.
-            // Head/tail and important stages compete under the same hard memory limit.
+            // 相比流中间的常规事件，优先保留失败与重试决策
+            // 首尾事件与重要阶段共用同一内存上限
             let index = (HEAD_EVENTS..state.events.len().saturating_sub(8))
                 .find(|index| {
                     !matches!(

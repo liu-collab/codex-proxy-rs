@@ -1,9 +1,13 @@
+//! 验证有界调用追踪保留关键事件并持续执行脱敏规则
+
 use std::{
     fmt::Write as _,
     sync::{Arc, Mutex},
 };
 
 use gateway_core::diagnostics::{TraceContext, body_fingerprint};
+use gateway_core::error::{ProviderDiagnostic, ProviderError, ProviderErrorKind, RawUpstreamError};
+use gateway_core::upstream::UpstreamSendState;
 use serde_json::json;
 use tracing::{
     Event, Metadata, Subscriber,
@@ -43,6 +47,55 @@ fn bounded_history_preserves_start_failure_and_final_result() {
         kept + snapshot["droppedEvents"].as_u64().unwrap(),
         snapshot["totalEvents"]
     );
+}
+
+#[test]
+fn provider_failure_trace_keeps_classification_when_diagnostic_is_truncated() {
+    let trace = TraceContext::new("req_export");
+    let error = ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
+        .with_diagnostic(
+            ProviderDiagnostic::new("Safe diagnostic".repeat(500))
+                .with_classification("prepare", "account_proxy_invalid"),
+        )
+        .with_raw_upstream_error(RawUpstreamError::new("PRIVATE_RAW"));
+    trace.attempt(3).record_provider_failure(&error);
+    let snapshot = trace.snapshot().unwrap();
+    let data = &snapshot["events"][0]["data"];
+    assert_eq!(data["kind"], "unavailable");
+    assert_eq!(data["sendState"], "not_sent");
+    assert_eq!(data["diagnostic"]["stage"], "prepare");
+    assert_eq!(data["diagnostic"]["code"], "account_proxy_invalid");
+    assert_eq!(data["diagnostic"]["truncated"], true);
+    assert!(!snapshot.to_string().contains("PRIVATE_RAW"));
+}
+
+#[test]
+fn oversized_failure_keeps_classification_and_marks_truncated_message() {
+    let trace = TraceContext::new("req_oversized_failure");
+    trace.attempt(2).record("attempt.failed", json!({
+        "kind": "transport", "sendState": "not_sent", "upstreamStatus": 502,
+        "diagnostic": {"stage": "connect", "code": "connection_refused", "message": "连接被拒绝".repeat(2000)},
+        "rawError": {"summary": "x".repeat(10_000)},
+    }));
+    let snapshot = trace.snapshot().unwrap();
+    let event = &snapshot["events"][0];
+    assert_eq!(event["attemptIndex"], 2);
+    let data = &event["data"];
+    assert_eq!(data["truncated"], true);
+    assert_eq!(data["kind"], "transport");
+    assert_eq!(data["sendState"], "not_sent");
+    assert_eq!(data["upstreamStatus"], 502);
+    assert_eq!(data["diagnostic"]["stage"], "connect");
+    assert_eq!(data["diagnostic"]["code"], "connection_refused");
+    assert_eq!(data["diagnostic"]["truncated"], true);
+    assert!(
+        data["diagnostic"]["message"]
+            .as_str()
+            .unwrap()
+            .starts_with("连接被拒绝")
+    );
+    assert!(serde_json::to_vec(data).unwrap().len() <= 4096);
+    assert!(data.get("rawError").is_none());
 }
 
 #[test]
@@ -284,7 +337,7 @@ fn size_gaps_and_truncated_events_do_not_reintroduce_user_content() {
 
 #[test]
 fn ordinary_trace_logs_and_serialized_snapshots_share_the_sanitized_capture_boundary() {
-    // tracing 的 callsite 缓存是进程级的；隔离并行测试的注册，不修改生产日志或全局 subscriber。
+    // tracing 的 callsite 缓存是进程级的；隔离并行测试的注册，不修改生产日志或全局 subscriber
     const CHILD: &str = "GATEWAY_CORE_DIAGNOSTICS_LOG_TEST";
     if std::env::var_os(CHILD).is_none() {
         let thread = std::thread::current();
@@ -301,7 +354,7 @@ fn ordinary_trace_logs_and_serialized_snapshots_share_the_sanitized_capture_boun
         );
         return;
     }
-    // 仅捕获本线程的普通 trace 事件，不打开 request_dump，也不读写真实日志文件。
+    // 仅捕获本线程的普通 trace 事件，不打开 request_dump，也不读写真实日志文件
     let logs = Arc::new(Mutex::new(Vec::new()));
     let snapshot = tracing::subscriber::with_default(TraceLog(Arc::clone(&logs)), || {
         let trace = TraceContext::new("req_feedback");
@@ -312,6 +365,18 @@ fn ordinary_trace_logs_and_serialized_snapshots_share_the_sanitized_capture_boun
         );
         exchange.capture_named_event("upstream.event", b"{}", Some("PRIVATE_SSE_EVENT"));
         exchange.wire_event("openai", Some("PRIVATE_WIRE_EVENT"));
+        exchange.record_provider_failure(
+            &ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::Sent)
+                .with_upstream_code(gateway_core::error::OpaqueUpstreamValue::new(
+                    "PRIVATE_CODE",
+                ))
+                .with_raw_upstream_error(RawUpstreamError::new("PRIVATE_UPSTREAM_BODY"))
+                .with_source(std::io::Error::other("PRIVATE_NATIVE_CAUSE"))
+                .with_diagnostic(
+                    ProviderDiagnostic::new("upstream rejected request")
+                        .with_classification("upstream", "upstream_failure"),
+                ),
+        );
         exchange.headers(
             "upstream.response.headers",
             json!({"status": 429}),
@@ -326,7 +391,7 @@ fn ordinary_trace_logs_and_serialized_snapshots_share_the_sanitized_capture_boun
         assert_eq!(snapshot["wireFrames"], 0);
         snapshot
     });
-    // API / 反馈导出使用的是这个 Value 的序列化结果，而不只是 Debug 表示。
+    // API / 反馈导出使用的是这个 Value 的序列化结果，而不只是 Debug 表示
     let exported = String::from_utf8(serde_json::to_vec(&snapshot).unwrap()).unwrap();
     assert!(!exported.contains("PRIVATE_"), "{exported}");
     let logs = logs.lock().unwrap();

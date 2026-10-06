@@ -1,3 +1,5 @@
+//! 验证 GitHub 发行查询的凭据、缓存合并与固定制品下载
+
 use gateway_admin::{
     model::{
         AdminErrorKind,
@@ -196,13 +198,12 @@ async fn rate_limit_applies_to_other_repositories_using_the_same_identity_and_eg
             .kind(),
         AdminErrorKind::RateLimited
     );
-    assert_eq!(
-        distribution
-            .query_release(query(None), vec![], None)
-            .await
-            .unwrap_err(),
-        failure
-    );
+    let cached_failure = distribution
+        .query_release(query(None), vec![], None)
+        .await
+        .unwrap_err();
+    assert_eq!(cached_failure.kind(), failure.kind());
+    assert_eq!(cached_failure.message(), failure.message());
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }
 

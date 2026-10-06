@@ -1,3 +1,5 @@
+//! 验证 OpenAI 账号导入的代理绑定、凭据解析与提交前校验
+
 use std::{
     num::NonZeroU32,
     sync::Arc,
@@ -28,6 +30,7 @@ async fn sub2api_import_resolves_distinct_proxy_bindings_and_encodes_credentials
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let prepared = service.prepare_import_document(serde_json::json!({"data": {
         "accounts": [
@@ -62,6 +65,7 @@ async fn import_default_proxy_preserves_explicit_account_exits() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let default_proxy =
         gateway_core::account::OutboundProxy::parse("http://default.example:8080").unwrap();
@@ -110,6 +114,7 @@ async fn sub2api_invalid_proxy_bindings_are_rejected_before_any_token_refresh() 
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let proxy = serde_json::json!({"proxy_key": "bound", "protocol": "http", "host": "127.0.0.1", "port": 18080, "status": "active"});
     let mut cases = vec![
@@ -150,6 +155,7 @@ async fn direct_import_persists_opaque_tokens_without_profile_or_token_validatio
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let prepared = service
         .prepare_import_document(serde_json::json!({
@@ -191,6 +197,7 @@ async fn direct_import_accepts_snake_case_oauth_token_aliases() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let prepared = service
         .prepare_import_document(serde_json::json!({
@@ -244,6 +251,7 @@ async fn direct_import_projects_access_token_jwt_expiry_without_persisting_refre
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let prepared = service
         .prepare_import_document(serde_json::json!({
@@ -284,6 +292,7 @@ fn pat_service(server: &MockServer) -> CodexCredentialAdminService {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     )
     .with_personal_access_token_client(Arc::new(client))
 }
@@ -395,6 +404,7 @@ async fn pat_import_times_out_without_falling_back_to_document_identity() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     )
     .with_personal_access_token_client(Arc::new(client));
     let error = service
@@ -417,6 +427,7 @@ async fn pat_import_requires_a_validation_client() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let error = service
         .prepare_import_document(serde_json::json!({
@@ -677,6 +688,7 @@ async fn oauth_import_uses_official_chatgpt_access_token_claims() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let prepared = service
         .prepare_import_document(serde_json::json!({
@@ -705,6 +717,7 @@ async fn oauth_import_uses_official_plan_alias_projection_and_user_id_fallback()
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let prepared = service
         .prepare_import_document(serde_json::json!({
@@ -716,6 +729,26 @@ async fn oauth_import_uses_official_plan_alias_projection_and_user_id_fallback()
     let account = &prepared.accounts().first().expect("one account").account;
     assert_eq!(account.upstream_user_id(), Some("fallback-user"));
     assert_eq!(account.plan_type(), Some("enterprise"));
+}
+
+#[tokio::test]
+async fn oauth_import_should_preserve_pro_max_and_future_plan_claims() {
+    let service = CodexCredentialAdminService::new(
+        Arc::new(UnusedRefresher),
+        Arc::new(TestLeaseCoordinator::default()),
+        runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    for plan in ["prolite", "pro", "promax", "future_plan"] {
+        let access_token = test_jwt(serde_json::json!({"https://api.openai.com/auth":{
+            "chatgpt_user_id":"plan-user", "chatgpt_plan_type":plan
+        }}));
+        let prepared = service
+            .prepare_import_document(serde_json::json!({"accessToken":access_token}))
+            .await
+            .unwrap();
+        assert_eq!(prepared.accounts()[0].account.plan_type(), Some(plan));
+    }
 }
 
 #[tokio::test]
@@ -736,6 +769,7 @@ async fn oauth_import_uses_id_token_then_access_token_for_missing_claims() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let prepared = service
         .prepare_import_document(serde_json::json!({
@@ -759,6 +793,7 @@ async fn oauth_import_does_not_use_top_level_identity_fields() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let prepared = service
         .prepare_import_document(serde_json::json!({
@@ -784,6 +819,7 @@ async fn oauth_import_rejects_legacy_bare_token_field() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let error = service
         .prepare_import_document(serde_json::json!({
@@ -848,6 +884,7 @@ async fn api_key_import_export_preserves_target_without_oauth_exchange() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     let imported = service.prepare_import_document(serde_json::json!({
         "provider": "openai", "authentication_kind": "api_key", "name": "relay", "base_url": "https://relay.example/custom/v2", "api_key": "sk-test-only"
@@ -901,6 +938,7 @@ async fn api_key_import_rejects_unsafe_urls_and_empty_keys() {
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     for (url, key) in [
         ("http://remote.example/v1", "sk-test"),
@@ -926,6 +964,7 @@ async fn sub2api_api_key_import_preserves_versioned_and_explicit_responses_paths
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
     );
     for (base, expected) in [
         ("https://example.com", "https://example.com/v1"),

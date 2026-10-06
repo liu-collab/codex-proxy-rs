@@ -1,3 +1,5 @@
+//! Key 用量查询测试共用的请求、费用与错误记录样本
+
 use crate::{admin::AdminTestFixture, support::key_fixture};
 use chrono::{Duration, Utc};
 use gateway_admin::model::{
@@ -181,7 +183,7 @@ fn error_record() -> OpsError {
         upstream_request_id: Some("private-sentinel".to_owned()),
         latency_ms: Some(420),
         message: "private-sentinel".to_owned(),
-        raw_upstream_error: Some("private-sentinel".to_owned()),
+        error_details: Some("private-sentinel".to_owned()),
         client_ip: Some("192.0.2.42".to_owned()),
         user_agent: Some("key-usage-test/1.0".to_owned()),
         reasoning_effort: Some("xhigh".to_owned()),

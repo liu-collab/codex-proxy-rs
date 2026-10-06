@@ -1,4 +1,4 @@
-//! xAI 对中立 [`ProviderAccountStore`] 的明文 OAuth adapter。
+//! xAI 对中立 [`ProviderAccountStore`] 的明文 OAuth adapter
 
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -33,7 +33,7 @@ const MAX_REASON_BYTES: usize = 2_048;
 const MAX_SECRET_BYTES: usize = 64 * 1_024;
 const MAX_IMPORT_BATCH: usize = 200;
 
-/// 已跨过官方 OAuth/OIDC 验证边界、等待转为 Core 创建命令的账号。
+/// 已跨过官方 OAuth/OIDC 验证边界、等待转为 Core 创建命令的账号
 pub struct VerifiedGrokAccount {
     pub account_id: ProviderAccountId,
     pub name: String,
@@ -62,7 +62,7 @@ impl std::fmt::Debug for VerifiedGrokAccount {
     }
 }
 
-/// Provider-owned OAuth 账号明文导出；Debug 永不展开凭据。
+/// Provider-owned OAuth 账号明文导出；Debug 永不展开凭据
 pub struct GrokAccountExport(Value);
 
 impl GrokAccountExport {
@@ -89,7 +89,7 @@ impl std::fmt::Debug for GrokAccountExport {
     }
 }
 
-/// 已从明文 Provider JSON 完整验证的 xAI account。
+/// 已从明文 Provider JSON 完整验证的 xAI account
 pub(crate) struct LoadedGrokCredential {
     pub(crate) account: ProviderAccount,
     pub(crate) access_token: SecretValue,
@@ -99,7 +99,7 @@ pub(crate) struct LoadedGrokCredential {
     pub(crate) refresh_token_expires_at: Option<DateTime<Utc>>,
 }
 
-/// 管理端可读取的 xAI credential 生命周期事实；不包含任何 OAuth secret。
+/// 管理端可读取的 xAI credential 生命周期事实；不包含任何 OAuth secret
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GrokCredentialLifecycle {
     account_id: ProviderAccountId,
@@ -138,12 +138,12 @@ impl std::fmt::Debug for LoadedGrokCredential {
     }
 }
 
-/// 无状态的 xAI Admin command preparer；不读写持久层。
+/// 无状态的 xAI Admin command preparer；不读写持久层
 #[derive(Debug, Default, Clone, Copy)]
 pub struct GrokCredentialAdmin;
 
 impl GrokCredentialAdmin {
-    /// 验证官方 OAuth account 并生成一次性 Core 创建命令。
+    /// 验证官方 OAuth account 并生成一次性 Core 创建命令
     pub fn prepare_import(
         &self,
         input: &CreateGrokCredential,
@@ -182,7 +182,7 @@ impl GrokCredentialAdmin {
         })
     }
 
-    /// 把已验证 token 的 Provider 生命周期事实一次性投影为 Core 创建命令。
+    /// 把已验证 token 的 Provider 生命周期事实一次性投影为 Core 创建命令
     pub fn prepare_verified_account(
         &self,
         input: &VerifiedGrokAccount,
@@ -223,7 +223,7 @@ impl GrokCredentialAdmin {
         })
     }
 
-    /// 将 Store 读取的 xAI 明文账号导出为规范 OAuth account bundle v1。
+    /// 将 Store 读取的 xAI 明文账号导出为规范 OAuth account bundle v1
     pub fn export_oauth_bundle(
         &self,
         accounts: &[LoadedCredential],
@@ -256,7 +256,7 @@ impl GrokCredentialAdmin {
                         .account
                         .access_token_expires_at()
                         .map(DateTime::<Utc>::from)
-                        .ok_or(GrokCredentialRepositoryError::InvalidCredentialData)?
+                        .ok_or(GrokCredentialRepositoryError::InvalidCredentialData(None))?
                         .to_rfc3339(),
                 ),
             );
@@ -302,7 +302,7 @@ impl GrokCredentialAdmin {
         })))
     }
 
-    /// 验证身份不可重绑并生成完整 profile + credential CAS 命令。
+    /// 验证身份不可重绑并生成完整 profile + credential CAS 命令
     pub fn prepare_rotation(
         &self,
         input: &RotateManagedGrokCredential,
@@ -319,7 +319,7 @@ impl GrokCredentialAdmin {
     }
 }
 
-/// Provider 层只验证 xAI wire，并通过 Core port 持久化；这里没有 SQL 或加密。
+/// Provider 层只验证 xAI wire，并通过 Core port 持久化；这里没有 SQL 或加密
 #[derive(Clone)]
 pub struct GrokCredentialRepository {
     store: Arc<dyn ProviderAccountStore>,
@@ -340,7 +340,7 @@ impl GrokCredentialRepository {
         Self { store }
     }
 
-    /// 按 id 读取账号事实，不做 enabled 过滤；诊断选择用它回补停用账号候选。
+    /// 按 id 读取账号事实，不做 enabled 过滤；诊断选择用它回补停用账号候选
     pub(crate) async fn account_by_id(
         &self,
         account_id: &ProviderAccountId,
@@ -361,7 +361,7 @@ impl GrokCredentialRepository {
             .map_err(map_store_error)
     }
 
-    /// 读取不含 secret 的生命周期投影；Provider 仍是明文 credential JSON 的唯一解析者。
+    /// 读取不含 secret 的生命周期投影；Provider 仍是明文 credential JSON 的唯一解析者
     pub async fn read_lifecycle(
         &self,
         account_id: &ProviderAccountId,
@@ -374,7 +374,7 @@ impl GrokCredentialRepository {
         })
     }
 
-    /// Runtime refresh 用 credential revision CAS 原子轮换 OAuth token pair。
+    /// Runtime refresh 用 credential revision CAS 原子轮换 OAuth token pair
     pub(crate) async fn rotate_oauth_credential(
         &self,
         input: &RotateGrokCredential,
@@ -398,7 +398,7 @@ impl GrokCredentialRepository {
             .await
             .map_err(map_store_error)?;
         let CredentialCasOutcome::Updated(revision) = outcome else {
-            return Err(GrokCredentialRepositoryError::StaleCredentialRevision);
+            return Err(GrokCredentialRepositoryError::StaleCredentialRevision(None));
         };
 
         Ok(GrokCredentialRecord {
@@ -407,7 +407,7 @@ impl GrokCredentialRepository {
         })
     }
 
-    /// 临时失败时只推进持久刷新时刻，不改变 OAuth material 或账号可用性。
+    /// 临时失败时只推进持久刷新时刻，不改变 OAuth material 或账号可用性
     pub(crate) async fn defer_refresh(
         &self,
         account_id: &ProviderAccountId,
@@ -435,7 +435,11 @@ impl GrokCredentialRepository {
             current.account.access_token_expires_at(),
             Some(next_refresh_at),
         )
-        .map_err(|_| GrokCredentialRepositoryError::InvalidCredentialData)?;
+        .map_err(|source| {
+            GrokCredentialRepositoryError::InvalidCredentialData(Some(
+                gateway_core::error::ErrorSource::new(source),
+            ))
+        })?;
         match self
             .store
             .compare_and_swap_credential(update)
@@ -444,12 +448,12 @@ impl GrokCredentialRepository {
         {
             CredentialCasOutcome::Updated(_) => Ok(()),
             CredentialCasOutcome::Conflict => {
-                Err(GrokCredentialRepositoryError::StaleCredentialRevision)
+                Err(GrokCredentialRepositoryError::StaleCredentialRevision(None))
             }
         }
     }
 
-    /// 用同一 credential revision fence 更新可用性。
+    /// 用同一 credential revision fence 更新可用性
     pub async fn update_state(
         &self,
         input: &UpdateGrokCredentialState,
@@ -483,7 +487,7 @@ impl GrokCredentialRepository {
             .map_err(map_store_error)
     }
 
-    /// 读取并完整校验一个 revision 对应的明文 OAuth credential。
+    /// 读取并完整校验一个 revision 对应的明文 OAuth credential
     pub(crate) async fn load(
         &self,
         account_id: &ProviderAccountId,
@@ -497,12 +501,15 @@ impl GrokCredentialRepository {
         loaded_from_core(loaded)
     }
 
-    /// 读取 xAI Provider 的全部账号；credential 逐行按 revision fence 加载。
+    /// 读取 xAI Provider 的全部账号；credential 逐行按 revision fence 加载
     pub(crate) async fn list_loaded_for_provider(
         &self,
     ) -> Result<Vec<LoadedGrokCredential>, GrokCredentialRepositoryError> {
-        let provider = ProviderKind::new(XAI_PROVIDER_KIND)
-            .map_err(|_| GrokCredentialRepositoryError::InvalidCredentialData)?;
+        let provider = ProviderKind::new(XAI_PROVIDER_KIND).map_err(|source| {
+            GrokCredentialRepositoryError::InvalidCredentialData(Some(
+                gateway_core::error::ErrorSource::new(source),
+            ))
+        })?;
         let accounts = self
             .store
             .list_for_provider(&provider)
@@ -520,8 +527,11 @@ impl GrokCredentialRepository {
     pub(crate) async fn list_accounts_for_provider(
         &self,
     ) -> Result<Vec<ProviderAccount>, GrokCredentialRepositoryError> {
-        let provider = ProviderKind::new(XAI_PROVIDER_KIND)
-            .map_err(|_| GrokCredentialRepositoryError::InvalidCredentialData)?;
+        let provider = ProviderKind::new(XAI_PROVIDER_KIND).map_err(|source| {
+            GrokCredentialRepositoryError::InvalidCredentialData(Some(
+                gateway_core::error::ErrorSource::new(source),
+            ))
+        })?;
         let accounts = self
             .store
             .list_for_provider(&provider)
@@ -568,7 +578,7 @@ impl GrokCredentialRepository {
         match outcome {
             QuotaWriteOutcome::Updated => Ok(()),
             QuotaWriteOutcome::Conflict => {
-                Err(GrokCredentialRepositoryError::StaleCredentialRevision)
+                Err(GrokCredentialRepositoryError::StaleCredentialRevision(None))
             }
         }
     }
@@ -591,7 +601,7 @@ impl GrokCredentialRepository {
         match outcome {
             QuotaWriteOutcome::Updated => Ok(()),
             QuotaWriteOutcome::Conflict => {
-                Err(GrokCredentialRepositoryError::StaleCredentialRevision)
+                Err(GrokCredentialRepositoryError::StaleCredentialRevision(None))
             }
         }
     }
@@ -673,12 +683,20 @@ fn encode_secret(
         scope: &secret.scope,
         refresh_token_expires_at: account.refresh_token_expires_at,
     })
-    .map_err(|_| GrokCredentialRepositoryError::InvalidCredentialData)?;
+    .map_err(|source| {
+        GrokCredentialRepositoryError::InvalidCredentialData(Some(
+            gateway_core::error::ErrorSource::new(source),
+        ))
+    })?;
     let Value::Object(object) = value else {
-        return Err(GrokCredentialRepositoryError::InvalidCredentialData);
+        return Err(GrokCredentialRepositoryError::InvalidCredentialData(None));
     };
     if serde_json::to_vec(&object)
-        .map_err(|_| GrokCredentialRepositoryError::InvalidCredentialData)?
+        .map_err(|source| {
+            GrokCredentialRepositoryError::InvalidCredentialData(Some(
+                gateway_core::error::ErrorSource::new(source),
+            ))
+        })?
         .len()
         > MAX_SECRET_BYTES
     {
@@ -698,7 +716,7 @@ fn prepare_rotation(
     validate_secret(secret)?;
     ensure_xai(current)?;
     if current.revision() != expected_revision {
-        return Err(GrokCredentialRepositoryError::StaleCredentialRevision);
+        return Err(GrokCredentialRepositoryError::StaleCredentialRevision(None));
     }
     if current.upstream_user_id() != Some(verified_account.subject.as_str())
         || current.upstream_account_id() != verified_account.upstream_account_id.as_deref()
@@ -730,7 +748,11 @@ fn prepare_rotation(
         Some(to_system_time(verified_account.access_token_expires_at)),
         None,
     )
-    .map_err(|_| GrokCredentialRepositoryError::InvalidCredentialData)?;
+    .map_err(|source| {
+        GrokCredentialRepositoryError::InvalidCredentialData(Some(
+            gateway_core::error::ErrorSource::new(source),
+        ))
+    })?;
     Ok(PreparedGrokCredentialRotation::new(profile, credential))
 }
 
@@ -738,15 +760,18 @@ fn decode_secret(
     credential: &PlaintextCredential,
 ) -> Result<OwnedGrokOAuthSecretWire, GrokCredentialRepositoryError> {
     let value = Value::Object(credential.expose_to_provider().clone());
-    let wire: OwnedGrokOAuthSecretWire = serde_json::from_value(value)
-        .map_err(|_| GrokCredentialRepositoryError::InvalidCredentialData)?;
+    let wire: OwnedGrokOAuthSecretWire = serde_json::from_value(value).map_err(|source| {
+        GrokCredentialRepositoryError::InvalidCredentialData(Some(
+            gateway_core::error::ErrorSource::new(source),
+        ))
+    })?;
     if wire.schema_version != CREDENTIAL_SCHEMA_VERSION
         || wire.auth_method != OAUTH_AUTH_METHOD
         || wire.access_token.is_empty()
         || wire.refresh_token.is_empty()
         || validate_scope(&wire.scope).is_err()
     {
-        return Err(GrokCredentialRepositoryError::InvalidCredentialData);
+        return Err(GrokCredentialRepositoryError::InvalidCredentialData(None));
     }
     Ok(wire)
 }
@@ -861,13 +886,15 @@ fn ensure_xai(account: &ProviderAccount) -> Result<(), GrokCredentialRepositoryE
 }
 
 fn map_store_error(error: gateway_core::error::StoreError) -> GrokCredentialRepositoryError {
+    use gateway_core::error::ErrorSource;
     match error.kind() {
-        StoreErrorKind::Conflict => GrokCredentialRepositoryError::Conflict,
-        StoreErrorKind::InvalidData | StoreErrorKind::InvalidState => {
-            GrokCredentialRepositoryError::InvalidCredentialData
+        StoreErrorKind::Conflict => {
+            GrokCredentialRepositoryError::Conflict(Some(ErrorSource::new(error)))
         }
-        StoreErrorKind::Unavailable => GrokCredentialRepositoryError::Store,
-        _ => GrokCredentialRepositoryError::Store,
+        StoreErrorKind::InvalidData | StoreErrorKind::InvalidState => {
+            GrokCredentialRepositoryError::InvalidCredentialData(Some(ErrorSource::new(error)))
+        }
+        _ => GrokCredentialRepositoryError::Store(error),
     }
 }
 
@@ -875,7 +902,9 @@ fn map_rotation_load_error(
     error: gateway_core::error::StoreError,
 ) -> GrokCredentialRepositoryError {
     if error.kind() == StoreErrorKind::Conflict {
-        GrokCredentialRepositoryError::StaleCredentialRevision
+        GrokCredentialRepositoryError::StaleCredentialRevision(Some(
+            gateway_core::error::ErrorSource::new(error),
+        ))
     } else {
         map_store_error(error)
     }
@@ -885,8 +914,8 @@ fn to_system_time(value: DateTime<Utc>) -> SystemTime {
     value.into()
 }
 
-/// xAI Provider account adapter 的脱敏错误。
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+/// xAI Provider account adapter 的脱敏错误
+#[derive(Debug, Error, Clone)]
 pub enum GrokCredentialRepositoryError {
     #[error("invalid xAI credential input: {0}")]
     InvalidInput(&'static str),
@@ -895,15 +924,15 @@ pub enum GrokCredentialRepositoryError {
     #[error("provider account belongs to another Provider")]
     WrongProviderKind,
     #[error("credential revision is stale")]
-    StaleCredentialRevision,
+    StaleCredentialRevision(#[source] Option<gateway_core::error::ErrorSource>),
     #[error("verified xAI identity cannot be rebound")]
     IdentityRebind,
     #[error("xAI credential data is invalid")]
-    InvalidCredentialData,
+    InvalidCredentialData(#[source] Option<gateway_core::error::ErrorSource>),
     #[error("xAI credential mutation conflicts with current state")]
-    Conflict,
+    Conflict(#[source] Option<gateway_core::error::ErrorSource>),
     #[error("credential revision overflow")]
     RevisionOverflow,
     #[error("provider account store is unavailable")]
-    Store,
+    Store(#[source] gateway_core::error::StoreError),
 }

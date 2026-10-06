@@ -1,3 +1,5 @@
+//! API 测试共用的应用组装、认证请求与服务替身
+
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::{Arc, atomic::Ordering},
@@ -155,5 +157,20 @@ impl ClientKeyVerifier for AcceptingVerifier {
         } else {
             Err(ClientAuthenticationError::InvalidKey)
         }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct RecordingDiagnostics(
+    pub std::sync::Mutex<Vec<gateway_core::diagnostics::OperationalFailure>>,
+);
+#[async_trait]
+impl gateway_core::diagnostics::OperationalDiagnostics for RecordingDiagnostics {
+    async fn record_failure(
+        &self,
+        failure: gateway_core::diagnostics::OperationalFailure,
+    ) -> Result<(), gateway_core::error::StoreError> {
+        self.0.lock().unwrap().push(failure);
+        Ok(())
     }
 }

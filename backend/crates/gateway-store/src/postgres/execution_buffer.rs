@@ -1,4 +1,4 @@
-//! 数据面执行观测的非阻塞 PostgreSQL 写入队列。
+//! 数据面执行观测的非阻塞 PostgreSQL 写入队列
 
 use std::mem::size_of;
 use std::num::NonZeroUsize;
@@ -8,6 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
 use futures::future::try_join_all;
+use gateway_core::diagnostics::{OperationalDiagnostics, OperationalFailure};
 use gateway_core::engine::{
     AttemptRecord, EntryRejection, ExecutionStore, IntermediateFailure, ModelRequestFinalization,
     ModelRequestId, NewModelRequest, ProbeFailure, RecoveryReport,
@@ -23,26 +24,26 @@ const DEFAULT_QUEUE_BYTE_CAPACITY: usize = 64 * 1024 * 1024;
 const PERSISTENCE_LANES: usize = 4;
 const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// 执行观测缓冲区的进程内累计状态。
+/// 执行观测缓冲区的进程内累计状态
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExecutionBufferStats {
-    /// 尚未完成落库的队列项和当前写入项数量。
+    /// 尚未完成落库的队列项和当前写入项数量
     pub queued_items: usize,
-    /// 尚未完成落库的观测对象估算字节数。
+    /// 尚未完成落库的观测对象估算字节数
     pub queued_bytes: usize,
-    /// 进程启动后成功入队的累计数量。
+    /// 进程启动后成功入队的累计数量
     pub enqueued_total: u64,
-    /// 因队列、字节预算或关闭排空超时丢弃的累计数量。
+    /// 因队列、字节预算或关闭排空超时丢弃的累计数量
     pub dropped_total: u64,
-    /// 已成功写入底层 Store 的累计数量。
+    /// 已成功写入底层 Store 的累计数量
     pub persisted_total: u64,
-    /// 底层 Store 返回失败的累计数量。
+    /// 底层 Store 返回失败的累计数量
     pub write_failure_total: u64,
 }
 
 struct ExecutionBufferState {
-    maximum_queued_items: usize,
-    maximum_queued_bytes: usize,
+    regular_item_capacity: usize,
+    regular_byte_capacity: usize,
     queued_items: AtomicUsize,
     queued_bytes: AtomicUsize,
     enqueued_total: AtomicU64,
@@ -53,10 +54,10 @@ struct ExecutionBufferState {
 }
 
 impl ExecutionBufferState {
-    fn new(maximum_queued_items: NonZeroUsize, maximum_queued_bytes: NonZeroUsize) -> Self {
+    fn new(regular_item_capacity: NonZeroUsize, regular_byte_capacity: NonZeroUsize) -> Self {
         Self {
-            maximum_queued_items: maximum_queued_items.get(),
-            maximum_queued_bytes: maximum_queued_bytes.get(),
+            regular_item_capacity: regular_item_capacity.get(),
+            regular_byte_capacity: regular_byte_capacity.get(),
             queued_items: AtomicUsize::new(0),
             queued_bytes: AtomicUsize::new(0),
             enqueued_total: AtomicU64::new(0),
@@ -67,12 +68,21 @@ impl ExecutionBufferState {
         }
     }
 
-    fn reserve(&self, bytes: usize) -> Result<(), ReservationFailure> {
+    fn reserve(&self, bytes: usize, critical: bool) -> Result<(), ReservationFailure> {
+        // 常规额度之外保留四分之一给失败与请求生命周期，普通进度更新不能消耗
+        let item_limit = self.regular_item_capacity.saturating_add(if critical {
+            self.regular_item_capacity / 4
+        } else {
+            0
+        });
+        let byte_limit = self.regular_byte_capacity.saturating_add(if critical {
+            self.regular_byte_capacity / 4
+        } else {
+            0
+        });
         self.queued_items
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                current
-                    .checked_add(1)
-                    .filter(|next| *next <= self.maximum_queued_items)
+                current.checked_add(1).filter(|next| *next <= item_limit)
             })
             .map_err(|_| ReservationFailure::ItemCapacity)?;
         let bytes_reserved = self
@@ -80,7 +90,7 @@ impl ExecutionBufferState {
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current
                     .checked_add(bytes)
-                    .filter(|next| *next <= self.maximum_queued_bytes)
+                    .filter(|next| *next <= byte_limit)
             })
             .is_ok();
         if !bytes_reserved {
@@ -153,14 +163,15 @@ fn saturating_increment(counter: &AtomicU64, increment: u64) {
     });
 }
 
-/// 将数据面观测写入转换为有界、非阻塞的进程内命令。
+/// 将数据面观测写入转换为有界、非阻塞的进程内命令
 ///
 /// 队列满、worker 尚未启动或已经退出时只丢弃观测并记录告警；协议数据面不会
-/// 等待 PostgreSQL，也不会看到 Store 错误。启动恢复仍直接访问底层 Store。
+/// 等待 PostgreSQL，也不会看到 Store 错误
+/// 启动恢复仍直接访问底层 Store
 pub struct BufferedExecutionStore<S: ?Sized> {
     inner: Arc<S>,
     // lane transport 本身没有独立容量；所有发送只能经 `enqueue` 的全局 item/byte
-    // 预留进入，`QueuedExecutionObservation::drop` 负责归还，不能增加旁路发送入口。
+    // 预留进入，`QueuedExecutionObservation::drop` 负责归还，不能增加旁路发送入口
     senders: Box<[mpsc::UnboundedSender<QueuedExecutionObservation>]>,
     next_unkeyed_lane: AtomicUsize,
     state: Arc<ExecutionBufferState>,
@@ -188,16 +199,17 @@ impl<S: ?Sized> BufferedExecutionStore<S> {
         )
     }
 
+    /// 参数限制常规接收额度；失败与生命周期记录可使用额外四分之一预留
     #[must_use]
     pub fn with_limits(
         inner: Arc<S>,
         capacity: NonZeroUsize,
-        maximum_queued_bytes: NonZeroUsize,
+        regular_byte_capacity: NonZeroUsize,
     ) -> (Self, ExecutionObservationWriter<S>) {
         let lane_count = PERSISTENCE_LANES.min(capacity.get());
         let (senders, receivers): (Vec<_>, Vec<_>) =
             (0..lane_count).map(|_| mpsc::unbounded_channel()).unzip();
-        let state = Arc::new(ExecutionBufferState::new(capacity, maximum_queued_bytes));
+        let state = Arc::new(ExecutionBufferState::new(capacity, regular_byte_capacity));
         (
             Self {
                 inner: Arc::clone(&inner),
@@ -223,16 +235,19 @@ impl<S: ?Sized> BufferedExecutionStore<S> {
             .estimated_bytes()
             .saturating_add(write.request_id().map_or(0, str::len))
             .max(1);
-        if let Err(failure) = self.state.reserve(estimated_bytes) {
+        if let Err(failure) = self.state.reserve(estimated_bytes, write.is_critical()) {
             self.state.record_dropped(1);
             let stats = self.state.snapshot();
+            if !stats.dropped_total.is_power_of_two() {
+                return;
+            }
             tracing::warn!(
                 operation = write.operation(),
                 request_id = ?write.request_id(),
                 reason = failure.reason(),
                 estimated_bytes,
-                maximum_queued_items = self.state.maximum_queued_items,
-                maximum_queued_bytes = self.state.maximum_queued_bytes,
+                regular_item_capacity = self.state.regular_item_capacity,
+                regular_byte_capacity = self.state.regular_byte_capacity,
                 queued_items = stats.queued_items,
                 queued_bytes = stats.queued_bytes,
                 dropped_total = stats.dropped_total,
@@ -252,6 +267,9 @@ impl<S: ?Sized> BufferedExecutionStore<S> {
                 drop(queued);
                 self.state.record_dropped(1);
                 let stats = self.state.snapshot();
+                if !stats.dropped_total.is_power_of_two() {
+                    return;
+                }
                 tracing::warn!(
                     operation,
                     request_id = ?request_id,
@@ -275,7 +293,7 @@ impl<S: ?Sized> BufferedExecutionStore<S> {
 }
 
 fn request_lane(request_id: &str, lane_count: usize) -> usize {
-    // request ID 由 Core 生成，不含用户选择的散列输入；固定散列只用于进程内顺序亲和。
+    // request ID 由 Core 生成，不含用户选择的散列输入；固定散列只用于进程内顺序亲和
     let hash = request_id
         .bytes()
         .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| {
@@ -285,9 +303,19 @@ fn request_lane(request_id: &str, lane_count: usize) -> usize {
 }
 
 #[async_trait]
+impl<S: Send + Sync + ?Sized> OperationalDiagnostics for BufferedExecutionStore<S> {
+    async fn record_failure(&self, failure: OperationalFailure) -> Result<(), StoreError> {
+        self.enqueue(ExecutionObservationWrite::OperationalFailure(Box::new(
+            failure,
+        )));
+        Ok(())
+    }
+}
+
+#[async_trait]
 impl<S> ExecutionStore for BufferedExecutionStore<S>
 where
-    S: ExecutionStore + ?Sized,
+    S: ExecutionStore + OperationalDiagnostics + ?Sized,
 {
     fn maintain_request(
         &self,
@@ -391,9 +419,9 @@ where
     }
 }
 
-/// 由 Host 监督的固定并行写泵；同一 request ID 固定落在一个 lane 并按入队顺序落库。
+/// 由 Host 监督的固定并行写泵；同一 request ID 固定落在一个 lane 并按入队顺序落库
 ///
-/// lane transport 共享 Store 的全局 item/byte 预留，正在写入的项目同样计入总上限。
+/// lane transport 共享 Store 的全局 item/byte 预留，正在写入的项目同样计入总上限
 pub struct ExecutionObservationWriter<S: ?Sized> {
     inner: Arc<S>,
     receivers: Box<[Mutex<mpsc::UnboundedReceiver<QueuedExecutionObservation>>]>,
@@ -410,10 +438,10 @@ impl<S: ?Sized> ExecutionObservationWriter<S> {
         self.state.snapshot()
     }
 
-    /// 等待所有已接收写入结束一次持久化尝试。
+    /// 等待所有已接收写入结束一次持久化尝试
     ///
-    /// 队列计数包含正在写入的项目；失败沿用现有 fail-open 计数且不会由本方法重试。
-    /// 返回 `false` 表示到达截止时间时仍有排队或正在写入的项目。
+    /// 队列计数包含正在写入的项目；失败沿用现有 fail-open 计数且不会由本方法重试
+    /// 返回 `false` 表示到达截止时间时仍有排队或正在写入的项目
     pub async fn wait_until_idle(&self, deadline: Instant) -> bool {
         self.idle().wait_until(deadline).await
     }
@@ -427,7 +455,7 @@ impl<S: ?Sized> ExecutionObservationWriter<S> {
 
 impl ExecutionBufferIdle {
     /// 等待所有已接收写入结束一次持久化尝试；队列计数包含正在写入的项目，
-    /// 写入失败沿用现有 fail-open 计数且不在关闭路径重试。
+    /// 写入失败沿用现有 fail-open 计数且不在关闭路径重试
     pub(crate) async fn wait_until(&self, deadline: Instant) -> bool {
         loop {
             if self.state.queued_items.load(Ordering::Acquire) == 0 {
@@ -436,7 +464,7 @@ impl ExecutionBufferIdle {
             let idle = self.state.idle.notified();
             tokio::pin!(idle);
             let _ = idle.as_mut().enable();
-            // 在订阅前后各检查一次，覆盖最后一个写入恰好在注册等待时结束的竞态。
+            // 在订阅前后各检查一次，覆盖最后一个写入恰好在注册等待时结束的竞态
             if self.state.queued_items.load(Ordering::Acquire) == 0 {
                 return true;
             }
@@ -454,7 +482,7 @@ impl ExecutionBufferIdle {
 
 impl<S> DaemonTask for ExecutionObservationWriter<S>
 where
-    S: ExecutionStore + ?Sized,
+    S: ExecutionStore + OperationalDiagnostics + ?Sized,
 {
     fn run(
         &self,
@@ -487,7 +515,7 @@ async fn run_lane<S>(
     shutdown_deadline: &OnceLock<Instant>,
 ) -> Result<(), WorkerTaskError>
 where
-    S: ExecutionStore + ?Sized,
+    S: ExecutionStore + OperationalDiagnostics + ?Sized,
 {
     let mut receiver = receiver.lock().await;
     loop {
@@ -547,7 +575,7 @@ fn shared_shutdown_deadline(deadline: &OnceLock<Instant>) -> Instant {
 
 async fn persist_queued<S>(mut queued: QueuedExecutionObservation, store: &S)
 where
-    S: ExecutionStore + ?Sized,
+    S: ExecutionStore + OperationalDiagnostics + ?Sized,
 {
     let operation = queued.operation();
     let request_id = queued.request_id().map(ToOwned::to_owned);
@@ -562,12 +590,16 @@ where
         return;
     };
     // Store 写入没有统一幂等键；超时可能表示已提交，不能在这里盲目重试并
-    // 制造重复 ops_events。失败会被计数并丢弃，数据面始终不等待补偿。
+    // 制造重复 ops_events
+    // 失败会被计数并丢弃，数据面始终不等待补偿
     match write.persist(store).await {
         Ok(()) => state.record_persisted(),
         Err(error) => {
             state.record_write_failure();
             let stats = state.snapshot();
+            if !stats.write_failure_total.is_power_of_two() {
+                return;
+            }
             tracing::warn!(
                 operation,
                 request_id = ?request_id,
@@ -586,7 +618,7 @@ async fn drain_on_shutdown<S>(
     state: &ExecutionBufferState,
     deadline: Instant,
 ) where
-    S: ExecutionStore + ?Sized,
+    S: ExecutionStore + OperationalDiagnostics + ?Sized,
 {
     receiver.close();
     let queued_at_shutdown = receiver.len();
@@ -693,10 +725,20 @@ enum ExecutionObservationWrite {
     IntermediateFailure(Box<IntermediateFailure>),
     ProbeFailure(Box<ProbeFailure>),
     EntryRejection(Box<EntryRejection>),
+    OperationalFailure(Box<OperationalFailure>),
     Finalize(Box<ModelRequestFinalization>),
 }
 
 impl ExecutionObservationWrite {
+    const fn is_critical(&self) -> bool {
+        !matches!(
+            self,
+            Self::MarkSendState { .. }
+                | Self::MarkDownstreamCommitted { .. }
+                | Self::RecordClientStatus { .. }
+        )
+    }
+
     const fn operation(&self) -> &'static str {
         match self {
             Self::Create(_) => "create_model_request",
@@ -708,6 +750,7 @@ impl ExecutionObservationWrite {
             Self::IntermediateFailure(_) => "record_intermediate_failure",
             Self::ProbeFailure(_) => "record_probe_failure",
             Self::EntryRejection(_) => "record_entry_rejection",
+            Self::OperationalFailure(_) => "record_operational_failure",
             Self::Finalize(_) => "finalize_model_request",
         }
     }
@@ -722,6 +765,7 @@ impl ExecutionObservationWrite {
             | Self::RecordClientStatus { request_id, .. } => Some(request_id.as_str()),
             Self::IntermediateFailure(failure) => Some(failure.request_id.as_str()),
             Self::ProbeFailure(_) | Self::EntryRejection(_) => None,
+            Self::OperationalFailure(failure) => failure.correlation_id.as_deref(),
             Self::Finalize(finalization) => Some(finalization.request_id.as_str()),
         }
     }
@@ -754,13 +798,26 @@ impl ExecutionObservationWrite {
                 rejection.error.client_error_code(),
                 rejection.error.client_error_type(),
             ])
-            .saturating_add(size_of::<EntryRejection>()),
+            .saturating_add(size_of::<EntryRejection>())
+            .saturating_add(gateway_core::error::ErrorSource::estimated_chain_bytes(
+                std::error::Error::source(&rejection.error),
+            )),
             Self::ProbeFailure(failure) => text_bytes([
                 Some(failure.provider_kind.as_str()),
                 Some(failure.account_id.as_str()),
                 Some(failure.upstream_model_id.as_str()),
             ])
             .saturating_add(provider_error_bytes(&failure.error)),
+            Self::OperationalFailure(failure) => {
+                size_of::<OperationalFailure>().saturating_add(text_bytes([
+                    Some(failure.message.as_str()),
+                    failure.correlation_id.as_deref(),
+                    failure.provider_kind.as_ref().map(|kind| kind.as_str()),
+                    failure.account_id.as_ref().map(|id| id.as_str()),
+                    failure.upstream_code.as_ref().map(|code| code.as_str()),
+                    failure.details.as_ref().map(|details| details.as_str()),
+                ]))
+            }
             Self::Finalize(finalization) => {
                 let error_bytes = finalization.error.as_ref().map_or(0, |error| {
                     text_bytes([
@@ -768,6 +825,11 @@ impl ExecutionObservationWrite {
                         error.client_error_code(),
                         error.client_error_type(),
                     ])
+                    .saturating_add(
+                        gateway_core::error::ErrorSource::estimated_chain_bytes(
+                            std::error::Error::source(error),
+                        ),
+                    )
                 });
                 text_bytes([
                     Some(finalization.request_id.as_str()),
@@ -782,6 +844,7 @@ impl ExecutionObservationWrite {
                     finalization.provider_metadata_json.as_deref(),
                     finalization.diagnostic_trace_json.as_deref(),
                     finalization.provider_error_code.as_deref(),
+                    finalization.error_details.as_deref(),
                 ])
                 .saturating_add(error_bytes)
                 .saturating_add(size_of::<ModelRequestFinalization>())
@@ -791,9 +854,10 @@ impl ExecutionObservationWrite {
 
     async fn persist<S>(self, store: &S) -> Result<(), StoreError>
     where
-        S: ExecutionStore + ?Sized,
+        S: ExecutionStore + OperationalDiagnostics + ?Sized,
     {
         match self {
+            Self::OperationalFailure(failure) => store.record_failure(*failure).await,
             Self::Create(request) => store.create_model_request(*request).await,
             Self::Attempt(attempt) => store.record_attempt(*attempt).await,
             Self::CreateWithAttempt(write) => {
@@ -872,9 +936,13 @@ fn attempt_bytes(attempt: &AttemptRecord) -> usize {
 }
 
 fn provider_error_bytes(error: &ProviderError) -> usize {
+    use std::error::Error as _;
+
     let mut bytes = text_bytes([
         error.upstream_code().map(|value| value.as_str()),
         error.upstream_request_id().map(|value| value.as_str()),
+        error.diagnostic().map(|value| value.as_str()),
+        error.raw_upstream_error().map(|value| value.as_str()),
     ]);
     if let Some(client_error) = error.client_visible_upstream_error() {
         bytes = bytes.saturating_add(text_bytes([
@@ -893,7 +961,9 @@ fn provider_error_bytes(error: &ProviderError) -> usize {
                 .saturating_add(header.value().len());
         }
     }
-    bytes
+    bytes.saturating_add(gateway_core::error::ErrorSource::estimated_chain_bytes(
+        error.source(),
+    ))
 }
 
 fn text_bytes<const N: usize>(values: [Option<&str>; N]) -> usize {

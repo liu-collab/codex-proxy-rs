@@ -1,3 +1,5 @@
+//! 验证执行记录端口的请求、尝试、恢复租约与快照持久化
+
 use std::time::{Duration as StdDuration, SystemTime};
 
 use chrono::{DateTime, Duration, Utc};
@@ -214,7 +216,7 @@ async fn merged_model_less_first_attempt_should_match_sequential_semantics() {
         (1, "not_sent", "openai", "running", None, None)
     );
 
-    // 后续 attempt 沿用常规 CAS 递增路径；已持久化的 sent 水位不被重试重置。
+    // 后续 attempt 沿用常规 CAS 递增路径；已持久化的 sent 水位不被重试重置
     repository
         .mark_upstream_send_state(
             "req_merged",
@@ -675,7 +677,7 @@ fn successful_core_finalization(id: &str) -> CoreModelRequestFinalization {
         provider_metadata_json: None,
         error: None,
         provider_error_code: None,
-        raw_upstream_error: None,
+        error_details: None,
         failure_observation: Default::default(),
         retry_after_ms: None,
         usage: Usage::new(),
@@ -827,8 +829,8 @@ async fn core_adapter_persists_opaque_response_ids_as_bytes() {
 }
 
 #[tokio::test]
-async fn core_adapter_persists_raw_upstream_error_verbatim() {
-    let Some(database) = TestDatabase::create("execution_raw_upstream_error").await else {
+async fn core_adapter_persists_native_causes_and_verbatim_upstream_details() {
+    let Some(database) = TestDatabase::create("execution_error_details").await else {
         return;
     };
     seed_running_request(&database.pool, "req_raw_upstream_error")
@@ -836,6 +838,12 @@ async fn core_adapter_persists_raw_upstream_error_verbatim() {
         .expect("seed model request");
     let store = PgExecutionStore::new(database.pool.clone());
     let raw = r#"{"error":{"message":"raw upstream body","opaque":"\u0000"}}"#;
+    let provider_error = gateway_core::error::ProviderError::new(
+        gateway_core::error::ProviderErrorKind::Unavailable,
+        UpstreamSendState::Sent,
+    )
+    .with_source(std::io::Error::other("original local cause"))
+    .with_raw_upstream_error(gateway_core::error::RawUpstreamError::new(raw));
     let mut finalization = successful_core_finalization("req_raw_upstream_error");
     finalization.outcome = ExecutionOutcome::Failed;
     finalization.client_status_code = Some(502);
@@ -844,19 +852,25 @@ async fn core_adapter_persists_raw_upstream_error_verbatim() {
         GatewayErrorKind::UpstreamUnavailable,
         "upstream service is unavailable",
     ));
-    finalization.raw_upstream_error = Some(raw.to_owned());
+    finalization.error_details = provider_error.error_details();
 
     ExecutionStore::finalize_model_request(&store, finalization)
         .await
-        .expect("persist raw upstream error");
+        .expect("persist restricted error details");
 
     let persisted: Option<String> = sqlx::query_scalar(
-        "select raw_upstream_error from model_requests where id = 'req_raw_upstream_error'",
+        "select error_details from model_requests where id = 'req_raw_upstream_error'",
     )
     .fetch_one(&database.pool)
     .await
-    .expect("load raw upstream error");
-    assert_eq!(persisted.as_deref(), Some(raw));
+    .expect("load restricted error details");
+    let persisted: Value = serde_json::from_str(persisted.as_deref().unwrap()).unwrap();
+    assert_eq!(persisted["upstream"], raw);
+    assert_eq!(
+        persisted["causes"]["messages"],
+        json!(["original local cause"])
+    );
+    assert_eq!(persisted["causes"]["truncated"], false);
 
     database.close().await;
 }
@@ -1453,7 +1467,7 @@ async fn diagnostic_trace_is_finalized_atomically_and_available_for_failed_reque
     database.close().await;
 }
 
-// 只构造已接纳的入口事实；未选择账号、未出站，也没有上游用量。
+// 只构造已接纳的入口事实；未选择账号、未出站，也没有上游用量
 pub(super) fn accepted_request(id: &str) -> CoreNewModelRequest {
     let started_at = SystemTime::from(
         DateTime::from_timestamp_micros(Utc::now().timestamp_micros())
@@ -1488,7 +1502,7 @@ pub(super) fn accepted_request(id: &str) -> CoreNewModelRequest {
 pub(super) fn early_failure(request: &CoreNewModelRequest) -> CoreModelRequestFinalization {
     let trace = TraceContext::new(request.id.as_str());
     trace.record("request.started", json!({"operation": "generate"}));
-    // trace 的 index 是预备阶段关联，不证明已经拿到账号、建流或实际发送。
+    // trace 的 index 是预备阶段关联，不证明已经拿到账号、建流或实际发送
     let preparation = trace.attempt(1);
     preparation.record(
         "attempt.started",
@@ -1525,7 +1539,7 @@ pub(super) fn early_failure(request: &CoreNewModelRequest) -> CoreModelRequestFi
             "no available provider",
         )),
         provider_error_code: None,
-        raw_upstream_error: None,
+        error_details: None,
         failure_observation: Default::default(),
         retry_after_ms: None,
         usage: Usage::new(),
@@ -1620,7 +1634,7 @@ async fn zero_attempt_failure_is_queryable_without_fabricating_upstream_facts() 
         "downstream_committed_at",
         "service_tier",
         "provider_observation_json",
-        "raw_upstream_error",
+        "error_details",
         "input_tokens",
         "output_tokens",
         "total_tokens",
@@ -1673,9 +1687,9 @@ async fn zero_attempt_failure_is_queryable_without_fabricating_upstream_facts() 
     assert_eq!(error.upstream_transport, None);
     assert_eq!(error.upstream_status_code, None);
     assert_eq!(error.upstream_request_id, None);
-    assert_eq!(error.raw_upstream_error, None);
+    assert_eq!(error.error_details, None);
 
-    // 路由入口不等于已选择 Provider；没有平台事实时不能被平台/attempt 筛选命中。
+    // 路由入口不等于已选择 Provider；没有平台事实时不能被平台/attempt 筛选命中
     for filter in [
         OpsErrorFilter {
             provider_kind: Some("openai".to_owned()),
