@@ -2045,6 +2045,91 @@ async fn capture_scoped_http_request(
     requests.pop().expect("single scoped request")
 }
 
+/// 后代线程必须先有根会话绑定：先发一次根请求（session 与 thread 同值）建立绑定，
+/// 再发后代请求并返回它捕获的上游请求。
+///
+/// 上游 v3.20 起，会话身份与线程身份不同的请求只跟随根会话已绑定的账号，没有绑定
+/// 时会等到请求超时；这里按真实调用顺序先建立绑定，避免把「等根会话」误判成失败。
+async fn capture_descendant_request_with_root_binding(
+    request_id: &str,
+    selected_account_id: &str,
+    root_session_id: &str,
+    body: Map<String, serde_json::Value>,
+    mut protocol_context: Map<String, serde_json::Value>,
+) -> wiremock::Request {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, selected_account_id).await;
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/codex/responses"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(CAPTURE_COMPLETED_SSE),
+        )
+        .expect(2)
+        .mount(&server)
+        .await;
+    let affinity = Arc::new(MemorySessionAffinity::default());
+    let provider = provider_with_affinity_and_base_url(&store, Arc::clone(&affinity), server.uri());
+    let root_context = Map::from_iter([
+        ("session_id".to_owned(), json!(root_session_id)),
+        ("thread_id".to_owned(), json!(root_session_id)),
+        ("use_websocket".to_owned(), json!(false)),
+    ]);
+    let root_operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+        ProtocolPayload::json_object(
+            "openai",
+            Map::from_iter([
+                ("model".to_owned(), json!("gpt-5.4")),
+                ("input".to_owned(), json!("hello")),
+                ("session_id".to_owned(), json!(root_session_id)),
+            ]),
+        )
+        .expect("OpenAI payload")
+        .with_context(root_context),
+    ));
+    let mut root_stream = Arc::clone(&provider)
+        .execute(
+            planned_request("openai", root_operation),
+            context_with_state_owner(&format!("{request_id}_root"), selected_account_id),
+        )
+        .await
+        .expect("prepare root session request");
+    while let Some(event) = root_stream.next().await {
+        event.expect("root session response");
+    }
+    drop(root_stream);
+    assert_eq!(
+        affinity.binding_count(),
+        1,
+        "根会话请求必须建立会话到账号的绑定"
+    );
+
+    protocol_context.insert("use_websocket".to_owned(), json!(false));
+    let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+        ProtocolPayload::json_object("openai", body)
+            .expect("OpenAI payload")
+            .with_context(protocol_context),
+    ));
+    let mut stream = Arc::clone(&provider)
+        .execute(
+            planned_request("openai", operation),
+            context_with_state_owner(request_id, selected_account_id),
+        )
+        .await
+        .expect("prepare descendant provider stream");
+    while let Some(event) = stream.next().await {
+        event.expect("scoped provider response");
+    }
+    let mut requests = server
+        .received_requests()
+        .await
+        .expect("captured scoped request");
+    assert_eq!(requests.len(), 2);
+    requests.pop().expect("descendant scoped request")
+}
+
 #[tokio::test]
 async fn provider_should_send_the_request_snapshot_location_to_the_upstream() {
     let body = json!({
@@ -7829,10 +7914,10 @@ async fn account_identity_pseudonyms_are_shared_across_headers_body_and_turn_met
             ("turn_metadata".to_owned(), json!(raw_turn_metadata)),
         ])
     };
-    let request = capture_scoped_http_request(
+    let request = capture_descendant_request_with_root_binding(
         "req_identity_pseudonym",
         "acct_scope_new",
-        "acct_scope_new",
+        "client-session",
         body(),
         protocol_context(),
     )
@@ -7910,10 +7995,10 @@ async fn account_identity_pseudonyms_are_shared_across_headers_body_and_turn_met
     }
 
     // 换一个账号：同一个原值得到不同伪名，跨账号不可关联。
-    let other = capture_scoped_http_request(
+    let other = capture_descendant_request_with_root_binding(
         "req_identity_pseudonym_other",
         "acct_scope_old",
-        "acct_scope_old",
+        "client-session",
         body(),
         protocol_context(),
     )
