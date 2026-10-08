@@ -97,9 +97,12 @@ impl CodexProvider {
         }
         let follow_only = inferred
             .as_ref()
-            .is_some_and(CodexSessionAffinity::follow_only);
-        Ok(explicit
-            .or(inferred)
+            .is_some_and(CodexSessionAffinity::follow_only)
+            || explicit
+                .as_ref()
+                .is_some_and(CodexSessionAffinity::follow_only);
+        Ok(inferred
+            .or(explicit)
             .map(|affinity| affinity.with_follow_only(follow_only)))
     }
 
@@ -216,7 +219,12 @@ impl CodexProvider {
         };
         if !context.is_diagnostic_required_account() {
             self.selector
-                .validate_translated_selection(&mut lease, affinity.as_ref(), None)
+                .validate_translated_selection(
+                    &mut lease,
+                    affinity.as_ref(),
+                    None,
+                    context.account_selection_policy(),
+                )
                 .await
                 .map_err(map_selection_error)?;
         }
@@ -269,7 +277,7 @@ impl CodexProvider {
         }
         // Standalone Provider 端点没有可证明的账号 owner：raw JSON 正文里已存在的安装身份
         // 必须收敛到当前 lease，不能沿用下游声明的账号或 installation identity。只替换字符串
-        // 字面量、其余字节逐字保留；正文里没有这些键时保持原样。
+        // 字面量、其余字节逐字保留；正文里没有这些键时保持原样
         let installation_id = lease.installation_id();
         if !installation_id.is_empty()
             && let Some(scoped) = crate::transport::request::scope_standalone_body_installation_id(
@@ -278,6 +286,21 @@ impl CodexProvider {
             )
         {
             request.body = Bytes::from(scoped);
+        }
+        if !context.is_diagnostic_required_account()
+            && let Some(affinity) = affinity.as_ref()
+            && let Some(turn) = affinity.turn_alias()
+        {
+            self.selector
+                .remember_turn(
+                    turn,
+                    affinity,
+                    context
+                        .account_selection_policy()
+                        .openai_session_affinity_ttl(),
+                )
+                .await
+                .map_err(map_selection_error)?;
         }
         let allows_account_state_mutation = lease.allows_account_state_mutation();
         let provider_kind = ProviderKind::new(PROVIDER_NAME)
@@ -310,7 +333,7 @@ impl CodexProvider {
                 .client_for_request(&context)?
                 .for_account(lease.account())
                 .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
-                .with_authentication(lease.authentication())
+                .with_responses_api_base_url(lease.authentication().responses_api_base_url())
                 .with_middleware_headers(middleware_headers),
             response_origin: request.response_origin,
             endpoint_path: request.endpoint_path,

@@ -31,8 +31,8 @@ use crate::support::{
     rejecting_account_proxy, runtime_policy, seed_input,
 };
 
-const OFFICIAL_FIXTURE: &[u8] =
-    include_bytes!("../transport/catalog/fixtures/official_grok_models_snapshot.json");
+const CLI_PROXY_FIXTURE: &[u8] =
+    include_bytes!("../transport/catalog/fixtures/cli_proxy_models.json");
 const OAUTH_BACKOFF_ATTEMPTS: u32 = 5;
 
 #[tokio::test]
@@ -190,7 +190,7 @@ impl GrokModelCatalogTransport for StaticCatalogTransport {
     fn execute(&self, _: GrokModelCatalogRequest) -> GrokModelCatalogTransportFuture<'_> {
         Box::pin(async {
             Ok(GrokModelCatalogTransportResponse::new(
-                OFFICIAL_FIXTURE,
+                CLI_PROXY_FIXTURE,
                 None,
             ))
         })
@@ -265,6 +265,7 @@ impl ProviderLeasePort for TestRefreshLeases {
         _: &'a gateway_core::policy::ClientApiKeyId,
         _: &'a gateway_core::routing::ProviderKind,
         _: &'a [gateway_core::account::ProviderAccountId],
+        _pool: gateway_core::provider_ports::ProviderConcurrencyPool,
     ) -> futures::future::BoxFuture<
         'a,
         Result<gateway_core::provider_ports::ProviderSchedulingState, ProviderStoreError>,

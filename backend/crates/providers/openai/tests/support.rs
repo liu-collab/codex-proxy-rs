@@ -54,11 +54,19 @@ pub(crate) struct MemoryAccountStore {
     accounts: Mutex<BTreeMap<ProviderAccountId, StoredAccount>>,
     quota_reads: AtomicUsize,
     fail_provider_listing: AtomicBool,
+    pending_account_reads: bool,
     credential_load_hook: Mutex<Option<Arc<CredentialLoadHook>>>,
     credential_loads: AtomicUsize,
 }
 
 impl MemoryAccountStore {
+    pub(crate) fn with_pending_account_reads() -> Self {
+        Self {
+            pending_account_reads: true,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn repository(self: &Arc<Self>) -> CodexCredentialRepository {
         CodexCredentialRepository::new(self.clone())
     }
@@ -236,6 +244,9 @@ impl ProviderAccountStore for MemoryAccountStore {
         &self,
         account: &ProviderAccountId,
     ) -> Result<Option<ProviderAccount>, StoreError> {
+        if self.pending_account_reads {
+            futures::future::pending::<()>().await;
+        }
         Ok(self
             .accounts
             .lock()
@@ -662,6 +673,7 @@ pub(crate) struct TestLeaseCoordinator {
     pub(crate) busy: Mutex<bool>,
     pub(crate) busy_accounts: Mutex<BTreeSet<ProviderAccountId>>,
     pub(crate) signals: Mutex<BTreeMap<ProviderAccountId, AccountRuntimeSignals>>,
+    pub(crate) reserved_signals: Mutex<BTreeMap<ProviderAccountId, AccountRuntimeSignals>>,
     round_robin_cursor: Mutex<u64>,
 }
 
@@ -671,9 +683,17 @@ impl ProviderLeasePort for TestLeaseCoordinator {
         _client_api_key_id: &'a ClientApiKeyId,
         _provider_kind: &'a ProviderKind,
         accounts: &'a [ProviderAccountId],
+        pool: gateway_core::provider_ports::ProviderConcurrencyPool,
     ) -> BoxFuture<'a, Result<ProviderSchedulingState, ProviderStoreError>> {
         Box::pin(async move {
-            let overrides = self.signals.lock().expect("scheduling signals lock");
+            let overrides = match pool {
+                gateway_core::provider_ports::ProviderConcurrencyPool::Shared => &self.signals,
+                gateway_core::provider_ports::ProviderConcurrencyPool::Reserved => {
+                    &self.reserved_signals
+                }
+            }
+            .lock()
+            .expect("scheduling signals lock");
             let signals = accounts
                 .iter()
                 .map(|account| {
@@ -734,14 +754,27 @@ impl ProviderLeasePort for TestLeaseCoordinator {
 
 #[derive(Default)]
 pub(crate) struct MemorySessionAffinity {
+    initial_claim_barrier: Option<Arc<tokio::sync::Barrier>>,
     aliases: Mutex<BTreeMap<(String, String), gateway_core::provider_ports::ProviderSessionAlias>>,
     bindings:
         Mutex<BTreeMap<(String, String), gateway_core::provider_ports::ProviderSessionBinding>>,
     lookups: Mutex<Vec<String>>,
     renewal_ttls: Mutex<Vec<Duration>>,
+    alias_ttls: Mutex<Vec<Duration>>,
 }
 
 impl MemorySessionAffinity {
+    pub(crate) fn with_initial_claim_barrier(participants: usize) -> Self {
+        Self {
+            initial_claim_barrier: Some(Arc::new(tokio::sync::Barrier::new(participants))),
+            ..Self::default()
+        }
+    }
+
+    pub(crate) fn alias_ttls(&self) -> Vec<Duration> {
+        self.alias_ttls.lock().unwrap().clone()
+    }
+
     pub(crate) fn renewal_ttls(&self) -> Vec<Duration> {
         self.renewal_ttls.lock().expect("affinity TTL lock").clone()
     }
@@ -829,6 +862,12 @@ impl ProviderSessionAffinityPort for MemorySessionAffinity {
         Result<Option<gateway_core::provider_ports::ProviderSessionBinding>, ProviderStoreError>,
     > {
         Box::pin(async move {
+            // 让并发首请求都读到空绑定，再验证发送前的原子认领冲突
+            if expected.is_none()
+                && let Some(barrier) = &self.initial_claim_barrier
+            {
+                barrier.wait().await;
+            }
             let key = (
                 provider.as_str().to_owned(),
                 key.expose_to_store().to_owned(),
@@ -877,7 +916,7 @@ impl ProviderSessionAffinityPort for MemorySessionAffinity {
         provider: &'a ProviderKind,
         alias: &'a ProviderSessionAffinityKey,
         session: &'a gateway_core::provider_ports::ProviderSessionAlias,
-        _: Duration,
+        ttl: Duration,
     ) -> BoxFuture<'a, Result<bool, ProviderStoreError>> {
         Box::pin(async move {
             let mut aliases = self.aliases.lock().unwrap();
@@ -887,7 +926,11 @@ impl ProviderSessionAffinityPort for MemorySessionAffinity {
                     alias.expose_to_store().to_owned(),
                 ))
                 .or_insert_with(|| session.clone());
-            Ok(current == session)
+            let applied = current == session;
+            if applied {
+                self.alias_ttls.lock().unwrap().push(ttl);
+            }
+            Ok(applied)
         })
     }
 }
@@ -1085,6 +1128,7 @@ pub(crate) fn account_policy() -> gateway_core::account::AccountSelectionPolicy 
         NonZeroU32::new(2).expect("nonzero concurrency"),
         Duration::from_millis(10),
     )
+    .with_openai_account_affinity(gateway_core::account::AccountAffinity::Strict)
 }
 
 /// 内存 `ProviderCooldownPort`：实现 `read`/`put_if_later` 与容量失败计数

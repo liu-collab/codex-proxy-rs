@@ -390,6 +390,10 @@ OAuth 账号默认 `prefer_websocket`，客户端使用 HTTP/SSE 时仍可能选
 客户端配置的 `supports_websockets` 只控制第一段连接，不是服务端传输策略开关。
 上游在响应终态前发送 Close 1000 仍属于失败，不能按“正常关闭”计为成功
 
+内建 xAI 适配器不支持 `generate=false` 的非生成预热请求，在发送推理请求前返回
+`400 unsupported_prewarm`，不会将其当作普通生成调用。`generate=true` 或省略该字段正常执行；
+客户端可跳过预热继续正式请求，外部插件 adapter 按各自的协议能力处理
+
 Codex OAuth backend 的候选上游为 WS 时，无 `previous_response_id` 的普通新链若规范化
 `response.create` 达到 15 MiB，发送前选择 HTTP/SSE；HTTP 和 WS 入站均适用，下游交付协议不变。
 该阈值为已观察到的上游消息大小边界预留余量，不是网关输入长度上限或 OpenAI 公布的统一限制；
@@ -428,7 +432,9 @@ API Key 上游返回完整 Codex `models` 目录时沿用该合同；仅返回�
 未提供的推理能力保持未知，不补充推理档位。
 模型别名仅替换 `slug`，不替换上游展示名、提示词、能力或 `priority`；保持原生模型顺序，新增别名附在后面。
 目录按当前路由快照的模型存在性及账号模型政策过滤，避免公布已知无法路由的模型；新模型需待后台目录对账后进入列表。
-xAI 没有 Codex 原生目录，继续使用明确的通用画像适配
+xAI 没有 Codex 原生目录，使用官方 CLI proxy 当前目录生成通用画像。推理菜单读取
+`reasoning_efforts` 对象列表，默认值只取菜单中的显式标记；缺失时保持未知，不以首项代替，
+也不回退旧字段或其他端点的目录形状
 
 目录账号只能来自本次 Client Key 冻结的账号范围。OpenAI 的 OAuth 目录按账号 ID 排序，使用首个成功读取的
 合格账号，最多尝试三个账号；API Key 目录按账号模型权限过滤后聚合。同名模型优先采用 OAuth 原生对象，
@@ -449,7 +455,8 @@ xAI 没有 Codex 原生目录，继续使用明确的通用画像适配
 Codex 专用目录中的 `context_window` 与 `max_context_window` 分别表示默认上下文窗口和客户端本地
 覆盖的上限。OpenAI Provider 原样保留上游对应字段，缺失与 `null` 不互相转换；网关不通过部署配置
 覆盖这些值。Codex 客户端配置 `model_context_window` 后，按该值与非空 `max_context_window` 的较小值
-使用窗口；上限为空时保留客户端本地值。xAI 目录只声明一个窗口，其 Provider 继续以该值作为客户端覆盖上限
+使用窗口；上限为空时保留客户端本地值。xAI 默认窗口取 `context_window`，缺失时取 `context_windows`
+中的首个有效值；覆盖上限取默认窗口和可选窗口的最大值，只有标量时以该值作为上限
 
 ### 透传与错误恢复
 
@@ -466,6 +473,16 @@ Authorization、Cookie、account ID、originator 和 User-Agent 均由代理安�
 Responses wire 之间的协议转换层，转换只在 xAI Provider 内完成。
 上游结构化错误的 message/code/type 按上述边界交付客户端，其中内嵌的账号指纹 UUID 已脱敏。模型映射是
 全局精确映射，未命中时模型名原样交给候选 Provider；分组只限定账号集合，不参与模型改名
+
+xAI 编码器同样保留路由选定的完整模型名，不内置 `grok`、`grok-latest` 等旧型号别名，也不剥离模型前缀；
+需要别名时使用显式模型映射。目录读取失败按错误处理，不用硬编码旧型号补全能力
+
+xAI 的 `reasoning.effort` 接受 `none / minimal / low / medium / high / xhigh / max`，去除两端
+空白并转为小写后保留档位，不按模型名称降档或删除；模型是否支持该选择由上游判断。
+未知值或错误类型返回字段错误，其他 reasoning 字段保留。`web_search.filters` 支持
+`allowed_domains` 与 `excluded_domains`，两者不能同时为非空；客户端函数与托管搜索工具
+同名时使用内部别名，并在返回工具调用时还原客户端名称。搜索工具的旧顶层 `allowed_domains`
+不再映射到 filters，直接返回请求错误
 
 OpenAI 明确返回 `server_is_overloaded`、`slow_down` 或模型容量不足错误时，代理在允许安全重放且
 尚未交付输出的前提下，先做最多 3 次同账号重试，再通过现有调度换号。没有有效服务器建议时，
@@ -696,7 +713,7 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 - `sortBy`: `email`、`status`、`planType`、`usage`、`lastUsedAt`、`expiresAt`
 - `sortDirection`: `asc`、`desc`
 
-账号视图的 `capacity` 返回查询时的网关并发容量：`usedSlots` 是正在执行的请求占用数，不含排队请求，
+账号视图的 `capacity` 返回查询时的普通并发容量：`usedSlots` 不含独立审批池和排队请求，
 读取运行态失败时为 `null`；`totalSlots` 是应用账号独立配置或全局默认值后的上限，`null` 表示不限。
 该上限不代表上游实际允许的并发数
 
@@ -1064,6 +1081,9 @@ OAuth start 使用：
   `quota_exhausted`。额度观测不会清除凭据过期、无效或封禁事实；这些事实统一投影为 `error`，并由
   `errorReason` 区分。额度接口的 401/403 也不足以判定 refresh token 永久失效，credential 终态只由
   OAuth refresh 的明确永久错误写入
+- xAI 额度百分比只读取 `creditUsagePercent`，缺失时保持未知，不由旧月额度与用量计算。
+  预付余额保留上游账本符号，非零余额及剩余按量额度可独立证明可用；窗口已过期或缺少可用证据时，
+  不凭旧快照恢复账号
 - 正常 Responses 请求会解析上游响应的 rate-limit headers，合并进同一 quota 快照并同步状态。Free、
   K12 等套餐共用该状态机；套餐只参与账号展示和按套餐隔离的模型目录 cache，不存在 K12 专属额度路径
 - 账号详情的 Token 统计、模型排行和列表 Token 汇总优先使用账号级周额度窗口，无可统计的周窗口时
@@ -1239,7 +1259,7 @@ HTTP 请求头及新建 WS 的握手提示按当时的最终出站档位构造�
 `providerCounts` 和 `clientKeyCount`。查询分组成员使用账号列表的 `groupId` 筛选，
 不提供独立的分组成员路由；账号的 Provider 不代表整个分组的 Provider。
 `capacity.totalSlots` 为 `number | null`：`null` 表示可用成员中存在继承无限并发的账号，`0` 表示没有可用槽位。
-`capacity.usedSlots` 继续返回实际在途数；Redis 不可用时为 `null`
+分组容量只统计普通池，`capacity.usedSlots` 返回其实际在途数；Redis 不可用时为 `null`
 
 分组费用按请求执行时实际服务账号的分组快照归属，不按 Client Key 绑定的分组分摊。
 账号属于多个组时，各组均包含该请求费用；之后调整账号分组不重写历史归属
@@ -1315,11 +1335,11 @@ HTTP 请求头及新建 WS 的握手提示按当时的最终出站档位构造�
 `response.create`；空闲连接不占名额，内部重试不重复占用。
 修改 Key 策略对既有 WebSocket 连接的下一次请求同样生效，已开始的请求保持原有快照
 
-运行设置可以分别启用 Key 与账号的有界排队。Key 并发满时按 Key 等待；OpenAI 根线程按配置等待当前账号，
-或沿既有调度策略重选账号并迁移会话绑定。内置调度中的后代线程只等待当前会话账号，不自行换号；
-根线程迁移后，后代线程跟随新账号。没有绑定的后代线程等待根线程首次认领
+运行设置可以分别启用 Key 与账号的有界排队。Key 并发满时按 Key 等待；OpenAI 优先亲和下会话请求优先主账号，
+繁忙时先按调度策略选择可用账号，临时分流不改写会话绑定；没有可立即使用的账号时才按配置排队。严格亲和下已有绑定的后代线程只等待当前会话账号，
+根线程迁移后跟随新账号。绑定缺失时，任何有可靠会话身份的请求都可按调度策略原子首绑，后续请求沿用该绑定
 
-后代线程始终排队，沿用 `concurrencyWaitTimeoutSeconds` 和请求截止时间；
+严格亲和下的后代线程始终启用账号排队，沿用 `concurrencyWaitTimeoutSeconds` 和请求截止时间；
 `maxWaitingPerAccount` 为 0 时使用每队列 1,000 人上限，否则沿用配置的上限。
 可识别来源的 Search、Images、Live 创建请求采用同样规则，身份与轮次关联见[会话绑定](architecture.md#6-路由账号范围与-continuation)。
 插件显式选号保留原有行为。普通请求关闭账号排队且没有可用容量时返回 `503` / `account_capacity_unavailable`，
@@ -1372,6 +1392,9 @@ maxConcurrentPerAccount
 maxWaitingPerKey
 maxWaitingPerAccount
 openaiGuardianReservedConcurrency
+openaiAccountAffinity
+openaiSessionAffinityTtlHours
+maxAccountRotations
 concurrencyWaitTimeoutSeconds
 responsesMaxDecompressedBodyBytes
 requestIntervalMs
@@ -1415,17 +1438,36 @@ accountWarmupModel
 `maxWaitingPerKey` 与 `maxWaitingPerAccount` 是全局统一的普通排队容量，取值 0～1,000，默认 0（关闭）；
 每个 Key、每个账号各自独立计数，没有单对象覆盖字段。执行并发为 5、最大排队数为 5 时，
 该对象最多容纳 5 个执行请求与 5 个等待请求。Key 并发为 0（不限）时跳过 Key 排队。
-OpenAI 后代线程的会话账号等待不随普通账号排队关闭，见 [Client Key 等待规则](#7-client-key)。
+OpenAI 严格亲和下后代线程的会话账号等待不随普通账号排队关闭，见 [Client Key 等待规则](#7-client-key)。
 `concurrencyWaitTimeoutSeconds` 取值 1～120，默认 30，从首次入队开始计时，密钥与账号两层共享该等待时限；
 切换账号或内部重试不重新计时；若插件设置了请求总时限，等待也计入该时限。排队超时不用于中断已开始的上游生成。
 设置更新请求须包含这三个字段，新请求使用更新后的快照
 
-`openaiGuardianReservedConcurrency`（默认 0，取值 0～4,294,967,295）为 Codex Guardian 自动审批保留账号并发，保存后对新请求生效。
+`openaiGuardianReservedConcurrency`（默认 0，取值 0～4,294,967,295）设置 Codex Guardian 自动审批的每账号独立并发，保存后对新请求生效。
 Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardian` 识别。取值 R 大于 0 时，
-有限上限为 L 的账号对其他 OpenAI 请求只开放 `max(L − R, 1)` 个名额，Guardian 可用满 L；
-开启账号排队后，Guardian 排在同账号已有 Guardian 之后、全部普通等待者之前，不受单账号排队上限约束，
-仍受总等待容量与等待时限约束。不限并发的账号和关闭排队时的其余行为不变。
-设置更新请求须包含该字段
+普通请求保留账号原上限 L，Guardian 单独计数并最多运行 R 个，两类请求互不占用名额，也不借用对方空位。
+例如 L 为 10、R 为 3 时，可以同时运行 10 个普通请求和 3 个审批请求；普通并发不限时，审批仍受 R 限制。
+设为 0 时关闭独立额度，Guardian 使用普通并发。开启账号排队后，审批请求单独按 FIFO 等待，
+不受普通队列位置或单账号排队上限约束，仍受自身队列总等待容量与等待时限约束。
+两类请求仍遵守账号最小请求间隔、可用性和 Client Key 限额。设置更新请求须包含该字段
+
+`openaiAccountAffinity` 控制 OpenAI 账号亲和，默认 `strict`（严格），已有保存的模式保持不变：
+
+- `relaxed`（宽松）：会话内请求直接按 `rotationStrategy` 选号，不优先主账号
+- `preferred`（优先）：会话内所有可关联请求优先主账号，并发已满、请求间隔未到、额度耗尽、停用、限流冷却或不支持当前模型时临时分流，保留会话绑定，后续请求仍优先主账号
+- `strict`（严格）：同一会话共用账号，后代请求等待当前账号并跟随根请求换号
+
+插件显式选号及原生续写的状态归属约束在三种模式下仍然生效
+
+`openaiSessionAffinityTtlHours` 是账号绑定及其会话关联的滑动保留时长，单位小时，默认 24，取值 1～720。
+各类请求统一在发送前成功准入时按请求冻结值续期。
+响应完成不回写或续期。调整时长不扫描已有 Redis 键，已有记录保留原到期时间，下一次成功准入时使用新值；
+真正过期或丢失后按缺失绑定处理，存储读取错误不会被当作过期
+
+`maxAccountRotations` 是单请求最大换号次数，默认 3，取值 0～31；0 表示不换号。
+首次选号、同账号重试和选号时过滤不可用候选不计入换号次数，总路由尝试仍最多 32 次。
+提高该值允许请求尝试更多账号，但不放宽安全重放或交付后的重试限制。
+设置更新请求须包含账号亲和、亲和时长与最大换号次数，保存后对新请求生效，执行中请求及其重试沿用冻结值
 
 `responsesMaxDecompressedBodyBytes` 是压缩 Responses HTTP 请求的解压输出上限，单位字节，默认
 67108864（64 MiB）。必须为正整数，且可表示为进程平台的 `isize`；管理端以整数 MiB 编辑。
@@ -1460,7 +1502,8 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 不影响已入队请求的位置、队内 FIFO、容量上限或等待超时。两项默认均为 `0`
 
 `preferHigherWeight` 默认关闭。开启后，更高权重账号恢复可用时，后续允许重新选号的请求优先回切；
-同权重且可用的会话亲和继续保留。没有可用亲和时，在最高可用权重层内按配置评分。
+同权重且可用的会话亲和继续保留。OpenAI 优先模式沿用可用的会话主账号，不因权重回切而分流。
+没有可用亲和时，在最高可用权重层内按配置评分。
 原生续写账号绑定仍是硬约束，不因回切而主动换号或触发历史重放。配置随运行设置原子保存和发布，
 新请求使用新值，已开始请求及其重试沿用原快照，无需重启
 
@@ -1750,7 +1793,7 @@ errorCode, errorMessage, startedAt, completedAt, expiresAt, createdAt, updatedAt
 
 ### Dashboard 容量与账号用量
 
-Dashboard 的 `capacityInfo.maxConcurrentPerAccount` 为默认账号并发上限，`0` 表示不限制。
+Dashboard 的 `capacityInfo` 统计普通容量，不含独立审批池；`maxConcurrentPerAccount` 为默认账号并发上限，`0` 表示不限制。
 `capacityInfo.totalSlots` 为 `number | null`；可用账号池含无限并发账号时为 `null`，此时 `availableSlots` 也为 `null`。
 `usedSlots` 仍表示实际在途数，Redis 不可用时为 `null`；没有可用账号时 `totalSlots` 为 `0`
 
@@ -1822,13 +1865,15 @@ OpenAI 优先采用服务端 `openai-model` / `x-openai-model` 报告（流内�
 不能仅凭客户端的同名 metadata 或输出 Token 为零排除普通推理；其他 Provider 不套用该规则
 
 `latencyMs` 从模型执行会话开始计到终结，包含账号选择、重试及流交付等待，不包含此前的入口解析、路由和准入。
-`firstTokenLatencyMs` 与它使用同一计时起点，表示首个语义输出到达网关的时间；文本、推理和工具输出均可触发，
-空增量、空结构帧和无输出的终态帧不算首字。`latencyDetails` 的首事件、首推理和首正文时间也使用请求级起点，
+`firstTokenLatencyMs` 与它使用同一计时起点，首字边界由 Provider 协议定义。
+OpenAI Responses 采用首个非前导输出事件，包含 `response.output_item.added` 等结构事件，
+跳过 `response.created`、`response.in_progress`、心跳、额度控制和失败事件；xAI 采用首个语义输出。
+`latencyDetails` 的首事件、首推理和首正文时间也使用请求级起点，首推理与首正文仍要求实际内容，
 连接、响应头等传输阶段耗时独立计量，不能直接相加作为总耗时
 
-列表与性能统计的输出速率为 `outputTokens × 1000 / (latencyMs − firstTokenLatencyMs)`，
-只在输出 Token 为正、首字已采集且总耗时大于首字时间时计算。该值是网关观测到的平均输出速率，
-生成区间仍包含流传输与交付等待，不表示模型内部的纯解码速度
+列表与性能统计的输出速率为 `outputTokens × 1000 / latencyMs`，只在输出 Token 和总耗时为正时计算，
+不依赖首字是否采集。输出 Token 保留上游用量口径，OpenAI 的输出已包含推理 Token，不重复相加或扣除。
+该值表示完整请求期间的平均输出速率，包含选号、重试、推理与流交付等待，不表示模型内部的纯解码速度
 
 ### 诊断与恢复关联
 
@@ -1858,6 +1903,10 @@ OpenAI 优先采用服务端 `openai-model` / `x-openai-model` 报告（流内�
 OpenAI 与 xAI 的本地费用估算按实际发送给上游的请求模型（`upstreamModel`）查价，结合响应中的实际
 用量计算；客户端请求 A、路由后发送 B 时按 B 计价，响应返回 C 不改变计价模型。实际发送模型缺少
 定价时不估算，也不借用响应模型的价格。Provider 明确上报的已计费金额仍优先于本地估算
+
+xAI 的 `cost_in_usd_ticks=0` 表示上游没有报告费用，不证明请求免费；正数才作为上游账单。
+未报告时，只有已知价格且能覆盖本次费用的请求才使用本地估算，未知价格或无法覆盖的托管工具费用保持未知。
+动态 latest 与旧 beta/internal 别名不借用具体旧型号的内置价格；显式配置的模型价格仍可用于估算
 
 OpenAI Responses 用量记录的 `serviceTier` 与本地费用估算统一采用 Provider 最终发给上游的请求
 `service_tier`，不使用响应档位覆盖或回退。例如发送 `priority`、响应回显 `default` 时，仍显示

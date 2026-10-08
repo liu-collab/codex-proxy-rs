@@ -19,7 +19,8 @@ use gateway_core::provider_ports::{
 };
 use gateway_core::routing::{ProviderKind, UpstreamModelId};
 
-use super::catalog::{GrokCatalogScope, GrokCredentialCatalogCache, GrokCredentialQuotaService};
+use super::catalog::{GrokCatalogScope, GrokCredentialCatalogCache};
+use super::quota::GrokCredentialQuotaService;
 use super::repository::{GrokCredentialRepository, GrokCredentialRepositoryError};
 use super::types::UpdateGrokCredentialState;
 use crate::{
@@ -190,6 +191,7 @@ impl GrokAccountSessionSelector {
                     request.client_api_key_id(),
                     &self.provider_kind,
                     &account_ids,
+                    gateway_core::provider_ports::ProviderConcurrencyPool::Shared,
                 )
                 .await
                 .map_err(|source| {
