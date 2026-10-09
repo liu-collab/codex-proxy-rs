@@ -137,3 +137,21 @@ async fn host_and_capability_version_mismatches_are_warnings_only() {
     assert!(warning.contains("middleware v99"));
     assert!(warning.contains("3.19.0"));
 }
+
+#[tokio::test]
+async fn compatibility_warning_rejects_invalid_packages_and_digest_mismatches() {
+    let inspector = PackageInspector::new(PackageLimits::default(), semver::Version::new(1, 0, 0));
+    let archive = crate::support::package_with_contributions(b"fixture", Contributions::new());
+    let error = inspector
+        .compatibility_warning(archive, "0".repeat(64))
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), gateway_admin::model::AdminErrorKind::Invalid);
+    let invalid: std::sync::Arc<[u8]> = b"invalid archive".as_slice().into();
+    let digest = hex::encode(Sha256::digest(invalid.as_ref()));
+    let error = inspector
+        .compatibility_warning(invalid, digest)
+        .await
+        .unwrap_err();
+    assert_eq!(error.kind(), gateway_admin::model::AdminErrorKind::Invalid);
+}

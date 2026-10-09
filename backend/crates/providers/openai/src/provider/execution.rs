@@ -229,7 +229,7 @@ impl CodexProvider {
                 .map_err(map_selection_error)?;
         }
         let lease = Arc::new(lease);
-        match operation {
+        let passthrough_headers = match operation {
             Operation::GenerateImage(image) => {
                 let Operation::GenerateImage(original) = &request.operation else {
                     return Err(provider_error(
@@ -250,6 +250,7 @@ impl CodexProvider {
                     .get("image_turn_id")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
+                crate::transport::request::decode_passthrough_headers(image.payload().context())
             }
             Operation::Search(search) => {
                 if !matches!(&request.operation, Operation::Search(_))
@@ -267,6 +268,7 @@ impl CodexProvider {
                     .get("turn_metadata")
                     .and_then(Value::as_str)
                     .map(str::to_owned);
+                crate::transport::request::decode_passthrough_headers(search.payload().context())
             }
             _ => {
                 return Err(provider_error(
@@ -274,7 +276,7 @@ impl CodexProvider {
                     UpstreamSendState::NotSent,
                 ));
             }
-        }
+        };
         // Standalone Provider 端点没有可证明的账号 owner：raw JSON 正文里已存在的安装身份
         // 必须收敛到当前 lease，不能沿用下游声明的账号或 installation identity。只替换字符串
         // 字面量、其余字节逐字保留；正文里没有这些键时保持原样
@@ -338,6 +340,7 @@ impl CodexProvider {
             response_origin: request.response_origin,
             endpoint_path: request.endpoint_path,
             body: request.body,
+            passthrough_headers,
             image_turn_id: request.image_turn_id,
             turn_metadata,
             context,
@@ -391,6 +394,7 @@ pub(super) struct ColdJsonResponse {
     pub(super) response_origin: Url,
     pub(super) endpoint_path: &'static str,
     pub(super) body: Bytes,
+    pub(super) passthrough_headers: reqwest::header::HeaderMap,
     pub(super) image_turn_id: Option<String>,
     pub(super) turn_metadata: Option<String>,
     pub(super) context: AttemptContext,
@@ -591,6 +595,7 @@ pub(super) async fn create_json_attempt(
         response = request.client.post_raw_json(
             request.endpoint_path,
             request.body.clone(),
+            &request.passthrough_headers,
             request.image_turn_id.as_deref(),
             request_context,
         ) => response.map_err(CodexHandshakeAttemptError::Client),
@@ -929,10 +934,8 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             OpenAiPassiveQuotaObservation::new(response.rate_limit_headers);
         let rate_limit_updates = response.rate_limit_updates;
         let response_metadata_updates = response.response_metadata_updates;
-        // OpenAI 线路为透明代理：HTTP SSE 与 WebSocket 两条上游均启用 raw 透传，
-        // 下游按字节转发上游原文，避免 serde 往返改写数值/精度（大整数→f64、logprobs 等）
-        // WS 帧由 reducer 以 encode_sse_event(&event, raw) 逐字节内嵌上游原始 JSON
-        // （transport/protocol/websocket.rs），push_frames 抽出的 data 即上游原文
+        // 同协议保留原始帧；canonical 解析只提取计费、续接和状态事实
+        let websocket_transport = response.transport == CodexBackendTransport::WebSocket;
         let mut decoder = CodexCanonicalDecoder::new(upstream_model.as_str())
             .with_pricing(context.pricing().get("openai").and_then(|models| models.get(upstream_model.as_str())).cloned())
             .with_reported_model(response.response_metadata.effective_model.as_deref())
@@ -1065,7 +1068,13 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             let first_event_changed =
                 observation_state.observe_stream_chunk(&chunk, context.timing_started_at());
             let chunk_len = chunk.len();
-            let (mut events, canonical_failure) = match decoder.push(&chunk) {
+            let decoded = if websocket_transport {
+                let text = std::str::from_utf8(&chunk).map_err(|_| provider_error(ProviderErrorKind::Protocol, UpstreamSendState::Sent))?;
+                decoder.push_websocket(text)
+            } else {
+                decoder.push(&chunk)
+            };
+            let (mut events, canonical_failure) = match decoded {
                 CodexCanonicalOutcome::Events(events) => (events, None),
                 CodexCanonicalOutcome::Failed(failure) => {
                     let (events, error, semantic_output_seen) = failure.into_parts();
@@ -1112,7 +1121,14 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             let timing_signals = decoder.take_timing_signals();
             let output_timing_changed = observation_state
                 .observe_timing_signals(timing_signals, context.timing_started_at());
-            let timing_changed = first_event_changed || output_timing_changed;
+            let upstream_timing_changed = observation_state
+                .observe_upstream_response_ms(decoder.upstream_response_ms());
+            let upstream_metrics_changed = observation_state
+                .observe_upstream_timing_metrics(decoder.upstream_timing_metrics());
+            let timing_changed = first_event_changed
+                || output_timing_changed
+                || upstream_timing_changed
+                || upstream_metrics_changed;
             let completed = events
                 .iter()
                 .flat_map(ProviderEvent::canonical_facts)
@@ -1223,8 +1239,15 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             .observe_upstream_response_model(decoder.response_model());
         let service_tier_changed = observation_state
             .observe_upstream_service_tier(decoder.response_service_tier());
-        let timing_changed = observation_state
+        let output_timing_changed = observation_state
             .observe_timing_signals(timing_signals, context.timing_started_at());
+        let upstream_timing_changed = observation_state
+            .observe_upstream_response_ms(decoder.upstream_response_ms());
+        let upstream_metrics_changed = observation_state
+            .observe_upstream_timing_metrics(decoder.upstream_timing_metrics());
+        let timing_changed = output_timing_changed
+            || upstream_timing_changed
+            || upstream_metrics_changed;
         let updates = take_rate_limit_updates(rate_limit_updates.as_ref()).await;
         let rate_limits_changed = if updates.is_empty() {
             false

@@ -168,6 +168,12 @@ impl CodexBackendClient {
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<HeaderMap> {
         let mut headers = self.response_headers(request, context)?;
+        if !headers.contains_key("x-responsesapi-include-timing-metrics") {
+            headers.insert(
+                HeaderName::from_static("x-responsesapi-include-timing-metrics"),
+                HeaderValue::from_static("true"),
+            );
+        }
         headers.insert(
             HeaderName::from_static("openai-beta"),
             HeaderValue::from_static("responses_websockets=2026-02-06"),
@@ -230,7 +236,7 @@ impl CodexBackendClient {
             None => format!("model={}", request.model()),
         };
         insert_optional_protocol_header(&mut headers, "x-codex-routing-hint", Some(&routing_hint));
-        append_passthrough_headers(&mut headers, request);
+        append_passthrough_headers(&mut headers, &request.passthrough_headers);
         self.append_middleware_headers(&mut headers)?;
         Ok(headers)
     }
@@ -252,8 +258,8 @@ impl CodexBackendClient {
     }
 }
 
-fn append_passthrough_headers(headers: &mut HeaderMap, request: &CodexResponsesRequest) {
-    for name in request.passthrough_headers.keys() {
+pub(super) fn append_passthrough_headers(headers: &mut HeaderMap, passthrough: &HeaderMap) {
+    for name in passthrough.keys() {
         // 身份与传输字段只由画像/正文/网关重建生成；其余协议头保留原始多值字节
         // 会话身份只由网关重建的伪名承载（见 scope_request_to_account）：原始头改名
         // 透传会让真名与伪名同时出站，等于没脱敏
@@ -274,7 +280,7 @@ fn append_passthrough_headers(headers: &mut HeaderMap, request: &CodexResponsesR
             continue;
         }
         headers.remove(name);
-        for value in request.passthrough_headers.get_all(name) {
+        for value in passthrough.get_all(name) {
             headers.append(name.clone(), value.clone());
         }
     }
@@ -339,6 +345,7 @@ fn websocket_header_order(name: &str) -> usize {
         "x-codex-turn-metadata",
         "x-codex-routing-hint",
         "openai-beta",
+        "x-responsesapi-include-timing-metrics",
         "originator",
         "user-agent",
         "authorization",

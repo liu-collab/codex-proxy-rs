@@ -629,8 +629,14 @@ async fn await_websocket_delivery_boundary(
 }
 
 fn is_websocket_lifecycle_prelude(frame: &[u8]) -> bool {
-    frame.starts_with(b"event: response.created\n")
-        || frame.starts_with(b"event: response.in_progress\n")
+    serde_json::from_slice::<serde_json::Value>(frame)
+        .ok()
+        .is_some_and(|value| {
+            matches!(
+                value.get("type").and_then(serde_json::Value::as_str),
+                Some("response.created" | "response.in_progress")
+            )
+        })
 }
 
 async fn read_model_catalog_body(response: ReqwestResponse) -> CodexClientResult<Vec<u8>> {

@@ -646,7 +646,7 @@ pub struct DashboardObservation {
 }
 
 /// 使用记录表格的窄读模型
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UsageListRecord {
     pub client_api_key_name: Option<String>,
     pub id: String,
@@ -687,6 +687,13 @@ pub struct UsageListRecord {
     pub first_text_ms: Option<u64>,
     pub first_token_ms: Option<u64>,
     pub provider_processing_ms: Option<u64>,
+    pub upstream_response_ms: Option<u64>,
+    pub upstream_api_overhead_ms: Option<f64>,
+    pub upstream_engine_ms: Option<f64>,
+    pub upstream_engine_iapi_ttft_ms: Option<f64>,
+    pub upstream_engine_service_ttft_ms: Option<f64>,
+    pub upstream_engine_iapi_tbt_ms: Option<f64>,
+    pub upstream_engine_service_tbt_ms: Option<f64>,
     pub latency_ms: Option<u64>,
     pub admission_decision_ms: Option<u64>,
     pub account_selection_wait_ms: Option<u64>,
@@ -702,7 +709,7 @@ pub struct UsageListRecord {
 }
 
 /// 一次完整模型请求的公共观测记录
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UsageRecord {
     pub id: String,
     pub client_api_key_ref: String,
@@ -761,6 +768,13 @@ pub struct UsageRecord {
     pub first_text_ms: Option<u64>,
     pub first_token_ms: Option<u64>,
     pub provider_processing_ms: Option<u64>,
+    pub upstream_response_ms: Option<u64>,
+    pub upstream_api_overhead_ms: Option<f64>,
+    pub upstream_engine_ms: Option<f64>,
+    pub upstream_engine_iapi_ttft_ms: Option<f64>,
+    pub upstream_engine_service_ttft_ms: Option<f64>,
+    pub upstream_engine_iapi_tbt_ms: Option<f64>,
+    pub upstream_engine_service_tbt_ms: Option<f64>,
     pub latency_ms: Option<u64>,
     pub admission_decision_ms: Option<u64>,
     pub account_selection_wait_ms: Option<u64>,
@@ -781,7 +795,7 @@ pub struct UsageRecord {
 }
 
 /// 用量分页结果
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UsagePage {
     pub items: Vec<UsageListRecord>,
     pub current_page: u32,
@@ -827,7 +841,7 @@ pub struct UsageAttempt {
 }
 
 /// 一条请求及其全部尝试
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UsageDetail {
     pub trace: Option<serde_json::Value>,
     pub related_requests: Vec<serde_json::Value>,

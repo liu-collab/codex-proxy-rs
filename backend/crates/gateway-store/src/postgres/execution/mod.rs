@@ -24,6 +24,10 @@ use crate::{
     ConflictKind, DecimalAmount, StoreError, StoreResult, postgres_unavailable, require_nonempty,
 };
 
+mod request_observation;
+
+use request_observation::RequestObservation;
+
 const ENTITY: &str = "model request";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -234,7 +238,6 @@ fn validate_timings(timings: &ModelRequestTimings) -> StoreResult<()> {
             timings.first_reasoning_ms,
             timings.first_text_ms,
             timings.first_token_ms,
-            timings.provider_processing_ms,
         ];
         if phases.into_iter().flatten().any(|phase| phase > total) {
             return Err(invalid("timing phase exceeds total latency"));
@@ -243,7 +246,7 @@ fn validate_timings(timings: &ModelRequestTimings) -> StoreResult<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModelRequestFinalization {
     pub billing_snapshot_json: Option<Value>,
     pub model_request_id: String,
@@ -422,51 +425,27 @@ impl PgExecutionStore {
 impl ModelRequestRepository for PgExecutionStore {
     async fn insert_model_request(&self, request: NewModelRequest) -> StoreResult<()> {
         request.validate()?;
+        let observation = RequestObservation::initial(&request)?;
         sqlx::query(
             "insert into model_requests (
-               id, client_api_key_id, client_api_key_ref, config_revision, protocol,
-               routing_scope, routing_group_refs, routing_group_names_snapshot,
-               operation, endpoint, client_transport, requested_model_id,
-               client_ip, user_agent, reasoning_effort,
-               reasoning_preset, request_kind, subagent_kind, compact,
-               image_generation_requested, admission_decision_ms, started_at, deadline_at,
-               continuation_affinity_hash, continuation_previous_response_id_hash,
-               continuation_requested
-             ) values (
-               $1, $2, $3, $4, $5, $6, $7, $8,
-               $9, $10, $11, $12, $13::inet, $14, $15,
-               $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26
-             )",
+               id, client_api_key_id, client_api_key_ref, operation, client_transport,
+               requested_model_id, image_generation_requested, started_at, deadline_at,
+               continuation_affinity_hash, continuation_requested, request_kind, request_observation_json
+             ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
         )
         .bind(request.id)
         .bind(request.client_api_key_id)
         .bind(request.client_api_key_ref)
-        .bind(to_i64(request.config_revision, "config_revision")?)
-        .bind(request.protocol)
-        .bind(request.routing_scope)
-        .bind(request.routing_group_refs)
-        .bind(sqlx::types::Json(request.routing_group_names_snapshot))
         .bind(request.operation)
-        .bind(request.endpoint)
         .bind(request.client_transport)
         .bind(request.requested_model_id)
-        .bind(request.client_ip)
-        .bind(request.user_agent)
-        .bind(request.reasoning_effort)
-        .bind(request.reasoning_preset)
-        .bind(request.request_kind)
-        .bind(request.subagent_kind)
-        .bind(request.compact)
         .bind(request.image_generation_requested)
-        .bind(optional_i64(
-            request.admission_decision_ms,
-            "admission_decision_ms",
-        )?)
         .bind(request.started_at)
         .bind(request.deadline_at)
         .bind(request.continuation.affinity_hash)
-        .bind(request.continuation.previous_response_id_hash)
         .bind(request.continuation.requested)
+        .bind(request.request_kind)
+        .bind(observation)
         .execute(&self.pool)
         .await
         .map_err(|source| postgres_unavailable("insert model request", source))?;
@@ -483,58 +462,40 @@ impl ModelRequestRepository for PgExecutionStore {
         if attempt.attempt_count != 1 || attempt.model_request_id != request.id {
             return Err(invalid("first attempt must target the inserted request"));
         }
+        let observation = RequestObservation::initial(&request)?;
         sqlx::query(
             "insert into model_requests (
-               id, client_api_key_id, client_api_key_ref, config_revision, protocol,
-               routing_scope, routing_group_refs, routing_group_names_snapshot,
-               operation, endpoint, client_transport, requested_model_id,
-               client_ip, user_agent, reasoning_effort,
-               reasoning_preset, request_kind, subagent_kind, compact,
-               image_generation_requested, admission_decision_ms, started_at, deadline_at,
-               provider_kind, provider_account_id, provider_account_ref,
-               provider_account_name_snapshot, provider_account_email_snapshot,
-               provider_account_authentication_kind_snapshot,
-               upstream_model_id, upstream_transport, http_version,
-               attempt_count, upstream_send_state, account_selection_wait_ms,
-               capacity_used_slots, capacity_total_slots
-               , continuation_affinity_hash, continuation_previous_response_id_hash,
-               continuation_requested
-             ) select
-               $1, $2, $3, $4, $5, $6, $7, $8,
-               $9, $10, $11, $12, $13::inet, $14, $15,
-               $16, $17, $18, $19, $20, $21, $22, $23,
-               $24, $25, $26,
-               account.name, account.email, account.authentication_kind,
-               $27, $28, $29, 1, 'not_sent', $30, $31, $32, $33, $34, $35
+               id, client_api_key_id, client_api_key_ref, operation, client_transport,
+               requested_model_id, image_generation_requested, started_at, deadline_at,
+               continuation_affinity_hash, continuation_requested, request_kind, request_observation_json,
+               provider_kind, provider_account_id, provider_account_ref, upstream_model_id,
+               upstream_transport, attempt_count, upstream_send_state
+             ) select $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+               $13::jsonb || jsonb_build_object(
+                 'account', jsonb_strip_nulls(jsonb_build_object(
+                   'name', account.name, 'email', account.email,
+                   'authenticationKind', account.authentication_kind)),
+                 'transport', jsonb_strip_nulls(jsonb_build_object('httpVersion', $19::text)),
+                 'scheduling', ($13::jsonb -> 'scheduling') || jsonb_strip_nulls(jsonb_build_object(
+                   'accountSelectionWaitMs', $20::bigint,
+                   'capacityUsedSlots', $21::bigint, 'capacityTotalSlots', $22::bigint))),
+               $14, $15, $16, $17, $18, 1, 'not_sent'
              from (values (true)) as seed(present)
-             left join provider_accounts account on account.id = $25",
+             left join provider_accounts account on account.id = $15",
         )
         .bind(request.id)
         .bind(request.client_api_key_id)
         .bind(request.client_api_key_ref)
-        .bind(to_i64(request.config_revision, "config_revision")?)
-        .bind(request.protocol)
-        .bind(request.routing_scope)
-        .bind(request.routing_group_refs)
-        .bind(sqlx::types::Json(request.routing_group_names_snapshot))
         .bind(request.operation)
-        .bind(request.endpoint)
         .bind(request.client_transport)
         .bind(request.requested_model_id)
-        .bind(request.client_ip)
-        .bind(request.user_agent)
-        .bind(request.reasoning_effort)
-        .bind(request.reasoning_preset)
-        .bind(request.request_kind)
-        .bind(request.subagent_kind)
-        .bind(request.compact)
         .bind(request.image_generation_requested)
-        .bind(optional_i64(
-            request.admission_decision_ms,
-            "admission_decision_ms",
-        )?)
         .bind(request.started_at)
         .bind(request.deadline_at)
+        .bind(request.continuation.affinity_hash)
+        .bind(request.continuation.requested)
+        .bind(request.request_kind)
+        .bind(observation)
         .bind(attempt.provider_kind)
         .bind(attempt.provider_account_id)
         .bind(attempt.provider_account_ref)
@@ -553,9 +514,6 @@ impl ModelRequestRepository for PgExecutionStore {
             attempt.capacity_total_slots,
             "capacity_total_slots",
         )?)
-        .bind(request.continuation.affinity_hash)
-        .bind(request.continuation.previous_response_id_hash)
-        .bind(request.continuation.requested)
         .execute(&self.pool)
         .await
         .map_err(|source| {
@@ -577,22 +535,20 @@ impl ModelRequestRepository for PgExecutionStore {
              set provider_kind = $2,
                  provider_account_id = $3,
                  provider_account_ref = $4,
-                 (provider_account_name_snapshot,
-                  provider_account_email_snapshot,
-                  provider_account_authentication_kind_snapshot) = (
-                   select name, email, authentication_kind
-                   from provider_accounts where id = $3
-                 ),
                  upstream_model_id = $5,
                  upstream_transport = $6,
-                 http_version = $7,
                  attempt_count = $8,
-                 account_selection_wait_ms = case
-                   when $9::bigint is null then account_selection_wait_ms
-                   else coalesce(account_selection_wait_ms, 0) + $9
-                 end,
-                 capacity_used_slots = coalesce($10, capacity_used_slots),
-                 capacity_total_slots = coalesce($11, capacity_total_slots)
+                 request_observation_json = request_observation_json || jsonb_build_object(
+                   'account', coalesce((select jsonb_strip_nulls(jsonb_build_object(
+                     'name', name, 'email', email, 'authenticationKind', authentication_kind))
+                     from provider_accounts where id = $3), '{}'::jsonb),
+                   'transport', jsonb_strip_nulls(jsonb_build_object('httpVersion', $7::text)),
+                   'scheduling', coalesce(request_observation_json -> 'scheduling', '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(
+                     'accountSelectionWaitMs', case when $9::bigint is null
+                       then (request_observation_json #>> '{scheduling,accountSelectionWaitMs}')::bigint
+                       else coalesce((request_observation_json #>> '{scheduling,accountSelectionWaitMs}')::bigint, 0) + $9 end,
+                     'capacityUsedSlots', coalesce($10::bigint, (request_observation_json #>> '{scheduling,capacityUsedSlots}')::bigint),
+                     'capacityTotalSlots', coalesce($11::bigint, (request_observation_json #>> '{scheduling,capacityTotalSlots}')::bigint))))
              where id = $1 and outcome = 'running' and downstream_committed_at is null
                and $8 = attempt_count + 1
              returning attempt_count",
@@ -698,35 +654,29 @@ impl ModelRequestRepository for PgExecutionStore {
         finalization: ModelRequestFinalization,
     ) -> StoreResult<bool> {
         finalization.validate()?;
+        let observation = RequestObservation::finalized(&finalization)?;
         // 墙上时间可能回拨；终态必须可落盘，实际耗时仍保留 Core 的单调时钟观测
         let finalized = sqlx::query_scalar::<_, i64>(
             "with finalized as (
              update model_requests
              set outcome = $2, upstream_send_state = $3, attempt_count = $4,
                  downstream_committed_at = $5,
-                 client_status_code = coalesce(client_status_code, $6),
-                 upstream_status_code = $7,
+                 client_status_code = coalesce(client_status_code, $6), upstream_status_code = $7,
                  client_response_id = $8, upstream_request_id = $9, upstream_response_id = $10,
-                 error_kind = $11, provider_error_code = $12, error_message = $13,
-                 retry_after_ms = $14, input_tokens = $15, output_tokens = $16,
-                 cached_tokens = $17, cache_write_tokens = $18, reasoning_tokens = $19,
-                 image_input_tokens = $20, image_output_tokens = $21, total_tokens = $22,
-                 image_generation_succeeded = $23, cost_source = $24,
-                 cost_amount = $25::numeric, cost_currency = $26,
-                 transport_decision_wait_ms = $27, connect_ms = $28,
-                 headers_ms = $29, first_event_ms = $30, first_reasoning_ms = $31,
-                 first_text_ms = $32, first_token_ms = $33, provider_processing_ms = $34,
-                 latency_ms = $35, completed_at = greatest($36, started_at),
-                 upstream_transport = coalesce($37, upstream_transport),
-                 http_version = coalesce($38, http_version), websocket_pool = $39,
-                 service_tier = $40, provider_observation_json = $41,
-                 error_details = $42,
-                 continuation_unavailable_reason = $43,
-                 upstream_connection_id = $44,
-                 upstream_connection_exit_reason = $45,
-                 upstream_connection_age_ms = $46,
-                 upstream_connection_idle_ms = $47, diagnostic_trace_json = $48,
-                 upstream_response_model = $49, billing_snapshot_json = $50
+                 error_kind = $11, input_tokens = $12, output_tokens = $13,
+                 cached_tokens = $14, cache_write_tokens = $15, reasoning_tokens = $16,
+                 image_input_tokens = $17, image_output_tokens = $18, total_tokens = $19,
+                 image_generation_succeeded = $20, cost_source = $21,
+                 cost_amount = $22::numeric, cost_currency = $23,
+                 completed_at = greatest($24, started_at),
+                 upstream_transport = coalesce($25, upstream_transport), service_tier = $26,
+                 provider_observation_json = $27, error_details = $28,
+                 diagnostic_trace_json = $29, billing_snapshot_json = $30,
+                 request_observation_json = request_observation_json || $31::jsonb || jsonb_build_object(
+                   'transport', ($31::jsonb -> 'transport') || jsonb_strip_nulls(jsonb_build_object(
+                     'httpVersion', coalesce($31::jsonb #>> '{transport,httpVersion}', request_observation_json #>> '{transport,httpVersion}'))),
+                   'continuation', coalesce(request_observation_json -> 'continuation', '{}'::jsonb)
+                     || ($31::jsonb -> 'continuation'))
              where id = $1 and outcome = 'running'
              returning id, client_api_key_ref, continuation_affinity_hash,
                        continuation_requested, provider_kind, upstream_transport,
@@ -758,20 +708,11 @@ impl ModelRequestRepository for PgExecutionStore {
                    when current.outcome = 'succeeded' then current.completed_at
                    else prior.recovered_at
                  end,
-                 recovery_retry_delay_ms = case
-                   when current.outcome = 'succeeded' then greatest(
-                     0,
-                     floor(extract(epoch from (current.started_at - prior.completed_at)) * 1000)
-                   )::bigint
-                   else prior.recovery_retry_delay_ms
-                 end,
-                 recovery_total_latency_ms = case
-                   when current.outcome = 'succeeded' then greatest(
-                     0,
-                     floor(extract(epoch from (current.completed_at - prior.completed_at)) * 1000)
-                   )::bigint
-                   else prior.recovery_total_latency_ms
-                 end
+                 request_observation_json = case when current.outcome = 'succeeded' then
+                   prior.request_observation_json || jsonb_build_object('recovery', jsonb_build_object(
+                     'retryDelayMs', greatest(0, floor(extract(epoch from (current.started_at - prior.completed_at)) * 1000))::bigint,
+                     'totalLatencyMs', greatest(0, floor(extract(epoch from (current.completed_at - prior.completed_at)) * 1000))::bigint))
+                   else prior.request_observation_json end
              from finalized current
              join recovery_target target on true
              where prior.id = target.id
@@ -801,14 +742,9 @@ impl ModelRequestRepository for PgExecutionStore {
              set recovery_attempt_count = prior.recovery_attempt_count + 1,
                  recovery_request_id = current.id,
                  recovered_at = current.completed_at,
-                 recovery_retry_delay_ms = greatest(
-                   0,
-                   floor(extract(epoch from (current.started_at - prior.completed_at)) * 1000)
-                 )::bigint,
-                 recovery_total_latency_ms = greatest(
-                   0,
-                   floor(extract(epoch from (current.completed_at - prior.completed_at)) * 1000)
-                 )::bigint
+                 request_observation_json = prior.request_observation_json || jsonb_build_object('recovery', jsonb_build_object(
+                   'retryDelayMs', greatest(0, floor(extract(epoch from (current.started_at - prior.completed_at)) * 1000))::bigint,
+                   'totalLatencyMs', greatest(0, floor(extract(epoch from (current.completed_at - prior.completed_at)) * 1000))::bigint))
              from finalized current
              join session_transport_recovery_target target on true
              where prior.id = target.id
@@ -833,93 +769,26 @@ impl ModelRequestRepository for PgExecutionStore {
         .bind(finalization.upstream_request_id)
         .bind(finalization.upstream_response_id.map(String::into_bytes))
         .bind(finalization.error_kind)
-        .bind(finalization.provider_error_code)
-        .bind(finalization.error_message)
-        .bind(optional_i64(finalization.retry_after_ms, "retry_after_ms")?)
-        .bind(optional_i64(
-            finalization.usage.input_tokens,
-            "input_tokens",
-        )?)
-        .bind(optional_i64(
-            finalization.usage.output_tokens,
-            "output_tokens",
-        )?)
-        .bind(optional_i64(
-            finalization.usage.cached_tokens,
-            "cached_tokens",
-        )?)
-        .bind(optional_i64(
-            finalization.usage.cache_write_tokens,
-            "cache_write_tokens",
-        )?)
-        .bind(optional_i64(
-            finalization.usage.reasoning_tokens,
-            "reasoning_tokens",
-        )?)
-        .bind(optional_i64(
-            finalization.usage.image_input_tokens,
-            "image_input_tokens",
-        )?)
-        .bind(optional_i64(
-            finalization.usage.image_output_tokens,
-            "image_output_tokens",
-        )?)
-        .bind(optional_i64(
-            finalization.usage.total_tokens,
-            "total_tokens",
-        )?)
+        .bind(optional_i64(finalization.usage.input_tokens, "input_tokens")?)
+        .bind(optional_i64(finalization.usage.output_tokens, "output_tokens")?)
+        .bind(optional_i64(finalization.usage.cached_tokens, "cached_tokens")?)
+        .bind(optional_i64(finalization.usage.cache_write_tokens, "cache_write_tokens")?)
+        .bind(optional_i64(finalization.usage.reasoning_tokens, "reasoning_tokens")?)
+        .bind(optional_i64(finalization.usage.image_input_tokens, "image_input_tokens")?)
+        .bind(optional_i64(finalization.usage.image_output_tokens, "image_output_tokens")?)
+        .bind(optional_i64(finalization.usage.total_tokens, "total_tokens")?)
         .bind(finalization.image_generation_succeeded)
         .bind(finalization.cost_source.as_str())
         .bind(finalization.cost_amount.map(|amount| amount.to_string()))
         .bind(finalization.cost_currency)
-        .bind(optional_i64(
-            finalization.timings.transport_decision_wait_ms,
-            "transport_decision_wait_ms",
-        )?)
-        .bind(optional_i64(finalization.timings.connect_ms, "connect_ms")?)
-        .bind(optional_i64(finalization.timings.headers_ms, "headers_ms")?)
-        .bind(optional_i64(
-            finalization.timings.first_event_ms,
-            "first_event_ms",
-        )?)
-        .bind(optional_i64(
-            finalization.timings.first_reasoning_ms,
-            "first_reasoning_ms",
-        )?)
-        .bind(optional_i64(
-            finalization.timings.first_text_ms,
-            "first_text_ms",
-        )?)
-        .bind(optional_i64(
-            finalization.timings.first_token_ms,
-            "first_token_ms",
-        )?)
-        .bind(optional_i64(
-            finalization.timings.provider_processing_ms,
-            "provider_processing_ms",
-        )?)
-        .bind(optional_i64(finalization.timings.latency_ms, "latency_ms")?)
         .bind(finalization.completed_at)
         .bind(finalization.upstream_transport)
-        .bind(finalization.http_version)
-        .bind(finalization.websocket_pool)
         .bind(finalization.service_tier)
         .bind(finalization.provider_metadata_json.map(sqlx::types::Json))
         .bind(finalization.error_details)
-        .bind(finalization.continuation_unavailable_reason)
-        .bind(finalization.upstream_connection_id)
-        .bind(finalization.upstream_connection_exit_reason)
-        .bind(optional_i64(
-            finalization.upstream_connection_age_ms,
-            "upstream_connection_age_ms",
-        )?)
-        .bind(optional_i64(
-            finalization.upstream_connection_idle_ms,
-            "upstream_connection_idle_ms",
-        )?)
         .bind(finalization.diagnostic_trace_json.map(sqlx::types::Json))
-        .bind(finalization.upstream_response_model)
         .bind(finalization.billing_snapshot_json.map(sqlx::types::Json))
+        .bind(observation)
         .fetch_one(&self.pool)
         .await
         .map_err(|source| postgres_unavailable("finalize model request", source))?;
@@ -933,7 +802,8 @@ impl ModelRequestRepository for PgExecutionStore {
         let result = sqlx::query(
             "update model_requests
              set outcome = 'incomplete', error_kind = 'process_interrupted',
-                 error_message = 'request did not reach a terminal state',
+                 request_observation_json = request_observation_json || jsonb_build_object('error',
+                   jsonb_build_object('message', 'request did not reach a terminal state')),
                  image_generation_succeeded = case
                    when image_generation_requested then false else null
                  end,

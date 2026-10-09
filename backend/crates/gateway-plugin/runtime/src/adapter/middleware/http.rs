@@ -12,7 +12,7 @@ use gateway_plugin_sdk::{
 use http_body::Frame;
 use http_body_util::{BodyExt as _, StreamBody};
 
-use super::super::MiddlewareEntry;
+use super::MiddlewareEntry;
 use crate::callback::http_middleware::{Invocation, headers};
 
 pub(super) async fn invoke(

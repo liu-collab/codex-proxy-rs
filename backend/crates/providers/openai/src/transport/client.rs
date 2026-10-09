@@ -609,9 +609,9 @@ pub type CodexRateLimitUpdates = CodexWebSocketRateLimitUpdates;
 /// 响应头之后在 live 流中采集的请求级 metadata 更新
 pub type CodexResponseMetadataUpdates = CodexWebSocketResponseMetadataUpdates;
 
-/// Codex Responses 上游 live SSE 响应
+/// Codex Responses 上游流式响应
 pub struct CodexBackendStreamingResponse {
-    /// 上游 SSE 字节流
+    /// HTTP 为 SSE 字节块，WebSocket 为完整 UTF-8 文本消息
     pub body: CodexBackendSseStream,
     /// 实际使用的上游传输
     pub transport: CodexBackendTransport,
