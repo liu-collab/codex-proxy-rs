@@ -249,6 +249,18 @@ impl AffinitySelection {
         self.bound_account.as_ref()
     }
 
+    /// preferred 模式下本次分流后会话主账号是否保留
+    ///
+    /// 并发占满、请求间隔与短冷却是秒级状态，保留主账号让会话回流；额度耗尽、凭据
+    /// 失效、停用或离开范围通常持续数小时到数天，继续保留会让会话每个请求都临时分流
+    /// 到不同账号，同一会话被摊到大量账号上，因此迁到本次选中的账号
+    fn keeps_primary_after_spillover(&self) -> bool {
+        !matches!(
+            self.escape_reason,
+            Some(AffinityEscapeReason::QuotaExhausted | AffinityEscapeReason::HardUnavailable)
+        )
+    }
+
     fn preferred_account(&self) -> Option<&ProviderAccountId> {
         self.preferred_account.as_ref()
     }
@@ -965,10 +977,14 @@ impl CodexCredentialSelector {
                                 .admit_session(
                                     key,
                                     binding.as_ref(),
-                                    // 分流只改变本次租约，CAS 续期仍保留会话主账号
+                                    // 暂时性分流只改变本次租约，CAS 续期仍保留会话主账号；
+                                    // 主账号持续不可用时迁移，避免会话被逐请求摊到多个账号
                                     binding
                                         .as_ref()
-                                        .filter(|_| affinity_mode == AccountAffinity::Preferred)
+                                        .filter(|_| {
+                                            affinity_mode == AccountAffinity::Preferred
+                                                && affinity.keeps_primary_after_spillover()
+                                        })
                                         .map_or(account.id(), ProviderSessionBinding::account_id),
                                     request
                                         .attempt
