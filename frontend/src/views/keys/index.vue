@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ApiKey } from '@/api'
-import { BaseCard, BaseCheckbox, BaseConfirmModal, BasePageHeader, BaseTable, BaseTablePagination } from '@codex-proxy/ui'
+import { ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable } from '@codex-proxy/ui'
 
 import { ref, shallowRef, watch } from 'vue'
 import ApiKeyConfigModal from '@/components/ApiKeyConfigModal.vue'
@@ -105,13 +105,13 @@ watch(
 
 <template>
   <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
-    <BasePageHeader
+    <ZPageHeader
       class="h-17"
       title="API 密钥"
       description="创建和管理 API 密钥，并设置每个密钥可以使用的账号"
     />
 
-    <BaseCard
+    <ZCard
       class="mt-5 flex h-[calc(100dvh-136px)] min-h-125 flex-col"
     >
       <template #header>
@@ -126,10 +126,10 @@ watch(
 
       <template #body>
         <div class="flex h-full min-h-0 flex-col">
-          <BaseTable
+          <ZTable
             class="min-h-0 flex-1"
             :columns="apiKeyColumns"
-            :rows="apiKeys"
+            :data="apiKeys"
             :loading="loading"
             :selected-row-keys="selectedRowKeys"
             :sort="sort"
@@ -137,17 +137,17 @@ watch(
             @sort-change="handleSortChange"
           >
             <template #header-selection>
-              <BaseCheckbox
+              <ZCheckbox
                 :model-value="allSelected"
                 :indeterminate="indeterminate"
-                label="选择当前页密钥"
+                aria-label="选择当前页密钥"
                 @update:model-value="toggleAll"
               />
             </template>
             <template #selection="{ row }">
-              <BaseCheckbox
+              <ZCheckbox
                 :model-value="selectedIds.has(row.id)"
-                label="选择密钥"
+                aria-label="选择密钥"
                 @update:model-value="toggleSelection(row.id)"
               />
             </template>
@@ -203,16 +203,16 @@ watch(
                 @use="openUseKeyModal"
               />
             </template>
-          </BaseTable>
-          <BaseTablePagination
-            :pagination="apiKeyPagination"
-            :loading="loading"
-            @page-change="handlePageChange"
-            @page-size-change="handlePageSizeChange"
+          </ZTable>
+          <ZPagination
+            v-bind="apiKeyPagination"
+            :disabled="loading"
+            @current-change="handlePageChange"
+            @size-change="handlePageSizeChange"
           />
         </div>
       </template>
-    </BaseCard>
+    </ZCard>
 
     <ApiKeyFormModal
       v-model="showFormModal"
@@ -247,7 +247,7 @@ watch(
       @after-leave="selectedUseKey = null"
     />
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="showAllAccountsConfirm"
       title="授予全部账号权限"
       description="保存后，该密钥可以使用所有账号"
@@ -258,9 +258,9 @@ watch(
       <p class="m-0">
         该密钥可以使用所有账号，包括以后新增和未分组的账号
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="showDeleteModal"
       title="确认删除"
       description="删除后这些 API Key 将立即失效，此操作不可撤销"
@@ -272,9 +272,9 @@ watch(
       <p class="m-0">
         确定删除选中的 {{ deleteCount }} 个 API Key 吗？
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="showSingleDeleteModal"
       title="删除 API Key"
       description="删除后该 API Key 将立即失效，此操作不可撤销"
@@ -286,6 +286,6 @@ watch(
       <p class="m-0">
         确定删除 {{ pendingDeleteKey?.name || pendingDeleteKey?.prefix || '该 API Key' }} 吗？
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
   </div>
 </template>

@@ -2,6 +2,8 @@
 
 mod admission;
 mod contract;
+mod delivery;
+pub use delivery::ResponseCommit;
 mod failure;
 pub use contract::{
     AuthenticatedClient, ClientApiKeyUsageSink, ClientAuthenticationError, ClientKeyVerifier,

@@ -305,6 +305,9 @@ impl PluginsService {
             .get(id)
             .await
             .map_err(|error| map_store_error(error, "proxy"))?;
+        if !record.enabled {
+            return Err(AdminError::invalid("下载代理已禁用，请启用或改为直连"));
+        }
         Ok(Some(PluginDistributionEgress::new(
             record.id,
             record.revision,

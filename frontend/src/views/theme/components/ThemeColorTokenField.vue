@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseColorPicker, BaseIconButton } from '@codex-proxy/ui'
+import { ZColorPicker, ZIconButton } from '@codex-proxy/ui'
 
 import { themeTokenAllowsAlpha } from '@codex-proxy/ui/theme'
 import { RotateCcw } from '@lucide/vue'
@@ -43,23 +43,22 @@ const emit = defineEmits<{
     </div>
 
     <div class="flex items-center gap-1.5 rounded-cp bg-cp-bg-container p-1 shadow-cp-tertiary">
-      <BaseColorPicker
+      <ZColorPicker
         :model-value="value"
         :presets="presets"
         :allow-alpha="themeTokenAllowsAlpha(token)"
-        :label="`编辑 ${label}`"
+        :aria-label="`编辑 ${label}`"
         @update:model-value="emit('change', $event)"
       />
       <span class="min-w-17 font-mono text-[10px] tabular-nums text-cp-text-secondary">{{ value }}</span>
-      <BaseIconButton
+      <ZIconButton
         v-if="overridden"
-        label="恢复派生值"
-        size="sm"
-        variant="ghost"
+        aria-label="恢复派生值"
+        size="small"
         @click="emit('reset')"
       >
         <RotateCcw class="size-3.5" />
-      </BaseIconButton>
+      </ZIconButton>
     </div>
   </div>
 </template>

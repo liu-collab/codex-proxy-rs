@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { KeyUsageMetrics } from '@/api/modules/key-usage'
-import { BaseCard, BaseMotionIcon } from '@codex-proxy/ui'
+import { ZCard, ZMotionIcon } from '@codex-proxy/ui'
 import { Gauge, Zap } from '@lucide/vue'
 import { computed } from 'vue'
 import AnimatedMetricValue from '@/components/AnimatedMetricValue.vue'
@@ -9,7 +9,7 @@ import { money } from '../utils/format'
 import { keyUsageTokenMetrics, keyUsageTokenValue } from '../utils/metrics'
 
 const props = defineProps<{ summary: KeyUsageMetrics }>()
-const hitRate = computed(() => props.summary.inputTokens > 0 ? props.summary.cachedTokens / props.summary.inputTokens * 100 : null)
+const hitRate = computed(() => props.summary.inputTokens > 0 ? props.summary.cachedInputTokens / props.summary.inputTokens * 100 : null)
 const metrics = computed(() => [
   ...keyUsageTokenMetrics.map(metric => ({ ...metric, value: keyUsageTokenValue(props.summary, metric.key), percentage: false })),
   { label: '缓存命中率', value: hitRate.value, icon: Gauge, tone: 'text-cp-success-text', percentage: true },
@@ -22,11 +22,11 @@ const metrics = computed(() => [
 
 <template>
   <section class="grid min-w-0 gap-4 xl:grid-cols-[minmax(340px,0.95fr)_minmax(0,3fr)]" aria-label="用量汇总">
-    <BaseCard as="article" padding="compact" class="flex min-h-28 min-w-0 flex-col justify-between gap-4">
+    <ZCard as="article" padding="compact" class="flex min-h-28 min-w-0 flex-col justify-between gap-4">
       <div class="flex min-w-0 flex-1 items-center gap-3">
-        <BaseMotionIcon class="inline-flex size-9 shrink-0 items-center relative -top-0.5 justify-center rounded-cp-lg bg-cp-info-container text-cp-info-on-container" aria-hidden="true">
+        <ZMotionIcon class="inline-flex size-9 shrink-0 items-center relative -top-0.5 justify-center rounded-cp-lg bg-cp-info-container text-cp-info-on-container" aria-hidden="true">
           <Zap :size="19" />
-        </BaseMotionIcon>
+        </ZMotionIcon>
         <span class="sr-only">消耗 Tokens</span>
         <div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
           <strong class="min-w-0 font-mono text-[32px] leading-[1.05] font-heavy wrap-anywhere tabular-nums text-cp-text" :title="formatCompactNumber(summary.totalTokens)">
@@ -53,8 +53,8 @@ const metrics = computed(() => [
           </dd>
         </div>
       </dl>
-    </BaseCard>
-    <BaseCard as="article" padding="compact" class="flex min-h-28 min-w-0 items-center" aria-label="用量明细">
+    </ZCard>
+    <ZCard as="article" padding="compact" class="flex min-h-28 min-w-0 items-center" aria-label="用量明细">
       <dl class="m-0 grid w-full min-w-0 grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 2xl:grid-cols-6">
         <div v-for="item in metrics" :key="item.label" class="min-w-0">
           <dt class="flex min-w-0 items-center gap-2 text-cp-lg leading-[1.15] font-emphasis text-cp-text-secondary">
@@ -66,6 +66,6 @@ const metrics = computed(() => [
           </dd>
         </div>
       </dl>
-    </BaseCard>
+    </ZCard>
   </section>
 </template>

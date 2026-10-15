@@ -1,4 +1,4 @@
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 
 import { reactive, shallowRef } from 'vue'
 import {
@@ -40,7 +40,7 @@ export function useAdminApiKey() {
         const wasEnabled = status.exists
         generatedKey.value = (await regenerateAdminApiKey()).key
         status.exists = true
-        toast.success(wasEnabled ? '管理员 API Key 已更新' : '管理员 API Key 已生成')
+        ZNotification.success({ message: wasEnabled ? '管理员 API Key 已更新' : '管理员 API Key 已生成' })
       },
     )
   }
@@ -55,7 +55,7 @@ export function useAdminApiKey() {
         status.exists = false
         generatedKey.value = ''
         showDeleteModal.value = false
-        toast.success('管理员 API Key 已删除')
+        ZNotification.success({ message: '管理员 API Key 已删除' })
       },
     )
   }

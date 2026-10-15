@@ -665,6 +665,8 @@ fn rebuild_account(current: &ProviderAccount, rebuild: AccountRebuild) -> Provid
     )
     .with_scheduling(current.concurrency_limit(), current.weight())
     .with_refresh_schedule(rebuild.has_refresh_token, rebuild.next_refresh_at)
+    .with_outbound_proxy(current.outbound_proxy().cloned())
+    .with_request_location(current.request_location().cloned())
 }
 
 #[derive(Default)]
@@ -1126,7 +1128,6 @@ pub(crate) fn account_policy() -> gateway_core::account::AccountSelectionPolicy 
     gateway_core::account::AccountSelectionPolicy::new(
         gateway_core::account::RotationStrategy::Smart,
         NonZeroU32::new(2).expect("nonzero concurrency"),
-        Duration::from_millis(10),
     )
     .with_openai_account_affinity(gateway_core::account::AccountAffinity::Strict)
 }

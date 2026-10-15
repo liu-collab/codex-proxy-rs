@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountErrorReason, AccountStatus } from '@/api'
-import { BasePopover, BaseScrollbar } from '@codex-proxy/ui'
+import { ZPopover, ZScrollbar } from '@codex-proxy/ui'
 
 import { computed } from 'vue'
 import { resolveAccountStatusPresentation } from './presenter'
@@ -47,8 +47,8 @@ const presentation = computed(() =>
 </script>
 
 <template>
-  <BasePopover :disabled="!presentation.hasDetail" trigger="hover-click" placement="top-start">
-    <template #trigger="{ open }">
+  <ZPopover :disabled="!presentation.hasDetail" trigger="hover-click" placement="top-start">
+    <template #reference="{ open }">
       <component
         :is="presentation.hasDetail ? 'button' : 'span'"
         :type="presentation.hasDetail ? 'button' : undefined"
@@ -140,15 +140,15 @@ const presentation = computed(() =>
             <span class="text-cp-xs leading-none font-heavy text-cp-text-tertiary">上游原始反馈</span>
             <span class="shrink-0 text-[10px] leading-none font-emphasis text-cp-text-quaternary">仅供排查</span>
           </div>
-          <BaseScrollbar class="bg-cp-fill-quaternary" max-height="124px">
+          <ZScrollbar class="bg-cp-fill-quaternary" max-height="124px">
             <div class="px-3 py-2">
               <pre
                 class="m-0 whitespace-pre-wrap wrap-break-word font-mono text-cp-xs leading-[1.55] font-emphasis text-cp-text-secondary"
               >{{ presentation.errorText }}</pre>
             </div>
-          </BaseScrollbar>
+          </ZScrollbar>
         </div>
       </div>
     </section>
-  </BasePopover>
+  </ZPopover>
 </template>

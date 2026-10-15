@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountAffinity } from '@/api'
-import { BaseCard, BaseForm, BaseFormItem, BaseInput, BasePopover, BaseSegmented } from '@codex-proxy/ui'
+import { ZCard, ZForm, ZFormItem, ZIconButton, ZInput, ZPopover, ZSegmented } from '@codex-proxy/ui'
 import { CircleAlert } from '@lucide/vue'
 
 const props = defineProps<{ disabled: boolean }>()
@@ -11,15 +11,15 @@ const affinityOptions = [{ label: '宽松', value: 'relaxed' }, { label: '优先
 </script>
 
 <template>
-  <BaseCard title="亲和策略">
-    <BaseForm class="max-w-6xl sm:grid-cols-2 lg:grid-cols-3">
-      <BaseFormItem label="账号亲和" description="控制同一会话内的账号绑定方式">
+  <ZCard title="亲和策略">
+    <ZForm class="max-w-6xl sm:grid-cols-2 lg:grid-cols-3">
+      <ZFormItem label="账号亲和" description="控制同一会话内的账号绑定方式">
         <template #label-extra>
-          <BasePopover class="-my-1" trigger="hover-click" placement="top-start">
-            <template #trigger="{ open }">
-              <button type="button" aria-label="账号亲和说明" :aria-expanded="open" class="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-cp-sm border-0 bg-transparent p-0 text-cp-text-tertiary outline-none transition-colors hover:text-cp-text focus-visible:ring-2 focus-visible:ring-cp-control-outline motion-reduce:transition-none">
+          <ZPopover class="-my-1" trigger="hover-click" placement="top-start">
+            <template #reference="{ open }">
+              <ZIconButton aria-label="账号亲和说明" :title="undefined" :aria-expanded="open" class="size-6! hover:bg-transparent! active:bg-transparent!">
                 <CircleAlert class="size-3.5" aria-hidden="true" />
-              </button>
+              </ZIconButton>
             </template>
             <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
               <p>宽松：会话内请求直接按调度策略选号，不优先主账号</p>
@@ -27,20 +27,20 @@ const affinityOptions = [{ label: '宽松', value: 'relaxed' }, { label: '优先
               <p>严格：同一会话共用账号，子线程等待当前账号，并跟随主线程换号</p>
               <p>重新选号仍遵循当前调度策略</p>
             </div>
-          </BasePopover>
+          </ZPopover>
         </template>
-        <BaseSegmented v-model="accountAffinity" label="账号亲和" :options="affinityOptions" :disabled="props.disabled" class="w-full" />
-      </BaseFormItem>
-      <BaseFormItem label="亲和时长" description="账号绑定的保留时间，成功调度后续期">
-        <BaseInput v-model="affinityTtlHours" aria-label="亲和时长（小时）" type="number" min="1" max="720" step="1" :disabled="props.disabled">
+        <ZSegmented v-model="accountAffinity" aria-label="账号亲和" :options="affinityOptions" :disabled="props.disabled" class="w-full" />
+      </ZFormItem>
+      <ZFormItem label="亲和时长" description="账号绑定的保留时间，成功调度后续期">
+        <ZInput v-model="affinityTtlHours" aria-label="亲和时长（小时）" type="number" min="1" max="720" step="1" :disabled="props.disabled">
           <template #suffix>
             小时
           </template>
-        </BaseInput>
-      </BaseFormItem>
-      <BaseFormItem label="最大换号次数" description="单请求最多换号次数，0 表示不换号">
-        <BaseInput v-model="maxAccountRotations" aria-label="最大换号次数" type="number" min="0" max="31" step="1" :disabled="props.disabled" />
-      </BaseFormItem>
-    </BaseForm>
-  </BaseCard>
+        </ZInput>
+      </ZFormItem>
+      <ZFormItem label="最大换号次数" description="单请求最多换号次数，0 表示不换号">
+        <ZInput v-model="maxAccountRotations" aria-label="最大换号次数" type="number" min="0" max="31" step="1" :disabled="props.disabled" />
+      </ZFormItem>
+    </ZForm>
+  </ZCard>
 </template>

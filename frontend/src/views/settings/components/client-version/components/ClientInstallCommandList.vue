@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseIconButton } from '@codex-proxy/ui'
+import { ZIconButton } from '@codex-proxy/ui'
 
 import { Copy } from '@lucide/vue'
 import { useCopyText } from '@/composables/useCopyText'
@@ -31,11 +31,11 @@ function copyCommand(command: string) {
         <p class="m-0 text-cp-xs font-heavy text-cp-text-quaternary">
           {{ item.label }}
         </p>
-        <code class="mt-1.5 block overflow-x-auto whitespace-nowrap font-mono text-cp-sm leading-[1.5] font-semibold text-cp-text">{{ item.command }}</code>
+        <code class="mt-1.5 block overflow-x-auto whitespace-nowrap font-mono text-cp-sm leading-normal font-semibold text-cp-text">{{ item.command }}</code>
       </div>
-      <BaseIconButton size="sm" label="复制命令" @click="copyCommand(item.command)">
+      <ZIconButton size="small" aria-label="复制命令" @click="copyCommand(item.command)">
         <Copy class="size-3.5" />
-      </BaseIconButton>
+      </ZIconButton>
     </article>
   </div>
 </template>

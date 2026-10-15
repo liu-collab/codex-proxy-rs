@@ -1,6 +1,6 @@
 import type { Ref } from 'vue'
 import type { ApiKey } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef, watch } from 'vue'
 import { deleteApiKey, disableApiKey, enableApiKey } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
@@ -46,7 +46,7 @@ export function useApiKeyMutations(options: {
         options.selectedIds.value = remaining
         showSingleDeleteModal.value = false
         await options.reload()
-        toast.success('删除成功')
+        ZNotification.success({ message: '删除成功' })
       },
       { onError: () => void options.reload() },
     )
@@ -67,7 +67,7 @@ export function useApiKeyMutations(options: {
         }
         showDeleteModal.value = false
         await options.reload()
-        toast.success(`已删除 ${deleteCount} 个 API Key`)
+        ZNotification.success({ message: `已删除 ${deleteCount} 个 API Key` })
       },
       { onError: () => void options.reload() },
     )
@@ -79,7 +79,7 @@ export function useApiKeyMutations(options: {
         const mutation = key.enabled ? disableApiKey : enableApiKey
         await mutation({ id: key.id })
         await options.reload()
-        toast.success(key.enabled ? '已禁用' : '已启用')
+        ZNotification.success({ message: key.enabled ? '已禁用' : '已启用' })
       }
       catch {
         void options.reload()

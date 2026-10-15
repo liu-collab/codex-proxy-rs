@@ -395,14 +395,7 @@ async fn published_fixture() -> AdminTestFixture {
     fixture.published_snapshot.publish(
         RuntimeSnapshot::new(
             ConfigRevision::new(7).unwrap(),
-            gateway_core::settings::SettingsValues::new(
-                1,
-                0,
-                "smart",
-                Default::default(),
-                None,
-                None,
-            ),
+            gateway_core::settings::SettingsValues::new(1, "smart", Default::default(), None, None),
             vec![],
             vec![],
             vec![],
@@ -440,6 +433,35 @@ async fn resource_request(
     .oneshot(request.body(Body::empty()).unwrap())
     .await
     .unwrap()
+}
+
+#[tokio::test]
+async fn large_html_resource_should_remain_uncompressed() {
+    let fixture = published_fixture().await;
+    let path = format!("ui/{}.html", "a".repeat(2048));
+    let response = crate::openai::api_router_with_admin(fixture.services)
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/admin/plugins/extensions/plugin-instance-diagnostic/{}/7/resources/{path}",
+                    "a".repeat(64)
+                ))
+                .header("cookie", "cpr_session=management-session")
+                .header("accept-encoding", "gzip")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()["content-type"], "text/html");
+    assert!(!response.headers().contains_key("content-encoding"));
+    assert_eq!(
+        axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap(),
+        path
+    );
 }
 
 #[tokio::test]

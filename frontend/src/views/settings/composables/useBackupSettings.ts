@@ -1,6 +1,6 @@
 import type { BackupSettingsView, UpdateBackupStoragePayload } from '@/api'
 
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { computed, ref, shallowRef } from 'vue'
 import {
   getBackupSettings,
@@ -102,7 +102,7 @@ export function useBackupSettings() {
       // 仅存储版本变化时同步服务端暂停状态，普通保存不覆盖计划草稿。
       if (storageChanged)
         schedule.value.scheduleEnabled = data.scheduleEnabled
-      toast.success(schedulePaused ? '存储配置已保存，定时备份已暂停，请测试连接后重新启用' : '存储配置已保存')
+      ZNotification.success({ message: schedulePaused ? '存储配置已保存，定时备份已暂停，请测试连接后重新启用' : '存储配置已保存' })
       return true
     }
     catch {
@@ -121,11 +121,11 @@ export function useBackupSettings() {
       const result = await testBackupStorage()
       if (result.ok) {
         verified.value = true
-        toast.success('连接测试通过')
+        ZNotification.success({ message: '连接测试通过' })
       }
       else {
         verified.value = false
-        toast.error(`${result.stage}: ${result.message}`)
+        ZNotification.error({ message: `${result.stage}: ${result.message}` })
       }
     }
     catch {
@@ -148,7 +148,7 @@ export function useBackupSettings() {
         retentionCount: Number(schedule.value.retentionCount) || 0,
       })
       applySchedule(data)
-      toast.success('备份计划已保存')
+      ZNotification.success({ message: '备份计划已保存' })
       return true
     }
     catch {

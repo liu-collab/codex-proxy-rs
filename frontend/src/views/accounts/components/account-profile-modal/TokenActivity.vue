@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ProfileActivityLevel, ProfileActivityMode } from './activity'
 import type { ProfileActivityCalendar } from '@/api'
-import { BaseEmpty, BaseSegmented } from '@codex-proxy/ui'
+import { ZEmpty, ZSegmented } from '@codex-proxy/ui'
 
 import { computed, shallowRef } from 'vue'
 import { buildProfileActivityGrid, profileActivityCellLabel } from './activity'
@@ -40,14 +40,14 @@ const monthLabels = computed(() =>
           Token 活动
         </h3>
       </div>
-      <BaseSegmented v-model="mode" label="Token 活动统计方式" size="sm" :options="modeOptions" />
+      <ZSegmented v-model="mode" aria-label="Token 活动统计方式" size="small" :options="modeOptions" />
     </div>
 
-    <BaseEmpty
+    <ZEmpty
       v-if="calendar === null"
       title="暂无 Token 活动"
       description="本次未获取到每日 Token 活动"
-      size="sm"
+      size="small"
       surface="none"
     />
 

@@ -9,12 +9,14 @@ use axum::{
     response::Response,
     routing::any,
 };
+use tower_http::compression::{CompressionLayer, CompressionLevel};
 
 pub mod account_groups;
 pub mod accounts;
 pub mod auth;
 pub mod backups;
 pub mod client_keys;
+mod compression;
 pub(crate) mod diagnostics;
 mod extract;
 pub mod observability;
@@ -55,6 +57,12 @@ where
         .method_not_allowed_fallback(method_not_allowed)
         .route("/api/admin", any(admin_not_found))
         .route("/api/admin/{*path}", any(admin_not_found))
+        .layer(
+            CompressionLayer::new()
+                .quality(CompressionLevel::Fastest)
+                .compress_when(compression::AdminJson),
+        )
+        .merge(plugins::public_router().method_not_allowed_fallback(method_not_allowed))
         .layer(middleware::map_response(no_store))
 }
 

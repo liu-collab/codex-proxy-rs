@@ -146,7 +146,7 @@ fn logging_rejects_zero_retention_windows() {
     for request_dump in [false, true] {
         let mut config = valid_config();
         if request_dump {
-            config.logging.request_dump_retention_days = 0;
+            config.logging.request_dump_retention_days = 0.0;
         } else {
             config.logging.file.retention_days = 0;
         }
@@ -168,7 +168,7 @@ fn logging_defaults_to_time_retention_and_ignores_removed_count_retention() {
         "file": { "enabled": true, "directory": "logs", "max_file_size_mb": 20 }
     });
     let config: LoggingConfig = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(config.request_dump_retention_days, 1);
+    assert_eq!(config.request_dump_retention_days, 1.0);
     assert_eq!(config.file.retention_days, 7);
     assert!(!config.oauth_recovery);
     value["file"]["max_files"] = serde_json::json!(20);
@@ -176,6 +176,55 @@ fn logging_defaults_to_time_retention_and_ignores_removed_count_retention() {
         serde_json::from_value::<LoggingConfig>(value).unwrap(),
         config
     );
+}
+
+#[test]
+fn request_dump_retention_accepts_integer_and_fractional_yaml_days() {
+    for (input, expected) in [("1", 1.0), ("0.5", 0.5), ("0.25", 0.25), ("1.5", 1.5)] {
+        let yaml = format!(
+            "level: info\nstdout: true\nrequest_dump_retention_days: {input}\nfile:\n  enabled: true\n  directory: logs\n  max_file_size_mb: 20\n"
+        );
+        let mut config = valid_config();
+        config.logging = config::Config::builder()
+            .add_source(config::File::from_str(&yaml, config::FileFormat::Yaml))
+            .build()
+            .unwrap()
+            .try_deserialize()
+            .unwrap();
+        config
+            .resolve_and_validate(
+                std::path::Path::new("/srv/gateway"),
+                std::path::Path::new("/srv/gateway/web/dist"),
+            )
+            .unwrap();
+        assert_eq!(config.logging.request_dump_retention_days, expected);
+    }
+}
+
+#[test]
+fn request_dump_retention_rejects_invalid_durations() {
+    for days in [
+        0.0,
+        -0.5,
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::MAX,
+        1e-20,
+    ] {
+        let mut config = valid_config();
+        config.logging.request_dump_retention_days = days;
+        let error = config
+            .resolve_and_validate(
+                std::path::Path::new("/srv/gateway"),
+                std::path::Path::new("/srv/gateway/web/dist"),
+            )
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            gateway_host::ConfigError::InvalidField("host.logging.request_dump_retention_days")
+        ));
+    }
 }
 
 #[test]
@@ -220,7 +269,7 @@ fn valid_config() -> HostConfig {
             },
             oauth_recovery: false,
             request_dump: false,
-            request_dump_retention_days: 1,
+            request_dump_retention_days: 1.0,
         },
         system_update,
         worker_shutdown_timeout_seconds: 30,

@@ -297,6 +297,11 @@ pub struct StartedExecution {
 }
 
 pub trait ExecutionSession: Send {
+    /// 允许协议层在等待业务事件期间记录传输首字节，保活不提交业务批次
+    fn response_commit(&self) -> super::ResponseCommit {
+        super::ResponseCommit::default()
+    }
+
     fn trace(&self) -> crate::diagnostics::TraceContext {
         crate::diagnostics::TraceContext::default()
     }

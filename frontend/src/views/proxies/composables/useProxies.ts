@@ -1,5 +1,5 @@
 import type { OutboundProxyRecord, OutboundProxyTest } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { computed, onMounted, reactive, shallowRef, watch } from 'vue'
 import { createProxy, deleteProxy, getProxies, probeProxy, proxyProtocolOf, testProxy, updateProxy } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
@@ -33,6 +33,11 @@ export function useProxies() {
   const pendingDelete = shallowRef<OutboundProxyRecord | null>(null)
   const testing = useIdSet<string>()
   const testingIds = testing.ids
+  const updating = useIdSet<string>()
+  const updatingIds = updating.ids
+  const showDisable = shallowRef(false)
+  const pendingDisable = shallowRef<OutboundProxyRecord | null>(null)
+  const disabling = computed(() => pendingDisable.value !== null && updating.has(pendingDisable.value.id))
   const formTestAction = useAsyncAction()
   const testingForm = computed(() => formTestAction.loading.value || (editing.value !== null && testingIds.value.has(editing.value.id)))
   const detectingLocation = shallowRef(false)
@@ -61,11 +66,11 @@ export function useProxies() {
         formTestResult.value = result.lastTest
       }
       if (result.lastTest?.success === false)
-        toast.error(`${result.name}：${result.lastTest.message}`)
+        ZNotification.error({ message: `${result.name}：${result.lastTest.message}` })
       else if (result.lastTest?.success)
-        toast.success(`${result.name}：连接成功`)
+        ZNotification.success({ message: `${result.name}：连接成功` })
       else
-        toast.error(result.lastTest?.message ?? '代理测试失败')
+        ZNotification.error({ message: result.lastTest?.message ?? '代理测试失败' })
     }
     catch {}
     finally {
@@ -83,7 +88,7 @@ export function useProxies() {
       return
     }
     if (!proxyUrl) {
-      toast.warning('请填写代理连接地址')
+      ZNotification.warning({ message: '请填写代理连接地址' })
       return
     }
     await formTestAction.run(async () => {
@@ -91,9 +96,9 @@ export function useProxies() {
       const result = await probeProxy({ proxyUrl, proxyProtocol: form.proxyProtocol, detectLocation: false })
       formTestResult.value = result
       if (!result.success)
-        toast.error(result.message)
+        ZNotification.error({ message: result.message })
       else
-        toast.success(`连接成功，耗时 ${result.latencyMs} ms`)
+        ZNotification.success({ message: `连接成功，耗时 ${result.latencyMs} ms` })
     })
   }
 
@@ -102,7 +107,7 @@ export function useProxies() {
       return
     const proxyUrl = form.proxyUrl.trim()
     if (!proxyUrl && !editing.value) {
-      toast.warning('请填写代理连接地址')
+      ZNotification.warning({ message: '请填写代理连接地址' })
       return
     }
     detectingLocation.value = true
@@ -122,22 +127,22 @@ export function useProxies() {
         }
         formTestResult.value = result
         if (!result?.success) {
-          toast.error(result?.message ?? '代理连接失败，未能解析位置')
+          ZNotification.error({ message: result?.message ?? '代理连接失败，未能解析位置' })
           return
         }
         if (result.location.status === 'detected') {
           form.location = { ...result.location.location }
           form.customLocation = true
-          toast.success('已填入出口位置')
+          ZNotification.success({ message: '已填入出口位置' })
         }
         else if (result.location.status === 'conflict') {
-          toast.warning('IPv4 与 IPv6 出口时区不一致，请手动填写')
+          ZNotification.warning({ message: 'IPv4 与 IPv6 出口时区不一致，请手动填写' })
         }
         else if (result.location.status === 'failed') {
-          toast.warning(result.location.message)
+          ZNotification.warning({ message: result.location.message })
         }
         else {
-          toast.warning('未获取到出口位置')
+          ZNotification.warning({ message: '未获取到出口位置' })
         }
       })
     }
@@ -152,13 +157,13 @@ export function useProxies() {
     const name = form.name.trim()
     const proxyUrl = form.proxyUrl.trim()
     if (!name || (!editing.value && !proxyUrl)) {
-      toast.warning('请填写代理名称和连接地址')
+      ZNotification.warning({ message: '请填写代理名称和连接地址' })
       return
     }
     const location = form.customLocation ? normalizeRequestLocation(form.location) : null
     const locationError = location ? requestLocationError(location) : ''
     if (locationError) {
-      toast.warning(locationError)
+      ZNotification.warning({ message: locationError })
       return
     }
     await saveAction.run(async () => {
@@ -183,7 +188,7 @@ export function useProxies() {
             location,
           }))
       showForm.value = false
-      toast.success('代理已保存')
+      ZNotification.success({ message: '代理已保存' })
       search.value = ''
       query.page.value = 1
       await query.execute()
@@ -195,6 +200,37 @@ export function useProxies() {
     showDelete.value = true
   }
 
+  async function setEnabled(proxy: OutboundProxyRecord, enabled: boolean) {
+    if (updating.has(proxy.id) || testing.has(proxy.id))
+      return
+    updating.add(proxy.id)
+    try {
+      await updateProxy({ id: proxy.id, revision: proxy.revision, name: proxy.name, enabled })
+      showDisable.value = false
+      ZNotification.success({ message: enabled ? '代理已启用' : '代理已禁用，关联账号已改为直连' })
+    }
+    catch {}
+    finally {
+      updating.remove(proxy.id)
+      await query.execute({ silent: true })
+    }
+  }
+
+  function toggleEnabled(proxy: OutboundProxyRecord) {
+    if (proxy.enabled) {
+      pendingDisable.value = proxy
+      showDisable.value = true
+    }
+    else {
+      void setEnabled(proxy, true)
+    }
+  }
+
+  async function confirmDisable() {
+    if (pendingDisable.value)
+      await setEnabled(pendingDisable.value, false)
+  }
+
   async function confirmDelete() {
     const proxy = pendingDelete.value
     if (!proxy || deleting.value)
@@ -203,7 +239,7 @@ export function useProxies() {
       await deleteProxy({ id: proxy.id, revision: proxy.revision })
       showDelete.value = false
       await query.execute()
-      toast.success('代理已删除')
+      ZNotification.success({ message: '代理已删除' })
     })
   }
 
@@ -248,6 +284,12 @@ export function useProxies() {
     pendingDelete,
     deleting,
     testingIds,
+    updatingIds,
+    showDisable,
+    pendingDisable,
+    disabling,
+    toggleEnabled,
+    confirmDisable,
     testingConnection,
     detectingLocation,
     openForm,

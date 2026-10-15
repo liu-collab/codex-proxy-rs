@@ -1,5 +1,5 @@
 import type { ApiKey } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { revealApiKey } from '@/api'
 import { useCopyText } from '@/composables/useCopyText'
@@ -64,7 +64,7 @@ export function useApiKeyUse() {
       if (!result)
         return undefined
       if (!result.plaintextKey) {
-        toast.error('完整 API Key 不可用')
+        ZNotification.error({ message: '完整 API Key 不可用' })
         return undefined
       }
       return result.plaintextKey

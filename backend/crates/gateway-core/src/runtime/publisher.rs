@@ -234,7 +234,14 @@ impl RuntimeSnapshotPublisher {
                 None => self.compiler.compile().await,
             }
         } else {
-            preempt_for_committed_refresh(cancellation, self.compiler.compile()).await?
+            let previous = self.snapshots.snapshot_for_diagnostics();
+            preempt_for_committed_refresh(cancellation, async {
+                match previous {
+                    Some(previous) => self.compiler.compile_with_catalog_fallback(&previous).await,
+                    None => self.compiler.compile().await,
+                }
+            })
+            .await?
         };
         let snapshot = match compiled {
             Ok(snapshot) => snapshot,

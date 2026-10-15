@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { rotationOptions } from '../constants'
 import type { SmartSchedulingConfig } from '@/api'
-import { BaseCard, BaseIconButton } from '@codex-proxy/ui'
+import { ZCard, ZIconButton } from '@codex-proxy/ui'
 import { Settings2 } from '@lucide/vue'
 import { isEqual } from 'es-toolkit'
 import { computed, shallowRef } from 'vue'
@@ -23,7 +23,7 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
 </script>
 
 <template>
-  <BaseCard title="调度策略">
+  <ZCard title="调度策略">
     <div class="grid max-w-6xl gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <div
         v-for="option in options"
@@ -60,19 +60,19 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
             {{ option.description }}
           </span>
         </button>
-        <BaseIconButton
+        <ZIconButton
           v-if="option.value === 'smart'"
           class="absolute top-3 right-3 size-6! rounded-cp-sm p-0"
-          label="智能调度设置"
-          size="sm"
+          aria-label="智能调度设置"
+          size="small"
           :disabled="disabled || !smartScheduling || !smartDefaults"
           @click="settingsOpen = true"
         >
           <Settings2 class="size-3.5" />
-        </BaseIconButton>
+        </ZIconButton>
       </div>
     </div>
-  </BaseCard>
+  </ZCard>
   <SmartSchedulingModal
     v-if="smartScheduling && smartDefaults"
     v-model="settingsOpen"

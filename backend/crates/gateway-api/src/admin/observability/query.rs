@@ -84,7 +84,6 @@ pub struct DiagnosticsQuery {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub status_code: Option<i64>,
-    pub search: Option<String>,
 }
 
 impl DiagnosticsQuery {
@@ -312,6 +311,15 @@ pub(crate) fn usage_filter(query: &UsageQuery) -> Result<domain::UsageFilter, Wi
         upstream_request_id: non_empty(query.upstream_request_id.clone()),
         search: non_empty(query.search.clone()),
     })
+}
+
+pub(crate) fn analytics_filter(
+    query: &UsageQuery,
+) -> Result<domain::UsageFilter, WireValidationError> {
+    if query.search.is_some() {
+        return Err(WireValidationError::new("search"));
+    }
+    usage_filter(query)
 }
 
 pub(crate) fn usage_command(

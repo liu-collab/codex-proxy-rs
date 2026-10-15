@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 import type { PluginRefreshContext } from '../utils/actions'
 import type { CreatePluginSourceCredentialRequest, PluginSourceCredential } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { createPluginSourceCredential, deletePluginSourceCredential } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
@@ -42,7 +42,7 @@ export function usePluginCredentials({ credentials, refresh }: CredentialContext
     try {
       await deletePluginSourceCredential({ id: credential.id }, { silent: true })
       showCredentialDelete.value = false
-      toast.success('来源凭据已删除')
+      ZNotification.success({ message: '来源凭据已删除' })
       await refresh(true)
     }
     catch (error) {

@@ -369,11 +369,11 @@ impl AuthStore for BootstrapAuthStore {
         Err(unavailable("admin session"))
     }
 
-    async fn renew_session(
+    async fn compare_exchange_session(
         &self,
         _: &str,
         _: &gateway_admin::model::auth::AuthSession,
-        _: chrono::DateTime<chrono::Utc>,
+        _: Option<&gateway_admin::model::auth::AuthSession>,
     ) -> AdminStoreResult<Option<gateway_admin::model::auth::AuthSession>> {
         Ok(None)
     }
@@ -747,6 +747,10 @@ impl ClientKeyStore for UnavailableStore {
 
 #[async_trait]
 impl ObservabilityStore for UnavailableStore {
+    fn query_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(10)
+    }
+
     async fn dashboard_summary(
         &self,
         _: DashboardQuery,
@@ -772,15 +776,17 @@ impl ObservabilityStore for UnavailableStore {
         Err(unavailable("usage trend"))
     }
 
-    fn usage_calculated_billing_facts(
+    async fn analytics_cache_generation(&self) -> AdminStoreResult<u64> {
+        Err(unavailable("analytics generation"))
+    }
+
+    async fn usage_insights_observation(
         &self,
         _: TimeRange,
         _: UsageFilter,
         _: Granularity,
-    ) -> gateway_admin::ports::store::UsageCalculatedBillingStream<'_> {
-        Box::pin(futures::stream::once(async {
-            Err(unavailable("usage billing facts"))
-        }))
+    ) -> AdminStoreResult<gateway_admin::model::observability::UsageInsightsObservation> {
+        Err(unavailable("usage insights"))
     }
 
     async fn list_usage_records(&self, _: UsageQuery) -> AdminStoreResult<UsagePage> {

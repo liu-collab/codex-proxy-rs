@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseButton, BaseInput, BasePageHeader, BaseScrollbar, BaseSegmented, toast } from '@codex-proxy/ui'
+import { ZButton, ZInput, ZNotification, ZPageHeader, ZScrollbar, ZSegmented } from '@codex-proxy/ui'
 
 import { Check, RotateCcw, Save, Search, Undo2 } from '@lucide/vue'
 
@@ -46,16 +46,16 @@ function switchScope(value: string) {
 
 function saveTheme(event: MouseEvent) {
   if (!save(event)) {
-    toast.error('主题设置无效，请检查编辑值')
+    ZNotification.error({ message: '主题设置无效，请检查编辑值' })
     return
   }
-  toast.success('主题已保存并应用')
+  ZNotification.success({ message: '主题已保存并应用' })
 }
 </script>
 
 <template>
   <div class="flex min-h-0 w-full flex-col">
-    <BasePageHeader class="xl:h-17" title="主题设置">
+    <ZPageHeader class="xl:h-17" title="主题设置">
       <template #description>
         <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
           <span>自定义当前浏览器中的管理端配色与界面风格</span>
@@ -71,35 +71,35 @@ function saveTheme(event: MouseEvent) {
 
       <template #actions>
         <div class="flex flex-wrap items-center justify-end gap-2">
-          <BaseSegmented
+          <ZSegmented
             :model-value="scope"
-            label="主题编辑层级"
+            aria-label="主题编辑层级"
             :options="scopeOptions"
-            size="sm"
+            size="small"
             @update:model-value="switchScope"
           />
-          <BaseButton size="sm" variant="ghost" :disabled="!dirty" @click="resetDraft">
+          <ZButton size="small" variant="text" :disabled="!dirty" @click="resetDraft">
             <template #icon>
               <Undo2 class="size-3.5" />
             </template>
             撤销草稿
-          </BaseButton>
-          <BaseButton size="sm" variant="secondary" @click="restoreDefaults">
+          </ZButton>
+          <ZButton size="small" @click="restoreDefaults">
             <template #icon>
               <RotateCcw class="size-3.5" />
             </template>
             恢复默认
-          </BaseButton>
-          <BaseButton size="sm" variant="primary" :disabled="!dirty" @click="saveTheme">
+          </ZButton>
+          <ZButton size="small" type="primary" :disabled="!dirty" @click="saveTheme">
             <template #icon>
               <Save v-if="dirty" class="size-3.5" />
               <Check v-else class="size-3.5" />
             </template>
             {{ dirty ? '保存并应用' : '已保存' }}
-          </BaseButton>
+          </ZButton>
         </div>
       </template>
-    </BasePageHeader>
+    </ZPageHeader>
 
     <section
       class="theme-workbench isolate mt-5 overflow-hidden rounded-cp-card bg-cp-bg-layout shadow-cp-card xl:flex xl:min-h-0 xl:flex-1 xl:flex-col"
@@ -112,7 +112,7 @@ function saveTheme(event: MouseEvent) {
           class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-cp-lg bg-cp-bg-container pt-3 pr-0 pb-3 pl-3 shadow-cp-secondary"
           aria-label="主题 Token 编辑面板"
         >
-          <BaseInput
+          <ZInput
             v-model="query"
             class="mr-3"
             aria-label="搜索 Token"
@@ -121,9 +121,9 @@ function saveTheme(event: MouseEvent) {
             <template #prefix>
               <Search class="size-4" />
             </template>
-          </BaseInput>
+          </ZInput>
 
-          <BaseScrollbar class="h-full min-h-0">
+          <ZScrollbar class="h-full min-h-0">
             <div class="pr-4">
               <ThemeGlobalTokenPanel
                 v-if="scope === 'global'"
@@ -150,7 +150,7 @@ function saveTheme(event: MouseEvent) {
                 @reset-component-number="resetComponentNumber"
               />
             </div>
-          </BaseScrollbar>
+          </ZScrollbar>
         </aside>
 
         <div class="hidden min-h-0 min-[768px]:block">

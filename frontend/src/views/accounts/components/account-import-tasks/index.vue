@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountImportTask, AccountImportTaskDetail } from '@/api'
-import { BaseButton, BaseEmpty, BaseIconButton, BaseModal, BasePopover, BaseSelect } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZEmpty, ZIconButton, ZPopover, ZSelect } from '@codex-proxy/ui'
 import { CircleAlert, ListTodo } from '@lucide/vue'
 import { computed, shallowRef, useId, watch } from 'vue'
 import { taskLabel } from './presenter'
@@ -39,41 +39,41 @@ function handleRetentionKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <BaseModal v-model="open" title="导入任务" description="关闭页面后继续导入，再次打开即可查看进度" size="lg">
+  <ZDialog v-model="open" title="导入任务" description="关闭页面后继续导入，再次打开即可查看进度" width="48rem">
     <div v-if="error" role="alert" class="mb-4 flex items-center justify-between gap-3 rounded-cp bg-cp-warning-container p-3 text-xs text-cp-warning-on-container">
       <span>进度暂未更新：{{ error.replace(/[。.]\s*$/u, '') }}，恢复连接后将自动刷新</span>
-      <BaseButton size="sm" :loading="loading" @click="emit('refresh')">
+      <ZButton size="small" :loading="loading" @click="emit('refresh')">
         重试
-      </BaseButton>
+      </ZButton>
     </div>
-    <BaseEmpty v-if="!tasks.length" class="min-h-[min(20rem,50dvh)] content-center" :icon="ListTodo" :title="loading ? '正在读取导入任务' : '暂无导入任务'" description="新建一次账号导入，即可在这里查看逐条入库结果" />
+    <ZEmpty v-if="!tasks.length" class="min-h-[min(20rem,50dvh)] content-center" :icon="ListTodo" :title="loading ? '正在读取导入任务' : '暂无导入任务'" description="新建一次账号导入，即可在这里查看逐条入库结果" />
     <div v-else class="min-h-[min(20rem,50dvh)] min-w-0">
       <div v-if="tasks.length > 1" class="mb-5">
-        <BaseSelect
+        <ZSelect
           :model-value="selectedId"
           :options="taskOptions"
-          size="sm"
+          size="small"
           aria-label="切换导入任务"
           class="w-full min-w-0 sm:max-w-96"
-          @update:model-value="emit('select', $event)"
+          @update:model-value="emit('select', $event ?? selectedId)"
         />
       </div>
       <TaskDetail v-if="detail" :task="detail" :stopping="stopping" @stop="emit('stop')" @view-accounts="emit('viewAccounts')" />
-      <BaseEmpty v-else class="min-h-[min(16rem,40dvh)] content-center" :title="loading ? '正在读取条目结果' : '请选择一个任务'" surface="none" />
+      <ZEmpty v-else class="min-h-[min(16rem,40dvh)] content-center" :title="loading ? '正在读取条目结果' : '请选择一个任务'" surface="none" />
     </div>
     <template #footer>
       <div class="flex w-full flex-wrap items-center justify-between gap-3">
-        <BasePopover v-model="retentionOpen" trigger="hover-click" placement="top-start" :hover-delay="240">
-          <template #trigger>
-            <BaseIconButton
-              label="任务保留说明"
-              size="sm"
+        <ZPopover v-model="retentionOpen" trigger="hover-click" placement="top-start" :hover-delay="240">
+          <template #reference>
+            <ZIconButton
+              aria-label="任务保留说明"
+              size="small"
               :aria-expanded="retentionOpen"
               :aria-describedby="retentionOpen ? retentionId : undefined"
               @keydown="handleRetentionKeydown"
             >
               <CircleAlert class="size-4" />
-            </BaseIconButton>
+            </ZIconButton>
           </template>
           <div :id="retentionId" role="tooltip" class="grid w-72 max-w-[calc(100vw-2rem)] gap-2 p-4 text-cp-xs leading-relaxed text-cp-text-secondary">
             <p class="m-0">
@@ -83,11 +83,11 @@ function handleRetentionKeydown(event: KeyboardEvent) {
               服务重启后任务记录消失，已入库账号保留
             </p>
           </div>
-        </BasePopover>
-        <BaseButton @click="open = false">
+        </ZPopover>
+        <ZButton @click="open = false">
           关闭
-        </BaseButton>
+        </ZButton>
       </div>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

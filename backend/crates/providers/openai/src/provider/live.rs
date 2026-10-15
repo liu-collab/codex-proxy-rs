@@ -32,7 +32,7 @@ use uuid::Uuid;
 use super::*;
 
 use crate::credential::{
-    CODEX_AUTHENTICATION_KIND_OAUTH, CodexCredentialRepository,
+    CODEX_AUTHENTICATION_KIND_OAUTH, CodexCredentialRepository, CodexSelectionModel,
     SelectCodexProviderEndpointCredential,
 };
 use crate::transport::headers::websocket_header_pairs;
@@ -252,7 +252,7 @@ impl CodexProvider {
                 request_url: &self.live_calls_url,
                 attempt: &context,
                 session_affinity: session_affinity.as_ref(),
-                upstream_model: Some(upstream_model.as_str()),
+                model: CodexSelectionModel::Requested(upstream_model.as_str()),
                 // realtime calls 端点绑定 ChatGPT OAuth 身份；在候选阶段就排除
                 // API Key 账号，避免混合账号池选中不支持语音的账号后必然失败。
                 requires_oauth: true,
@@ -341,6 +341,9 @@ impl CodexProvider {
                 provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
             })?,
         )
+        .with_account_snapshot(Some(
+            gateway_core::account::AccountHistorySnapshot::from_account(lease.account()),
+        ))
         .with_selection_observation(ProviderSelectionObservation::new(
             account_selection_wait_ms,
             lease.capacity_snapshot(),

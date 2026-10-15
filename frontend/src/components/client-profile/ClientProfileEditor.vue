@@ -4,7 +4,7 @@ import type {
   ClientProfilePreview,
   ClientProfileSelection,
 } from '@/api/modules/settings/profiles'
-import { BaseButton, BaseSegmented } from '@codex-proxy/ui'
+import { ZButton, ZSegmented } from '@codex-proxy/ui'
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { getClientProfileOptions, previewClientProfile } from '@/api/modules/settings/profiles'
 import { errorMessage } from '@/utils/operation'
@@ -95,9 +95,9 @@ onMounted(() => load())
 <template>
   <div class="grid min-w-0 gap-4">
     <div v-if="allowInherit" class="flex flex-wrap items-center justify-between gap-3">
-      <BaseSegmented
+      <ZSegmented
         v-model="profileSource"
-        label="客户端身份来源"
+        aria-label="客户端身份来源"
         class="shrink-0"
         :options="[
           { label: '全局配置', value: 'global' },
@@ -109,9 +109,9 @@ onMounted(() => load())
     </div>
     <div v-if="loadError" role="alert" class="flex flex-wrap items-center justify-between gap-3 text-cp text-cp-error">
       <span>预设加载失败：{{ loadError }}</span>
-      <BaseButton size="sm" :disabled="disabled || loading" @click="load()">
+      <ZButton size="small" :disabled="disabled || loading" @click="load()">
         重试
-      </BaseButton>
+      </ZButton>
     </div>
     <ClientProfilePresetFields
       v-if="!inherited"

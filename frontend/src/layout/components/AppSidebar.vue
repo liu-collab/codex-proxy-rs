@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PluginManagementView } from '@/api'
 
-import { BaseIconButton, BaseMotionIcon, BaseScrollbar } from '@codex-proxy/ui'
+import { ZIconButton, ZMotionIcon, ZScrollbar } from '@codex-proxy/ui'
 import {
   ArrowUpCircle,
   Blocks,
@@ -391,12 +391,12 @@ onBeforeUnmount(() => {
       class="mx-4 mt-6 grid h-12 shrink-0 grid-cols-[44px_minmax(0,1fr)] items-center"
       :class="isCollapsed ? 'w-11 justify-start' : 'self-stretch gap-3'"
     >
-      <BaseMotionIcon
+      <ZMotionIcon
         variant="brand"
         class="inline-flex size-11 items-center justify-center relative -top-0.5 rounded-cp"
       >
         <AppBrandMark class="block size-11 select-none" />
-      </BaseMotionIcon>
+      </ZMotionIcon>
       <span v-show="brandLabelVisible" ref="brandLabelEl" class="grid min-w-33 content-center overflow-hidden">
         <strong class="text-base leading-[1.1] font-heavy text-cp-text"> Codex Proxy </strong>
         <span class="mt-1.5 flex h-4.5 min-w-0 items-center gap-2">
@@ -420,8 +420,9 @@ onBeforeUnmount(() => {
       </span>
     </div>
 
-    <BaseScrollbar class="my-6 w-full flex-1">
+    <ZScrollbar class="my-6 w-full flex-1">
       <div class="px-4">
+        <!-- 焦点环绘制在按钮内侧，避免被滚动区和折叠菜单裁切 -->
         <nav class="relative grid gap-3" :class="isCollapsed ? 'mx-auto w-11.5' : 'w-full'" aria-label="主导航">
           <span
             class="pointer-events-none absolute inset-x-0 top-0 h-11.5 overflow-hidden rounded-cp bg-cp-menu-item-selected-bg transition-[transform,opacity] duration-260 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
@@ -436,7 +437,7 @@ onBeforeUnmount(() => {
             <div v-if="item.path === '/plugins'" class="relative z-10 grid min-w-0">
               <button
                 type="button"
-                class="inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 bg-transparent text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-cp-bg-container"
+                class="inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 bg-transparent text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline"
                 :class="[
                   isCollapsed ? 'w-11.5 justify-center' : 'w-full gap-3 px-4',
                   isActive(item.path)
@@ -490,7 +491,7 @@ onBeforeUnmount(() => {
                     </span>
                     <button
                       type="button"
-                      class="relative inline-flex h-10 min-w-0 cursor-pointer items-center gap-2 rounded-cp border-0 bg-transparent px-3 text-left text-cp-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-cp-control-outline motion-reduce:transition-none"
+                      class="relative inline-flex h-10 min-w-0 cursor-pointer items-center gap-2 rounded-cp border-0 bg-transparent px-3 text-left text-cp-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline motion-reduce:transition-none"
                       :class="route.name === 'plugins'
                         ? 'font-emphasis text-cp-text'
                         : navFeedbackMuted ? 'font-semibold text-cp-text-secondary' : 'font-semibold text-cp-text-secondary hover:bg-cp-fill-quaternary hover:text-cp-text'"
@@ -504,7 +505,7 @@ onBeforeUnmount(() => {
                       v-for="view in pluginPageViews"
                       :key="view.target.instanceId"
                       type="button"
-                      class="relative inline-flex h-10 min-w-0 cursor-pointer items-center gap-2 rounded-cp border-0 bg-transparent px-3 text-left text-cp-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-cp-control-outline motion-reduce:transition-none"
+                      class="relative inline-flex h-10 min-w-0 cursor-pointer items-center gap-2 rounded-cp border-0 bg-transparent px-3 text-left text-cp-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline motion-reduce:transition-none"
                       :class="isPluginViewActive(view)
                         ? 'font-emphasis text-cp-text'
                         : navFeedbackMuted ? 'font-semibold text-cp-text-secondary' : 'font-semibold text-cp-text-secondary hover:bg-cp-fill-quaternary hover:text-cp-text'"
@@ -522,7 +523,7 @@ onBeforeUnmount(() => {
             <button
               v-else
               type="button"
-              class="relative z-10 inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-cp-bg-container"
+              class="relative z-10 inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline"
               :class="[
                 isCollapsed ? 'w-11.5 justify-center' : 'w-full gap-3 px-4',
                 isActive(item.path)
@@ -546,7 +547,7 @@ onBeforeUnmount(() => {
           </template>
         </nav>
       </div>
-    </BaseScrollbar>
+    </ZScrollbar>
 
     <div class="mx-4 mb-6 shrink-0" :class="isCollapsed ? 'w-11' : 'self-stretch'">
       <div
@@ -562,54 +563,52 @@ onBeforeUnmount(() => {
         </span>
 
         <div class="flex items-center" :class="isCollapsed ? 'grid gap-1' : 'gap-1'">
-          <BaseIconButton
+          <ZIconButton
             v-if="isCollapsed && hasUpdate"
-            variant="success"
-            size="md"
-            :label="updateButtonLabel"
+            type="success" variant="plain"
+            size="default"
+            :aria-label="updateButtonLabel"
             @click="openSystemUpdate"
           >
             <ArrowUpCircle :size="19" />
-          </BaseIconButton>
+          </ZIconButton>
 
-          <BaseIconButton
-            :size="isCollapsed ? 'md' : 'sm'"
-            label="退出登录"
-            variant="destructive"
+          <ZIconButton
+            :size="isCollapsed ? 'default' : 'small'"
+            aria-label="退出登录"
+            type="danger"
             @click="handleLogout"
           >
             <LogOut :size="isCollapsed ? 19 : 18" />
-          </BaseIconButton>
+          </ZIconButton>
 
-          <BaseIconButton
-            variant="ghost"
-            :size="isCollapsed ? 'md' : 'sm'"
-            :label="themeToggleLabel"
+          <ZIconButton
+            :size="isCollapsed ? 'default' : 'small'"
+            :aria-label="themeToggleLabel"
             @click="toggleTheme($event)"
           >
             <Sun v-if="effectiveTheme === 'dark'" :size="isCollapsed ? 19 : 18" />
             <Moon v-else :size="isCollapsed ? 19 : 18" />
-          </BaseIconButton>
+          </ZIconButton>
 
-          <BaseIconButton variant="ghost" :size="isCollapsed ? 'md' : 'sm'" label="关于" @click="emit('openAbout')">
+          <ZIconButton :size="isCollapsed ? 'default' : 'small'" aria-label="关于" @click="emit('openAbout')">
             <Info :size="isCollapsed ? 19 : 18" />
-          </BaseIconButton>
+          </ZIconButton>
 
-          <BaseIconButton v-if="mobile" variant="ghost" size="sm" label="关闭侧边栏" @click="emit('close')">
+          <ZIconButton v-if="mobile" size="small" aria-label="关闭侧边栏" @click="emit('close')">
             <PanelLeftClose :size="18" />
-          </BaseIconButton>
+          </ZIconButton>
 
-          <BaseIconButton
+          <ZIconButton
             v-else
-            variant="ghost"
-            :size="isCollapsed ? 'md' : 'sm'"
+            :size="isCollapsed ? 'default' : 'small'"
             data-sidebar-toggle
-            :label="isCollapsed ? '展开侧边栏' : '收缩侧边栏'"
+            :aria-label="isCollapsed ? '展开侧边栏' : '收缩侧边栏'"
             @click="emit('toggle')"
           >
             <PanelLeftOpen v-if="isCollapsed" :size="19" />
             <PanelLeftClose v-else :size="18" />
-          </BaseIconButton>
+          </ZIconButton>
         </div>
       </div>
     </div>

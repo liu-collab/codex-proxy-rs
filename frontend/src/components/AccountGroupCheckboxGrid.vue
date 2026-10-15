@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AccountGroupRef } from '@/api'
 
-import { BaseCheckbox } from '@codex-proxy/ui'
+import { ZCheckbox } from '@codex-proxy/ui'
 
 withDefaults(
   defineProps<{
@@ -35,10 +35,9 @@ function updateGroup(groupId: string, selected: boolean) {
     >
       <span class="flex min-w-0 items-center gap-2.5">
         <span class="size-3.5 shrink-0 rounded-sm" :style="{ backgroundColor: group.color }" />
-        <BaseCheckbox
+        <ZCheckbox
           :model-value="selectedGroupIds.includes(group.id)"
           :label="group.name"
-          show-label
           :disabled="disabled || loading"
           @update:model-value="updateGroup(group.id, $event)"
         />

@@ -2,7 +2,7 @@ import type { InstalledPlugin } from '../utils/catalog'
 import type { PluginInstallMode, PluginInstallSelection } from '../utils/model'
 import type { PluginUpdateSelection } from './usePluginUpdateCheck'
 import type { PluginArtifact, PluginArtifactMutationResponse, PluginInstance, PluginRelease, PluginUpdateSourceBinding, QueryPluginReleaseRequest, VerifiedPluginArtifact } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { isEqual } from 'es-toolkit'
 import { onScopeDispose, shallowRef, watch } from 'vue'
 import { acceptPluginArtifact, getPluginUpdateSources, installRemotePlugin, queryPluginRelease, updatePluginSource, uploadPluginArtifact, verifyRemotePlugin, verifyUploadedPlugin } from '@/api'
@@ -57,7 +57,7 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
   function openVersionInstall(plugin: InstalledPlugin) {
     const source = plugin.source
     if (!source || source.source.kind === 'builtin') {
-      toast.warning('此插件没有可用的安装来源')
+      ZNotification.warning({ message: '此插件没有可用的安装来源' })
       return
     }
     openInstall(source.source.kind)
@@ -128,7 +128,7 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
   async function installArtifact(request: PluginInstallSelection) {
     const verified = verifiedArtifact.value
     if (!verified || verified.requestKey !== pluginInstallSelectionKey(request)) {
-      toast.warning('请先校验当前选择的插件包')
+      ZNotification.warning({ message: '请先校验当前选择的插件包' })
       return
     }
     const result = await action.run(async () => {
@@ -149,7 +149,7 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
     if (!result)
       return
     showInstall.value = false
-    toast.success(result.configurationRequired ? '插件已安装，请补充必要配置' : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装')
+    ZNotification.success({ message: result.configurationRequired ? '插件已安装，请补充必要配置' : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装' })
     await onInstalled(result)
   }
 
@@ -178,14 +178,14 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
 
   async function acceptArtifact(artifact: PluginArtifact) {
     if (acceptanceArtifact.value?.metadata.sha256 !== artifact.metadata.sha256) {
-      toast.warning('请选择待安装的插件版本')
+      ZNotification.warning({ message: '请选择待安装的插件版本' })
       return
     }
     const result = await action.run(() => acceptPluginArtifact({ sha256: artifact.metadata.sha256 }, { silent: true }))
     if (!result)
       return
     showInstall.value = false
-    toast.success(result.configurationRequired ? '插件已安装，请补充必要配置' : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装')
+    ZNotification.success({ message: result.configurationRequired ? '插件已安装，请补充必要配置' : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装' })
     await onInstalled(result)
   }
 

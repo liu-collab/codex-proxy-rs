@@ -68,6 +68,8 @@ pub type CodexWebSocketResponseMetadataUpdates = Arc<Mutex<CodexWebSocketRespons
 pub(super) fn reusable_websocket_metadata(
     mut metadata: CodexWebSocketConnectionMetadata,
 ) -> CodexWebSocketConnectionMetadata {
+    // 握手 Cookie 只属于首次响应，复用旧头会重复写入并覆盖后续轮换结果
+    metadata.set_cookie_headers.clear();
     metadata.rate_limit_headers.clear();
     metadata.turn_state = None;
     // 模型报告属于上一轮请求，池中连接不能把它带到下一轮缺失报告的响应

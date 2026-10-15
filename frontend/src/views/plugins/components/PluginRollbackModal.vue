@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PluginInstance, PluginRollbackPlan } from '@/api'
 
-import { BaseButton, BaseForm, BaseFormItem, BaseModal, BaseSelect } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZForm, ZFormItem, ZSelect } from '@codex-proxy/ui'
 
 import { computed, shallowRef, watch } from 'vue'
 import { shortDigest } from '../utils/model'
@@ -34,14 +34,14 @@ watch(() => props.plan, () => {
 </script>
 
 <template>
-  <BaseModal v-model="open" title="回退插件版本" description="恢复对应版本的设置，保持当前启停状态" size="md" :dismissible="!saving">
-    <BaseForm class="grid gap-4">
-      <BaseFormItem label="当前版本">
+  <ZDialog v-model="open" title="回退插件版本" description="恢复对应版本的设置，保持当前启停状态" width="36rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
+    <ZForm class="grid gap-4">
+      <ZFormItem label="当前版本">
         <p class="m-0 break-all text-cp-sm text-cp-text">
           {{ instance?.name }} <span v-if="plan" class="font-mono">· {{ plan.currentVersion }}</span>
         </p>
-      </BaseFormItem>
-      <BaseFormItem v-if="loading || options.length" label="目标版本" required>
+      </ZFormItem>
+      <ZFormItem v-if="loading || options.length" label="目标版本" required>
         <template #label-extra>
           <PluginHelpPopover label="回退说明">
             <p class="m-0">
@@ -52,7 +52,7 @@ watch(() => props.plan, () => {
             </p>
           </PluginHelpPopover>
         </template>
-        <BaseSelect
+        <ZSelect
           v-model="selected"
           class="w-full"
           :options="options"
@@ -60,21 +60,21 @@ watch(() => props.plan, () => {
           :placeholder="loading ? '正在加载旧版' : '请选择回退目标'"
           aria-label="回退目标版本"
         />
-      </BaseFormItem>
+      </ZFormItem>
       <p v-else-if="plan" role="status" class="m-0 text-cp-sm text-cp-text-secondary">
         没有保留恢复设置的旧版，其他版本可在“版本”中切换
       </p>
-    </BaseForm>
+    </ZForm>
     <template #footer>
-      <BaseButton v-if="instance" variant="secondary" :disabled="saving" :loading="loading" @click="$emit('reload', instance)">
+      <ZButton v-if="instance" :disabled="saving" :loading="loading" @click="$emit('reload', instance)">
         重新加载
-      </BaseButton>
-      <BaseButton variant="secondary" :disabled="saving" @click="open = false">
+      </ZButton>
+      <ZButton :disabled="saving" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton variant="primary" :disabled="!canConfirm" :loading="saving" @click="$emit('confirm', selected)">
+      </ZButton>
+      <ZButton type="primary" :disabled="!canConfirm" :loading="saving" @click="$emit('confirm', selected)">
         确认回退
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

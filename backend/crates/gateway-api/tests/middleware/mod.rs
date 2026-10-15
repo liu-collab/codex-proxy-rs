@@ -1,5 +1,6 @@
 //! HTTP 与 WebSocket 中间件测试入口及请求生命周期替身
 
+mod session;
 mod websocket;
 
 use std::{
@@ -34,11 +35,15 @@ use tower::ServiceExt as _;
 
 #[derive(Clone, Copy, Debug)]
 enum Mode {
+    Overloaded,
     Rewrite,
     Upgrade {
         reject: bool,
         idle: bool,
         block_messages: bool,
+    },
+    SessionEnd {
+        kind: Option<&'static str>,
     },
     Service,
     Echo,
@@ -120,7 +125,7 @@ impl MiddlewarePlan for Plan {
         assert!(input.is_null());
         Box::pin(async move {
             let mut result = next.run(input).await?;
-            result["request_interval_ms"] = serde_json::json!(4321);
+            result["refresh_margin_seconds"] = serde_json::json!(4321);
             Ok(result)
         })
     }
@@ -138,6 +143,12 @@ impl MiddlewarePlan for Plan {
         let mode = self.mode;
         Box::pin(async move {
             match mode {
+                Mode::Overloaded => Err(MiddlewareError::Gateway(
+                    gateway_core::error::GatewayError::new(
+                        gateway_core::error::GatewayErrorKind::MiddlewareCapacityUnavailable,
+                        "Request middleware is temporarily busy",
+                    ),
+                )),
                 Mode::Service => unreachable!("service-only plan bypasses HTTP layers"),
                 Mode::Upgrade { reject, idle, .. } => {
                     let upgrade = request
@@ -161,11 +172,41 @@ impl MiddlewarePlan for Plan {
                         session.send(Message { kind: Kind::Text, payload: Bytes::from_static(b"ready") }).await?;
                         let message = receive.await?.unwrap();
                         session.send(message).await?;
-                        session.send(Message { kind: Kind::Close { code: Some(1000) }, payload: Bytes::from_static(b"done") }).await
+                        session.send(Message { kind: Kind::Close { code: Some(1000) }, payload: Bytes::from_static(b"done") }).await.map_err(Into::into)
                     })));
                     if reject {
                         *response.status_mut() = StatusCode::FORBIDDEN;
                     }
+                    Ok(response)
+                }
+                Mode::SessionEnd { kind } => {
+                    let upgrade = request
+                        .extensions_mut()
+                        .remove::<Arc<dyn contract::upgrade::WebSocketUpgrade>>()
+                        .unwrap();
+                    let (parts, _) = request.into_parts();
+                    let (mut response, session) = upgrade.accept(parts, Vec::new()).await?;
+                    response
+                        .extensions_mut()
+                        .insert(contract::upgrade::Upgraded::new(
+                            StatusCode::SWITCHING_PROTOCOLS,
+                            Box::pin(async move {
+                                let _session = session.await.map_err(|_| MiddlewareError::Fault)?;
+                                match kind {
+                                    None => Ok(()),
+                                    Some("cancelled") => {
+                                        Err(contract::upgrade::SessionError::Cancelled)
+                                    }
+                                    Some("reported") => {
+                                        Err(contract::upgrade::SessionError::Reported)
+                                    }
+                                    Some(kind) => Err(contract::upgrade::SessionError::Failed {
+                                        kind,
+                                        plugin_instance_id: Some("plugin-fixture".into()),
+                                    }),
+                                }
+                            }),
+                        ));
                     Ok(response)
                 }
                 Mode::Rewrite => {
@@ -389,7 +430,7 @@ async fn admin_http_does_not_invoke_service_middleware_for_native_business_metho
         .await
         .unwrap();
     let result: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-    assert_ne!(result["data"]["requestIntervalMs"], 4321);
+    assert_ne!(result["data"]["refreshMarginSeconds"], 4321);
     assert_eq!(plan.calls.load(Ordering::SeqCst), 0);
 }
 
@@ -624,4 +665,26 @@ async fn plugin_http_dispatch_uses_host_identity_without_client_credentials() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn http_middleware_overload_is_an_explicit_503_before_native_routing() {
+    let (router, plan) = router(Mode::Overloaded, None).await;
+    for path in [
+        "/healthz",
+        "/assets/index.js",
+        "/api/settings",
+        "/v1/responses",
+    ] {
+        let response = router
+            .clone()
+            .oneshot(Request::builder().uri(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["error"]["code"], "middleware_capacity_unavailable");
+    }
+    assert_eq!(plan.calls.load(Ordering::Acquire), 4);
 }

@@ -1,5 +1,5 @@
 import type { PricingCatalog, PricingChange, PricingSyncPreview } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { getPricing, previewPricingSync, syncPricing, updatePricing } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
@@ -48,7 +48,7 @@ export function usePricing() {
   async function save(models: string[], change: PricingChange): Promise<boolean> {
     return await writeAction.run(async () => {
       await updatePricing({ provider: provider.value, models, change })
-      toast.success(change.action === 'delete' ? '模型价目已删除' : change.action === 'reset' ? '已清除人工覆盖' : '模型定价已保存')
+      ZNotification.success({ message: change.action === 'delete' ? '模型价目已删除' : change.action === 'reset' ? '已清除人工覆盖' : '模型定价已保存' })
       selected.value = []
       await load()
       return true
@@ -68,7 +68,7 @@ export function usePricing() {
     await writeAction.run(async () => {
       await syncPricing({ preview: approved, models })
       syncOpen.value = false
-      toast.success('来源价目已同步，人工覆盖保持不变')
+      ZNotification.success({ message: '来源价目已同步，人工覆盖保持不变' })
       await load()
     })
   }

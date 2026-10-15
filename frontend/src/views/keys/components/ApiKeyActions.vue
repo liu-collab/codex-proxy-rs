@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ApiKey } from '@/api'
 
-import { BaseIconButton, BaseMenuItem, BasePopover } from '@codex-proxy/ui'
+import { ZIconButton, ZMenuItem, ZPopover } from '@codex-proxy/ui'
 
 import { MoreHorizontal, Pencil, Power, RotateCcw, Terminal, Trash2, Upload } from '@lucide/vue'
 
@@ -24,59 +24,57 @@ const emit = defineEmits<{
 
 <template>
   <div class="flex items-center justify-start gap-0.5">
-    <BaseIconButton
-      variant="ghost"
-      size="sm"
-      label="编辑密钥"
+    <ZIconButton
+      size="small"
+      aria-label="编辑密钥"
       @click.stop="emit('edit', apiKey)"
     >
       <Pencil class="size-3.5 text-cp-link" />
-    </BaseIconButton>
-    <BaseIconButton
-      variant="ghost"
-      size="sm"
-      label="使用密钥"
+    </ZIconButton>
+    <ZIconButton
+      size="small"
+      aria-label="使用密钥"
       :loading="revealing"
       :disabled="revealing"
       @click.stop="emit('use', apiKey)"
     >
       <Terminal class="size-3.5 text-cp-primary-text" />
-    </BaseIconButton>
+    </ZIconButton>
 
-    <BasePopover placement="bottom-end">
-      <template #trigger="{ open }">
-        <BaseIconButton variant="ghost" size="sm" label="更多操作" :pressed="open">
+    <ZPopover placement="bottom-end">
+      <template #reference="{ open }">
+        <ZIconButton size="small" aria-label="更多操作" :pressed="open">
           <MoreHorizontal class="size-4" />
-        </BaseIconButton>
+        </ZIconButton>
       </template>
       <template #default="{ close }">
         <div class="w-44 p-1.5">
-          <BaseMenuItem @click.stop="(close(), emit('resetBudget', apiKey))">
+          <ZMenuItem @click.stop="(close(), emit('resetBudget', apiKey))">
             <template #icon>
               <RotateCcw class="size-3.5 text-cp-text-quaternary" />
             </template>
             重置已用额度
-          </BaseMenuItem>
-          <BaseMenuItem :disabled="revealing" @click.stop="(close(), emit('importCcs', apiKey))">
+          </ZMenuItem>
+          <ZMenuItem :disabled="revealing" @click.stop="(close(), emit('importCcs', apiKey))">
             <template #icon>
               <Upload class="size-3.5 text-cp-text-quaternary" />
             </template>
             导入 CCSwitch
-          </BaseMenuItem>
-          <BaseMenuItem :loading="updatingStatus" @click.stop="(close(), emit('toggle', apiKey))">
+          </ZMenuItem>
+          <ZMenuItem :loading="updatingStatus" @click.stop="(close(), emit('toggle', apiKey))">
             <template #icon>
               <Power class="size-3.5" :class="apiKey.enabled ? 'text-cp-warning' : 'text-cp-success'" />
             </template>
             {{ apiKey.enabled ? '禁用密钥' : '启用密钥' }}
-          </BaseMenuItem>
-          <BaseMenuItem tone="destructive" :disabled="deleting" @click.stop="(close(), emit('delete', apiKey))">
+          </ZMenuItem>
+          <ZMenuItem type="danger" :disabled="deleting" @click.stop="(close(), emit('delete', apiKey))">
             <template #icon>
               <Trash2 class="size-3.5" />
             </template>
             删除密钥
-          </BaseMenuItem>
+          </ZMenuItem>
         </div>
       </template>
-    </BasePopover>
+    </ZPopover>
   </div>
 </template>

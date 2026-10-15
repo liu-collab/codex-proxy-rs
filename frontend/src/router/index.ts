@@ -1,5 +1,5 @@
 import type { AuthSession } from '@/api'
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHistory, START_LOCATION } from 'vue-router'
 
 import { useAuthStore } from '@/stores/modules/auth'
 import { routes } from './routes'
@@ -16,7 +16,7 @@ function resolveRoleEntry(role: AuthSession['role']) {
   return { path: entry.path }
 }
 
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, from) => {
   const authStore = useAuthStore()
 
   // 登录页不依赖会话恢复；只使用当前已知身份决定是否跳转。
@@ -41,8 +41,8 @@ router.beforeEach(async (to) => {
       await authStore.checkAuth()
     }
     catch {
-      // 短暂故障已由请求层重试；阻止导航并保留已有页面，等待恢复连接
-      return false
+      // 首次进入时没有页面可保留，转到登录页；已有页面则保留，且不清除会话。
+      return from === START_LOCATION ? login : false
     }
   }
 

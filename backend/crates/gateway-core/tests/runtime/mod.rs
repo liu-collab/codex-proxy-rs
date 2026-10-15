@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 mod publications;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures::channel::{mpsc, oneshot};
@@ -325,25 +325,6 @@ fn publisher_should_suspend_but_still_notify_after_committed_refresh_failure() {
 }
 
 #[test]
-fn snapshot_ports_and_control_should_remain_object_safe() {
-    fn accept_store(_: &dyn SnapshotStorePort) {}
-    fn accept_subscriptions(_: &dyn SnapshotSubscriptionPort) {}
-    fn accept_control(_: &dyn SnapshotControl) {}
-
-    let store = Arc::new(TestSnapshotStore::new(Ok(facts(1, 1))));
-    let subscriptions = Arc::new(TestSnapshotSubscriptions::default());
-    let publisher = RuntimeSnapshotPublisher::new(
-        Arc::new(compiler(store.clone())),
-        RuntimeSnapshotHandle::new(empty_snapshot(1)),
-        subscriptions.clone(),
-    );
-
-    accept_store(store.as_ref());
-    accept_subscriptions(subscriptions.as_ref());
-    accept_control(&publisher);
-}
-
-#[test]
 fn publisher_should_contribute_reconciliation_and_subscription_workers() {
     let store = Arc::new(TestSnapshotStore::new(Ok(facts(1, 1))));
     let publisher = RuntimeSnapshotPublisher::new(
@@ -613,6 +594,85 @@ fn catalog_only_reconciliation_should_keep_snapshot_on_failure_and_retry_generat
 }
 
 #[test]
+fn catalog_failure_should_preserve_model_facts_without_restoring_revoked_accounts() {
+    block_on(async {
+        let catalog = Arc::new(TestCatalog::default());
+        let provider = ProviderKind::new("audit").unwrap();
+        let model = gateway_core::routing::PublicModelId::new("audit-model").unwrap();
+        catalog.models.lock().unwrap().push(
+            ProviderModelCapabilities::new(
+                UpstreamModelId::new("audit-model").unwrap(),
+                ModelCapabilities::new(
+                    std::collections::BTreeSet::from([
+                        gateway_core::operation::OperationKind::Generate,
+                    ]),
+                    Some(16_000),
+                ),
+            )
+            .with_presentation(gateway_core::routing::ModelPresentation::new(
+                Some("Audit model".to_owned()),
+                None,
+            ))
+            .with_catalog_accounts(std::collections::BTreeSet::from([ProviderAccountId::new(
+                "acct_audit_removed",
+            )
+            .unwrap()])),
+        );
+        let store = Arc::new(TestSnapshotStore::new(Ok(scoped_facts(10, true))));
+        let handle = RuntimeSnapshotHandle::default();
+        let publisher = RuntimeSnapshotPublisher::new(
+            Arc::new(catalog_compiler(store.clone(), catalog.clone())),
+            handle.clone(),
+            Arc::new(TestSnapshotSubscriptions::default()),
+        );
+        publisher.refresh().await.unwrap();
+        let initial = handle.acquire().unwrap();
+        let initial_profiles = initial.public_model_profiles_for_provider(&provider);
+
+        catalog.unavailable.store(true, Ordering::SeqCst);
+        catalog.generation.store(1, Ordering::SeqCst);
+        *store.facts.lock().unwrap() = Ok(scoped_facts(11, false));
+        *store.current_revision.lock().unwrap() = Ok(revision(11));
+        publisher.refresh().await.unwrap();
+
+        let retained = handle.acquire().unwrap();
+        assert_eq!(retained.revision(), revision(11));
+        assert!(!removed_account_allowed(&retained));
+        assert_eq!(
+            retained.public_model_profiles_for_provider(&provider),
+            initial_profiles
+        );
+        assert!(retained.contains_public_model_for_provider(&model, &provider));
+        assert!(!retained.contains_public_model_for_provider(
+            &gateway_core::routing::PublicModelId::new("unlisted-model").unwrap(),
+            &provider,
+        ));
+        assert!(retained.public_models_for_scope(
+            retained.client_policies().next().unwrap().account_scope(),
+        ).is_empty());
+        assert!(removed_account_allowed(&initial));
+        assert_eq!(
+            retained.provider_catalog_generations(),
+            &catalog.catalog_generations()
+        );
+
+        // 上游恢复并明确撤回模型后，旧目录不能继续作为已知归属
+        catalog.unavailable.store(false, Ordering::SeqCst);
+        catalog.models.lock().unwrap().clear();
+        catalog.generation.store(2, Ordering::SeqCst);
+        let (task, context) = reconciliation_task(&publisher);
+        task.run_cycle(context).await.unwrap();
+        let refreshed = handle.acquire().unwrap();
+        assert!(refreshed.public_models_for_provider(&provider).is_empty());
+        assert!(!refreshed.contains_public_model_for_provider(&model, &provider));
+        assert_eq!(
+            refreshed.provider_catalog_generations(),
+            &catalog.catalog_generations()
+        );
+    });
+}
+
+#[test]
 fn dropping_inflight_refresh_should_release_publication_for_next_refresh() {
     block_on(async {
         let (release, gate) = oneshot::channel();
@@ -688,6 +748,7 @@ fn reconciliation_task(
 #[derive(Default)]
 struct TestCatalog {
     generation: AtomicU64,
+    unavailable: AtomicBool,
     queries: AtomicUsize,
     next_query: Mutex<Option<oneshot::Receiver<()>>>,
     models: Mutex<Vec<ProviderModelCapabilities>>,
@@ -710,6 +771,9 @@ impl ProviderCatalogPort for TestCatalog {
             let gate = self.next_query.lock().expect("catalog gate lock").take();
             if let Some(gate) = gate {
                 gate.await.expect("release catalog query");
+            }
+            if self.unavailable.load(Ordering::SeqCst) {
+                return Err(ProviderCatalogUnavailable);
             }
             Ok(self.models.lock().expect("models lock").clone())
         })
@@ -740,7 +804,7 @@ fn scoped_facts(value: u64, allow_removed: bool) -> SnapshotFacts {
     SnapshotFacts::new(
         revision(value),
         revision(value),
-        SettingsValues::new(3, 0, "smart", BTreeMap::new(), None, None),
+        SettingsValues::new(3, "smart", BTreeMap::new(), None, None),
         vec![SnapshotClientPolicyFacts::new(
             ClientApiKeyId::new("key_audit_synthetic").expect("key ID"),
             PlaintextClientApiKey::new("sk_audit_synthetic_not_a_real_key").expect("synthetic key"),
@@ -775,7 +839,6 @@ fn facts(config_revision: u64, observed_current_revision: u64) -> SnapshotFacts 
         revision(observed_current_revision),
         SettingsValues::new(
             3,
-            50,
             "smart",
             BTreeMap::from([("public-model".to_owned(), "upstream-model".to_owned())]),
             None,
@@ -800,7 +863,7 @@ fn compiler(store: Arc<dyn SnapshotStorePort>) -> RuntimeSnapshotCompiler {
 fn empty_snapshot(value: u64) -> RuntimeSnapshot {
     RuntimeSnapshot::new(
         revision(value),
-        gateway_core::settings::SettingsValues::new(1, 0, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(1, "smart", Default::default(), None, None),
         Vec::new(),
         Vec::new(),
         Vec::new(),

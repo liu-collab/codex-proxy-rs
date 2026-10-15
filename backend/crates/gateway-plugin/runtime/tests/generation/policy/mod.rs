@@ -553,7 +553,6 @@ fn selection_context() -> AccountSelectionContext {
         policy: AccountSelectionPolicy::new(
             RotationStrategy::RoundRobin,
             NonZeroU32::new(4).unwrap(),
-            Duration::ZERO,
         ),
         now: SystemTime::now(),
         excluded_accounts: BTreeSet::new(),
@@ -681,6 +680,16 @@ impl Downstream {
 }
 
 fn middleware_context(transport: ClientTransport) -> MiddlewareContext {
+    middleware_context_with_deadline(
+        transport,
+        (SystemTime::now() + Duration::from_secs(5)).into(),
+    )
+}
+
+fn middleware_context_with_deadline(
+    transport: ClientTransport,
+    deadline: gateway_core::lifecycle::Deadline,
+) -> MiddlewareContext {
     MiddlewareContext::new(
         MiddlewareTarget {
             request_id: ModelRequestId::new("req_middleware").unwrap(),
@@ -697,7 +706,7 @@ fn middleware_context(transport: ClientTransport) -> MiddlewareContext {
             client_key_id: ClientApiKeyId::new("key-middleware").unwrap(),
             account_group_ids: Arc::<[AccountGroupId]>::from([]),
             cancellation: CancellationToken::new(),
-            deadline: (SystemTime::now() + Duration::from_secs(5)).into(),
+            deadline,
             extension_scope: ExtensionCallScope::default(),
             execution_effects: None,
         },
@@ -1172,7 +1181,7 @@ async fn real_request_plugins_rewrite_settings_in_onion_order() {
         )])
     };
     let baseline = ExecutionSettings {
-        runtime: SettingsValues::new(3, 50, "smart", BTreeMap::new(), None, None)
+        runtime: SettingsValues::new(3, "smart", BTreeMap::new(), None, None)
             .with_request_profiles(profiles("key-default")),
         fast_mode: FastMode::Disabled,
         client_limits: RateLimits {
@@ -1184,7 +1193,7 @@ async fn real_request_plugins_rewrite_settings_in_onion_order() {
     let baseline_json = serde_json::to_value(&baseline).unwrap();
     let host_snapshot = gateway_core::routing::RuntimeSnapshot::new(
         ConfigRevision::new(1).unwrap(),
-        gateway_core::settings::SettingsValues::new(1, 0, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(1, "smart", Default::default(), None, None),
         vec![],
         vec![],
         vec![],
@@ -1220,7 +1229,7 @@ async fn real_request_plugins_rewrite_settings_in_onion_order() {
             );
     let mut first = baseline_json.clone();
     first["fast_mode"] = serde_json::json!("default");
-    first["runtime"]["request_interval_ms"] = serde_json::json!(0);
+    first["runtime"]["max_account_rotations"] = serde_json::json!(0);
     first["runtime"]["model_mappings"] = serde_json::json!({"alias":"model-one"});
     let mut last = first.clone();
     last["runtime"]["model_mappings"] = serde_json::json!({"alias":"model-two"});

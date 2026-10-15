@@ -19,6 +19,9 @@ use gateway_core::{
     error::GatewayError,
 };
 
+pub(crate) const SSE_KEEPALIVE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+pub(crate) const SSE_KEEPALIVE_FRAME: Bytes = Bytes::from_static(b": keep-alive\n\n");
+
 /// 只读目录/用量与协议错误共用的单帧响应；没有 Provider attempt 或计量副作用
 pub(crate) async fn buffered_response(
     protocol: &str,
@@ -161,8 +164,8 @@ pub(crate) async fn into_http_response(
         let chunk = tokio::select! {
             biased;
             chunk = stream.next() => chunk?,
-            () = tokio::time::sleep(std::time::Duration::from_secs(15)), if keep_alive => {
-                Ok(Bytes::from_static(b": keep-alive\n\n"))
+            () = tokio::time::sleep(SSE_KEEPALIVE_INTERVAL), if keep_alive => {
+                Ok(SSE_KEEPALIVE_FRAME)
             }
         };
         Some((chunk, stream))

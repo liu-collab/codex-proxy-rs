@@ -1115,12 +1115,12 @@ impl SettingsStore for StaticSettingsStore {
             rotation_strategy: RotationStrategy::Smart,
             updated_at: Utc::now(),
             values: gateway_admin::model::settings::RuntimeSettingsValues {
+                codex_privacy_policy: Default::default(),
                 request_location_enabled: false,
                 request_location: Default::default(),
                 refresh_margin_seconds: 300,
                 refresh_concurrency: 2,
                 max_concurrent_per_account: 1,
-                request_interval_ms: 0,
                 max_waiting_per_key: 0,
                 max_waiting_per_account: 0,
                 concurrency_wait_timeout_seconds: 30,
@@ -2399,6 +2399,93 @@ async fn quota_forecast_only_queries_the_two_selected_source_windows() {
 }
 
 #[tokio::test]
+async fn quota_forecast_same_window_reversal_keeps_recorded_usage_in_the_report() {
+    use gateway_admin::model::quota_forecast_sampling::QuotaForecastHistoryPoint;
+
+    for (percents, tokens, expected_tokens, expected_usd) in [
+        ([32.0, 30.0, 35.0], [100, 120, 140], 400, 0.4),
+        (
+            [100.0, 99.0, 99.5],
+            [10_000, 10_010, 10_020],
+            10_070,
+            10.02 / 0.995,
+        ),
+    ] {
+        let now = Utc::now();
+        let observed = now - TimeDelta::minutes(1);
+        let reset = now + TimeDelta::days(1);
+        let provider = FakeProviderAdmin::new("openai", events());
+        provider.set_quota(ProviderQuota {
+            plan_type: Some("pro".to_owned()),
+            observed_at: Some(observed),
+            windows: vec![ProviderQuotaWindow {
+                key: "week".to_owned(),
+                group: "shortTerm".to_owned(),
+                label: "周额度".to_owned(),
+                limit_id: None,
+                limit_name: None,
+                role: None,
+                local_usage_attribution: QuotaLocalUsageAttribution::AccountWide,
+                window_seconds: Some(604_800),
+                used_percent: Some(percents[2]),
+                reset_at: Some(reset),
+                limit_reached: false,
+                local_usage: None,
+                provider_data: None,
+            }],
+            ..empty_quota()
+        });
+        let mut account = account_record("openai");
+        account.created_at = now - TimeDelta::days(7);
+        let store = FakeAccountStore::with_account(account, events());
+        let usage = |requests, tokens| QuotaForecastUsage {
+            request_count: requests,
+            tokens,
+            input_tokens: tokens,
+            known_cost_count: requests,
+            usd: tokens as f64 / 1_000.0,
+            ..Default::default()
+        };
+        *store.quota_forecast_history.lock().unwrap() = QuotaForecastHistory {
+            points: [(3, percents[0], tokens[0]), (2, percents[1], tokens[1])]
+                .into_iter()
+                .enumerate()
+                .map(
+                    |(index, (minutes, percent, tokens))| QuotaForecastHistoryPoint {
+                        started_at: now - TimeDelta::minutes(5),
+                        completed_at: now - TimeDelta::minutes(minutes),
+                        usage: usage(index as u64 + 1, tokens),
+                        provider_observation: ProviderDocument::new(OpaqueProviderData::new(
+                            serde_json::json!({
+                                "percent": percent, "reset": reset.to_rfc3339(), "plan": "pro",
+                            })
+                            .as_object()
+                            .unwrap()
+                            .clone(),
+                        )),
+                    },
+                )
+                .collect(),
+            usage: usage(3, tokens[2]),
+            pending_request_count: 0,
+        };
+        let services = accounts_service(provider, store).await;
+        let result = services
+            .accounts()
+            .quota_forecast(&ProviderAccountId::new("acct_test").unwrap())
+            .await
+            .unwrap();
+        let forecast = &result.forecasts[0];
+        let source = forecast.source.as_ref().unwrap();
+        assert_eq!(source.tokens, Some(tokens[2]));
+        assert!((source.usd.unwrap() - tokens[2] as f64 / 1_000.0).abs() < 1e-10);
+        assert_eq!(forecast.estimated_tokens, Some(expected_tokens));
+        assert!((forecast.estimated_usd.unwrap() - expected_usd).abs() < 1e-10);
+        assert!(forecast.unavailable_reason.is_none());
+    }
+}
+
+#[tokio::test]
 async fn quota_forecast_mid_cycle_sampling_accepts_small_reset_jitter_but_not_a_changed_bucket() {
     use gateway_admin::model::quota_forecast_sampling::QuotaForecastHistoryPoint;
     let now = Utc::now();
@@ -3031,9 +3118,9 @@ fn quota_local_usage(account_id: &str, total_tokens: u64) -> AccountUsage {
         success_count: 1,
         input_tokens: Some(total_tokens),
         output_tokens: Some(0),
-        cached_tokens: Some(0),
-        cache_write_tokens: Some(0),
-        reasoning_tokens: Some(0),
+        cached_input_tokens: Some(0),
+        cache_write_input_tokens: Some(0),
+        reasoning_output_tokens: Some(0),
         image_input_tokens: Some(0),
         image_output_tokens: Some(0),
         image_request_count: 0,
@@ -3050,6 +3137,7 @@ fn quota_local_usage(account_id: &str, total_tokens: u64) -> AccountUsage {
 pub(super) fn account_record(kind: &str) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        outbound_proxy_enabled: true,
         notes: None,
         model_access: Default::default(),
         outbound_proxy: None,

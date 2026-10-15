@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 import type { Account, AccountImportTask } from '@/api'
 import type { RequestOptions } from '@/api/request'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { computed, ref, shallowReactive, watch } from 'vue'
 import {
   batchUpdateAccounts,
@@ -23,7 +23,7 @@ import { useAccountOnboarding } from './useAccountOnboarding'
 export function useAccountMutations(options: {
   accounts: Ref<Account[]>
   selectedIds: Ref<Set<string>>
-  onImportTaskCreated: (task: AccountImportTask) => void
+  onImportTaskCreated: (task: AccountImportTask, reveal?: boolean) => void
   reload: () => Promise<unknown>
   replaceAccount: (account: Account) => Promise<boolean>
 }) {
@@ -104,7 +104,7 @@ export function useAccountMutations(options: {
         options.selectedIds.value = remaining
         showSingleDeleteModal.value = false
         await loadAccounts()
-        toast.success('账号已删除')
+        ZNotification.success({ message: '账号已删除' })
       },
     )
   }
@@ -128,17 +128,15 @@ export function useAccountMutations(options: {
         }
         showDeleteModal.value = false
         await loadAccounts()
-        toast.success(`已删除 ${deletedCount} 个账号`)
+        ZNotification.success({ message: `已删除 ${deletedCount} 个账号` })
       },
       {
         errorText: false,
         onError: (error) => {
           void loadAccounts().catch(() => undefined)
-          toast.error(
-            deletedCount > 0
-              ? `已删除 ${deletedCount} 个账号，其余未删除：${errorMessage(error, '操作失败')}`
-              : errorMessage(error, '批量删除失败'),
-          )
+          ZNotification.error({ message: deletedCount > 0
+            ? `已删除 ${deletedCount} 个账号，其余未删除：${errorMessage(error, '操作失败')}`
+            : errorMessage(error, '批量删除失败') })
         },
       },
     )
@@ -149,11 +147,11 @@ export function useAccountMutations(options: {
       return
     const selected = [...options.selectedIds.value]
     if (selected.length === 0) {
-      toast.warning('请选择要导出的账号')
+      ZNotification.warning({ message: '请选择要导出的账号' })
       return
     }
     if (exportDisabledReason.value) {
-      toast.warning(exportDisabledReason.value)
+      ZNotification.warning({ message: exportDisabledReason.value })
       return
     }
 
@@ -165,7 +163,7 @@ export function useAccountMutations(options: {
         })
         const fileName = payload.fileName
         await downloadJson(payload, fileName)
-        toast.success(`已导出 ${selected.length} 个账号`)
+        ZNotification.success({ message: `已导出 ${selected.length} 个账号` })
       },
       { errorText: '导出失败' },
     )
@@ -178,7 +176,7 @@ export function useAccountMutations(options: {
         const plan = account.planTypeDisplay.trim().replace(/[^\p{L}\p{N}_-]/gu, '_') || 'unknown-plan'
         const name = account.name.trim().replace(/[^\p{L}\p{N}_-]/gu, '_') || 'account'
         await downloadJson(result.catalog, `cpr-model-catalog-${plan}-${name}.json`)
-        toast.success(`已下载模型目录，共 ${result.modelCount} 个模型`)
+        ZNotification.success({ message: `已下载模型目录，共 ${result.modelCount} 个模型` })
       }
       catch {}
     })
@@ -194,14 +192,14 @@ export function useAccountMutations(options: {
         )
         await loadAccounts()
         if (result.result === 'skipped') {
-          toast.warning(result.error || 'Token 正在刷新中')
+          ZNotification.warning({ message: result.error || 'Token 正在刷新中' })
           return
         }
         if (result.result === 'failed') {
-          toast.error(result.error || '刷新失败')
+          ZNotification.error({ message: result.error || '刷新失败' })
           return
         }
-        toast.success('Token 已刷新')
+        ZNotification.success({ message: 'Token 已刷新' })
       }
       catch {}
     })
@@ -212,7 +210,7 @@ export function useAccountMutations(options: {
       try {
         await batchUpdateAccounts({ accountIds: [account.id], enabled: !account.enabled })
         await loadAccounts()
-        toast.success(account.enabled ? '调度已停用' : '调度已启用')
+        ZNotification.success({ message: account.enabled ? '调度已停用' : '调度已启用' })
       }
       catch {}
     })
@@ -228,7 +226,7 @@ export function useAccountMutations(options: {
           selectedIds.delete(accountId)
           options.selectedIds.value = selectedIds
         }
-        toast.success('额度已刷新')
+        ZNotification.success({ message: '额度已刷新' })
       }
       catch {}
     })
@@ -242,10 +240,7 @@ export function useAccountMutations(options: {
       await options.replaceAccount(result.account)
     }
     catch (error: unknown) {
-      toast.warning(
-        `额度已重置，但最新额度加载失败：${errorMessage(error, '请手动刷新额度')}`,
-        { duration: 5000 },
-      )
+      ZNotification.warning({ message: `额度已重置，但最新额度加载失败：${errorMessage(error, '请手动刷新额度')}`, ...({ duration: 5000 }) })
     }
   }
 
@@ -259,7 +254,7 @@ export function useAccountMutations(options: {
           selectedIds.delete(accountId)
           options.selectedIds.value = selectedIds
         }
-        toast.success('账号状态已恢复')
+        ZNotification.success({ message: '账号状态已恢复' })
       }
       catch {}
     })

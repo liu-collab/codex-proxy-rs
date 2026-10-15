@@ -24,6 +24,7 @@ const MAXIMUM_RESPONSE_BYTES: usize = 512 * 1024;
 const DYNAMIC_CACHE_SECONDS: i64 = 300;
 const FALLBACK_CACHE_SECONDS: u64 = 60;
 const MINIMUM_REMAINING_LINK_SECONDS: i64 = 600;
+const OFFICIAL_METADATA_TIMEOUT: Duration = Duration::from_secs(3);
 
 const OFFICIAL_X64_URL: &str = "https://persistent.oaistatic.com/codex-app-prod/ChatGPT-x64.msix";
 const OFFICIAL_ARM64_URL: &str =
@@ -53,7 +54,7 @@ impl RgAdguardClientDistribution {
     pub(crate) fn new() -> Self {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(12))
+            .timeout(Duration::from_secs(30))
             .redirect(Policy::none())
             .build()
             .inspect_err(|_| {
@@ -69,10 +70,11 @@ impl RgAdguardClientDistribution {
     }
 
     async fn resolve_uncached(&self) -> (CodexDesktopWindowsDownloads, Duration) {
-        let now = Utc::now();
-        match self.fetch_store_packages(now).await {
+        match self.fetch_store_packages().await {
             Ok(packages) => {
-                let (packages, warning) = complete_with_official_fallback(packages);
+                let (mut packages, warning) = complete_with_official_fallback(packages);
+                self.fill_official_package_sizes(&mut packages).await;
+                let now = Utc::now();
                 let valid_seconds = packages
                     .iter()
                     .filter_map(|package| package.expires_at)
@@ -97,17 +99,33 @@ impl RgAdguardClientDistribution {
                     error_kind = ?error_kind,
                     "RG-Adguard package resolution failed; using official downloads"
                 );
-                (
-                    official_fallback(now),
-                    Duration::from_secs(FALLBACK_CACHE_SECONDS),
-                )
+                let mut downloads = official_fallback(Utc::now());
+                self.fill_official_package_sizes(&mut downloads.packages)
+                    .await;
+                downloads.resolved_at = Utc::now();
+                (downloads, Duration::from_secs(FALLBACK_CACHE_SECONDS))
             }
         }
     }
 
+    async fn fill_official_package_sizes(&self, packages: &mut [ClientDownloadPackage]) {
+        let Some(client) = self.client.as_ref() else {
+            return;
+        };
+        // 只补充回退包的展示大小，超时或缺失长度不能撤销官方稳定下载地址
+        futures::future::join_all(
+            packages
+                .iter_mut()
+                .filter(|package| package.source == ClientDownloadSource::OfficialOpenAi)
+                .map(|package| async {
+                    package.size_bytes = official_package_size(client, &package.download_url).await;
+                }),
+        )
+        .await;
+    }
+
     async fn fetch_store_packages(
         &self,
-        now: DateTime<Utc>,
     ) -> Result<Vec<ClientDownloadPackage>, ClientDistributionResolutionErrorKind> {
         let client = self
             .client
@@ -145,7 +163,8 @@ impl RgAdguardClientDistribution {
         }
         let html = std::str::from_utf8(&bytes)
             .map_err(|_| ClientDistributionResolutionErrorKind::InvalidResponse)?;
-        parse_store_packages(html, now)
+        // 上游解析可能耗时几十秒，按收到结果时的时间检查剩余有效期
+        parse_store_packages(html, Utc::now())
     }
 }
 
@@ -318,11 +337,12 @@ fn parse_size_bytes(value: &str) -> Option<u64> {
     if parts.next().is_some() {
         return None;
     }
+    // RG 页面以 KB/MB/GB 标记二进制大小，换算后才能与 CDN Content-Length 对齐
     let multiplier = match unit {
         "B" => 1_u128,
-        "KB" => 1_000,
-        "MB" => 1_000_000,
-        "GB" => 1_000_000_000,
+        "KB" => 1_024,
+        "MB" => 1_048_576,
+        "GB" => 1_073_741_824,
         _ => return None,
     };
     let (whole, fraction) = amount.split_once('.').unwrap_or((amount.as_str(), ""));
@@ -351,7 +371,7 @@ fn official_fallback(now: DateTime<Utc>) -> CodexDesktopWindowsDownloads {
         resolved_at: now,
         cached: false,
         warning: Some(
-            "Microsoft Store 离线直链暂不可用，已切换为 OpenAI 官方稳定安装包。".to_owned(),
+            "Microsoft Store 离线直链暂不可用，已切换为 OpenAI 官方稳定安装包".to_owned(),
         ),
         packages,
     }
@@ -375,7 +395,7 @@ pub fn complete_with_official_fallback(
     }
     let warning = (!missing.is_empty()).then(|| {
         format!(
-            "{} 的 Microsoft Store 临时直链不可用，已切换为 OpenAI 官方稳定安装包。",
+            "{} 的 Microsoft Store 临时直链不可用，已切换为 OpenAI 官方稳定安装包",
             missing.join("、")
         )
     });
@@ -396,4 +416,26 @@ fn official_package(architecture: ClientArchitecture) -> ClientDownloadPackage {
         download_url: download_url.to_owned(),
         expires_at: None,
     }
+}
+
+/// 读取官方安装包的响应头大小，不下载包字节
+pub async fn official_package_size(client: &Client, download_url: &str) -> Option<u64> {
+    let response = client
+        .head(download_url)
+        .timeout(OFFICIAL_METADATA_TIMEOUT)
+        .send()
+        .await
+        .ok()?;
+    if !response.status().is_success() {
+        return None;
+    }
+    // HEAD 没有正文，不能用正文长度推断实际安装包大小
+    response
+        .headers()
+        .get(reqwest::header::CONTENT_LENGTH)?
+        .to_str()
+        .ok()?
+        .parse::<u64>()
+        .ok()
+        .filter(|size| *size > 0)
 }

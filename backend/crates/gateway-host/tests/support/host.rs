@@ -56,7 +56,7 @@ pub fn configuration(directory: &Path) -> HostConfig {
             },
             oauth_recovery: false,
             request_dump: false,
-            request_dump_retention_days: 1,
+            request_dump_retention_days: 1.0,
         },
         system_update: Default::default(),
         worker_shutdown_timeout_seconds: 1,

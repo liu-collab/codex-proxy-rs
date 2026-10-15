@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { TokenPrices } from '@/api'
-import { BaseFormItem, BaseInput } from '@codex-proxy/ui'
+import { ZFormItem, ZInput } from '@codex-proxy/ui'
 import { effectivePrice, priceFields, validPrice } from './model'
 
 const props = defineProps<{
@@ -22,8 +22,8 @@ function preview(field: keyof TokenPrices) {
 <template>
   <div class="grid grid-cols-2 gap-x-4 gap-y-5 sm:gap-x-6">
     <div v-for="field in priceFields" :key="field.key" class="min-w-0">
-      <BaseFormItem v-if="custom" :label="field.label">
-        <BaseInput
+      <ZFormItem v-if="custom" :label="field.label">
+        <ZInput
           :model-value="custom[field.key]"
           :aria-label="`${field.label}单价`"
           class="font-mono"
@@ -32,7 +32,7 @@ function preview(field: keyof TokenPrices) {
           :disabled="disabled"
           @update:model-value="$emit('change', field.key, $event)"
         />
-      </BaseFormItem>
+      </ZFormItem>
       <div v-else>
         <div class="mb-2 text-cp leading-none font-medium text-cp-text-secondary">
           {{ field.label }}

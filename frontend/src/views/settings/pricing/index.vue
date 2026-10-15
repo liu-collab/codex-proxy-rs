@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PricingRow } from './model'
 import type { ModelPricing, PricingChange } from '@/api'
-import { BaseButton, BaseConfirmModal, BaseEmpty, BaseTablePagination } from '@codex-proxy/ui'
+import { ZButton, ZConfirmDialog, ZEmpty, ZPagination } from '@codex-proxy/ui'
 import { CircleAlert } from '@lucide/vue'
 import { computed, ref, shallowRef } from 'vue'
 import PricingBatchModal from './PricingBatchModal.vue'
@@ -68,20 +68,20 @@ function requestDelete(row: PricingRow) {
     />
     <PricingTable class="min-h-0 flex-1" :rows="error ? [] : visible" :selected="selected" :loading="loading" :disabled="disabled" @toggle="toggle" @toggle-page="togglePage" @edit="edit" @delete="requestDelete">
       <template v-if="error" #empty>
-        <BaseEmpty title="价目加载失败" :description="error" :icon="CircleAlert" surface="none" class="w-full max-w-80" role="alert">
+        <ZEmpty title="价目加载失败" :description="error" :icon="CircleAlert" surface="none" class="w-full max-w-80" role="alert">
           <template #action>
-            <BaseButton :loading="loading" @click="load">
+            <ZButton :loading="loading" @click="load">
               重试
-            </BaseButton>
+            </ZButton>
           </template>
-        </BaseEmpty>
+        </ZEmpty>
       </template>
     </PricingTable>
-    <BaseTablePagination :pagination="pagination" :loading="loading" @page-change="page = $event" @page-size-change="pageSize = $event" />
+    <ZPagination v-bind="pagination" :disabled="loading" @current-change="page = $event" @size-change="pageSize = $event" />
     <PricingEditor v-model="editorOpen" :row="editing" :provider="provider" :saving="saving" @save="saveModel" />
-    <BaseConfirmModal v-model="deleteOpen" title="删除模型价目" description="删除该模型的同步与自定义价格，历史账单不变" destructive confirm-text="删除" :loading="saving" @confirm="deleteModel">
+    <ZConfirmDialog v-model="deleteOpen" title="删除模型价目" description="删除该模型的同步与自定义价格，历史账单不变" destructive confirm-text="删除" :loading="saving" @confirm="deleteModel">
       <span class="break-all font-mono text-cp-sm font-normal">{{ deleting?.model }}</span>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
     <PricingBatchModal v-model="batchOpen" :rows="targets" :reset="batchReset" :saving="saving" @confirm="saveBatch" />
     <PricingSyncModal v-model="syncOpen" :preview="preview" :catalog="syncCatalog" :saving="saving" @confirm="confirmSync" />
   </section>

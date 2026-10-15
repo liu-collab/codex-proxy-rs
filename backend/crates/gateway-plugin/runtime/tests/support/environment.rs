@@ -699,9 +699,6 @@ impl Environment {
         } else {
             gateway_store::initialize(config).await.unwrap()
         };
-        // 迁移可能已创建默认行；该场景只测租约释放，明确关闭相邻请求的间隔限制
-        sqlx::raw_sql(sqlx::AssertSqlSafe(format!("insert into {schema}.runtime_settings(id, config_revision, request_interval_ms, updated_at) values (1,1,0,now()) on conflict (id) do update set request_interval_ms=0")))
-            .execute(&admin).await.unwrap();
         Some(Self {
             store,
             directory,

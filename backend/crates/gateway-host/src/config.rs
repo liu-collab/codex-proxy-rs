@@ -72,7 +72,7 @@ fn missing_config_field(error: &config::ConfigError) -> Option<String> {
 }
 
 /// Host 唯一拥有的进程配置
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct HostConfig {
     #[serde(default)]
     pub timezone: gateway_core::time::DeploymentTimeZone,
@@ -145,7 +145,7 @@ pub struct ListenConfig {
 }
 
 /// Host 结构化日志配置
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct LoggingConfig {
     pub level: String,
     pub stdout: bool,
@@ -157,17 +157,17 @@ pub struct LoggingConfig {
     /// 请求报文的留存窗口由 request_dump_retention_days 独立控制
     #[serde(default)]
     pub request_dump: bool,
-    /// 完整报文的最少保留天数；按 UTC 日期整组清理，默认 1 天
+    /// 完整报文的最少保留天数；支持小数，每天按 24 小时换算，默认 1 天
     #[serde(default = "default_request_dump_retention_days")]
-    pub request_dump_retention_days: usize,
+    pub request_dump_retention_days: f64,
 }
 
 fn default_file_retention_days() -> usize {
     7
 }
 
-fn default_request_dump_retention_days() -> usize {
-    1
+fn default_request_dump_retention_days() -> f64 {
+    1.0
 }
 
 impl LoggingConfig {
@@ -190,13 +190,18 @@ impl LoggingConfig {
                 "host.logging.file.max_file_size_mb",
             ));
         }
-        if self.request_dump_retention_days == 0 {
-            return Err(ConfigError::InvalidField(
-                "host.logging.request_dump_retention_days",
-            ));
-        }
+        self.request_dump_retention()?;
         resolve_relative_path(source_dir, &mut self.file.directory);
         Ok(())
+    }
+
+    pub(crate) fn request_dump_retention(&self) -> Result<Duration, ConfigError> {
+        Duration::try_from_secs_f64(self.request_dump_retention_days * 86_400.0)
+            .ok()
+            .filter(|duration| !duration.is_zero())
+            .ok_or(ConfigError::InvalidField(
+                "host.logging.request_dump_retention_days",
+            ))
     }
 }
 

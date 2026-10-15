@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PluginManagementView } from '@/api'
 
-import { BaseButton, BaseEmpty, BaseTag } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZTag } from '@codex-proxy/ui'
 import { Blocks, ExternalLink } from '@lucide/vue'
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
@@ -26,7 +26,7 @@ function openView(view: PluginManagementView) {
   <div class="flex h-full min-h-0 flex-col gap-4">
     <div v-if="loading && pageViews.length === 0" class="min-h-0 flex-1" aria-busy="true" />
 
-    <BaseEmpty
+    <ZEmpty
       v-else-if="pageViews.length === 0"
       class="flex-1 content-center"
       surface="none"
@@ -53,21 +53,21 @@ function openView(view: PluginManagementView) {
               配置 {{ shortPluginInstanceId(view.target.instanceId) }}
             </p>
           </div>
-          <BaseTag size="sm">
+          <ZTag size="small">
             {{ view.pages.length }} 页
-          </BaseTag>
+          </ZTag>
         </div>
 
         <p class="m-0 line-clamp-2 text-cp-sm leading-relaxed text-cp-text-secondary">
           {{ view.pages.map(page => page.title).join('、') }}
         </p>
 
-        <BaseButton class="mt-auto self-start" size="sm" variant="secondary" @click="openView(view)">
+        <ZButton class="mt-auto self-start" size="small" @click="openView(view)">
           <template #icon>
             <ExternalLink class="size-3.5" />
           </template>
           打开页面
-        </BaseButton>
+        </ZButton>
       </article>
     </div>
   </div>

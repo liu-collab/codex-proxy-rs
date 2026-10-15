@@ -1,4 +1,4 @@
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { ApiError } from '@/api/request'
 import { errorMessage } from '@/utils/operation'
 
@@ -10,5 +10,5 @@ export interface PluginRefreshContext {
 export function notifyPluginError(title: string, error: unknown): void {
   if (error instanceof ApiError && error.kind === 'cancelled')
     return
-  toast.error(errorMessage(error, title))
+  ZNotification.error({ message: errorMessage(error, title) })
 }

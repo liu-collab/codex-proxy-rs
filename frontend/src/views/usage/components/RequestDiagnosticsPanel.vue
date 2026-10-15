@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { OpsError, OpsErrorMetadata } from '@/api'
-import { BaseButton, BaseEmpty, BaseScrollbar } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZScrollbar } from '@codex-proxy/ui'
 import { Download, RefreshCw } from '@lucide/vue'
 import { computed } from 'vue'
 import { useAsyncAction } from '@/composables/useAsyncAction'
@@ -40,21 +40,21 @@ function download() {
         请求诊断
       </h3>
       <div class="flex flex-wrap gap-2">
-        <BaseButton v-if="selectedId !== requestId" variant="soft" size="sm" @click="selectedId = requestId">
+        <ZButton v-if="selectedId !== requestId" type="primary" variant="plain" size="small" @click="selectedId = requestId">
           返回本次请求
-        </BaseButton>
-        <BaseButton variant="soft" size="sm" :loading="loading" @click="refresh">
+        </ZButton>
+        <ZButton type="primary" variant="plain" size="small" :loading="loading" @click="refresh">
           <template #icon>
             <RefreshCw :size="14" />
           </template>
           刷新
-        </BaseButton>
-        <BaseButton variant="soft" size="sm" :loading="exporting" :disabled="!canExport" @click="download">
+        </ZButton>
+        <ZButton type="primary" variant="plain" size="small" :loading="exporting" :disabled="!canExport" @click="download">
           <template #icon>
             <Download :size="14" />
           </template>
           导出诊断包
-        </BaseButton>
+        </ZButton>
       </div>
     </div>
     <p class="mt-1 mb-3 break-all font-mono text-cp-xs leading-relaxed text-cp-text-secondary">
@@ -68,12 +68,12 @@ function download() {
     </p>
     <template v-else-if="detail">
       <div v-if="detail.relatedRequests?.length" class="mb-3 flex flex-wrap gap-2">
-        <BaseButton v-for="related in detail.relatedRequests" :key="related.requestId" variant="soft" size="sm" class="max-w-full" @click="selectedId = related.requestId">
+        <ZButton v-for="related in detail.relatedRequests" :key="related.requestId" type="primary" variant="plain" size="small" class="max-w-full" @click="selectedId = related.requestId">
           {{ related.relation === 'recovered_by' ? '查看恢复请求' : '查看先前失败' }} · {{ related.requestId }}
-        </BaseButton>
+        </ZButton>
       </div>
       <RequestTransportFailure :events="trace?.events ?? []" :metadata="selectedId === requestId ? metadata : undefined" />
-      <BaseEmpty v-if="!events.length" title="暂无诊断时间线" size="sm" surface="none" />
+      <ZEmpty v-if="!events.length" title="暂无诊断时间线" size="small" surface="none" />
       <template v-else-if="trace">
         <div class="mb-3 grid gap-1 text-cp-xs leading-relaxed">
           <p class="m-0 text-cp-text-secondary">
@@ -83,7 +83,7 @@ function download() {
             已达保存上限，{{ trace.droppedEvents }} 个事件未保留
           </p>
         </div>
-        <BaseScrollbar max-height="32rem">
+        <ZScrollbar max-height="32rem">
           <ol class="m-0 grid list-none gap-2 p-0 pr-3">
             <li v-for="event in events" :key="event.sequence" class="min-w-0">
               <details class="group overflow-hidden rounded-cp bg-cp-bg-container">
@@ -100,7 +100,7 @@ function download() {
               </details>
             </li>
           </ol>
-        </BaseScrollbar>
+        </ZScrollbar>
       </template>
     </template>
   </section>

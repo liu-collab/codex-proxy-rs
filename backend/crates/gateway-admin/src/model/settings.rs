@@ -45,12 +45,12 @@ pub use gateway_core::account::RotationStrategy;
 /// 运行设置的共同值；版本、Provider 画像更新和数据库秘密由外层类型拥有
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RuntimeSettingsValues {
+    pub codex_privacy_policy: gateway_core::settings::privacy::CodexPrivacyPolicy,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
     pub refresh_margin_seconds: u64,
     pub refresh_concurrency: u32,
     pub max_concurrent_per_account: u32,
-    pub request_interval_ms: u64,
     pub max_waiting_per_key: u32,
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
@@ -211,10 +211,6 @@ impl RuntimeSettingsValues {
                 "refresh_margin_seconds",
             ),
             (self.refresh_concurrency > 0, "refresh_concurrency"),
-            (
-                i64::try_from(self.request_interval_ms).is_ok(),
-                "request_interval_ms",
-            ),
         ] {
             if !valid {
                 return Err(field);

@@ -86,7 +86,9 @@ async fn models_response(
             .iter()
             .enumerate()
             .map(|(index, entry)| match entry {
-                PublicModelDescriptor::Adapted(profile) => Ok(codex_model_json(profile, index)),
+                PublicModelDescriptor::Adapted(profile) => {
+                    Ok(adapted_codex_model_json(profile, index))
+                }
                 PublicModelDescriptor::Native { model, payload } => {
                     if payload.protocol() != "codex" {
                         return Err(());
@@ -192,7 +194,7 @@ fn openai_model_json(id: &str) -> Value {
     })
 }
 
-fn codex_model_json(profile: &PublicModelProfile, index: usize) -> Value {
+fn adapted_codex_model_json(profile: &PublicModelProfile, index: usize) -> Value {
     let id = profile.model().as_str();
     let presentation = profile.presentation();
     let reasoning_levels = presentation
@@ -265,6 +267,8 @@ fn codex_model_json(profile: &PublicModelProfile, index: usize) -> Value {
         "experimental_supported_tools": [],
         "input_modalities": input_modalities,
         "supports_search_tool": presentation.search_tool(),
+        // 通用画像没有 Responses Lite 支持依据，避免客户端启用未经声明的协议行为
+        // 原生目录由 Native 分支保留上游字段，不经过此处
         "use_responses_lite": false,
     })
 }

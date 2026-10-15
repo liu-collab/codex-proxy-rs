@@ -42,8 +42,11 @@ else
   mkdir -p "$(dirname "$directory")"
   temporary="$(mktemp -d "${directory}.XXXXXX")"
   trap 'rm -rf "$temporary"' EXIT
-  mkdir "$temporary/context"
-  "${command[@]}" --output "type=local,dest=$temporary/snapshot" "$temporary/context"
+  mkdir "$temporary"/{context,snapshot}
+  # tar 流避开 local exporter 的逐文件同步阻塞，直接解包以免额外落盘整份归档。
+  # https://github.com/moby/buildkit/issues/2950
+  "${command[@]}" --output type=tar,dest=- "$temporary/context" \
+    | tar -xf - -C "$temporary/snapshot"
   if usable "$temporary/snapshot"; then
     rm -rf "$directory"
     mv "$temporary/snapshot" "$directory"

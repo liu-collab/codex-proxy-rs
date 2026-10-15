@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PluginArtifact, PluginInstance } from '@/api'
-import { BaseIconButton, BaseTag } from '@codex-proxy/ui'
+import { ZIconButton, ZTag } from '@codex-proxy/ui'
 import { ArrowDownToLine, ChevronDown, Play, Trash2 } from '@lucide/vue'
 import { computed, shallowRef, useId } from 'vue'
 import { PLUGIN_STATUS_LABELS } from '../constants'
@@ -29,11 +29,11 @@ const detailsId = useId()
   <article class="min-w-0 rounded-cp bg-cp-fill-alter" :class="isCurrent ? 'grid min-h-36 content-between gap-3 p-4' : 'flex flex-wrap items-center gap-2 px-3 py-2 sm:gap-3'">
     <div v-if="isCurrent && current" class="flex flex-wrap items-center gap-2">
       <strong class="min-w-0 flex-1 wrap-break-word text-cp-sm">当前版本</strong>
-      <BaseTag>{{ artifact.metadata.version }}</BaseTag>
+      <ZTag>{{ artifact.metadata.version }}</ZTag>
       <PluginStatusNotice :instance="current" />
-      <BaseTag :type="pluginStatusType(configurationStatus(current))">
+      <ZTag :type="pluginStatusType(configurationStatus(current))">
         {{ PLUGIN_STATUS_LABELS[configurationStatus(current)] }}
-      </BaseTag>
+      </ZTag>
     </div>
     <div class="flex min-w-0 items-center justify-between gap-3" :class="isCurrent ? 'flex-wrap py-1' : 'flex-1'">
       <div class="grid min-w-0 gap-1 sm:flex sm:flex-wrap sm:items-center sm:gap-x-3">
@@ -53,12 +53,12 @@ const detailsId = useId()
         <ChevronDown class="size-3.5 transition-transform motion-reduce:transition-none" :class="detailsOpen ? 'rotate-180' : undefined" aria-hidden="true" />
       </button>
     </div>
-    <BaseTag v-if="!artifact.acceptedAt" type="warning" size="sm">
+    <ZTag v-if="!artifact.acceptedAt" type="warning" size="small">
       待安装
-    </BaseTag>
-    <BaseTag v-else-if="!isCurrent && uses.length" size="sm">
+    </ZTag>
+    <ZTag v-else-if="!isCurrent && uses.length" size="small">
       历史配置
-    </BaseTag>
+    </ZTag>
     <dl v-show="detailsOpen" :id="detailsId" class="m-0 grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 text-cp-xs text-cp-text-secondary sm:grid-cols-2" :class="!isCurrent ? 'order-last w-full pt-2' : undefined">
       <div class="grid min-w-0 content-start gap-1">
         <dt class="text-cp-sm font-emphasis text-cp-text">
@@ -86,18 +86,18 @@ const detailsId = useId()
       </div>
     </dl>
     <div class="flex shrink-0 items-center gap-1" :class="isCurrent ? 'justify-self-end' : undefined">
-      <BaseIconButton v-if="!isCurrent" :label="`${artifact.metadata.version} 版本详情`" variant="secondary" size="sm" :aria-expanded="detailsOpen" :aria-controls="detailsId" @click="detailsOpen = !detailsOpen">
+      <ZIconButton v-if="!isCurrent" :aria-label="`${artifact.metadata.version} 版本详情`" variant="solid" size="small" :aria-expanded="detailsOpen" :aria-controls="detailsId" @click="detailsOpen = !detailsOpen">
         <ChevronDown class="size-4 transition-transform motion-reduce:transition-none" :class="detailsOpen ? 'rotate-180' : undefined" />
-      </BaseIconButton>
-      <BaseIconButton v-if="!artifact.acceptedAt" :label="`安装 ${artifact.metadata.version}`" size="sm" variant="primary" :disabled="busy" @click="$emit('accept', artifact)">
+      </ZIconButton>
+      <ZIconButton v-if="!artifact.acceptedAt" :aria-label="`安装 ${artifact.metadata.version}`" size="small" type="primary" variant="solid" :disabled="busy" @click="$emit('accept', artifact)">
         <ArrowDownToLine class="size-4" />
-      </BaseIconButton>
-      <BaseIconButton v-else :label="`切换至 ${artifact.metadata.version}`" size="sm" variant="secondary" :disabled="busy || !current || isCurrent" @click="$emit('switchVersion', artifact)">
+      </ZIconButton>
+      <ZIconButton v-else :aria-label="`切换至 ${artifact.metadata.version}`" size="small" variant="solid" :disabled="busy || !current || isCurrent" @click="$emit('switchVersion', artifact)">
         <Play class="size-4" />
-      </BaseIconButton>
-      <BaseIconButton v-if="artifact.acceptedAt" :label="`删除版本 ${artifact.metadata.version}`" size="sm" variant="secondary" class="group" :disabled="busy || uses.length > 0 || artifact.source.kind === 'builtin'" @click="$emit('deleteVersion', artifact)">
+      </ZIconButton>
+      <ZIconButton v-if="artifact.acceptedAt" :aria-label="`删除版本 ${artifact.metadata.version}`" size="small" variant="solid" class="group" :disabled="busy || uses.length > 0 || artifact.source.kind === 'builtin'" @click="$emit('deleteVersion', artifact)">
         <Trash2 class="size-4 text-cp-error-text group-disabled:text-cp-text-disabled" />
-      </BaseIconButton>
+      </ZIconButton>
     </div>
   </article>
 </template>

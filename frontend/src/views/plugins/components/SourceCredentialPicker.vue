@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PluginSourceCredential } from '@/api'
 
-import { BaseCheckbox, BaseIconButton } from '@codex-proxy/ui'
+import { ZCheckbox, ZIconButton } from '@codex-proxy/ui'
 import { Trash2 } from '@lucide/vue'
 
 withDefaults(defineProps<{
@@ -32,10 +32,10 @@ function toggle(id: string, checked: boolean) {
       class="flex min-w-0 items-center gap-3 rounded-cp bg-cp-fill-alter px-3 py-1.5"
       :class="disabled ? 'opacity-60' : undefined"
     >
-      <BaseCheckbox
+      <ZCheckbox
         :model-value="isSelected(credential.id)"
         :disabled="disabled"
-        :label="`选择下载认证 ${credential.name}`"
+        :aria-label="`选择下载认证 ${credential.name}`"
         @update:model-value="toggle(credential.id, $event)"
       />
       <span class="flex min-w-0 flex-1 items-center gap-3">
@@ -44,9 +44,9 @@ function toggle(id: string, checked: boolean) {
           {{ credential.origin }}{{ credential.pathPrefix }}
         </span>
       </span>
-      <BaseIconButton size="sm" :label="`删除下载认证 ${credential.name}`" :disabled="disabled" @click="$emit('delete', credential)">
+      <ZIconButton size="small" :aria-label="`删除下载认证 ${credential.name}`" :disabled="disabled" @click="$emit('delete', credential)">
         <Trash2 class="size-3.5 text-cp-error" />
-      </BaseIconButton>
+      </ZIconButton>
     </div>
   </div>
 </template>

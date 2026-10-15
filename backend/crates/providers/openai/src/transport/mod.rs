@@ -1,5 +1,6 @@
 //! Codex HTTP/SSE/WebSocket 上游 transport
 
+mod automatic_context;
 pub mod canonical;
 pub mod catalog;
 pub mod client;
@@ -28,7 +29,7 @@ pub mod subscription;
 pub(crate) use downstream::{
     normalize_selected_codex_downstream_body, normalize_universal_history_cleanup,
 };
-pub(crate) use endpoints::valid_upstream_base_url;
+pub(crate) use endpoints::parse_upstream_base_url;
 pub mod tls;
 pub mod usage;
 pub mod websocket;
@@ -79,3 +80,5 @@ pub use self::{
         CodexWebSocketPool, CodexWebSocketPoolConfig, CodexWebSocketPoolKey, WebSocketPoolDecision,
     },
 };
+
+pub mod privacy;

@@ -34,7 +34,9 @@ use crate::transport::{CodexWebSocketPool, build_reqwest_client};
 
 pub use config::{OpenAiConfig, OpenAiConfigError};
 #[doc(hidden)]
-pub use jitter::{catalog_refresh_jitter, quota_failure_refresh_delay, uniform_delay};
+pub use jitter::{
+    catalog_refresh_jitter, quota_failure_refresh_delay, server_error_retry_jitter, uniform_delay,
+};
 pub use provider::{
     CodexProvider, CodexProviderConfigError, CodexProviderTransport, OFFICIAL_CODEX_BASE_PATH,
     OFFICIAL_CODEX_BASE_URL, context_length_exceeded_error, openai_failure_affects_account_score,

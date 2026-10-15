@@ -51,7 +51,7 @@ const dates = computed(() => [
         <dt class="text-cp-xs text-cp-text-secondary">
           计费
         </dt>
-        <dd class="m-0 mt-1.5 text-cp-sm leading-relaxed break-words text-cp-text">
+        <dd class="m-0 mt-1.5 text-cp-sm leading-relaxed wrap-break-word text-cp-text">
           {{ billing }}
         </dd>
       </div>

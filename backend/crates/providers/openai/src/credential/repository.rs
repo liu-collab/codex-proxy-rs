@@ -180,6 +180,28 @@ impl CodexCredentialRepository {
         self.decode_runtime_credential(&loaded)
     }
 
+    /// 选号专用的凭据重读，返回最新账号快照
+    ///
+    /// 成功推理会持续刷新额度观测时刻；未耗尽账号的访问结论不变时调度资格不变，
+    /// 沿用最新快照，避免繁忙账号在选号阶段反复冲突
+    pub async fn reload_selected_credential(
+        &self,
+        account: &ProviderAccount,
+    ) -> Result<(ProviderAccount, CodexRuntimeCredential), CredentialRepositoryError> {
+        if account.provider().as_str() != PROVIDER_NAME {
+            return Err(CredentialRepositoryError::InvalidCredentialData(None));
+        }
+        let loaded = self
+            .store
+            .load_credential(account.id(), account.revision())
+            .await?;
+        if !only_quota_observation_advanced(account, &loaded.account) {
+            return Err(CredentialRepositoryError::RevisionConflict(None));
+        }
+        let runtime = self.decode_runtime_credential(&loaded)?;
+        Ok((loaded.account, runtime))
+    }
+
     pub async fn load_complete_data(
         &self,
         account: &ProviderAccount,
@@ -319,4 +341,28 @@ fn oauth_account_state(account: &ProviderAccount, observed: CredentialState) -> 
     } else {
         observed
     }
+}
+
+fn only_quota_observation_advanced(selected: &ProviderAccount, current: &ProviderAccount) -> bool {
+    if selected == current {
+        return true;
+    }
+    let (before, after) = (selected.quota(), current.quota());
+    // 耗尽状态的复核时间依赖观测时刻，必须按冲突处理
+    if before.is_exhausted()
+        || before.access() != after.access()
+        || before.evidence() != after.evidence()
+        || before.reset_at() != after.reset_at()
+    {
+        return false;
+    }
+    // 只替换额度观测，其余账号事实必须与选号时完全一致
+    let normalized = current.clone().with_account_facts(
+        current.enabled(),
+        current.credential_state(),
+        before,
+        current.last_error_reason(),
+        current.last_error_message().map(str::to_owned),
+    );
+    normalized == *selected
 }

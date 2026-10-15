@@ -78,11 +78,11 @@ export function useAccountImportTasks(options: { reload: () => Promise<unknown> 
     void refresh()
   }
 
-  function created(task: AccountImportTask) {
+  function created(task: AccountImportTask, reveal = true) {
     tasks.value = [task, ...tasks.value.filter(entry => entry.taskId !== task.taskId)]
     selectedId.value = task.taskId
     detail.value = null
-    if (open.value)
+    if (open.value || !reveal)
       void refresh()
     else
       open.value = true

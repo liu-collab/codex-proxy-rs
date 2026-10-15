@@ -15,7 +15,6 @@ pub enum ConflictKind {
     StaleRevision,
     DuplicateName,
     AlreadyFinalized,
-    DownstreamAlreadyCommitted,
     RequestNotRunning,
     InvalidTransition,
     LeaseLost,

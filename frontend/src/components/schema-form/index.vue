@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { InputField } from './schema'
-import { BaseForm, BaseFormItem, BaseIconButton, BaseInput, BasePopover, BaseSelect, BaseTextarea } from '@codex-proxy/ui'
+import { ZForm, ZFormItem, ZIconButton, ZInput, ZPopover, ZSelect, ZTextarea } from '@codex-proxy/ui'
 import { Braces, Info, List } from '@lucide/vue'
 import { computed, nextTick, shallowRef, useTemplateRef } from 'vue'
 import { parseJsonObject } from '@/utils/data'
@@ -94,18 +94,18 @@ defineExpose({ focusField })
 
 <template>
   <div v-if="!empty" ref="root" class="grid gap-3">
-    <BaseForm v-if="showJson">
-      <BaseFormItem label="输入内容" :error="error">
+    <ZForm v-if="showJson">
+      <ZFormItem label="输入内容" :error="error">
         <template #extra>
-          <BaseIconButton v-if="fields !== null" label="使用表单" size="sm" variant="secondary" :disabled="disabled || Boolean(error) || hasExtra || incompatibleValue" @click="jsonMode = false">
+          <ZIconButton v-if="fields !== null" aria-label="使用表单" size="small" variant="solid" :disabled="disabled || Boolean(error) || hasExtra || incompatibleValue" @click="jsonMode = false">
             <List class="size-4" />
-          </BaseIconButton>
+          </ZIconButton>
         </template>
-        <BaseTextarea v-model="text" :rows="8" :disabled="disabled" spellcheck="false" autocomplete="off" data-schema-json-control />
-      </BaseFormItem>
-    </BaseForm>
-    <BaseForm v-else>
-      <BaseFormItem
+        <ZTextarea v-model="text" :rows="8" :disabled="disabled" spellcheck="false" autocomplete="off" data-schema-json-control />
+      </ZFormItem>
+    </ZForm>
+    <ZForm v-else>
+      <ZFormItem
         v-for="(field, index) in fields"
         :key="field.key"
         :label="field.label"
@@ -113,32 +113,32 @@ defineExpose({ focusField })
         :error="fieldErrors?.[field.key]"
       >
         <template v-if="field.description" #label-extra>
-          <BasePopover trigger="hover-click" placement="top-start">
-            <template #trigger>
-              <BaseIconButton :label="`${field.label}说明`" class="size-3.5!" :title="undefined">
+          <ZPopover trigger="hover-click" placement="top-start">
+            <template #reference>
+              <ZIconButton :aria-label="`${field.label}说明`" class="size-3.5!" :title="undefined">
                 <Info class="size-3.5" />
-              </BaseIconButton>
+              </ZIconButton>
             </template>
             <p class="m-0 max-w-72 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
               {{ field.description }}
             </p>
-          </BasePopover>
+          </ZPopover>
         </template>
         <template v-if="index === 0" #extra>
-          <BaseIconButton label="编辑 JSON" size="sm" variant="secondary" :disabled="disabled" @click="jsonMode = true">
+          <ZIconButton aria-label="编辑 JSON" size="small" variant="solid" :disabled="disabled" @click="jsonMode = true">
             <Braces class="size-4" />
-          </BaseIconButton>
+          </ZIconButton>
         </template>
-        <BaseSelect
+        <ZSelect
           v-if="field.values || field.type === 'boolean'"
           :model-value="fieldValue(field)"
           :options="fieldOptions(field)"
           :disabled="disabled"
           :data-schema-control="field.key"
           class="w-full"
-          @update:model-value="update(field, $event)"
+          @update:model-value="update(field, $event ?? '')"
         />
-        <BaseInput
+        <ZInput
           v-else
           :model-value="fieldValue(field)"
           :type="field.secret ? 'password' : 'text'"
@@ -148,7 +148,7 @@ defineExpose({ focusField })
           autocomplete="off"
           @update:model-value="update(field, $event)"
         />
-      </BaseFormItem>
-    </BaseForm>
+      </ZFormItem>
+    </ZForm>
   </div>
 </template>

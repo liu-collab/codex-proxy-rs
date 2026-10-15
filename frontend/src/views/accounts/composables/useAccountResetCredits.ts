@@ -1,5 +1,5 @@
 import type { AccountResetCredit } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { computed, shallowReactive, shallowRef, watch } from 'vue'
 
 import {
@@ -189,7 +189,7 @@ export function useAccountResetCredits(options: {
         || (result.code === 'already_redeemed' && operation.hasTransportFailure)
       target.pendingOperation = null
       if (!confirmed) {
-        toast.error(resetResultMessage(result.code))
+        ZNotification.error({ message: resetResultMessage(result.code) })
         await loadSessionCredits(target, true)
         return false
       }
@@ -201,7 +201,7 @@ export function useAccountResetCredits(options: {
       if (session.value === target)
         showConfirm.value = false
       options.onConsumed(operation.accountId)
-      toast.success(successMessage)
+      ZNotification.success({ message: successMessage })
       applyConfirmedConsumption(target, operation)
       await loadSessionCredits(target, true)
       return true
@@ -212,11 +212,11 @@ export function useAccountResetCredits(options: {
           ...operation,
           hasTransportFailure: true,
         }
-        toast.warning('消费结果暂不确定，重试会复用同一个请求标识', { duration: 5000 })
+        ZNotification.warning({ message: '消费结果暂不确定，重试会复用同一个请求标识', ...({ duration: 5000 }) })
       }
       else {
         target.pendingOperation = null
-        toast.error(errorMessage(error, '额度重置失败'))
+        ZNotification.error({ message: errorMessage(error, '额度重置失败') })
         await loadSessionCredits(target, true)
       }
       return false

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseButton, BaseIconButton, BaseModal, BaseScrollbar, BaseSegmented, BaseSwitch } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZIconButton, ZScrollbar, ZSegmented, ZSwitch } from '@codex-proxy/ui'
 
 import { Apple, Copy, Monitor, Upload } from '@lucide/vue'
 import { computed, shallowRef } from 'vue'
@@ -52,18 +52,18 @@ function importToCcs() {
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     :title="title"
     description="保存或合并下方配置后重启 Codex"
-    size="lg"
+    width="48rem"
   >
     <div class="flex flex-col gap-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <BaseSegmented v-model="activePlatform" label="配置平台" :options="platformOptions" />
-        <BaseSwitch
+        <ZSegmented v-model="activePlatform" aria-label="配置平台" :options="platformOptions" />
+        <ZSwitch
           v-model="websocketEnabled"
-          label="切换 WebSocket 配置"
+          aria-label="切换 WebSocket 配置"
           active-text="WS"
           inactive-text="WS"
           inline-prompt
@@ -78,34 +78,34 @@ function importToCcs() {
           >
             {{ configPath }}
           </span>
-          <BaseIconButton
-            variant="secondary"
-            size="sm"
-            label="复制"
+          <ZIconButton
+            variant="solid"
+            size="small"
+            aria-label="复制"
             @click="emit('copy', codexConfig)"
           >
             <Copy class="size-3.5" />
-          </BaseIconButton>
+          </ZIconButton>
         </div>
-        <BaseScrollbar max-height="calc(100dvh - 21rem)">
+        <ZScrollbar max-height="calc(100dvh - 21rem)">
           <div class="mx-3 mb-3 rounded-cp bg-cp-bg-container px-3.5 py-3 shadow-cp-tertiary">
             <pre
               class="m-0 whitespace-pre-wrap wrap-break-word font-mono text-cp-sm leading-[1.65] font-emphasis text-cp-text"
               v-text="codexConfig"
             />
           </div>
-        </BaseScrollbar>
+        </ZScrollbar>
       </section>
     </div>
 
     <template #footer>
-      <BaseButton variant="secondary" :disabled="!keyValue" @click="importToCcs">
+      <ZButton :disabled="!keyValue" @click="importToCcs">
         <Upload class="size-4" />
         导入 CCSwitch
-      </BaseButton>
-      <BaseButton variant="primary" @click="open = false">
+      </ZButton>
+      <ZButton type="primary" @click="open = false">
         关闭
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

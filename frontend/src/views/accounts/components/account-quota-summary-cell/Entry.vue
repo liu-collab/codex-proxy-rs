@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AccountQuotaWindow } from '@/api'
 
-import { BasePopover } from '@codex-proxy/ui'
+import { ZPopover } from '@codex-proxy/ui'
 
 import { computed } from 'vue'
 import AccountRequestTimeline from '@/components/account/account-usage-window/AccountRequestTimeline.vue'
@@ -74,8 +74,8 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
 </script>
 
 <template>
-  <BasePopover class="grid! w-full grid-cols-subgrid" trigger="hover-click" placement="right" :hover-delay="240">
-    <template #trigger="{ open }">
+  <ZPopover class="grid! w-full grid-cols-subgrid" trigger="hover-click" placement="right" :hover-delay="240">
+    <template #reference="{ open }">
       <button
         type="button"
         class="col-span-full grid w-full min-w-0 grid-cols-subgrid cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline"
@@ -184,5 +184,5 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
         </article>
       </div>
     </section>
-  </BasePopover>
+  </ZPopover>
 </template>

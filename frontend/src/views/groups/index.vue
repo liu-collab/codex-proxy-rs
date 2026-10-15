@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseCard, BaseCheckbox, BaseConfirmModal, BasePageHeader, BaseTable, BaseTablePagination } from '@codex-proxy/ui'
+import { ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable } from '@codex-proxy/ui'
 import { Zap, ZapOff } from '@lucide/vue'
 import { usePageSelection } from '@/composables/usePageSelection'
 import AccountGroupActions from './components/AccountGroupActions.vue'
@@ -49,13 +49,13 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
 
 <template>
   <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
-    <BasePageHeader
+    <ZPageHeader
       class="h-17"
       title="分组管理"
       description="将账号归类管理，并为每个 API 密钥指定可使用的账号"
     />
 
-    <BaseCard
+    <ZCard
       class="mt-5 flex h-[calc(100dvh-136px)] min-h-125 flex-col"
     >
       <template #header>
@@ -71,26 +71,26 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
 
       <template #body>
         <div class="flex h-full min-h-0 flex-col">
-          <BaseTable
+          <ZTable
             class="min-h-0 flex-1"
             :columns="accountGroupColumns"
-            :rows="groups"
+            :data="groups"
             :loading="loading"
             :selected-row-keys="selectedRowKeys"
             empty-text="暂无分组，请点击创建分组创建"
           >
             <template #header-selection>
-              <BaseCheckbox
+              <ZCheckbox
                 :model-value="allSelected"
                 :indeterminate="indeterminate"
-                label="选择当前页分组"
+                aria-label="选择当前页分组"
                 @update:model-value="toggleAll"
               />
             </template>
             <template #selection="{ row }">
-              <BaseCheckbox
+              <ZCheckbox
                 :model-value="selectedIds.has(row.id)"
-                label="选择分组"
+                aria-label="选择分组"
                 @update:model-value="toggleSelection(row.id)"
               />
             </template>
@@ -162,16 +162,16 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
                 @delete="requestDelete"
               />
             </template>
-          </BaseTable>
-          <BaseTablePagination
-            :pagination="pagination"
-            :loading="loading"
-            @page-change="handlePageChange"
-            @page-size-change="handlePageSizeChange"
+          </ZTable>
+          <ZPagination
+            v-bind="pagination"
+            :disabled="loading"
+            @current-change="handlePageChange"
+            @size-change="handlePageSizeChange"
           />
         </div>
       </template>
-    </BaseCard>
+    </ZCard>
 
     <AccountGroupFormModal
       v-model="showFormModal"
@@ -181,7 +181,7 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
       @save="save"
     />
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="showBatchDeleteModal"
       title="确认删除"
       description="删除后这些分组将立即失效，此操作不可撤销"
@@ -193,9 +193,9 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
       <p class="m-0">
         确定删除选中的 {{ deleteCount }} 个分组吗？账号本身不会被删除
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="showDisableModal"
       title="禁用账号分组"
       description="禁用后，使用该分组的 API 密钥将无法再使用其中的账号"
@@ -212,9 +212,9 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
       <p v-else-if="pendingDisableGroup?.clientKeyCount" class="mt-2 mb-0 text-cp-warning-text">
         将影响 {{ pendingDisableGroup.clientKeyCount }} 个 API 密钥
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="showDeleteModal"
       title="删除账号分组"
       description="删除后该分组将立即失效，此操作不可撤销"
@@ -226,6 +226,6 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
       <p class="m-0">
         确定删除“{{ pendingDeleteGroup?.name || '该分组' }}”吗？账号本身不会被删除
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
   </div>
 </template>

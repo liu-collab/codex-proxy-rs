@@ -70,7 +70,7 @@ fn live_request_with_headers(
     );
     let snapshot = RuntimeSnapshot::new(
         ConfigRevision::new(1).unwrap(),
-        gateway_core::settings::SettingsValues::new(2, 10, "smart", BTreeMap::new(), None, None),
+        gateway_core::settings::SettingsValues::new(2, "smart", BTreeMap::new(), None, None),
         vec![provider.clone()],
         Vec::new(),
         Vec::new(),
@@ -218,7 +218,7 @@ async fn live_bootstrap_rejects_missing_planned_model_before_upstream_send() {
     let provider_kind = ProviderKind::new("openai").unwrap();
     let snapshot = RuntimeSnapshot::new(
         ConfigRevision::new(1).unwrap(),
-        gateway_core::settings::SettingsValues::new(2, 10, "smart", BTreeMap::new(), None, None),
+        gateway_core::settings::SettingsValues::new(2, "smart", BTreeMap::new(), None, None),
         vec![provider_kind.clone()],
         Vec::new(),
         Vec::new(),

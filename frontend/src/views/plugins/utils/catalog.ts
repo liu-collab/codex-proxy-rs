@@ -61,7 +61,7 @@ export function pluginStatusType(status: PluginCatalogStatus) {
     return 'danger' as const
   if (status === 'pending' || status === 'unconfigured' || status === 'unaccepted')
     return 'warning' as const
-  return 'neutral' as const
+  return 'default' as const
 }
 
 export function currentPluginInstance(plugin: InstalledPlugin): PluginInstance | undefined {

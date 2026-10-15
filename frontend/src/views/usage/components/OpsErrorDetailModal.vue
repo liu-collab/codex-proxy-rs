@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { OpsError } from '@/api'
 
-import { BaseButton, BaseModal } from '@codex-proxy/ui'
+import { ZButton, ZDialog } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import { failureClassText } from '../utils/opsErrorPresentation'
 import RequestDiagnosticsPanel from './RequestDiagnosticsPanel.vue'
@@ -121,12 +121,12 @@ function visibleFields(items: DetailField[]) {
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="错误明细"
     description="上游错误与请求上下文"
-    tone="danger"
-    size="xl"
+    type="danger"
+    width="64rem"
   >
     <template v-if="record">
       <RequestDiagnosticsPanel v-if="record.requestId" class="mb-3" :request-id="record.requestId" :metadata="record.metadata" :error-record="record" :active="open" />
@@ -180,9 +180,9 @@ function visibleFields(items: DetailField[]) {
     </template>
 
     <template #footer>
-      <BaseButton variant="primary" @click="open = false">
+      <ZButton type="primary" @click="open = false">
         关闭
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

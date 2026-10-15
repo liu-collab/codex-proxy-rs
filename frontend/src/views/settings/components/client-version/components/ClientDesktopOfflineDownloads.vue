@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import type { ClientDownloadPackage, CodexDesktopWindowsDownloads } from '@/api'
-import { BaseButton, BaseEmpty, BaseIconButton, BaseSkeleton } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZIconButton, ZSkeleton } from '@codex-proxy/ui'
 
 import { ArrowDownToLine, PackageOpen, RefreshCw } from '@lucide/vue'
+
+import { computed } from 'vue'
 
 import ClientInstallCommandList from './ClientInstallCommandList.vue'
 
 defineOptions({ name: 'ClientDesktopOfflineDownloads' })
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     downloads?: CodexDesktopWindowsDownloads | null
     loading?: boolean
@@ -25,6 +27,13 @@ const emit = defineEmits<{
   refresh: []
   retry: []
 }>()
+
+const downloadDescription = computed(() => {
+  const packages = props.downloads?.packages
+  if (packages?.length && packages.every(packageItem => packageItem.source === 'official_openai'))
+    return 'OpenAI 官方安装包，请选择与设备一致的架构'
+  return 'Microsoft Store 离线安装包，请选择与设备一致的架构'
+})
 
 const localInstallCommand = [
   {
@@ -71,19 +80,18 @@ function formatFileSize(value: number | null): string {
             </span>
           </div>
           <p class="mt-1.5 mb-0 text-cp-sm leading-[1.45] font-semibold text-cp-text-secondary">
-            后端实时校验 Microsoft CDN 直链，请选择与设备一致的架构
+            {{ downloadDescription }}
           </p>
         </div>
       </div>
-      <BaseIconButton
-        :label="loading ? '正在重新提取离线下载链接' : '重新提取离线下载链接'"
-        variant="secondary"
+      <ZIconButton
+        :aria-label="loading ? '正在刷新离线下载链接' : '刷新离线下载链接'" variant="solid"
         :disabled="loading"
         :aria-busy="loading || undefined"
         @click="emit('refresh')"
       >
         <RefreshCw class="size-4" :class="loading && 'animate-spin motion-reduce:animate-none'" />
-      </BaseIconButton>
+      </ZIconButton>
     </div>
 
     <p
@@ -101,27 +109,27 @@ function formatFileSize(value: number | null): string {
       {{ error }}，当前仍显示上次成功结果
     </p>
 
-    <div v-if="loading && !downloads" class="grid gap-3 sm:grid-cols-2" aria-label="正在提取离线安装包">
+    <div v-if="loading && !downloads" class="grid gap-3 sm:grid-cols-2" aria-label="正在加载离线安装包">
       <div v-for="index in 2" :key="index" class="grid gap-3 rounded-cp bg-cp-bg-container p-4 shadow-cp-tertiary">
-        <BaseSkeleton class="h-4 w-28" />
-        <BaseSkeleton class="h-3 w-44" shape="text" />
-        <BaseSkeleton class="h-9 w-full" />
+        <ZSkeleton class="h-4 w-28" />
+        <ZSkeleton class="h-3 w-44" shape="text" />
+        <ZSkeleton class="h-9 w-full" />
       </div>
     </div>
 
-    <BaseEmpty
+    <ZEmpty
       v-else-if="error && !downloads"
       title="离线安装包加载失败"
       :description="error"
       :icon="PackageOpen"
-      size="sm"
+      size="small"
     >
       <template #action>
-        <BaseButton size="sm" :loading="loading" @click="emit('retry')">
+        <ZButton size="small" :loading="loading" @click="emit('retry')">
           重试
-        </BaseButton>
+        </ZButton>
       </template>
-    </BaseEmpty>
+    </ZEmpty>
 
     <div v-else-if="downloads" class="grid gap-3 sm:grid-cols-2">
       <article

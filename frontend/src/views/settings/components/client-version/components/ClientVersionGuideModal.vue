@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CodexDesktopWindowsDownloads } from '@/api'
-import { BaseButton, BaseModal, BaseSegmented } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZSegmented } from '@codex-proxy/ui'
 
 import { MonitorUp, PackageOpen, TerminalSquare } from '@lucide/vue'
 import { shallowRef } from 'vue'
@@ -39,23 +39,23 @@ const sectionOptions = [
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="Codex 客户端升级"
     description="先选择客户端，再查看对应的安装与升级方式"
-    tone="info"
-    size="lg"
+    type="info"
+    width="48rem"
   >
     <template #icon>
       <PackageOpen class="size-4.5 text-cp-info" />
     </template>
 
     <div class="grid gap-4">
-      <BaseSegmented
+      <ZSegmented
         v-model="activeSection"
-        label="客户端类型"
+        aria-label="客户端类型"
         :options="sectionOptions"
-        size="lg"
+        size="large"
         class="w-full"
       />
 
@@ -71,9 +71,9 @@ const sectionOptions = [
     </div>
 
     <template #footer>
-      <BaseButton variant="primary" @click="open = false">
+      <ZButton type="primary" @click="open = false">
         关闭
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

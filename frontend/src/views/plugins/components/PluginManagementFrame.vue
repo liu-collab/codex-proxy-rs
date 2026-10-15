@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PluginManagementPage, PluginManagementRoute, PluginManagementView } from '@/api'
 
-import { BaseButton } from '@codex-proxy/ui'
+import { ZButton } from '@codex-proxy/ui'
 import { RotateCw } from '@lucide/vue'
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 
@@ -715,12 +715,12 @@ onScopeDispose(() => {
         <p class="m-0 text-xs leading-relaxed text-cp-text-secondary">
           {{ loadError }}
         </p>
-        <BaseButton size="sm" variant="secondary" @click="loadPage">
+        <ZButton size="small" @click="loadPage">
           <template #icon>
             <RotateCw class="size-3.5" />
           </template>
           重试
-        </BaseButton>
+        </ZButton>
       </div>
     </div>
     <iframe

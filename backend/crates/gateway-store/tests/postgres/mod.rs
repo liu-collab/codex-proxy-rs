@@ -15,6 +15,10 @@ use uuid::Uuid;
 mod account_groups;
 mod admin_security_audit;
 mod admission_recovery;
+mod analytics;
+mod analytics_buckets;
+mod analytics_reset;
+mod analytics_upgrade;
 mod backup;
 mod client_budgets;
 mod client_keys;
@@ -35,6 +39,7 @@ mod runtime_settings;
 mod schema_integrity;
 mod snapshot;
 mod snapshots;
+mod usage_paging;
 
 static TEST_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
@@ -45,7 +50,7 @@ pub(super) struct TestDatabase {
 }
 
 pub(super) fn observability_query_budget() -> ObservabilityQueryBudget {
-    ObservabilityQueryBudget::try_new(4, Duration::from_secs(1))
+    ObservabilityQueryBudget::try_new(4, Duration::from_secs(1), Duration::from_secs(10))
         .expect("valid test observability query budget")
 }
 
@@ -109,5 +114,44 @@ impl TestDatabase {
         .await
         .expect("drop test schema");
         self.admin.close().await;
+    }
+}
+
+/// 领域合同测试显式等待后台投影，异步一致性测试直接控制 Worker
+pub(super) async fn drain_analytics(pool: &PgPool) {
+    let worker = gateway_store::postgres::PgRequestAnalyticsRepository::new(
+        pool.clone(),
+        observability_query_budget(),
+    )
+    .with_billing_projector(std::sync::Arc::new(TestBillingProjector));
+    for _ in 0..100 {
+        worker
+            .maintain(1000)
+            .await
+            .expect("maintain test analytics");
+        let status = worker.status().await.expect("test analytics status");
+        if !status.building && status.pending_requests == 0 && status.pending_buckets == 0 {
+            return;
+        }
+    }
+    panic!("test analytics did not converge");
+}
+
+struct TestBillingProjector;
+
+impl gateway_admin::ports::store::UsageBillingProjector for TestBillingProjector {
+    fn project(
+        &self,
+        fact: &gateway_admin::model::observability::UsageCalculatedBillingFact,
+    ) -> Result<
+        gateway_admin::model::observability::UsageBillingProjection,
+        gateway_admin::model::AdminError,
+    > {
+        Ok(
+            gateway_admin::model::observability::UsageBillingProjection {
+                standard_amount: Some(fact.total.amount.clone()),
+                no_cache_amount: Some(fact.total.amount.clone()),
+            },
+        )
     }
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseCard, BaseEmpty, BaseSegmented } from '@codex-proxy/ui'
+import { ZCard, ZEmpty, ZSegmented } from '@codex-proxy/ui'
 
 import { Box, CheckCircle2, Monitor, RefreshCw, ShieldCheck, Terminal, TriangleAlert } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
@@ -178,16 +178,16 @@ watch(
 </script>
 
 <template>
-  <BaseCard as="article" class="flex min-h-95 w-full flex-col">
+  <ZCard as="article" class="flex min-h-95 w-full flex-col">
     <template #header>
       <div class="flex min-w-0 flex-wrap items-start justify-between gap-3">
         <h2 class="m-0 pt-0.5 text-xl leading-[1.15] font-heavy text-cp-text text-balance">
           通用上游身份
         </h2>
         <div v-if="providerOptions.length > 1" class="min-w-0 max-w-full overflow-x-auto">
-          <BaseSegmented
+          <ZSegmented
             v-model="activeProvider"
-            label="上游平台"
+            aria-label="上游平台"
             :options="providerOptions"
             :style="{ width: `${providerOptions.length * 40 + 4}px` }"
             display="icon"
@@ -197,7 +197,7 @@ watch(
     </template>
 
     <template #body>
-      <BaseEmpty v-if="!profile" title="暂无请求身份" surface="inset" class="min-h-71.75 flex-1 place-content-center" />
+      <ZEmpty v-if="!profile" title="暂无请求身份" surface="inset" class="min-h-71.75 flex-1 place-content-center" />
 
       <div v-else class="flex flex-1">
         <section
@@ -303,5 +303,5 @@ watch(
         </section>
       </div>
     </template>
-  </BaseCard>
+  </ZCard>
 </template>

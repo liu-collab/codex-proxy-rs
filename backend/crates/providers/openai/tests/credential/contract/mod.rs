@@ -118,7 +118,6 @@ fn round_robin_attempt() -> AttemptContext {
         AccountSelectionPolicy::new(
             RotationStrategy::RoundRobin,
             NonZeroU32::new(2).expect("concurrency"),
-            Duration::ZERO,
         ),
         AccountAttemptContext::new(BTreeSet::new(), None, None)
             .with_account_scope(contract_account_scope()),
@@ -459,7 +458,6 @@ fn selector_uses_frozen_global_account_policy_for_lease() {
         lease.account().revision()
     );
     assert_eq!(requests[0].max_concurrent().get(), 2);
-    assert_eq!(requests[0].request_interval(), Duration::from_millis(10));
     assert_eq!(requests[0].deadline(), attempt.deadline());
 }
 
@@ -537,15 +535,64 @@ fn selector_reloads_quota_snapshot_before_acquiring_the_only_lease() {
         selected.account(),
         &store.account("acct_primary").expect("current account")
     );
-    assert_eq!(store.credential_loads(), 2);
+    assert_eq!(
+        store.credential_loads(),
+        1,
+        "observation-only quota updates must not restart selection"
+    );
     let requests = leases.requests.lock().expect("lease requests");
     assert_eq!(
         requests.len(),
         1,
-        "conflicted snapshots must never consume capacity or request interval"
+        "conflicted snapshots must never consume capacity"
     );
     assert_eq!(requests[0].max_concurrent().get(), 1);
-    assert_eq!(requests[0].request_interval(), Duration::from_millis(10));
+}
+
+#[test]
+fn selector_rejects_quota_exhaustion_observed_after_selection() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_primary", "at-primary");
+    let original = store.account("acct_primary").expect("account");
+    block_on(store.apply_quota_access(QuotaAccessChange {
+        account_id: original.id().clone(),
+        expected_revision: original.revision(),
+        state: QuotaState::allowed(SystemTime::now()),
+    }))
+    .expect("initial quota observation");
+    store.on_credential_load(Arc::new(|store, id, count| {
+        Box::pin(async move {
+            if count == 1 {
+                let account = store.account(id.as_str()).expect("account");
+                store
+                    .apply_quota_access(QuotaAccessChange {
+                        account_id: id.clone(),
+                        expected_revision: account.revision(),
+                        state: QuotaState::exhausted(
+                            QuotaEvidence::UsageLimitReached,
+                            SystemTime::now(),
+                            None,
+                        ),
+                    })
+                    .await?;
+            }
+            Ok(())
+        })
+    }));
+    let leases = Arc::new(TestLeaseCoordinator::default());
+    let selector = selector(&store, Arc::clone(&leases));
+    let attempt = attempt(BTreeSet::new());
+    let error = block_on(selector.select(&SelectCodexCredential {
+        upstream_model: "gpt-5.4",
+        request_url: &Url::parse("https://chatgpt.com/backend-api/codex/responses").expect("URL"),
+        attempt: &attempt,
+        session_affinity_key: None,
+    }))
+    .expect_err("quota exhaustion must still invalidate the selected snapshot");
+
+    assert!(matches!(error, CredentialSelectionError::QuotaExhausted));
+    assert_eq!(store.credential_loads(), 1);
+    assert!(leases.requests.lock().expect("lease requests").is_empty());
 }
 
 #[test]
@@ -1794,6 +1841,41 @@ fn cloudflare_path_block_deletes_provider_owned_cookies() {
 }
 
 #[test]
+fn stale_response_cookie_capture_reports_revision_conflict_and_preserves_newer_cookie() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_primary", "at-primary");
+    let selector = selector(&store, Arc::new(TestLeaseCoordinator::default()));
+    let origin = Url::parse("https://chatgpt.com/backend-api/codex/responses").unwrap();
+    let stale = store.account("acct_primary").unwrap();
+    block_on(selector.capture_response_cookies(
+        &stale,
+        &origin,
+        &["cf_clearance=newer; Path=/; Secure; Max-Age=3600".to_owned()],
+    ))
+    .unwrap();
+    let current = store.account("acct_primary").unwrap();
+
+    let error = block_on(selector.capture_response_cookies(
+        &stale,
+        &origin,
+        &["cf_clearance=older; Path=/; Secure; Max-Age=3600".to_owned()],
+    ))
+    .unwrap_err();
+
+    assert!(matches!(
+        error,
+        CredentialSelectionError::RevisionConflict(_)
+    ));
+    assert_eq!(error.to_string(), "Codex credential revision conflict");
+    assert_eq!(
+        store.account("acct_primary").unwrap().revision(),
+        current.revision()
+    );
+    let data = block_on(store.repository().load_complete_data(&current)).unwrap();
+    assert_eq!(data.cookies()[0].value, "newer");
+}
+
+#[test]
 fn response_cookie_rotation_returns_a_current_account_for_later_fenced_writes() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_primary", "at-primary");
@@ -1842,22 +1924,18 @@ fn queued_attempt(timeout: Duration) -> AttemptContext {
         ),
         NonZeroU32::new(1).unwrap(),
         SystemTime::now() + Duration::from_secs(5),
-        AccountSelectionPolicy::new(
-            RotationStrategy::Smart,
-            NonZeroU32::new(2).unwrap(),
-            Duration::ZERO,
-        )
-        .with_queue(gateway_core::concurrency::ConcurrencyQueuePolicy {
-            max_waiting: 1,
-            timeout,
-        })
-        .with_smart_scheduling(
-            gateway_core::account::SmartSchedulingConfig::new(
-                [1.0, 0.8, 1.0, 0.5, 1.0, 1.0],
-                false,
-            )
-            .unwrap(),
-        ),
+        AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(2).unwrap())
+            .with_queue(gateway_core::concurrency::ConcurrencyQueuePolicy {
+                max_waiting: 1,
+                timeout,
+            })
+            .with_smart_scheduling(
+                gateway_core::account::SmartSchedulingConfig::new(
+                    [1.0, 0.8, 1.0, 0.5, 1.0, 1.0],
+                    false,
+                )
+                .unwrap(),
+            ),
         AccountAttemptContext::new(BTreeSet::new(), None, None)
             .with_account_scope(contract_account_scope()),
         None,

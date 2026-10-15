@@ -18,12 +18,12 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
             ("grok-latest".to_owned(), "grok-4.5".to_owned()),
         ]),
         values: gateway_admin::model::settings::RuntimeSettingsValues {
+            codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),
             refresh_margin_seconds,
             refresh_concurrency: 2,
             max_concurrent_per_account: 3,
-            request_interval_ms: 50,
             max_waiting_per_key: 0,
             max_waiting_per_account: 0,
             concurrency_wait_timeout_seconds: 30,
@@ -56,6 +56,235 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
 fn runtime_settings_keep_account_rotation_global() {
     let settings = settings_with_margin(3_600);
     assert!(settings.validate().is_ok());
+}
+
+#[tokio::test]
+async fn removing_request_interval_preserves_settings_and_snapshot() {
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create_through("drop_interval", 29).await else {
+        return;
+    };
+    sqlx::query("update runtime_settings set request_interval_ms = 60000, max_concurrent_per_account = 7, refresh_concurrency = 12, refresh_margin_seconds = 1234, config_revision = 70 where id = 1")
+        .execute(&database.pool).await.unwrap();
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let column_exists: bool = sqlx::query_scalar("select exists(select 1 from information_schema.columns where table_schema = current_schema() and table_name = 'runtime_settings' and column_name = 'request_interval_ms')")
+        .fetch_one(&database.pool).await.unwrap();
+    assert!(!column_exists);
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    let settings = repository.load_runtime_settings().await.unwrap();
+    assert_eq!(settings.values.max_concurrent_per_account, 7);
+    assert_eq!(settings.values.refresh_concurrency, 12);
+    assert_eq!(settings.values.refresh_margin_seconds, 1234);
+    let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+        .load_runtime_snapshot()
+        .await
+        .unwrap();
+    assert!(
+        serde_json::to_value(snapshot.settings)
+            .unwrap()
+            .get("request_interval_ms")
+            .is_none()
+    );
+    repository
+        .update_runtime_settings(settings_with_margin(600))
+        .await
+        .unwrap();
+    assert_eq!(
+        repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .values
+            .refresh_margin_seconds,
+        600
+    );
+    database.close().await;
+}
+
+#[tokio::test]
+async fn privacy_policy_upgrade_defaults_off_and_round_trips_in_snapshot() {
+    use gateway_core::settings::privacy::*;
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create_through("privacy_policy", 25).await else {
+        return;
+    };
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    let before = repository.load_runtime_settings().await.unwrap();
+    assert_eq!(
+        before.values.codex_privacy_policy,
+        CodexPrivacyPolicy::default()
+    );
+    let mut update = settings_with_margin(300);
+    update.values.codex_privacy_policy = CodexPrivacyPolicy {
+        enabled: true,
+        on_error: PrivacyFailureMode::RejectRequest,
+        rules: vec![PrivacyRule {
+            id: "remove-auth".into(),
+            name: "配置者控制".into(),
+            enabled: true,
+            steps: vec![PrivacyStep {
+                scope: PrivacyScope::RequestHeader,
+                selector: "authorization".into(),
+                action: PrivacyAction::RemoveField,
+                pattern: None,
+                replacement: String::new(),
+                value: serde_json::Value::Null,
+                replace_all: true,
+                case_insensitive: false,
+                multi_line: false,
+            }],
+        }],
+    };
+    let expected = update.values.codex_privacy_policy.clone();
+    repository.update_runtime_settings(update).await.unwrap();
+    let after = repository.load_runtime_settings().await.unwrap();
+    assert_eq!(after.values.codex_privacy_policy, expected);
+    assert!(after.config_revision > before.config_revision);
+    let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+        .load_runtime_snapshot()
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(snapshot.settings).unwrap()["codex_privacy_policy"],
+        serde_json::to_value(expected).unwrap()
+    );
+    assert_eq!(
+        before.values.codex_privacy_policy,
+        CodexPrivacyPolicy::default()
+    );
+    database.close().await;
+}
+
+#[tokio::test]
+async fn privacy_steps_migration_preserves_rules_and_other_settings() {
+    let Some(database) = TestDatabase::create_through("privacy_steps", 30).await else {
+        return;
+    };
+    let legacy = serde_json::json!({
+        "enabled":true, "onError":"skip_rule", "rules":[
+            {"id":"first","name":"旧规则一","enabled":true,"scope":"request_header","selector":"x-private",
+             "action":"remove_field","pattern":null,"replacement":"","value":null,
+             "replaceAll":true,"caseInsensitive":false,"multiLine":false},
+            {"id":"second","name":"旧规则二","enabled":false,"scope":"request_body","selector":"$.owner",
+             "action":"regex_replace","pattern":"alice","replacement":"user","value":null,
+             "replaceAll":false,"caseInsensitive":true,"multiLine":true}
+        ]
+    });
+    let mut expected = serde_json::json!({
+        "enabled":true, "onError":"skip_rule", "rules":[
+            {"id":"first","name":"旧规则一","enabled":true,"steps":[
+                {"scope":"request_header","selector":"x-private","action":"remove_field",
+                 "pattern":null,"replacement":"","value":null,
+                 "replaceAll":true,"caseInsensitive":false,"multiLine":false}]},
+            {"id":"second","name":"旧规则二","enabled":false,"steps":[
+                {"scope":"request_body","selector":"$.owner","action":"regex_replace",
+                 "pattern":"alice","replacement":"user","value":null,
+                 "replaceAll":false,"caseInsensitive":true,"multiLine":true}]}
+        ]
+    });
+    // 同时包含聚合规则，迁移不能嵌套包装或拆散现有步骤
+    let canonical = serde_json::json!({
+        "id":"aggregate","name":"通用聚合规则","enabled":true,"steps":[
+            {"scope":"request_body","selector":"$.metadata","action":"set_value",
+             "pattern":null,"replacement":"","value":{"owner":"user","items":[1,2]},
+             "replaceAll":true,"caseInsensitive":false,"multiLine":false},
+            {"scope":"request_header","selector":"x-private","action":"remove_field",
+             "pattern":null,"replacement":"","value":null,
+             "replaceAll":true,"caseInsensitive":false,"multiLine":false}
+        ]
+    });
+    let mut mixed = legacy;
+    mixed["rules"]
+        .as_array_mut()
+        .unwrap()
+        .insert(1, canonical.clone());
+    expected["rules"]
+        .as_array_mut()
+        .unwrap()
+        .insert(1, canonical);
+    sqlx::query("update runtime_settings set codex_privacy_policy_json = $1, config_revision = 70, refresh_margin_seconds = 1234 where id = 1")
+        .bind(&mixed).execute(&database.pool).await.unwrap();
+    let mut expected_row: serde_json::Value =
+        sqlx::query_scalar("select to_jsonb(runtime_settings) from runtime_settings where id = 1")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    expected_row["codex_privacy_policy_json"] = expected.clone();
+
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let stored: serde_json::Value =
+        sqlx::query_scalar("select to_jsonb(runtime_settings) from runtime_settings where id = 1")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, expected_row);
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    let loaded = repository.load_runtime_settings().await.unwrap();
+    assert_eq!(
+        serde_json::to_value(&loaded.values.codex_privacy_policy).unwrap(),
+        expected
+    );
+    // 服务重启后再次检查迁移，不产生写入或额外嵌套
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let stored: serde_json::Value =
+        sqlx::query_scalar("select to_jsonb(runtime_settings) from runtime_settings where id = 1")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, expected_row);
+    let snapshot = gateway_store::postgres::RuntimeSnapshotRepository::load_runtime_snapshot(
+        &gateway_store::postgres::PgRuntimeSnapshotRepository::new(database.pool.clone()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        serde_json::to_value(snapshot.settings).unwrap()["codex_privacy_policy"],
+        expected
+    );
+    database.close().await;
+}
+
+#[tokio::test]
+async fn privacy_steps_migration_rejects_non_object_without_losing_data() {
+    let Some(database) = TestDatabase::create_through("privacy_invalid", 30).await else {
+        return;
+    };
+    let invalid = serde_json::json!({
+        "enabled":false,"onError":"reject_request","rules":[{},42]
+    });
+    sqlx::query("update runtime_settings set codex_privacy_policy_json = $1 where id = 1")
+        .bind(&invalid)
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    assert!(super::TEST_MIGRATOR.run(&database.pool).await.is_err());
+    let stored: serde_json::Value =
+        sqlx::query_scalar("select codex_privacy_policy_json from runtime_settings where id = 1")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    assert_eq!(stored, invalid);
+    let applied: bool =
+        sqlx::query_scalar("select exists(select 1 from _sqlx_migrations where version = 31)")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    assert!(!applied);
+    sqlx::query("update runtime_settings set codex_privacy_policy_json = jsonb_set(codex_privacy_policy_json, '{rules}', '[]') where id = 1")
+        .execute(&database.pool).await.unwrap();
+    super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    let loaded = PgRuntimeSettingsRepository::new(database.pool.clone())
+        .load_runtime_settings()
+        .await
+        .unwrap();
+    assert!(!loaded.values.codex_privacy_policy.enabled);
+    assert!(loaded.values.codex_privacy_policy.rules.is_empty());
+    assert_eq!(
+        loaded.values.codex_privacy_policy.on_error,
+        gateway_core::settings::privacy::PrivacyFailureMode::RejectRequest
+    );
+    database.close().await;
 }
 
 #[tokio::test]
@@ -178,7 +407,6 @@ async fn unlimited_default_account_concurrency_round_trips_without_relaxing_othe
         "update runtime_settings set max_concurrent_per_account = -1 where id = 1",
         "update runtime_settings set refresh_concurrency = 0 where id = 1",
         "update runtime_settings set refresh_margin_seconds = 0 where id = 1",
-        "update runtime_settings set request_interval_ms = -1 where id = 1",
     ] {
         let error = sqlx::query(statement)
             .execute(&database.pool)
@@ -1187,9 +1415,15 @@ async fn preferred_affinity_migration_defaults_to_strict_and_preserves_saved_mod
             .await
             .unwrap();
         let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
-        let mut update = settings_with_margin(3600);
-        update.values.openai_account_affinity = mode;
-        repository.update_runtime_settings(update).await.unwrap();
+        // 升级前只写当时已有列，现行 Repository 依赖完整迁移后的 schema
+        sqlx::query("update runtime_settings set openai_account_affinity = $1, config_revision = config_revision + 1, updated_at = now() where id = 1")
+            .bind(match mode {
+                AccountAffinity::Relaxed => "relaxed",
+                _ => "strict",
+            })
+            .execute(&database.pool)
+            .await
+            .unwrap();
         super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
         assert_eq!(
             repository

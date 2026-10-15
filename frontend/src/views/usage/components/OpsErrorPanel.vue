@@ -2,7 +2,7 @@
 import type { UsageTimeRangeParams } from '../composables/useUsageTimeRange'
 import type { OpsError } from '@/api'
 
-import { BaseIconButton, BaseInput, BaseTable, BaseTableColumnSettings, BaseTablePagination, useTableColumns } from '@codex-proxy/ui'
+import { useTableColumns, ZIconButton, ZInput, ZPagination, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
 import { Eye, RefreshCw, Search } from '@lucide/vue'
 import { shallowRef, toRef } from 'vue'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
@@ -92,7 +92,7 @@ function upstreamSendStateText(value: string | null | undefined) {
       aria-label="错误筛选与操作"
     >
       <div class="min-w-0 flex-1">
-        <BaseInput
+        <ZInput
           v-model="searchQuery"
           placeholder="请求 ID、密钥名称或账号"
           aria-label="搜索错误：请求 ID、密钥名称或账号"
@@ -101,20 +101,19 @@ function upstreamSendStateText(value: string | null | undefined) {
           <template #prefix>
             <Search class="size-4.5 text-cp-text-tertiary" />
           </template>
-        </BaseInput>
+        </ZInput>
       </div>
 
       <div class="flex shrink-0 self-end items-center justify-end gap-2 lg:ml-auto">
-        <BaseTableColumnSettings
+        <ZTableColumnSettings
           :options="columnOptions"
           @change="setColumnVisible"
           @reorder="setColumnOrder"
           @reset="resetColumns"
         />
-        <BaseIconButton
-          variant="ghost"
-          size="md"
-          label="刷新错误明细"
+        <ZIconButton
+          size="default"
+          aria-label="刷新错误明细"
           :loading="refreshing"
           :disabled="loading || refreshing"
           @click="handleRefresh"
@@ -123,7 +122,7 @@ function upstreamSendStateText(value: string | null | undefined) {
             <RefreshCw class="size-4.5 animate-spin motion-reduce:animate-none" />
           </template>
           <RefreshCw class="size-4.5" />
-        </BaseIconButton>
+        </ZIconButton>
       </div>
     </div>
 
@@ -131,11 +130,11 @@ function upstreamSendStateText(value: string | null | undefined) {
       <p v-if="error && !loading" role="alert" class="text-cp-sm text-cp-error-text">
         {{ error }}，请刷新重试
       </p>
-      <BaseTable
+      <ZTable
         v-else
         class="min-h-0 flex-1"
         :columns="visibleColumns"
-        :rows="records"
+        :data="records"
         :loading="loading"
         empty-text="当前时段没有错误"
       >
@@ -216,21 +215,20 @@ function upstreamSendStateText(value: string | null | undefined) {
           </span>
         </template>
         <template #actions="{ row }">
-          <BaseIconButton
-            variant="ghost"
-            size="md"
-            label="查看错误详情"
+          <ZIconButton
+            size="default"
+            aria-label="查看错误详情"
             @click="showDetail(row)"
           >
             <Eye class="size-4.5" />
-          </BaseIconButton>
+          </ZIconButton>
         </template>
-      </BaseTable>
-      <BaseTablePagination
-        :pagination="pagination"
-        :loading="loading"
-        @page-change="handlePageChange"
-        @page-size-change="handlePageSizeChange"
+      </ZTable>
+      <ZPagination
+        v-bind="pagination"
+        :disabled="loading"
+        @current-change="handlePageChange"
+        @size-change="handlePageSizeChange"
       />
     </div>
   </div>

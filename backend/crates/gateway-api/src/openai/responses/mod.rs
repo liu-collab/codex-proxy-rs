@@ -2,6 +2,7 @@
 
 mod error;
 mod http;
+mod keepalive;
 mod request;
 mod response;
 mod validation;

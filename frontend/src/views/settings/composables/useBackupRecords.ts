@@ -1,6 +1,6 @@
 import type { BackupRecord, BackupStatus } from '@/api'
 
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { computed, onScopeDispose, shallowRef } from 'vue'
 import {
   createBackup,
@@ -117,7 +117,7 @@ export function useBackupRecords() {
     creating.value = true
     try {
       await createBackup()
-      toast.success('备份任务已创建')
+      ZNotification.success({ message: '备份任务已创建' })
       await paged.execute({ silent: true })
     }
     catch {}
@@ -142,7 +142,7 @@ export function useBackupRecords() {
     }
     catch (cause) {
       if (!(cause instanceof ApiError))
-        toast.error(errorMessage(cause, '下载备份失败'))
+        ZNotification.error({ message: errorMessage(cause, '下载备份失败') })
     }
     finally {
       downloadStates.value = { ...downloadStates.value, [record.id]: false }
@@ -161,7 +161,7 @@ export function useBackupRecords() {
     deleting.value = true
     try {
       await deleteBackup({ backupId: target.id })
-      toast.success('已请求删除备份')
+      ZNotification.success({ message: '已请求删除备份' })
       await paged.execute({ silent: true })
     }
     catch {}

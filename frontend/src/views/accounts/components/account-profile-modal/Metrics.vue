@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountProfileStatisticsResponse } from '@/api'
-import { BaseSkeleton } from '@codex-proxy/ui'
+import { ZSkeleton } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import { formatCompactNumber, formatInteger } from '@/utils/format'
 
@@ -67,7 +67,7 @@ function formatDuration(value: number | null | undefined) {
     <dl class="grid min-w-130 grid-cols-5">
       <div v-for="metric in metrics" :key="metric.label" class="min-w-0 px-2 text-center sm:px-3">
         <dd class="m-0 font-mono text-cp-lg leading-tight font-heavy tabular-nums text-cp-text" :title="metric.title">
-          <BaseSkeleton v-if="loading && !profile" shape="text" class="mx-auto h-4 w-14" />
+          <ZSkeleton v-if="loading && !profile" shape="text" class="mx-auto h-4 w-14" />
           <template v-else>
             {{ metric.value }}
           </template>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
 
-import { BaseButton, BaseEmpty, BaseIconButton, BaseModal, BasePopover, BaseSegmented } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZEmpty, ZIconButton, ZPopover, ZSegmented } from '@codex-proxy/ui'
 import { ChartNoAxesCombined, CircleAlert, RefreshCw } from '@lucide/vue'
 import { useIntervalFn, useNow } from '@vueuse/core'
 import { computed, ref, toRef, useId, watch } from 'vue'
@@ -62,12 +62,12 @@ function handleExplanationKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="额度预测"
     description="按本周期估算，重置后重新累计"
-    size="md"
-    tone="info"
+    width="36rem"
+    type="info"
   >
     <template #icon>
       <ChartNoAxesCombined class="size-5 text-cp-primary-text" :stroke-width="1.75" />
@@ -80,23 +80,23 @@ function handleExplanationKeydown(event: KeyboardEvent) {
             <ProviderIconGroup :provider="account.provider" size="xs" />
           </template>
         </AccountIdentityCell>
-        <BaseSegmented v-model="period" label="预测周期" :options="options" class="w-48" />
+        <ZSegmented v-model="period" aria-label="预测周期" :options="options" class="w-48" />
       </div>
 
       <div aria-live="polite" :aria-busy="loading || refreshing">
         <ForecastSkeleton v-if="loading || refreshing" />
         <div v-else-if="error && !report" class="grid rounded-cp-card bg-cp-fill-tertiary/70 [html[data-theme=light]_&]:bg-cp-fill-quaternary/70">
-          <BaseEmpty title="预测加载失败" description="暂时无法取得预测数据，请重新加载" surface="none" class="min-h-80 content-center">
+          <ZEmpty title="预测加载失败" description="暂时无法取得预测数据，请重新加载" surface="none" class="min-h-80 content-center">
             <template #action>
-              <BaseButton variant="secondary" @click="load">
+              <ZButton @click="load">
                 重新加载
-              </BaseButton>
+              </ZButton>
             </template>
-          </BaseEmpty>
+          </ZEmpty>
         </div>
         <template v-else-if="forecast">
           <div v-if="unavailableReason" class="grid rounded-cp-card bg-cp-fill-tertiary/70 [html[data-theme=light]_&]:bg-cp-fill-quaternary/70">
-            <BaseEmpty title="暂时无法预测" :description="unavailableReason" :icon="ChartNoAxesCombined" surface="none" class="min-h-72 content-center" />
+            <ZEmpty title="暂时无法预测" :description="unavailableReason" :icon="ChartNoAxesCombined" surface="none" class="min-h-72 content-center" />
           </div>
           <ForecastCapacity v-else :forecast="forecast" />
         </template>
@@ -108,18 +108,17 @@ function handleExplanationKeydown(event: KeyboardEvent) {
         <span v-if="forecast?.source?.observedAt" class="hidden text-cp-xs text-cp-text-tertiary sm:block">
           更新于 {{ forecast.source.observedAtDisplay }}
         </span>
-        <BasePopover v-model="explanationOpen" trigger="hover-click" placement="top-start" :hover-delay="240">
-          <template #trigger>
-            <BaseIconButton
-              label="预测说明"
-              variant="ghost"
-              size="sm"
+        <ZPopover v-model="explanationOpen" trigger="hover-click" placement="top-start" :hover-delay="240">
+          <template #reference>
+            <ZIconButton
+              aria-label="预测说明"
+              size="small"
               :aria-expanded="explanationOpen"
               :aria-describedby="explanationOpen ? explanationId : undefined"
               @keydown="handleExplanationKeydown"
             >
               <CircleAlert class="size-3.5" aria-hidden="true" />
-            </BaseIconButton>
+            </ZIconButton>
           </template>
           <section :id="explanationId" role="tooltip" class="grid w-96 max-w-[calc(100vw-2rem)] gap-3 p-4 text-cp-xs leading-relaxed text-cp-text-secondary">
             <h4 class="m-0 font-heavy text-cp-text">
@@ -141,12 +140,12 @@ function handleExplanationKeydown(event: KeyboardEvent) {
               预测以数据更新时间为准，等价费用不是实际账单或账户余额
             </p>
           </section>
-        </BasePopover>
+        </ZPopover>
       </div>
-      <BaseButton variant="secondary" @click="open = false">
+      <ZButton @click="open = false">
         关闭
-      </BaseButton>
-      <BaseButton variant="primary" :loading="refreshing" :disabled="loading" @click="refresh">
+      </ZButton>
+      <ZButton type="primary" :loading="refreshing" :disabled="loading" @click="refresh">
         <template #loading>
           <RefreshCw class="size-3.5 motion-safe:animate-spin" />
         </template>
@@ -154,7 +153,7 @@ function handleExplanationKeydown(event: KeyboardEvent) {
           <RefreshCw class="size-3.5" />
         </template>
         刷新额度
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

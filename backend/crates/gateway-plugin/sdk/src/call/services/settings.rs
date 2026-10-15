@@ -16,14 +16,90 @@ pub type RotationStrategy = String;
 pub type AccountAffinity = String;
 pub type PricingOverrides = BTreeMap<String, BTreeMap<String, ModelPriceOverride>>;
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodexPrivacyPolicy {
+    pub enabled: bool,
+    pub on_error: PrivacyFailureMode,
+    pub rules: Vec<PrivacyRule>,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivacyFailureMode {
+    SkipRule,
+    RejectRequest,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivacyScope {
+    TurnMetadata,
+    DesktopGitContext,
+    EnvironmentText,
+    RequestBody,
+    RequestHeader,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PrivacyAction {
+    RegexReplace,
+    SetValue,
+    RenameKey,
+    RemoveField,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrivacyRule {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub steps: Vec<PrivacyStep>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrivacyStep {
+    pub scope: PrivacyScope,
+    pub selector: String,
+    pub action: PrivacyAction,
+    /// 删除动作的 null 表示无条件删除，字符串模式只匹配目标字符串值
+    pub pattern: Option<String>,
+    pub replacement: String,
+    pub value: serde_json::Value,
+    pub replace_all: bool,
+    pub case_insensitive: bool,
+    pub multi_line: bool,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyRuleOutcome {
+    pub rule_id: String,
+    pub matches: usize,
+    pub status: String,
+    pub reason: Option<String>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrivacyPreviewRequest {
+    pub policy: CodexPrivacyPolicy,
+    pub body: serde_json::Value,
+    pub headers: BTreeMap<String, Vec<String>>,
+    pub turn_metadata: Option<String>,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrivacyPreviewResult {
+    pub body: serde_json::Value,
+    pub headers: BTreeMap<String, Vec<String>>,
+    pub turn_metadata: Option<String>,
+    pub outcomes: Vec<PrivacyRuleOutcome>,
+}
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimeSettings {
+    pub codex_privacy_policy: CodexPrivacyPolicy,
     pub request_location_enabled: bool,
     pub request_location: RequestLocation,
     pub refresh_margin_seconds: u64,
     pub refresh_concurrency: u32,
     pub max_concurrent_per_account: u32,
-    pub request_interval_ms: u64,
     pub max_waiting_per_key: u32,
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
@@ -57,12 +133,12 @@ pub struct RuntimeSettings {
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReplaceRuntimeSettings {
+    pub codex_privacy_policy: CodexPrivacyPolicy,
     pub request_location_enabled: bool,
     pub request_location: RequestLocation,
     pub refresh_margin_seconds: u64,
     pub refresh_concurrency: u32,
     pub max_concurrent_per_account: u32,
-    pub request_interval_ms: u64,
     pub max_waiting_per_key: u32,
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
@@ -190,6 +266,12 @@ impl Operation for Load {
     type Input = ();
     type Output = RuntimeSettings;
 }
+pub struct PreviewPrivacyPolicy;
+impl Operation for PreviewPrivacyPolicy {
+    const NAME: &'static str = "settings.preview_privacy_policy";
+    type Input = PrivacyPreviewRequest;
+    type Output = PrivacyPreviewResult;
+}
 pub struct Replace;
 impl Operation for Replace {
     const NAME: &'static str = "settings.replace";
@@ -253,12 +335,12 @@ impl Operation for PreviewClientProfile {
 impl From<RuntimeSettings> for ReplaceRuntimeSettings {
     fn from(settings: RuntimeSettings) -> Self {
         Self {
+            codex_privacy_policy: settings.codex_privacy_policy,
             request_location_enabled: settings.request_location_enabled,
             request_location: settings.request_location,
             refresh_margin_seconds: settings.refresh_margin_seconds,
             refresh_concurrency: settings.refresh_concurrency,
             max_concurrent_per_account: settings.max_concurrent_per_account,
-            request_interval_ms: settings.request_interval_ms,
             max_waiting_per_key: settings.max_waiting_per_key,
             max_waiting_per_account: settings.max_waiting_per_account,
             concurrency_wait_timeout_seconds: settings.concurrency_wait_timeout_seconds,

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { useAccountConnectionTest } from '../composables/useAccountConnectionTest'
 
-import { BaseButton, BaseIconButton, BaseModal, BaseSelect } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZIconButton, ZSelect } from '@codex-proxy/ui'
 import { RefreshCw } from '@lucide/vue'
 import AccountStatusBadge from './account-status-badge/index.vue'
 import AccountIdentityCell from './AccountIdentityCell.vue'
@@ -42,12 +42,12 @@ function connectionLogClass(tone: string) {
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="测试连接"
     description="验证账号凭据、身份绑定与上游模型端点是否可用"
-    tone="info"
-    size="lg"
+    type="info"
+    width="48rem"
   >
     <div v-if="account" class="flex flex-col gap-4">
       <section
@@ -73,10 +73,9 @@ function connectionLogClass(tone: string) {
             <span class="text-cp-sm font-heavy text-cp-text-quaternary">
               测试模型
             </span>
-            <BaseIconButton
-              variant="ghost"
-              size="sm"
-              label="刷新上游模型"
+            <ZIconButton
+              size="small"
+              aria-label="刷新上游模型"
               :loading="refreshingModels"
               :disabled="status === 'running' || loadingModels"
               @click="emit('refreshModels')"
@@ -85,9 +84,9 @@ function connectionLogClass(tone: string) {
                 <RefreshCw class="size-3.5 animate-spin motion-reduce:animate-none" />
               </template>
               <RefreshCw class="size-3.5" />
-            </BaseIconButton>
+            </ZIconButton>
           </div>
-          <BaseSelect
+          <ZSelect
             v-model="selectedModel"
             aria-label="测试模型"
             :options="modelOptions"
@@ -212,17 +211,17 @@ function connectionLogClass(tone: string) {
     </div>
 
     <template #footer>
-      <BaseButton variant="secondary" @click="open = false">
+      <ZButton @click="open = false">
         关闭
-      </BaseButton>
-      <BaseButton
-        variant="primary"
+      </ZButton>
+      <ZButton
+        type="primary"
         :loading="status === 'running'"
         :disabled="!account || loadingModels || refreshingModels || !selectedModel"
         @click="emit('test')"
       >
         {{ logs.length > 0 || error ? '重新测试' : '开始测试' }}
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

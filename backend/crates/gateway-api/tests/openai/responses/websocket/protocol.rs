@@ -9,6 +9,30 @@ use serde_json::json;
 use super::decode_response_create;
 
 #[test]
+fn client_retry_identity_should_follow_each_frame_instead_of_handshake_metadata() {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-codex-turn-metadata",
+        HeaderValue::from_static(
+            r#"{"thread_id":"old-thread","turn_id":"old-turn","request_kind":"compaction"}"#,
+        ),
+    );
+    let headers = OpenAiRequestHeaders::from_headers(&headers);
+    for turn in ["turn-one", "turn-two"] {
+        let decoded = decode_response_create_with_context(&json!({
+            "type":"response.create", "model":"smart-code", "input":"hello",
+            "client_metadata": {"thread_id":"thread", "turn_id":turn, "x-codex-turn-metadata":r#"{"request_kind":"turn"}"#}
+        }).to_string(), &headers).unwrap();
+        let Operation::Generate(request) = decoded.operation() else {
+            panic!("generate");
+        };
+        let identity = request.client_turn().unwrap();
+        assert_eq!(identity.thread_id(), "thread");
+        assert_eq!(identity.turn_id(), turn);
+    }
+}
+
+#[test]
 fn response_create_should_carry_source_headers_to_provider_on_every_frame() {
     let mut headers = HeaderMap::new();
     for (name, value) in [

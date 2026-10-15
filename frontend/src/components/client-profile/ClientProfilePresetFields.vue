@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ClientProfilePreset, ClientProfilePreview, ClientProfileSelection, CustomClientProfileSelection, PresetClientProfileSelection } from '@/api/modules/settings/profiles'
-import { BaseFormItem, BaseInput, BaseSelect, BaseTextarea } from '@codex-proxy/ui'
+import { ZFormItem, ZInput, ZSelect, ZTextarea } from '@codex-proxy/ui'
 import { computed, shallowRef } from 'vue'
 
 const props = withDefaults(defineProps<{
@@ -115,11 +115,11 @@ const userAgent = computed({
 <template>
   <div class="grid gap-4">
     <div class="grid gap-4" :class="preset?.client === 'cli' && !custom ? 'sm:grid-cols-3' : 'sm:grid-cols-2'">
-      <BaseFormItem label="客户端预设">
-        <BaseSelect v-model="selectedPreset" class="w-full" :options="presetOptions" :placeholder="custom ? '使用自定义用户代理' : undefined" :disabled="disabled || custom || !presets.length" />
-      </BaseFormItem>
-      <BaseFormItem v-if="preset?.client === 'cli' && !custom" label="CLI 入口">
-        <BaseSelect
+      <ZFormItem label="客户端预设">
+        <ZSelect v-model="selectedPreset" class="w-full" :options="presetOptions" :placeholder="custom ? '使用自定义用户代理' : undefined" :disabled="disabled || custom || !presets.length" />
+      </ZFormItem>
+      <ZFormItem v-if="preset?.client === 'cli' && !custom" label="CLI 入口">
+        <ZSelect
           v-model="cliEntry"
           class="w-full"
           :options="[
@@ -129,9 +129,9 @@ const userAgent = computed({
           ]"
           :disabled="disabled"
         />
-      </BaseFormItem>
-      <BaseFormItem label="版本策略">
-        <BaseSelect
+      </ZFormItem>
+      <ZFormItem label="版本策略">
+        <ZSelect
           v-model="versionMode"
           class="w-full"
           :options="[
@@ -140,14 +140,14 @@ const userAgent = computed({
           ]"
           :disabled="disabled"
         />
-      </BaseFormItem>
+      </ZFormItem>
     </div>
     <p v-if="!custom && currentPreset?.reason" class="m-0 text-cp-sm text-cp-text-secondary">
       {{ currentPreset.reason }}
     </p>
     <div v-if="!custom" class="grid gap-4 sm:grid-cols-2">
-      <BaseFormItem label="版本滞后" :error="versionLagError">
-        <BaseInput
+      <ZFormItem label="版本滞后" :error="versionLagError">
+        <ZInput
           v-model="versionLag"
           aria-label="版本滞后"
           type="number"
@@ -158,10 +158,10 @@ const userAgent = computed({
           :placeholder="`滞后 1～${maxVersionLag} 个版本，留空不滞后`"
           :disabled="disabled"
         />
-      </BaseFormItem>
+      </ZFormItem>
       <div class="grid gap-4" :class="{ 'sm:grid-cols-2': preset?.client === 'desktop' }">
-        <BaseFormItem label="终端标识">
-          <BaseInput
+        <ZFormItem label="终端标识">
+          <ZInput
             v-model="terminal"
             :disabled="disabled"
             aria-label="终端标识"
@@ -171,9 +171,9 @@ const userAgent = computed({
             autocomplete="off"
             class="font-mono"
           />
-        </BaseFormItem>
-        <BaseFormItem v-if="preset?.client === 'desktop'" label="系统版本">
-          <BaseInput
+        </ZFormItem>
+        <ZFormItem v-if="preset?.client === 'desktop'" label="系统版本">
+          <ZInput
             v-model="osVersion"
             :disabled="disabled"
             aria-label="系统版本"
@@ -183,11 +183,11 @@ const userAgent = computed({
             autocomplete="off"
             class="font-mono"
           />
-        </BaseFormItem>
+        </ZFormItem>
       </div>
     </div>
     <template v-if="custom">
-      <BaseTextarea
+      <ZTextarea
         v-model="userAgent"
         :rows="3"
         :disabled="disabled || (!model?.mode && previewing)"

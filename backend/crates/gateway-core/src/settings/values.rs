@@ -10,6 +10,7 @@ use crate::identity::ProviderKind;
 pub struct SettingsValues {
     pub(crate) pricing: Arc<crate::metering::PricingOverrides>,
     pub(crate) request_profiles: Arc<BTreeMap<ProviderKind, crate::account::OpaqueProviderData>>,
+    pub(crate) codex_privacy_policy: super::privacy::CodexPrivacyPolicy,
     pub(crate) request_location_enabled: bool,
     pub(crate) request_location: crate::account::RequestLocation,
     pub(crate) max_concurrent_per_account: u32,
@@ -21,7 +22,6 @@ pub struct SettingsValues {
     pub(crate) max_account_rotations: u32,
     pub(crate) openai_session_affinity_ttl_hours: u32,
     pub(crate) responses_max_decompressed_body_bytes: u64,
-    pub(crate) request_interval_ms: u64,
     pub(crate) smart_scheduling: crate::account::SmartSchedulingConfig,
     pub(crate) rotation_strategy: String,
     pub(crate) model_mappings: Arc<BTreeMap<String, String>>,
@@ -30,6 +30,12 @@ pub struct SettingsValues {
 }
 
 impl SettingsValues {
+    #[must_use]
+    pub fn with_codex_privacy_policy(mut self, policy: super::privacy::CodexPrivacyPolicy) -> Self {
+        self.codex_privacy_policy = policy;
+        self
+    }
+
     #[must_use]
     pub const fn with_openai_session_affinity_ttl_hours(mut self, hours: u32) -> Self {
         self.openai_session_affinity_ttl_hours = hours;
@@ -122,7 +128,6 @@ impl SettingsValues {
     #[must_use]
     pub fn new(
         max_concurrent_per_account: u32,
-        request_interval_ms: u64,
         rotation_strategy: impl Into<String>,
         model_mappings: BTreeMap<String, String>,
         min_codex_desktop_version: Option<String>,
@@ -131,6 +136,7 @@ impl SettingsValues {
         Self {
             request_profiles: Arc::default(),
             pricing: Arc::default(),
+            codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: crate::account::RequestLocation::default(),
             max_concurrent_per_account,
@@ -142,7 +148,6 @@ impl SettingsValues {
             max_account_rotations: 3,
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
-            request_interval_ms,
             smart_scheduling: crate::account::SmartSchedulingConfig::default(),
             rotation_strategy: rotation_strategy.into(),
             model_mappings: Arc::new(model_mappings),

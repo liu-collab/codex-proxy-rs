@@ -14,6 +14,40 @@ use gateway_api::openai::error::{
 };
 
 #[tokio::test]
+async fn ordinary_upstream_rejections_preserve_status_body_and_client_retry_advice() {
+    use bytes::Bytes;
+    use gateway_core::error::ClientVisibleUpstreamResponse;
+    use gateway_core::event::ProviderResponseHeader;
+
+    let body = Bytes::from_static(br#"{ "error":{"code":"Vendor.Future.v2","type":"server_error","message":"original failure","future":9007199254740993} }"#);
+    for status in [400, 409, 500, 503, 504] {
+        let error = EngineError::Provider(
+            ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
+                .with_retry_prohibited()
+                .with_client_visible_upstream_response(
+                    ClientVisibleUpstreamResponse::new(
+                        status,
+                        Some(b"application/problem+json".to_vec()),
+                        body.clone(),
+                    )
+                    .with_headers(vec![ProviderResponseHeader::new(
+                        "retry-after",
+                        Bytes::from_static(b"17"),
+                    )]),
+                ),
+        );
+        let response = engine_error_response(&error);
+        assert_eq!(response.status().as_u16(), status);
+        assert_eq!(
+            response.headers()["content-type"],
+            "application/problem+json"
+        );
+        assert_eq!(response.headers()["retry-after"], "17");
+        assert_eq!(to_bytes(response.into_body(), 4096).await.unwrap(), body);
+    }
+}
+
+#[tokio::test]
 async fn capacity_errors_offer_client_retry_without_changing_upstream_facts() {
     use bytes::Bytes;
     use gateway_core::error::ClientVisibleUpstreamResponse;
@@ -226,6 +260,18 @@ fn rate_limited_error_should_map_to_openai_retryable_status() {
             "rate_limit_error",
             "rate_limit_exceeded",
         )
+    );
+}
+
+#[test]
+fn middleware_capacity_is_service_unavailable() {
+    assert_eq!(
+        gateway_error_contract(GatewayErrorKind::MiddlewareCapacityUnavailable),
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "server_error",
+            "middleware_capacity_unavailable"
+        ),
     );
 }
 
@@ -514,7 +560,7 @@ fn engine_store_error_should_collapse_to_safe_internal_error() {
 
     let projected = gateway_error_from_engine(&error);
     assert_eq!(projected.kind(), GatewayErrorKind::Internal);
-    assert_eq!(projected.safe_message(), "gateway execution failed");
+    assert_eq!(projected.safe_message(), "request execution failed");
 }
 #[test]
 fn openai_error_response_should_preserve_only_safe_contract_fields() {

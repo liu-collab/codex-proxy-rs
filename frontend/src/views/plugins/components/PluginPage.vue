@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseButton, BaseEmpty, BaseIconButton, BasePageHeader, BaseSegmented } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZIconButton, ZPageHeader, ZSegmented } from '@codex-proxy/ui'
 import { Blocks, CircleAlert, RefreshCw } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
 import { computed, onMounted, shallowRef } from 'vue'
@@ -62,23 +62,23 @@ onMounted(() => {
 
 <template>
   <div class="flex min-w-0 w-full flex-col gap-5">
-    <BasePageHeader
+    <ZPageHeader
       :title="page?.title ?? '插件页面'"
       :description="page?.description || (view ? `使用插件提供的功能，当前配置为「${view.name}」` : '加载已启用插件的管理页面')"
     >
       <template #actions>
-        <BaseIconButton label="刷新页面" variant="secondary" :loading="loading" @click="refreshDirectory">
+        <ZIconButton aria-label="刷新页面" variant="solid" :loading="loading" @click="refreshDirectory">
           <template #loading>
             <RefreshCw class="size-4 animate-spin motion-reduce:animate-none" />
           </template>
           <RefreshCw class="size-4" />
-        </BaseIconButton>
+        </ZIconButton>
       </template>
-    </BasePageHeader>
+    </ZPageHeader>
 
     <PluginPageLoading v-if="loading && !loaded" />
 
-    <BaseEmpty
+    <ZEmpty
       v-else-if="!view || !page"
       class="min-h-0 flex-1 content-center"
       :icon="Blocks"
@@ -86,11 +86,11 @@ onMounted(() => {
       :description="loadError || '该配置或页面未发布，可能已停用或切换版本'"
     >
       <template #action>
-        <BaseButton variant="secondary" @click="router.push('/plugins')">
+        <ZButton @click="router.push('/plugins')">
           返回插件管理
-        </BaseButton>
+        </ZButton>
       </template>
-    </BaseEmpty>
+    </ZEmpty>
 
     <div
       v-else-if="loadError"
@@ -101,19 +101,19 @@ onMounted(() => {
       <p class="m-0 min-w-0 flex-1 text-cp-sm font-semibold">
         页面目录刷新失败，当前显示上次成功加载的版本：{{ loadError }}
       </p>
-      <BaseButton size="sm" variant="secondary" :loading="loading" @click="refreshDirectory">
+      <ZButton size="small" :loading="loading" @click="refreshDirectory">
         重试
-      </BaseButton>
+      </ZButton>
     </div>
 
     <section v-if="view && page" class="flex min-w-0 flex-col gap-4">
-      <BaseSegmented
+      <ZSegmented
         v-if="view.pages.length > 1"
         v-model="selectedPageId"
         class="w-max max-w-full shrink-0 overflow-x-auto"
         :options="pageOptions"
-        label="插件页面"
-        size="sm"
+        aria-label="插件页面"
+        size="small"
       />
       <PluginManagementFrame
         :key="frameKey"

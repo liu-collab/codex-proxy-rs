@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { dashboardSnapshotView, dashboardTrendView } from '../presenter'
 import type { DashboardTrendKind } from '@/api/modules/dashboard'
-import { BaseIconButton, BasePageHeader } from '@codex-proxy/ui'
+import { ZIconButton, ZPageHeader } from '@codex-proxy/ui'
 
 import { RefreshCw } from '@lucide/vue'
 
@@ -22,6 +22,8 @@ withDefaults(
     refreshing?: boolean
     lastRefreshedAt?: string
     metrics: DashboardSnapshotView['metrics']
+    analytics: DashboardSnapshotView['analytics']
+    analyticsError?: string
     trendPoints: DashboardTrendView['points']
     trendSummary: DashboardTrendView['summary']
     trendLoading?: boolean
@@ -38,6 +40,7 @@ withDefaults(
     loading: false,
     refreshing: false,
     lastRefreshedAt: '',
+    analyticsError: '',
     trendLoading: false,
     trendError: '',
   },
@@ -53,16 +56,16 @@ const trendKind = defineModel<DashboardTrendKind>('trendKind', { required: true 
 
 <template>
   <div class="w-full">
-    <BasePageHeader title="系统概览">
+    <ZPageHeader title="系统概览">
       <template #description>
         <span>当日统计</span>
         <DashboardHeartbeat :updated-at="lastRefreshedAt" />
       </template>
       <template #actions>
-        <BaseIconButton
+        <ZIconButton
           class="text-cp-primary-text"
-          size="md"
-          label="刷新概览"
+          size="default"
+          aria-label="刷新概览"
           :loading="loading || refreshing"
           :disabled="loading || refreshing"
           @click="emit('refresh')"
@@ -71,41 +74,47 @@ const trendKind = defineModel<DashboardTrendKind>('trendKind', { required: true 
             <RefreshCw class="animate-spin motion-reduce:animate-none" :size="19" />
           </template>
           <RefreshCw :size="19" />
-        </BaseIconButton>
+        </ZIconButton>
       </template>
-    </BasePageHeader>
+    </ZPageHeader>
 
-    <section
-      class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4 2xl:gap-6"
-      aria-label="核心指标"
-    >
-      <MetricCard v-for="metric in metrics" :key="metric.title" :metric="metric" />
-    </section>
+    <p v-if="analyticsError" class="mt-4 text-cp-sm text-cp-warning-text" role="alert">
+      {{ analytics ? '刷新失败，显示上次统计' : '统计暂不可用，请稍后重试' }}
+    </p>
 
-    <section
-      class="mt-6 grid grid-cols-1 gap-6 2xl:grid-cols-[minmax(0,948fr)_minmax(0,608fr)] 2xl:gap-7"
-    >
-      <RequestTrendCard
-        v-model:kind="trendKind"
-        :points="trendPoints"
-        :summary="trendSummary"
-        :loading="trendLoading"
-        :error="trendError"
-        @trend-change="emit('trendChange', $event)"
+    <template v-if="!analyticsError || analytics">
+      <section
+        class="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4 2xl:gap-6"
+        aria-label="核心指标"
+      >
+        <MetricCard v-for="metric in metrics" :key="metric.title" :metric="metric" />
+      </section>
+
+      <section
+        class="mt-6 grid grid-cols-1 gap-6 2xl:grid-cols-[minmax(0,948fr)_minmax(0,608fr)] 2xl:gap-7"
+      >
+        <RequestTrendCard
+          v-model:kind="trendKind"
+          :points="trendPoints"
+          :summary="trendSummary"
+          :loading="trendLoading"
+          :error="trendError"
+          @trend-change="emit('trendChange', $event)"
+        />
+        <WireProfileCard :profiles="wireProfiles" />
+      </section>
+
+      <AccountOverviewCard
+        :accounts="accountUsage"
+        :pool="poolSummary"
+        :capacity="capacityInfo"
+        :rotation-strategy="rotationStrategy"
+        class="mt-6"
       />
-      <WireProfileCard :profiles="wireProfiles" />
-    </section>
 
-    <AccountOverviewCard
-      :accounts="accountUsage"
-      :pool="poolSummary"
-      :capacity="capacityInfo"
-      :rotation-strategy="rotationStrategy"
-      class="mt-6"
-    />
+      <RequestHealthTimelineCard :timeline="healthTimeline" class="mt-6" />
 
-    <RequestHealthTimelineCard :timeline="healthTimeline" class="mt-6" />
-
-    <UsageRecordCard :rows="usageRecords" class="mt-6" />
+      <UsageRecordCard :rows="usageRecords" class="mt-6" />
+    </template>
   </div>
 </template>

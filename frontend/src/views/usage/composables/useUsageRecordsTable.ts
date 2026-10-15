@@ -1,5 +1,6 @@
 import type { Ref } from 'vue'
 import type { UsageTimeRangeParams } from './useUsageTimeRange'
+import type { AnalyticsMetadata } from '@/api/modules/analytics'
 
 import { computed, onMounted, onScopeDispose, shallowRef, watch } from 'vue'
 import {
@@ -18,10 +19,10 @@ interface UseUsageRecordsTableOptions {
 }
 
 type UsageLoadScope = 'all' | 'table'
+type LoadingAnalytics<T> = Omit<T, 'analytics'> & { analytics: AnalyticsMetadata | null }
 
 interface UsageLoadOptions {
   scope?: UsageLoadScope
-  background?: boolean
 }
 
 export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
@@ -70,18 +71,18 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   }
 
   async function loadUsageRecords(loadOptions: UsageLoadOptions = {}) {
-    const { scope = 'all', background = false } = loadOptions
+    const { scope = 'all' } = loadOptions
     const globalParams = scopedParams()
     if (scope === 'all')
       resetTable()
 
     await Promise.all([
       ...(options.active.value ? [table.execute()] : []),
-      ...(scope === 'all' ? [loadUsageAnalytics(globalParams, background)] : []),
+      ...(scope === 'all' ? [loadUsageAnalytics(globalParams)] : []),
     ])
   }
 
-  async function loadUsageAnalytics(globalParams: ReturnType<typeof scopedParams>, background: boolean) {
+  async function loadUsageAnalytics(globalParams: ReturnType<typeof scopedParams>) {
     const requestId = ++analyticsRequestId
     const diagnosticsId = ++diagnosticRequestId
     analyticsController?.abort()
@@ -89,7 +90,9 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
     analyticsController = new AbortController()
     const requestOptions = { signal: analyticsController.signal }
     const dimension = diagnosticDimension.value
-    analyticsLoading.value = !background
+    analyticsLoading.value = true
+    summary.value = emptySummary()
+    insights.value = emptyInsights()
     try {
       const [nextSummary, overview, diagnostics] = await Promise.all([
         getUsageRecordSummary(globalParams, requestOptions),
@@ -111,7 +114,12 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
             : insights.value.diagnostics,
       }
     }
-    catch {}
+    catch {
+      if (requestId === analyticsRequestId) {
+        summary.value = emptySummary()
+        insights.value = emptyInsights()
+      }
+    }
     finally {
       if (requestId === analyticsRequestId) {
         analyticsLoading.value = false
@@ -183,7 +191,7 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
   })
 
   watch(providerQuery, () => {
-    void loadUsageRecords({ background: true })
+    void loadUsageRecords()
   })
 
   watch(options.active, (active) => {
@@ -232,12 +240,13 @@ export function useUsageRecordsTable(options: UseUsageRecordsTableOptions) {
 }
 
 function emptySummary() {
-  const summary: Awaited<ReturnType<typeof getUsageRecordSummary>> = {
+  const summary: LoadingAnalytics<Awaited<ReturnType<typeof getUsageRecordSummary>>> = {
+    analytics: null,
     totalRequests: '0',
     inputTokens: '0',
     outputTokens: '0',
-    cachedTokens: '0',
-    cacheWriteTokens: '0',
+    cachedInputTokens: '0',
+    cacheWriteInputTokens: '0',
     totalTokens: '0',
     averageLatencyMs: '0 ms',
   }
@@ -252,7 +261,8 @@ function emptyInsights() {
 }
 
 function emptyOverview() {
-  const overview: Awaited<ReturnType<typeof getUsageRecordInsightsOverview>> = {
+  const overview: LoadingAnalytics<Awaited<ReturnType<typeof getUsageRecordInsightsOverview>>> = {
+    analytics: null,
     granularity: '1d',
     health: {
       totalRequests: 0,
@@ -303,7 +313,7 @@ function emptyOverview() {
       cacheHitRequestRate: 0,
       inputTokens: 0,
       outputTokens: 0,
-      cachedTokens: 0,
+      cachedInputTokens: 0,
       totalTokens: 0,
       points: [],
       coverage: { known: 0, partial: 0, unknown: 0, notBillable: 0 },
@@ -313,7 +323,8 @@ function emptyOverview() {
 }
 
 function emptyDiagnostics() {
-  const diagnostics: Awaited<ReturnType<typeof getUsageRecordInsightsDiagnostics>> = {
+  const diagnostics: LoadingAnalytics<Awaited<ReturnType<typeof getUsageRecordInsightsDiagnostics>>> = {
+    analytics: null,
     dimension: 'model',
     items: [],
   }

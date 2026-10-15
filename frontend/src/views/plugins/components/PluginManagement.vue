@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ArrowInDownSquareHalf } from '@boxicons/vue'
-import { BaseCheckbox, BaseConfirmModal, BaseIconButton, BasePageHeader, BaseScrollbar, BaseSegmented } from '@codex-proxy/ui'
+import { ZCheckbox, ZConfirmDialog, ZIconButton, ZPageHeader, ZScrollbar, ZSegmented } from '@codex-proxy/ui'
 
 import { PackageOpen, PanelsTopLeft, RefreshCw } from '@lucide/vue'
 import { shallowRef } from 'vue'
@@ -26,27 +26,27 @@ const tabOptions = [
 
 <template>
   <div class="flex h-[calc(100dvh-2rem)] min-h-0 w-full flex-none! flex-col gap-3 overflow-hidden min-[961px]:h-[calc(100dvh-3rem)]">
-    <BasePageHeader title="插件管理" description="管理插件、版本和扩展页面" />
+    <ZPageHeader title="插件管理" description="管理插件、版本和扩展页面" />
 
     <div class="flex shrink-0 items-start gap-3">
-      <BaseScrollbar horizontal :vertical="false" height="var(--cp-control-height)" class="min-w-0">
-        <BaseSegmented
+      <ZScrollbar horizontal :vertical="false" height="var(--cp-control-height)" class="min-w-0">
+        <ZSegmented
           v-model="activeTab"
           :options="tabOptions"
-          label="插件管理分区"
+          aria-label="插件管理分区"
           class="w-44"
         />
-      </BaseScrollbar>
+      </ZScrollbar>
       <div class="flex shrink-0 items-center gap-1">
-        <BaseIconButton label="安装插件" variant="secondary" @click="management.openInstall('upload')">
+        <ZIconButton aria-label="安装插件" variant="solid" @click="management.openInstall('upload')">
           <ArrowInDownSquareHalf pack="filled" class="size-5" />
-        </BaseIconButton>
-        <BaseIconButton label="刷新插件" variant="secondary" :loading="management.loading.value" @click="management.refresh()">
+        </ZIconButton>
+        <ZIconButton aria-label="刷新插件" variant="solid" :loading="management.loading.value" @click="management.refresh()">
           <template #loading>
             <RefreshCw class="size-4.5 animate-spin motion-reduce:animate-none" />
           </template>
           <RefreshCw class="size-4.5" />
-        </BaseIconButton>
+        </ZIconButton>
       </div>
     </div>
 
@@ -132,7 +132,7 @@ const tabOptions = [
       @save="management.saveInstance"
     />
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="management.showVersionSwitch.value"
       title="切换插件版本"
       description="切换前会检查目标版本设置，失败时保留当前版本"
@@ -144,7 +144,7 @@ const tabOptions = [
         {{ management.pendingVersionSwitch.value?.artifact.metadata.displayName }}：
         {{ management.pendingVersionSwitch.value?.currentVersion }} → {{ management.pendingVersionSwitch.value?.artifact.metadata.version }}
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
 
     <PluginRollbackModal
       v-model="management.showRollback.value"
@@ -165,7 +165,7 @@ const tabOptions = [
       @confirm="management.confirmInstanceEnable"
     />
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="management.showArtifactDelete.value"
       title="删除插件版本"
       description="使用中的版本不可删除，删除版本也会清除对应的恢复设置"
@@ -196,9 +196,9 @@ const tabOptions = [
       <p class="mt-3 mb-0 text-cp-xs font-normal text-cp-text-secondary">
         同时清理独用下载认证，最后一版还会清理来源
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="management.showInstanceDelete.value"
       title="删除插件配置"
       description="配置、密钥与私有数据将永久删除"
@@ -215,9 +215,9 @@ const tabOptions = [
           无法恢复，已安装版本与其他配置不受影响
         </p>
       </div>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="management.uninstall.open.value"
       title="卸载插件"
       description="删除全部版本、配置、密钥与私有数据"
@@ -247,14 +247,14 @@ const tabOptions = [
             </p>
           </PluginHelpPopover>
         </div>
-        <BaseCheckbox v-model="management.uninstall.acknowledged.value" label="确认永久删除，无法恢复" show-label :disabled="management.uninstall.busy.value" />
+        <ZCheckbox v-model="management.uninstall.acknowledged.value" label="确认永久删除，无法恢复" :disabled="management.uninstall.busy.value" />
         <p v-if="management.uninstall.progress.value" role="status" class="m-0 text-cp-xs text-cp-text-secondary">
           {{ management.uninstall.progress.value }}
         </p>
       </div>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="management.showCredentialDelete.value"
       title="删除下载认证"
       description="仍被使用时不可删除，删除后无法恢复"
@@ -266,6 +266,6 @@ const tabOptions = [
       <p class="m-0 wrap-anywhere text-cp-sm font-normal">
         {{ management.pendingCredential.value?.name }}
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
   </div>
 </template>

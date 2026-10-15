@@ -129,9 +129,6 @@ const WEBSOCKET_TRANSPORT: &str = "websocket";
 // 在已观测到的 Codex OAuth 上游 16 MiB 附近消息边界前留出传输 metadata 余量
 const WEBSOCKET_HTTP_FALLBACK_THRESHOLD_BYTES: usize = 15 * 1024 * 1024;
 const MAX_COOKIE_HEADER_BYTES: usize = 16 * 1024;
-/// 短暂保留 response.created 等结构事件，让随后到达的明确拒绝可以无感换号；
-/// 到期即放行，避免模型长时间思考时让客户端一直收不到首事件
-const STREAM_REPLAY_GRACE: Duration = Duration::from_millis(2_500);
 // 额度拒绝后的 usage 补查自身执行时长上限；结算等待的随机延迟见 jitter 模块
 const QUOTA_FAILURE_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
 pub const OFFICIAL_CODEX_BASE_PATH: &str = "/backend-api";
@@ -389,6 +386,16 @@ impl fmt::Debug for CodexProvider {
 
 #[async_trait]
 impl Provider for CodexProvider {
+    fn compile_privacy_policy(
+        &self,
+        policy: &gateway_core::settings::privacy::CodexPrivacyPolicy,
+    ) -> Result<
+        Arc<dyn gateway_core::settings::privacy::CompiledPrivacyPolicy>,
+        gateway_core::settings::privacy::PrivacyError,
+    > {
+        crate::transport::privacy::compile(policy)
+    }
+
     fn resolve_request_profile(
         &self,
         configuration: &gateway_core::account::OpaqueProviderData,
@@ -1061,6 +1068,9 @@ impl CodexProvider {
                 provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
             })?,
         )
+        .with_account_snapshot(Some(
+            gateway_core::account::AccountHistorySnapshot::from_account(lease.account()),
+        ))
         .with_selection_observation(ProviderSelectionObservation::new(
             account_selection_wait_ms,
             lease.capacity_snapshot(),
@@ -1096,7 +1106,8 @@ impl CodexProvider {
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
                 .with_connection_budget(context.connection_budget().clone())
                 .with_response_control(context.response_control().cloned())
-                .with_middleware_headers(middleware_headers),
+                .with_middleware_headers(middleware_headers)
+                .with_privacy(context.privacy(), context.cancellation().clone()),
             response_origin: self.responses_url.clone(),
             request: upstream_request,
             upstream_model,

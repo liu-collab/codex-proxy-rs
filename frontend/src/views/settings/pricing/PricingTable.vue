@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import type { BaseTableColumn } from '@codex-proxy/ui'
+import type { TableColumn } from '@codex-proxy/ui'
 import type { PricingRow } from './model'
-import { BaseCheckbox, BaseIconButton, BaseTable } from '@codex-proxy/ui'
+import { ZCheckbox, ZIconButton, ZTable } from '@codex-proxy/ui'
 import { Pencil, Trash2 } from '@lucide/vue'
 import { effectivePrice, multiplierText, sourceLabels } from './model'
 import PricingUnit from './PricingUnit.vue'
 
 defineProps<{ rows: PricingRow[], selected: string[], loading: boolean, disabled: boolean }>()
 defineEmits<{ toggle: [model: string, checked: boolean], togglePage: [checked: boolean], edit: [row: PricingRow], delete: [row: PricingRow] }>()
-const columns: BaseTableColumn<PricingRow>[] = [
+const columns: TableColumn<PricingRow>[] = [
   { key: 'select', kind: 'selection' },
   { key: 'model', label: '模型', kind: 'identity' },
   { key: 'input', label: '输入', kind: 'numeric' },
@@ -24,12 +24,12 @@ function summaryBand(row: PricingRow) {
 </script>
 
 <template>
-  <BaseTable :columns="columns" :rows="rows" row-key="model" :loading="loading" :selected-row-keys="selected" empty-text="没有匹配的模型" show-header-when-empty>
+  <ZTable class="[--cp-table-row-height:50px]" :columns="columns" :data="rows" row-key="model" :loading="loading" :selected-row-keys="selected" empty-text="没有匹配的模型" show-header-when-empty>
     <template v-if="$slots.empty" #empty>
       <slot name="empty" />
     </template>
     <template #header-select>
-      <BaseCheckbox label="选择本页模型" :disabled="disabled || !rows.length" :model-value="!!rows.length && rows.every(row => selected.includes(row.model))" :indeterminate="rows.some(row => selected.includes(row.model)) && !rows.every(row => selected.includes(row.model))" @update:model-value="$emit('togglePage', $event)" />
+      <ZCheckbox aria-label="选择本页模型" :disabled="disabled || !rows.length" :model-value="!!rows.length && rows.every(row => selected.includes(row.model))" :indeterminate="rows.some(row => selected.includes(row.model)) && !rows.every(row => selected.includes(row.model))" @update:model-value="$emit('togglePage', $event)" />
     </template>
     <template #header-model>
       <div class="flex items-center gap-3">
@@ -38,7 +38,7 @@ function summaryBand(row: PricingRow) {
       </div>
     </template>
     <template #select="{ row }">
-      <BaseCheckbox :label="`选择 ${row.model}`" :disabled="disabled" :model-value="selected.includes(row.model)" @update:model-value="$emit('toggle', row.model, $event)" />
+      <ZCheckbox :aria-label="`选择 ${row.model}`" :disabled="disabled" :model-value="selected.includes(row.model)" @update:model-value="$emit('toggle', row.model, $event)" />
     </template>
     <template #model="{ row }">
       <div class="min-w-0 py-1.5">
@@ -69,13 +69,13 @@ function summaryBand(row: PricingRow) {
     </template>
     <template #actions="{ row }">
       <div class="flex items-center gap-1">
-        <BaseIconButton size="sm" label="编辑价格" :disabled="disabled" @click="$emit('edit', row)">
+        <ZIconButton size="small" aria-label="编辑价格" :disabled="disabled" @click="$emit('edit', row)">
           <Pencil class="size-3.5 text-cp-link" aria-hidden="true" />
-        </BaseIconButton>
-        <BaseIconButton v-if="row.canDelete" size="sm" label="删除价目" :disabled="disabled" @click="$emit('delete', row)">
+        </ZIconButton>
+        <ZIconButton v-if="row.canDelete" size="small" aria-label="删除价目" :disabled="disabled" @click="$emit('delete', row)">
           <Trash2 class="size-3.5 text-cp-error" aria-hidden="true" />
-        </BaseIconButton>
+        </ZIconButton>
       </div>
     </template>
-  </BaseTable>
+  </ZTable>
 </template>

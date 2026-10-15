@@ -49,8 +49,8 @@ export function resolveAccountCreatePresentation(input: {
     modal: {
       title: configuring ? '账号设置' : input.reauthorizing ? '重新授权账号' : '导入账号',
       description: configuring ? '设置将应用于本次导入的账号' : input.reauthorizing ? '完成授权后更新账号凭据' : description,
-      tone: configuring ? 'neutral' as const : 'info' as const,
-      size: configuring ? 'md-wide' as const : 'md' as const,
+      type: configuring ? 'default' as const : 'info' as const,
+      width: configuring ? '42rem' : '36rem',
     },
     oauth: {
       callbackLabel: id === 'xai' ? '回调地址或授权码' : '回调地址',

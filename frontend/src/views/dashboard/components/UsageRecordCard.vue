@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { dashboardSnapshotView } from '../presenter'
 
-import { BaseCard } from '@codex-proxy/ui'
+import { ZCard } from '@codex-proxy/ui'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
 
@@ -17,7 +17,7 @@ const dashboardUsageRecordColumns = usageRecordColumns.filter(
 </script>
 
 <template>
-  <BaseCard
+  <ZCard
     as="article"
     title="使用记录"
     description="最近 10 条成功请求"
@@ -33,5 +33,5 @@ const dashboardUsageRecordColumns = usageRecordColumns.filter(
         />
       </div>
     </template>
-  </BaseCard>
+  </ZCard>
 </template>

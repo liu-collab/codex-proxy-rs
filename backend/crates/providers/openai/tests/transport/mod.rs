@@ -62,6 +62,7 @@ mod input_guard;
 mod json_literal;
 mod latency;
 mod local_compaction;
+pub(crate) mod privacy;
 mod profile;
 mod profile_avatar;
 mod profile_contract;

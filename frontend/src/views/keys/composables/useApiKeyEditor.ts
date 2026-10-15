@@ -1,6 +1,6 @@
 import type { ApiKey } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { cloneDeep } from 'es-toolkit'
 import { ref, shallowRef } from 'vue'
 import { createApiKey, updateApiKey } from '@/api'
@@ -105,11 +105,11 @@ export function useApiKeyEditor(options: {
         showFormModal.value = false
         await options.reload()
         if (current) {
-          toast.success('API Key 已更新')
+          ZNotification.success({ message: 'API Key 已更新' })
         }
         else if (created) {
           options.onCreated(created.key, created.name)
-          toast.success('API Key 创建成功')
+          ZNotification.success({ message: 'API Key 创建成功' })
         }
       },
       { onError: () => void options.reload() },
@@ -119,16 +119,16 @@ export function useApiKeyEditor(options: {
   function validateForm() {
     for (const [label, value] of [['日限额', form.value.dailyLimitUsd], ['周限额', form.value.weeklyLimitUsd]]) {
       if (value.trim() && !/^\d{1,10}(?:\.\d{1,10})?$/.test(value.trim())) {
-        toast.warning(`${label}必须是非负金额，最多 10 位小数`)
+        ZNotification.warning({ message: `${label}必须是非负金额，最多 10 位小数` })
         return false
       }
     }
     if (!form.value.name.trim()) {
-      toast.warning('请输入 API Key 名称')
+      ZNotification.warning({ message: '请输入 API Key 名称' })
       return false
     }
     if (!editingKey.value && form.value.customKey && !/^[\x21-\x7E]+$/.test(form.value.customKey)) {
-      toast.warning('自定义 Key 只能包含 HTTP 可传输的可见字符，不能包含空格或换行')
+      ZNotification.warning({ message: '自定义 Key 只能包含 HTTP 可传输的可见字符，不能包含空格或换行' })
       return false
     }
     for (const [label, value] of [
@@ -137,7 +137,7 @@ export function useApiKeyEditor(options: {
     ] as const) {
       const parsed = Number(value)
       if (!Number.isSafeInteger(parsed) || parsed < 0) {
-        toast.warning(`${label}必须是非负整数`)
+        ZNotification.warning({ message: `${label}必须是非负整数` })
         return false
       }
     }

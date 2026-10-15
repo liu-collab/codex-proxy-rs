@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PricingRow } from './model'
 import type { ModelPricing, PriceBand, TokenPrices } from '@/api'
-import { BaseButton, BaseFormItem, BaseInput, BaseModal, BasePopover, BaseSegmented, BaseSelect } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZFormItem, ZInput, ZPopover, ZSegmented, ZSelect } from '@codex-proxy/ui'
 import { Info } from '@lucide/vue'
 import { computed, ref, shallowRef, useId, watch } from 'vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
@@ -32,7 +32,7 @@ const priceMode = computed({
 const bandOptions = computed(() => bands
   .filter(band => props.row?.base.bands.image
     ? ['standard', 'image'].includes(band.value)
-    : props.provider !== 'xai' || !['flex', 'long_flex', 'image'].includes(band.value))
+    : props.provider !== 'xai' || !['flex', 'long_flex', 'ultrafast', 'long_ultrafast', 'image'].includes(band.value))
   .map(band => ({ ...band, label: band.value === 'standard' && props.row?.base.bands.image ? '文本 Token' : band.label })))
 
 watch(open, (value) => {
@@ -86,7 +86,7 @@ function submit() {
 </script>
 
 <template>
-  <BaseModal v-model="open" :title="row ? '编辑模型价格' : '添加模型价格'" size="md-wide" :dismissible="!saving">
+  <ZDialog v-model="open" :title="row ? '编辑模型价格' : '添加模型价格'" width="42rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
     <template #description>
       <span class="inline-flex items-center gap-2 align-middle text-cp-sm font-normal">
         <ProviderIconGroup :provider="provider" size="sm" />
@@ -95,30 +95,30 @@ function submit() {
     </template>
     <div class="grid gap-5">
       <div class="grid grid-cols-[minmax(0,1fr)_6.5rem] gap-3 sm:grid-cols-[minmax(0,1fr)_8rem] sm:gap-4">
-        <BaseFormItem label="上游模型 ID">
-          <BaseInput v-model="model" :disabled="saving || !!row" aria-label="上游模型 ID" placeholder="例如 gpt-5.4" class="font-mono" />
-        </BaseFormItem>
-        <BaseFormItem label="倍率">
-          <BaseInput v-model="multiplier" aria-label="自定义倍率" class="font-mono" inputmode="decimal" :disabled="saving">
+        <ZFormItem label="上游模型 ID">
+          <ZInput v-model="model" :disabled="saving || !!row" aria-label="上游模型 ID" placeholder="例如 gpt-5.4" class="font-mono" />
+        </ZFormItem>
+        <ZFormItem label="倍率">
+          <ZInput v-model="multiplier" aria-label="自定义倍率" class="font-mono" inputmode="decimal" :disabled="saving">
             <template #suffix>
               ×
             </template>
-          </BaseInput>
-        </BaseFormItem>
+          </ZInput>
+        </ZFormItem>
       </div>
       <section aria-label="档位价格">
         <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <BaseSelect :model-value="selectedBand" :options="bandOptions" aria-label="价格档位" class="min-w-0 flex-1 sm:max-w-56" :disabled="saving" @update:model-value="selectedBand = $event as PriceBand" />
-          <BaseSegmented v-model="priceMode" label="单价来源" :options="sourceOptions" :disabled="saving" />
+          <ZSelect :model-value="selectedBand" :options="bandOptions" aria-label="价格档位" class="min-w-0 flex-1 sm:max-w-56" :disabled="saving" @update:model-value="selectedBand = $event as PriceBand" />
+          <ZSegmented v-model="priceMode" aria-label="单价来源" :options="sourceOptions" :disabled="saving" />
         </div>
         <PricingRateFields v-if="current || base" class="rounded-cp-lg bg-cp-fill-quaternary p-4" :base="base" :custom="current" :multiplier-bps="bps" :disabled="saving" @change="updatePrice" />
         <div v-else class="grid justify-items-center gap-3 py-6 text-cp-sm text-cp-text-tertiary">
           <p class="m-0">
             此档位暂无来源价格
           </p>
-          <BaseButton size="sm" :disabled="saving" @click="toggleBand(true)">
+          <ZButton size="small" :disabled="saving" @click="toggleBand(true)">
             填写单价
-          </BaseButton>
+          </ZButton>
         </div>
       </section>
       <p v-if="validation" role="alert" class="m-0 rounded-cp bg-cp-error-container p-3 text-cp-sm text-cp-error-on-container">
@@ -126,12 +126,14 @@ function submit() {
       </p>
     </div>
     <template #footer>
-      <BasePopover v-model="helpOpen" class="mr-auto self-center" placement="top-start" trigger="hover-click">
-        <template #trigger>
-          <button type="button" class="inline-flex h-cp-control cursor-pointer items-center gap-1.5 rounded-cp-sm border-0 bg-transparent p-0 text-cp-sm text-cp-text-tertiary outline-none transition-colors hover:text-cp-primary-text focus-visible:ring-2 focus-visible:ring-cp-control-outline motion-reduce:transition-none" :aria-expanded="helpOpen" :aria-controls="helpOpen ? helpId : undefined">
-            <Info class="size-3.5" aria-hidden="true" />
+      <ZPopover v-model="helpOpen" class="mr-auto self-center" placement="top-start" trigger="hover-click">
+        <template #reference>
+          <ZButton variant="text" :aria-expanded="helpOpen" :aria-controls="helpOpen ? helpId : undefined">
+            <template #icon>
+              <Info class="size-3.5" aria-hidden="true" />
+            </template>
             计价说明
-          </button>
+          </ZButton>
         </template>
         <div :id="helpId" class="grid w-72 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
           <p class="m-0">
@@ -144,12 +146,12 @@ function submit() {
             仅调整本地估算与金额限额，不代表订阅实际扣费，保存后仅新请求生效，历史账单不变
           </p>
         </div>
-      </BasePopover>
-      <BaseButton :disabled="saving" @click="open = false">
+      </ZPopover>
+      <ZButton :disabled="saving" @click="open = false">
         取消
-      </BaseButton><BaseButton variant="primary" :loading="saving" @click="submit">
+      </ZButton><ZButton type="primary" :loading="saving" @click="submit">
         保存
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

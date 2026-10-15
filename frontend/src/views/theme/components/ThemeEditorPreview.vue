@@ -3,7 +3,7 @@ import type { ThemeName } from '@codex-proxy/ui/theme'
 import type { CSSProperties } from 'vue'
 import type { ThemeEditorPreview } from '../composables/useThemeEditor'
 
-import { BaseSegmented } from '@codex-proxy/ui'
+import { ZSegmented } from '@codex-proxy/ui'
 
 import ThemeComponentPreview from './ThemeComponentPreview.vue'
 import ThemeDashboardPreview from './ThemeDashboardPreview.vue'
@@ -29,7 +29,7 @@ const previewOptions = [
         <strong class="block text-cp-sm font-heavy text-cp-text">实时预览</strong>
         <span class="mt-0.5 block text-[9px] font-emphasis text-cp-text-quaternary">真实组件在影子环境隔离渲染，拖动画板并缩放检查细节</span>
       </div>
-      <BaseSegmented v-model="preview" label="预览类型" size="sm" :options="previewOptions" />
+      <ZSegmented v-model="preview" aria-label="预览类型" size="small" :options="previewOptions" />
     </header>
 
     <ThemePreviewCanvas

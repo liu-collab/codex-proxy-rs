@@ -62,6 +62,7 @@ struct CreateRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateRequest {
+    enabled: Option<bool>,
     auto_location: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_location_update")]
     location: Option<Option<gateway_core::account::RequestLocation>>,
@@ -150,6 +151,7 @@ struct ProxyAccountView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProxyView {
+    enabled: bool,
     auto_location: bool,
     detected_location: Option<gateway_admin::model::proxies::DetectedProxyLocation>,
     location: Option<gateway_core::account::RequestLocation>,
@@ -173,6 +175,7 @@ impl From<(ProxyRecord, crate::time::TimePresenter)> for ProxyView {
         let endpoint = record.proxy.endpoint();
         Self {
             auto_location: record.auto_location,
+            enabled: record.enabled,
             detected_location: record.detected_location,
             location: record.location,
             id: record.id,
@@ -424,6 +427,7 @@ where
         .proxies()
         .update(
             UpdateProxy {
+                enabled: request.enabled,
                 auto_location: request.auto_location,
                 test: None,
                 location: request.location,

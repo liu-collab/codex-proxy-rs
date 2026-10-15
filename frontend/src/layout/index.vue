@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseScrollbar } from '@codex-proxy/ui'
+import { ZScrollbar } from '@codex-proxy/ui'
 import { storeToRefs } from 'pinia'
 import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 
@@ -18,7 +18,7 @@ const { sidebarCollapsed } = storeToRefs(uiStore)
 const { version } = storeToRefs(systemUpdateStore)
 const { toggleSidebar } = uiStore
 const route = useRoute()
-const pageScrollbarRef = ref<InstanceType<typeof BaseScrollbar> | null>(null)
+const pageScrollbarRef = ref<InstanceType<typeof ZScrollbar> | null>(null)
 const mobileSidebarOpen = shallowRef(false)
 const aboutOpen = shallowRef(false)
 const systemUpdateOpen = shallowRef(false)
@@ -60,13 +60,13 @@ watch(
     />
     <FloatingSidebarToggle v-if="!mobileSidebarOpen" @open="openMobileSidebar" />
     <main class="relative isolate h-dvh min-w-0 flex-1 overflow-hidden">
-      <BaseScrollbar ref="pageScrollbarRef">
+      <ZScrollbar ref="pageScrollbarRef">
         <div class="flex min-h-full min-w-0 flex-col p-4 min-[961px]:p-6">
           <RouterView v-slot="{ Component }">
             <component :is="Component" class="min-h-0 flex-1" />
           </RouterView>
         </div>
-      </BaseScrollbar>
+      </ZScrollbar>
     </main>
 
     <Teleport to="body">

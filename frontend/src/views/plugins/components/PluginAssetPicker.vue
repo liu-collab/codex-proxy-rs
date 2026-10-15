@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PluginReleaseAsset } from '@/api'
-import { BasePopover, BaseScrollbar, BaseTag } from '@codex-proxy/ui'
+import { ZPopover, ZScrollbar, ZTag } from '@codex-proxy/ui'
 import { ChevronDown, FileArchive } from '@lucide/vue'
 import { useElementSize, useEventListener } from '@vueuse/core'
 import { computed, nextTick, shallowRef, useId, useTemplateRef, watch } from 'vue'
@@ -63,8 +63,8 @@ watch(() => props.disabled, (value) => {
 </script>
 
 <template>
-  <BasePopover v-model="open" placement="bottom-start" :disabled="disabled" class="w-full min-w-0">
-    <template #trigger>
+  <ZPopover v-model="open" placement="bottom-start" :disabled="disabled" class="w-full min-w-0">
+    <template #reference>
       <button
         ref="trigger"
         type="button"
@@ -91,7 +91,7 @@ watch(() => props.disabled, (value) => {
       </button>
     </template>
     <div :id="panelId" ref="panel" role="listbox" aria-label="插件包" aria-required="true" :style="{ width: `${width}px` }" class="max-w-[calc(100vw-2rem)] p-1.5">
-      <BaseScrollbar max-height="min(18rem, 45dvh)">
+      <ZScrollbar max-height="min(18rem, 45dvh)">
         <div class="grid gap-0.5 p-0.5">
           <button
             v-for="asset in assets"
@@ -107,12 +107,12 @@ watch(() => props.disabled, (value) => {
             @click="select(asset.name)"
           >
             <span class="min-w-0 flex-1 truncate text-cp-sm" :class="selected === asset.name ? 'text-cp-primary-text' : 'text-cp-text'">{{ asset.name }}</span>
-            <BaseTag class="shrink-0 tabular-nums">
+            <ZTag class="shrink-0 tabular-nums">
               {{ formatPluginFileSize(asset.size) }}
-            </BaseTag>
+            </ZTag>
           </button>
         </div>
-      </BaseScrollbar>
+      </ZScrollbar>
     </div>
-  </BasePopover>
+  </ZPopover>
 </template>

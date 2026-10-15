@@ -106,6 +106,10 @@ impl Drop for DefaultExecutionSession {
 }
 
 impl ExecutionSession for DefaultExecutionSession {
+    fn response_commit(&self) -> super::ResponseCommit {
+        self.core.response_commit()
+    }
+
     fn trace(&self) -> crate::diagnostics::TraceContext {
         self.core.trace()
     }

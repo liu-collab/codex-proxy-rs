@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountAuthorizationView } from '../../composables/useAccountAuthorization'
-import { BaseButton, BaseForm, BaseFormItem, BaseIconButton, BaseScrollbar, BaseTextarea } from '@codex-proxy/ui'
+import { ZButton, ZForm, ZFormItem, ZIconButton, ZScrollbar, ZTextarea } from '@codex-proxy/ui'
 import { Copy, KeyRound } from '@lucide/vue'
 import { computed } from 'vue'
 import { useCopyText } from '@/composables/useCopyText'
@@ -49,40 +49,39 @@ const statusText = computed(() => {
     </div>
 
     <div class="flex flex-wrap items-center gap-2">
-      <BaseButton
-        variant="secondary"
+      <ZButton
         :loading="loading"
         :disabled="disabled || (!authorization.flow && !canStart)"
         @click="emit('regenerate')"
       >
         {{ authUrl ? '重新生成授权链接' : '生成授权链接' }}
-      </BaseButton>
+      </ZButton>
     </div>
 
-    <BaseForm v-if="authUrl">
-      <BaseFormItem label="授权链接">
+    <ZForm v-if="authUrl">
+      <ZFormItem label="授权链接">
         <template #extra>
-          <BaseIconButton
-            variant="secondary"
-            size="sm"
+          <ZIconButton
+            variant="solid"
+            size="small"
             title="复制链接"
-            label="复制链接"
+            aria-label="复制链接"
             :disabled="disabled"
             @click="copyWithToast(authUrl, { successText: '授权链接已复制' })"
           >
             <Copy class="size-3.5" />
-          </BaseIconButton>
+          </ZIconButton>
         </template>
-        <BaseScrollbar max-height="92px">
+        <ZScrollbar max-height="92px">
           <div class="rounded-cp bg-(--cp-input-bg) px-3.5 py-3 shadow-cp-tertiary">
             <pre
               class="m-0 whitespace-pre-wrap wrap-break-word font-mono text-cp-sm leading-[1.6] font-emphasis text-cp-text-secondary"
               v-text="authUrl"
             />
           </div>
-        </BaseScrollbar>
-      </BaseFormItem>
-    </BaseForm>
+        </ZScrollbar>
+      </ZFormItem>
+    </ZForm>
 
     <p v-if="statusText" class="m-0 text-cp-sm text-cp-text-secondary" role="status">
       {{ statusText }}
@@ -91,16 +90,16 @@ const statusText = computed(() => {
       {{ authorization.error }}
     </p>
 
-    <BaseForm v-if="authorization.flow">
-      <BaseFormItem :label="callbackLabel" required>
-        <BaseTextarea
+    <ZForm v-if="authorization.flow">
+      <ZFormItem :label="callbackLabel" required>
+        <ZTextarea
           v-model="callback"
           :aria-label="callbackLabel"
           :rows="4"
           :placeholder="callbackPlaceholder"
           :disabled="disabled"
         />
-      </BaseFormItem>
-    </BaseForm>
+      </ZFormItem>
+    </ZForm>
   </div>
 </template>

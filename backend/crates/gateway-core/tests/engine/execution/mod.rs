@@ -579,10 +579,7 @@ fn assert_early_failure_recorded(
     let request = &requests[0];
     assert_eq!(request.id, *request_id);
     assert_eq!(request.client_api_key_ref.as_str(), "key_start_test");
-    assert_eq!(
-        request.client_api_key_id.as_ref(),
-        Some(&request.client_api_key_ref)
-    );
+    assert_eq!(request.client_api_key_name_snapshot, None);
     assert_eq!(request.protocol, "openai");
     assert_eq!(request.endpoint, "/v1/responses");
     assert_eq!(request.client_transport, transport.as_str());
@@ -1122,7 +1119,7 @@ fn request_policy_snapshot(
         ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), Some(16_000));
     RuntimeSnapshot::new(
         ConfigRevision::new(1).unwrap(),
-        gateway_core::settings::SettingsValues::new(2, 1, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(2, "smart", Default::default(), None, None),
         providers.to_vec(),
         providers
             .iter()
@@ -1850,14 +1847,7 @@ fn model_routing_cannot_expand_the_frozen_key_model_scope() {
             ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), Some(16_000));
         let snapshot = RuntimeSnapshot::new(
             ConfigRevision::new(1).unwrap(),
-            gateway_core::settings::SettingsValues::new(
-                2,
-                1,
-                "smart",
-                Default::default(),
-                None,
-                None,
-            ),
+            gateway_core::settings::SettingsValues::new(2, "smart", Default::default(), None, None),
             vec![kind.clone()],
             ["gpt-start", "gpt-blocked"]
                 .into_iter()
@@ -2234,7 +2224,7 @@ fn fallback_observation_snapshot(reference: ExtensionSetReference) -> RuntimeSna
         ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), Some(16_000));
     RuntimeSnapshot::new(
         ConfigRevision::new(1).unwrap(),
-        gateway_core::settings::SettingsValues::new(2, 1, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(2, "smart", Default::default(), None, None),
         providers.to_vec(),
         providers
             .iter()
@@ -3922,7 +3912,7 @@ fn probe_snapshot() -> RuntimeSnapshot {
         ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), Some(16_000));
     RuntimeSnapshot::new(
         ConfigRevision::new(1).expect("config revision"),
-        gateway_core::settings::SettingsValues::new(1, 1, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(1, "smart", Default::default(), None, None),
         vec![provider.clone()],
         vec![ProviderModel::new(
             provider,
@@ -3938,7 +3928,7 @@ fn client_snapshot() -> RuntimeSnapshot {
     let provider = ProviderKind::new("openai").expect("provider kind");
     RuntimeSnapshot::new(
         ConfigRevision::new(1).expect("config revision"),
-        gateway_core::settings::SettingsValues::new(1, 1, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(1, "smart", Default::default(), None, None),
         vec![provider.clone()],
         Vec::new(),
         vec![ClientPolicy::new(
@@ -3967,7 +3957,7 @@ fn start_snapshot_with_policy(
         ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), Some(16_000));
     RuntimeSnapshot::new(
         ConfigRevision::new(revision).expect("config revision"),
-        gateway_core::settings::SettingsValues::new(1, 1, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(1, "smart", Default::default(), None, None),
         vec![provider.clone()],
         vec![ProviderModel::new(
             provider.clone(),
@@ -4387,7 +4377,7 @@ fn request_settings_recompute_routing_and_admission_without_changing_sibling_or_
         let mut settings =
             serde_json::to_value(modified.request_settings().execution_values().unwrap()).unwrap();
         settings["runtime"]["model_mappings"] = json!({"request-alias":"gpt-start"});
-        settings["runtime"]["request_interval_ms"] = json!(0);
+        settings["runtime"]["max_account_rotations"] = json!(0);
         settings["runtime"]["request_profiles"] = json!({"openai":{"identity":"request-local"}});
         settings["fast_mode"] = json!("default");
         settings["client_limits"] = json!({"max_concurrency":0,"requests_per_minute":0});
@@ -4607,7 +4597,7 @@ fn entry_settings_freeze_authentication_and_rebase_only_explicit_overrides() {
         let baseline = service.request_settings().unwrap();
         let mut values = serde_json::to_value(baseline.values()).unwrap();
         values["responses_max_decompressed_body_bytes"] = json!(1024);
-        values["request_interval_ms"] = json!(0);
+        values["max_account_rotations"] = json!(0);
         let first = baseline
             .replace(serde_json::from_value(values).unwrap(), "first")
             .unwrap();
@@ -4624,7 +4614,7 @@ fn entry_settings_freeze_authentication_and_rebase_only_explicit_overrides() {
             .unwrap();
         let source = second.inspect();
         assert_eq!(
-            source["overrides"]["request_interval_ms"]["instance_id"],
+            source["overrides"]["max_account_rotations"]["instance_id"],
             "first"
         );
         assert_eq!(
@@ -4822,14 +4812,7 @@ fn child_settings_recompute_key_scope_without_inheriting_parent_defaults() {
         .collect();
         let snapshot = RuntimeSnapshot::new(
             ConfigRevision::new(1).unwrap(),
-            gateway_core::settings::SettingsValues::new(
-                1,
-                0,
-                "smart",
-                Default::default(),
-                None,
-                None,
-            ),
+            gateway_core::settings::SettingsValues::new(1, "smart", Default::default(), None, None),
             vec![provider],
             vec![],
             policies,

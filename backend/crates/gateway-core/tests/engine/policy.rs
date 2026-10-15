@@ -1,11 +1,6 @@
 //! 验证插件调度策略对软亲和的覆盖与宿主候选范围限制
 
-use std::{
-    collections::BTreeSet,
-    num::NonZeroU32,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{collections::BTreeSet, num::NonZeroU32, sync::Arc, time::SystemTime};
 
 use futures::{executor::block_on, future::BoxFuture};
 use gateway_core::{
@@ -106,11 +101,7 @@ fn policy(choice: Option<&'static str>) -> RequestPolicyContext {
 
 fn context() -> AccountSelectionContext {
     AccountSelectionContext {
-        policy: AccountSelectionPolicy::new(
-            RotationStrategy::Sticky,
-            NonZeroU32::new(2).unwrap(),
-            Duration::ZERO,
-        ),
+        policy: AccountSelectionPolicy::new(RotationStrategy::Sticky, NonZeroU32::new(2).unwrap()),
         now: SystemTime::now(),
         excluded_accounts: BTreeSet::new(),
         preferred_account: Some(account_id("acct_a")),
@@ -181,15 +172,15 @@ fn smart_switchback_does_not_override_explicit_plugin_choices_or_their_telemetry
             .clone()
             .with_scheduling(None, AccountWeight::new(10).unwrap());
         let mut selection_context = context();
-        selection_context.policy = AccountSelectionPolicy::new(
-            RotationStrategy::Smart,
-            NonZeroU32::new(2).unwrap(),
-            Duration::ZERO,
-        )
-        .with_smart_scheduling(
-            gateway_core::account::SmartSchedulingConfig::new([1.0, 0.8, 1.0, 0.5, 0.0, 0.0], true)
-                .unwrap(),
-        );
+        selection_context.policy =
+            AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(2).unwrap())
+                .with_smart_scheduling(
+                    gateway_core::account::SmartSchedulingConfig::new(
+                        [1.0, 0.8, 1.0, 0.5, 0.0, 0.0],
+                        true,
+                    )
+                    .unwrap(),
+                );
         for chosen in [Some("acct_a"), Some("acct_b"), None] {
             let selected = policy(chosen)
                 .select_account(

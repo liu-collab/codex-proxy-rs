@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseCard, BaseIconButton, BasePageHeader, BaseSegmented, BaseSelect, BaseTableColumnSettings, BaseTablePagination, useTableColumns } from '@codex-proxy/ui'
+import { useTableColumns, ZCard, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZSelect, ZTableColumnSettings } from '@codex-proxy/ui'
 
 import { Eye } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
@@ -59,16 +59,16 @@ watch(timeRange, () => {
 
 <template>
   <div class="w-full">
-    <BasePageHeader title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
+    <ZPageHeader title="使用统计" description="查看请求用量、性能趋势与调用错误记录">
       <template #actions>
-        <BaseSelect v-model="timeRange" :options="usageTimeRangeOptions" class="w-34" />
+        <ZSelect v-model="timeRange" :options="usageTimeRangeOptions" class="w-34" />
         <ProviderFilter
           v-model="providerQuery"
           :disabled="refreshingList"
           class="shrink-0"
         />
       </template>
-    </BasePageHeader>
+    </ZPageHeader>
 
     <UsageSummaryCards :summary="summary" />
     <UsageInsightsGrid
@@ -78,7 +78,7 @@ watch(timeRange, () => {
       :loading="analyticsLoading"
     />
 
-    <BaseCard
+    <ZCard
       class="mt-5 flex flex-col"
     >
       <template #header>
@@ -93,7 +93,7 @@ watch(timeRange, () => {
               成功请求与失败请求明细
             </p>
           </div>
-          <BaseSegmented v-model="recordView" label="请求明细类型" :options="recordViewOptions" class="w-52" />
+          <ZSegmented v-model="recordView" aria-label="请求明细类型" :options="recordViewOptions" class="w-52" />
         </div>
       </template>
 
@@ -109,7 +109,7 @@ watch(timeRange, () => {
             @refresh="refreshUsageRecords"
           >
             <template #actions>
-              <BaseTableColumnSettings
+              <ZTableColumnSettings
                 :options="columnOptions"
                 @change="setColumnVisible"
                 @reorder="setColumnOrder"
@@ -128,22 +128,21 @@ watch(timeRange, () => {
             >
               <template #actions="{ row }">
                 <div class="flex items-center justify-start">
-                  <BaseIconButton
-                    variant="ghost"
-                    size="sm"
-                    label="查看使用记录详情"
+                  <ZIconButton
+                    size="small"
+                    aria-label="查看使用记录详情"
                     @click="handleViewDetail(row)"
                   >
                     <Eye class="size-3.5" />
-                  </BaseIconButton>
+                  </ZIconButton>
                 </div>
               </template>
             </UsageRecordsTable>
-            <BaseTablePagination
-              :pagination="usagePagination"
-              :loading="loading"
-              @page-change="handlePageChange"
-              @page-size-change="handlePageSizeChange"
+            <ZPagination
+              v-bind="usagePagination"
+              :disabled="loading"
+              @current-change="handlePageChange"
+              @size-change="handlePageSizeChange"
             />
           </div>
         </div>
@@ -157,7 +156,7 @@ watch(timeRange, () => {
           />
         </div>
       </template>
-    </BaseCard>
+    </ZCard>
 
     <UsageRecordDetailModal v-model="showDetailModal" :record="selectedUsageRecord" />
   </div>

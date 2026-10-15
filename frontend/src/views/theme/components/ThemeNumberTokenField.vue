@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseIconButton, BaseNumberInput, BaseRange } from '@codex-proxy/ui'
+import { ZIconButton, ZInputNumber, ZSlider } from '@codex-proxy/ui'
 
 import { RotateCcw } from '@lucide/vue'
 
@@ -31,32 +31,32 @@ const emit = defineEmits<{
         <code class="mt-1 block truncate font-mono text-[10px] text-cp-text-quaternary">{{ token }}</code>
       </div>
       <div class="flex items-center gap-1">
-        <BaseNumberInput
+        <ZInputNumber
+          size="small"
           :model-value="value"
-          :label="label"
+          :aria-label="label"
           :min="min"
           :max="max"
           :step="step ?? 1"
           :unit="unit ?? 'px'"
           @update:model-value="emit('change', $event)"
         />
-        <BaseIconButton
+        <ZIconButton
           v-if="overridden"
-          label="恢复派生值"
-          size="sm"
-          variant="ghost"
+          aria-label="恢复派生值"
+          size="small"
           @click="emit('reset')"
         >
           <RotateCcw class="size-3.5" />
-        </BaseIconButton>
+        </ZIconButton>
       </div>
     </div>
-    <BaseRange
+    <ZSlider
       :model-value="value"
       :min="min"
       :max="max"
       :step="step ?? 1"
-      :label="label"
+      :aria-label="label"
       :unit="unit ?? 'px'"
       @update:model-value="emit('change', $event)"
     />

@@ -2,7 +2,7 @@ import type { Ref } from 'vue'
 import type { PluginRefreshContext } from '../utils/actions'
 import type { InstalledPlugin } from '../utils/catalog'
 import type { PluginArtifact, PluginInstance, PluginRollbackPlan, PluginVersionPlan } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { onScopeDispose, shallowRef, watch } from 'vue'
 import { getPluginRollbackPlan, getPluginVersionPlan, rollbackPluginInstance, switchPluginVersion } from '@/api'
 import { ApiError } from '@/api/request'
@@ -52,7 +52,7 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
         target: { artifactSha256: artifact.metadata.sha256, expectedRevision: instance.revision },
       }, { silent: true })
       showVersionSwitch.value = false
-      toast.success(`已切换至 ${artifact.metadata.version}`)
+      ZNotification.success({ message: `已切换至 ${artifact.metadata.version}` })
       await refresh(true)
       onApplied()
     }
@@ -115,7 +115,7 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
     try {
       await rollbackPluginInstance({ id: instance.id, target: { artifactSha256, expectedRevision: plan.instanceRevision } }, { silent: true })
       showRollback.value = false
-      toast.success(`已回退至 ${target.version}，并恢复对应设置`)
+      ZNotification.success({ message: `已回退至 ${target.version}，并恢复对应设置` })
       await refresh(true)
     }
     catch (error) {

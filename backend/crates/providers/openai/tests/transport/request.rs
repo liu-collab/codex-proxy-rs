@@ -159,6 +159,102 @@ fn encoder_should_align_official_environment_context_without_content_kinds() {
 }
 
 #[test]
+fn encoder_should_align_desktop_time_context_with_environment_dates() {
+    // Desktop Core 0.162.0-alpha.17.2 的应用附加上下文使用 developer role
+    let desktop = " <codex_apps_client_time_context><timezone>Asia/Shanghai</timezone>\n\
+        <current_date>2020-01-01</current_date>\n\
+        Use this client time context for user-facing dates, times, and schedules instead of the execution host's timezone and current date.\
+        </codex_apps_client_time_context>\n";
+    let environment = "<environment_context><current_date>2020-01-01</current_date><timezone>Asia/Shanghai</timezone></environment_context>";
+    for kinds in [
+        None,
+        Some(json!([
+            "developer.text",
+            "additional_content.codex_apps_client_time_context"
+        ])),
+    ] {
+        let mut message = json!({
+            "type": "message", "role": "developer",
+            "content": [
+                {"type": "input_text", "text": "Keep Asia/Shanghai in this instruction"},
+                {"type": "input_text", "text": desktop}
+            ],
+            "internal_chat_message_metadata_passthrough": {"create_time": 1789293131.822}
+        });
+        if let Some(kinds) = kinds {
+            message["internal_chat_message_metadata_passthrough"]["content_item_kinds"] = kinds;
+        }
+        let body = json!({"input": [
+            {"role": "user", "content": [{"type": "input_text", "text": environment}]},
+            message
+        ]})
+        .as_object()
+        .expect("request object")
+        .clone();
+        let before = Utc::now()
+            .with_timezone(&New_York)
+            .format("%Y-%m-%d")
+            .to_string();
+        let encoded = encode_generate_request(
+            &request(body.clone()),
+            "gpt-test",
+            Some(&CodexRequestLocation::default()),
+        )
+        .expect("encode Desktop time context");
+        let after = Utc::now()
+            .with_timezone(&New_York)
+            .format("%Y-%m-%d")
+            .to_string();
+        assert!(
+            [before, after].iter().any(|date| {
+                let mut expected = body["input"].clone();
+                expected[0]["content"][0]["text"] = json!(
+                    environment
+                        .replace("2020-01-01", date)
+                        .replace("Asia/Shanghai", "America/New_York")
+                );
+                expected[1]["content"][1]["text"] = json!(
+                    desktop
+                        .replace("2020-01-01", date)
+                        .replace("Asia/Shanghai", "America/New_York")
+                );
+                encoded.body().get("input") == Some(&expected)
+            }),
+            "both time contexts must agree while preserving other content and metadata"
+        );
+        let unchanged = encode_generate_request(&request(body.clone()), "gpt-test", None)
+            .expect("encode without override");
+        assert_eq!(unchanged.body().get("input"), body.get("input"));
+    }
+}
+
+#[test]
+fn encoder_should_preserve_text_outside_desktop_time_context() {
+    let desktop = "<codex_apps_client_time_context><timezone>Asia/Shanghai</timezone><current_date>2020-01-01</current_date></codex_apps_client_time_context>";
+    let input = json!([
+        {"role": "user", "content": [{"type": "input_text", "text": desktop}]},
+        {"role": "assistant", "content": [{"type": "output_text", "text": desktop}]},
+        {"type": "function_call_output", "call_id": "synthetic", "output": desktop},
+        {"role": "developer", "content": [{"type": "input_text", "text": desktop}], "internal_chat_message_metadata_passthrough": {"content_item_kinds": ["user.text"]}},
+        {"role": "developer", "content": [{"type": "input_text", "text": desktop}], "internal_chat_message_metadata_passthrough": {"content_item_kinds": ["environments.environment_context"]}},
+        {"role": "developer", "content": [{"type": "input_text", "text": desktop}], "internal_chat_message_metadata_passthrough": {"content_item_kinds": []}},
+        {"role": "developer", "content": [{"type": "input_text", "text": format!("Example:\n{desktop}")}]},
+        {"role": "developer", "content": [{"type": "input_text", "text": format!("{desktop}\nKeep this example")}]},
+        {"role": "developer", "content": [{"type": "input_text", "text": "<codex_apps_client_time_context><timezone>Asia/Shanghai</codex_apps_client_time_context>"}]},
+        {"role": "developer", "content": [{"type": "input_text", "text": "<other_context><timezone>Asia/Shanghai</timezone></other_context>"}]},
+        {"role": "developer", "content": [{"type": "output_text", "text": desktop}]},
+        {"role": "developer", "content": [{"type": "input_text", "text": "<codex_apps_client_time_context><example><timezone>Asia/Shanghai</timezone><current_date>2020-01-01</current_date></example></codex_apps_client_time_context>"}]}
+    ]);
+    let encoded = encode_generate_request(
+        &request(Map::from_iter([("input".to_owned(), input.clone())])),
+        "gpt-test",
+        Some(&CodexRequestLocation::default()),
+    )
+    .expect("encode without changing unrelated content");
+    assert_eq!(encoded.body().get("input"), Some(&input));
+}
+
+#[test]
 fn encoder_should_preserve_classified_text_and_non_user_environment_items() {
     let environment =
         "<environment_context><timezone>Asia/Shanghai</timezone></environment_context>";

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { XaiClientProfilePreview, XaiClientProfileSelection } from '@/api/modules/settings/profiles'
-import { BaseButton, BaseFormItem, BaseInput, BaseSegmented, BaseSelect } from '@codex-proxy/ui'
+import { ZButton, ZFormItem, ZInput, ZSegmented, ZSelect } from '@codex-proxy/ui'
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { getXaiClientProfileOptions, previewXaiClientProfile } from '@/api/modules/settings/profiles'
 import { errorMessage } from '@/utils/operation'
@@ -98,9 +98,9 @@ onMounted(() => props.allowInherit && void load())
 <template>
   <div class="grid min-w-0 gap-4">
     <div v-if="allowInherit" class="flex flex-wrap items-center justify-between gap-3">
-      <BaseSegmented
+      <ZSegmented
         v-model="source"
-        label="xAI 客户端身份来源"
+        aria-label="xAI 客户端身份来源"
         class="shrink-0"
         :options="[{ label: '全局配置', value: 'global' }, { label: '独立配置', value: 'independent' }]"
         :disabled="disabled || !globalConfiguration"
@@ -109,26 +109,26 @@ onMounted(() => props.allowInherit && void load())
     </div>
     <div v-if="loadError" role="alert" class="flex items-center justify-between gap-3 text-cp text-cp-error">
       <span>全局配置加载失败：{{ loadError }}</span>
-      <BaseButton size="sm" @click="load">
+      <ZButton size="small" @click="load">
         重试
-      </BaseButton>
+      </ZButton>
     </div>
     <template v-if="model">
       <div class="grid gap-4 sm:grid-cols-2">
-        <BaseFormItem label="客户端类型">
-          <BaseInput model-value="Grok CLI" readonly :disabled="disabled" />
-        </BaseFormItem>
-        <BaseFormItem label="版本策略">
-          <BaseSelect v-model="versionMode" class="w-full" :disabled="disabled" :options="[{ label: '跟随最新版本', value: 'latest' }, { label: '自定义版本', value: 'fixed' }]" />
-        </BaseFormItem>
+        <ZFormItem label="客户端类型">
+          <ZInput model-value="Grok CLI" readonly :disabled="disabled" />
+        </ZFormItem>
+        <ZFormItem label="版本策略">
+          <ZSelect v-model="versionMode" class="w-full" :disabled="disabled" :options="[{ label: '跟随最新版本', value: 'latest' }, { label: '自定义版本', value: 'fixed' }]" />
+        </ZFormItem>
       </div>
       <div v-if="model.versionMode === 'fixed'" class="grid gap-4 sm:grid-cols-2">
-        <BaseFormItem label="Grok CLI 版本" required>
-          <BaseInput :model-value="model.clientVersion ?? ''" :disabled="disabled" placeholder="例如：1.0.13" @update:model-value="updateField('clientVersion', $event)" />
-        </BaseFormItem>
-        <BaseFormItem v-for="field in fields" :key="field.key" :label="field.label" required>
-          <BaseInput :model-value="model[field.key]" :disabled="disabled" @update:model-value="updateField(field.key, $event)" />
-        </BaseFormItem>
+        <ZFormItem label="Grok CLI 版本" required>
+          <ZInput :model-value="model.clientVersion ?? ''" :disabled="disabled" placeholder="例如：1.0.13" @update:model-value="updateField('clientVersion', $event)" />
+        </ZFormItem>
+        <ZFormItem v-for="field in fields" :key="field.key" :label="field.label" required>
+          <ZInput :model-value="model[field.key]" :disabled="disabled" @update:model-value="updateField(field.key, $event)" />
+        </ZFormItem>
       </div>
     </template>
     <ClientProfilePreviewPanel :preview="preview" :previewing="previewing" :needs-version-input="needsVersionInput" :error="previewError" />

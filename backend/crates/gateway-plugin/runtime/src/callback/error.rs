@@ -4,7 +4,7 @@ use gateway_core::{
     engine::{EngineError, execution::gateway_error_from_engine, middleware::MiddlewareError},
     error::{
         ContinuationFailure, ContinuationRecoveryDisposition, GatewayError, GatewayErrorKind,
-        PreDeliveryRetry, ProviderError,
+        PreDeliveryRetry, ProviderError, TransientRetryPolicy,
     },
     upstream::UpstreamSendState,
 };
@@ -20,6 +20,7 @@ pub(super) fn gateway(error: GatewayError) -> PluginFault {
         GatewayErrorKind::Unauthorized => ErrorCode::PermissionDenied,
         GatewayErrorKind::PolicyDenied => ErrorCode::Rejected,
         GatewayErrorKind::AccountCapacityUnavailable
+        | GatewayErrorKind::MiddlewareCapacityUnavailable
         | GatewayErrorKind::ConcurrencyQueueFull
         | GatewayErrorKind::ConcurrencyQueueTimeout
         | GatewayErrorKind::RateLimited
@@ -85,7 +86,15 @@ fn provider(error: &ProviderError) -> PluginFault {
                 gateway_core::engine::AttemptTransport::Fallback => json!({"kind":"fallback"}),
             }}),
             PreDeliveryRetry::SameAccountTransportRetry {retry_index,delay} => json!({"kind":"same_account_transport_retry","retry_index":retry_index.get(),"delay_ms":delay.as_millis()}),
-            PreDeliveryRetry::SameAccountTransientRetry {max_retries,initial_delay,max_delay} => json!({"kind":"same_account_transient_retry","max_retries":max_retries.get(),"initial_delay_ms":initial_delay.as_millis(),"max_delay_ms":max_delay.as_millis()}),
+            PreDeliveryRetry::SameAccountTransientRetry {max_retries,initial_delay,max_delay,jitter,policy} => json!({
+                "kind":"same_account_transient_retry","max_retries":max_retries.get(),
+                "initial_delay_ms":initial_delay.as_millis(),"max_delay_ms":max_delay.as_millis(),
+                "jitter_ms":jitter.as_millis(),
+                "policy": match policy {
+                    TransientRetryPolicy::RetryThenRotateAccount => "retry_then_rotate_account",
+                    TransientRetryPolicy::RetryThenReturnError => "retry_then_return_error",
+                },
+            }),
         }),
         "replay_safe": error.replay_is_safe(),
         "retry_same_account": error.retries_same_account(),
@@ -134,13 +143,22 @@ pub(crate) fn rpc(error: &crate::RpcError) -> PluginFault {
         RpcError::Remote(fault) => return fault.clone(),
         RpcError::Timeout => ErrorCode::Timeout,
         RpcError::Cancelled => ErrorCode::Cancelled,
-        RpcError::Capacity => ErrorCode::Capacity,
+        RpcError::Capacity | RpcError::Overloaded => ErrorCode::Capacity,
         _ => ErrorCode::Fault,
     };
     PluginFault::new(code, error.to_string())
 }
 
 pub(crate) fn rpc_middleware(error: crate::RpcError) -> MiddlewareError {
+    if error.is_overloaded() {
+        return MiddlewareError::Gateway(
+            GatewayError::new(
+                GatewayErrorKind::MiddlewareCapacityUnavailable,
+                "Request middleware is temporarily busy",
+            )
+            .with_source(gateway_core::error::ErrorSource::new(error)),
+        );
+    }
     let rejected =
         matches!(&error, crate::RpcError::Remote(fault) if fault.code == ErrorCode::Rejected);
     MiddlewareError::Remote {

@@ -120,21 +120,37 @@ pub enum ContinuationRecoveryDisposition {
     ProviderReplayAllowed,
 }
 
+/// 同账号瞬态错误的恢复策略，明确重试耗尽后的去向
+///
+/// Provider 按上游错误场景选择，Core 共用同一套退避与安全重放检查
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TransientRetryPolicy {
+    /// 同账号退避重试，耗尽后允许在安全边界与换号预算内选择其他账号
+    RetryThenRotateAccount,
+    /// 同账号退避重试，耗尽后返回最后一次上游错误，不因该错误换号
+    RetryThenReturnError,
+}
+
 /// Provider 在下游尚未提交事件时请求的隐藏恢复方式
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PreDeliveryRetry {
     /// 排除本次账号，按普通调度策略重新选号
     AccountRotation,
-    /// 上游明确拒绝后的同账号退避；耗尽后仍由普通安全重放规则决定是否换号
+    /// 上游明确拒绝后的同账号退避；耗尽动作由 Provider 显式选择
     SameAccountTransientRetry {
         /// 每个账号在本请求中的重试上限，同时受总路由预算约束
         max_retries: NonZeroU32,
         /// 指数退避的起始间隔
         initial_delay: Duration,
-        /// 单次等待上限，避免上游提示把请求拖入长时间等待
+        /// 本地指数退避的基准上限，不含附加抖动，也不缩短上游 Retry-After
         max_delay: Duration,
+        /// Provider 为本次失败采样的附加等待，仅在没有 Retry-After 时使用
+        jitter: Duration,
+        /// 同账号恢复策略，不提供额外安全重放资格
+        policy: TransientRetryPolicy,
     },
     /// 固定本次账号，并按 Provider 给出的序号重试当前传输
+    /// 可用于发送结果不明确时的有界尽力恢复，不等于上游未执行的证明
     SameAccountTransportRetry {
         /// Provider-owned 传输重试序号，从 1 开始
         retry_index: NonZeroU32,
@@ -630,8 +646,8 @@ impl ProviderError {
 
     /// 允许 Core 在首个客户端事件前固定原账号并改用 Provider 备用传输
     ///
-    /// 与普通换号恢复相同，Core 仍会拒绝 continuation、指定账号、预算耗尽或
-    /// 下游已提交后的隐藏重放
+    /// Provider 必须确认备用传输满足当前 continuation scope 并限制恢复次数
+    /// Core 保持原账号，拒绝预算耗尽、外部副作用或下游已提交后的隐藏重放
     #[must_use]
     pub fn with_pre_delivery_transport_fallback(mut self) -> Self {
         self.set_pre_delivery_transport_fallback();
@@ -647,6 +663,7 @@ impl ProviderError {
     ///
     /// 重试预算和退避策略由 Provider 所属协议定义；Core 只负责同账号钉选、
     /// deadline/取消边界以及下游 commit barrier
+    /// 该意图允许发送结果不明确时尽力恢复，但不修改发送事实或安全重放证明
     #[must_use]
     pub fn with_pre_delivery_transport_retry(
         mut self,
@@ -680,18 +697,22 @@ impl ProviderError {
         self
     }
 
-    /// 请求有界同账号退避；该意图本身不提供安全重放证据
+    /// 请求有界同账号退避并显式选择耗尽去向；该意图本身不提供安全重放证据
     #[must_use]
     pub fn with_transient_retry(
         mut self,
         max_retries: NonZeroU32,
         initial_delay: Duration,
         max_delay: Duration,
+        jitter: Duration,
+        policy: TransientRetryPolicy,
     ) -> Self {
         self.pre_delivery_retry = Some(Box::new(PreDeliveryRetry::SameAccountTransientRetry {
             max_retries,
             initial_delay,
             max_delay,
+            jitter,
+            policy,
         }));
         self
     }
@@ -1046,6 +1067,8 @@ pub enum GatewayErrorKind {
     NoAvailableProvider,
     /// 符合条件的上游账号暂时没有调度容量
     AccountCapacityUnavailable,
+    /// 中间件在途资源或执行等待队列已满
+    MiddlewareCapacityUnavailable,
     ConcurrencyQueueFull,
     ConcurrencyQueueTimeout,
     /// Provider 的本地账号基础设施不可用
@@ -1077,6 +1100,7 @@ impl GatewayErrorKind {
             Self::ModelNotFound => "model_not_found",
             Self::NoAvailableProvider => "no_available_provider",
             Self::AccountCapacityUnavailable => "account_capacity_unavailable",
+            Self::MiddlewareCapacityUnavailable => "middleware_capacity_unavailable",
             Self::ConcurrencyQueueFull => "concurrency_queue_full",
             Self::ConcurrencyQueueTimeout => "concurrency_queue_timeout",
             Self::ProviderInfrastructureUnavailable => "provider_infrastructure_unavailable",

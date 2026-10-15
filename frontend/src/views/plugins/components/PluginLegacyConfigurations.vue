@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PluginArtifact, PluginInstance } from '@/api'
-import { BaseIconButton, BaseTag } from '@codex-proxy/ui'
+import { ZIconButton, ZTag } from '@codex-proxy/ui'
 import { Play, Power, Settings2, Trash2 } from '@lucide/vue'
 import { PLUGIN_STATUS_LABELS } from '../constants'
 import { configurationStatus, pluginStatusType } from '../utils/catalog'
@@ -29,26 +29,26 @@ defineEmits<{
     </p>
     <div v-for="instance in instances" :key="instance.id" class="mt-2 flex flex-wrap items-center gap-2 rounded-cp bg-cp-fill-alter p-3">
       <span class="min-w-0 flex-1 wrap-anywhere text-cp-sm">{{ instance.name }}</span>
-      <BaseTag size="sm">
+      <ZTag size="small">
         {{ artifactForInstance(instance, artifacts)?.metadata.version }}
-      </BaseTag>
+      </ZTag>
       <PluginStatusNotice :instance="instance" />
-      <BaseTag size="sm" :type="pluginStatusType(configurationStatus(instance))">
+      <ZTag size="small" :type="pluginStatusType(configurationStatus(instance))">
         {{ PLUGIN_STATUS_LABELS[configurationStatus(instance)] }}
-      </BaseTag>
+      </ZTag>
       <div class="flex shrink-0 items-center gap-1">
-        <BaseIconButton label="设置" variant="secondary" size="sm" :disabled="busy" @click="$emit('edit', instance)">
+        <ZIconButton aria-label="设置" variant="solid" size="small" :disabled="busy" @click="$emit('edit', instance)">
           <Settings2 class="size-4" />
-        </BaseIconButton>
-        <BaseIconButton v-if="instance.enabled" label="停用历史配置" variant="secondary" size="sm" :disabled="busy" @click="$emit('disable', instance)">
+        </ZIconButton>
+        <ZIconButton v-if="instance.enabled" aria-label="停用历史配置" variant="solid" size="small" :disabled="busy" @click="$emit('disable', instance)">
           <Power class="size-4" />
-        </BaseIconButton>
-        <BaseIconButton v-else label="启动" size="sm" variant="secondary" :disabled="busy || Boolean(instance.loadError)" @click="$emit('enable', instance)">
+        </ZIconButton>
+        <ZIconButton v-else aria-label="启动" size="small" variant="solid" :disabled="busy || Boolean(instance.loadError)" @click="$emit('enable', instance)">
           <Play class="size-4" />
-        </BaseIconButton>
-        <BaseIconButton v-if="!instance.enabled" label="删除历史配置" variant="secondary" size="sm" class="group" :disabled="busy" @click="$emit('delete', instance)">
+        </ZIconButton>
+        <ZIconButton v-if="!instance.enabled" aria-label="删除历史配置" variant="solid" size="small" class="group" :disabled="busy" @click="$emit('delete', instance)">
           <Trash2 class="size-4 text-cp-error-text group-disabled:text-cp-text-disabled" />
-        </BaseIconButton>
+        </ZIconButton>
       </div>
     </div>
   </details>

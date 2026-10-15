@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { EChartsOption, LineSeriesOption } from 'echarts'
 import type { KeyUsageTrendPoint } from '@/api/modules/key-usage'
-import { BaseCard, BaseEmpty } from '@codex-proxy/ui'
+import { ZCard, ZEmpty } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { chartTooltipStyle } from '@/components/charts/tooltip'
@@ -66,13 +66,13 @@ const option = computed<EChartsOption>(() => {
 </script>
 
 <template>
-  <BaseCard title="使用趋势" description="用量随时间的变化">
+  <ZCard title="使用趋势" description="用量随时间的变化">
     <BaseChart v-if="points.some(point => point.requests > 0)" :option="option" :height="285" />
-    <BaseEmpty
+    <ZEmpty
       v-else
       title="所选时间内暂无请求"
       surface="none"
       class="h-71 place-content-center"
     />
-  </BaseCard>
+  </ZCard>
 </template>

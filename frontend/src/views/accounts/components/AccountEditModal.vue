@@ -3,7 +3,7 @@ import type { ApiKeyAccountForm } from '../utils/upstreamApiKey'
 
 import type { Account, AccountGroupRef, AccountModelAccess } from '@/api'
 
-import { BaseButton, BaseFormItem, BaseModal, BaseSegmented, BaseTextarea } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZFormItem, ZSegmented, ZTextarea } from '@codex-proxy/ui'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { isOpenAiApiKeyAccount, isOpenAiOAuthAccount } from '../utils/upstreamApiKey'
@@ -42,11 +42,11 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="编辑账号"
-    size="md-wide"
-    :dismissible="!saving"
+    width="42rem"
+    :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving"
   >
     <div v-if="account" class="grid gap-5">
       <div
@@ -66,15 +66,15 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         </div>
       </div>
 
-      <BaseFormItem v-if="isOpenAiOAuthAccount(account)" label="上游传输方式">
+      <ZFormItem v-if="isOpenAiOAuthAccount(account)" label="上游传输方式">
         <p v-if="configurationLoading" role="status" class="m-0 text-cp-sm text-cp-text-secondary">
           正在读取上游设置…
         </p>
         <p v-else-if="!configurationReady" role="alert" class="m-0 text-cp-sm text-cp-error">
           传输方式读取失败，其他设置仍可保存
         </p>
-        <BaseSegmented v-else v-model="oauthTransport" label="上游传输方式" :options="transportOptions" :disabled="saving" />
-      </BaseFormItem>
+        <ZSegmented v-else v-model="oauthTransport" aria-label="上游传输方式" :options="transportOptions" :disabled="saving" />
+      </ZFormItem>
 
       <section v-if="isOpenAiApiKeyAccount(account)" class="grid gap-4">
         <h3 class="m-0 text-cp font-heavy text-cp-text">
@@ -105,29 +105,29 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         :account-id="account.id"
       />
 
-      <BaseFormItem label="备注">
-        <BaseTextarea
+      <ZFormItem label="备注">
+        <ZTextarea
           v-model="notes"
           :rows="3"
           :maxlength="500"
           placeholder="最多 500 字，留空可清除备注"
           :disabled="saving"
         />
-      </BaseFormItem>
+      </ZFormItem>
     </div>
 
     <template #footer>
-      <BaseButton variant="secondary" :disabled="saving" @click="open = false">
+      <ZButton :disabled="saving" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton
-        variant="primary"
+      </ZButton>
+      <ZButton
+        type="primary"
         :loading="saving"
         :disabled="!account || groupsLoading || (isOpenAiApiKeyAccount(account) && !configurationReady)"
         @click="emit('save')"
       >
         保存更改
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

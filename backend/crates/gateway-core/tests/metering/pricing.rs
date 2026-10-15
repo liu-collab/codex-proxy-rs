@@ -38,6 +38,19 @@ fn override_validation_rejects_unsupported_bands_and_excessive_multiplier() {
 }
 
 #[test]
+fn override_validation_accepts_ultrafast_bands() {
+    let pricing: ModelPriceOverride = serde_json::from_value(json!({
+        "multiplierBps": 10000,
+        "bands": {
+            "ultrafast": {"input":"12", "output":"60", "cacheRead":"0.6", "cacheWrite":"15"},
+            "long_ultrafast": {"input":"24", "output":"90", "cacheRead":"1.2", "cacheWrite":"30"}
+        }
+    }))
+    .unwrap();
+    assert!(pricing.validate().is_ok());
+}
+
+#[test]
 fn sync_layer_cannot_erase_manual_bands_or_multiplier() {
     let synced: PricingOverrides = serde_json::from_value(json!({"openai":{"model":{
         "multiplierBps":10000, "bands":{"standard":{"input":"2", "output":"10", "cacheRead":"0.2", "cacheWrite":"0"}}

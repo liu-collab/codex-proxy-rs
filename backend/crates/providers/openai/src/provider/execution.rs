@@ -3,6 +3,7 @@
 use gateway_core::metering::{CalculatedCost, Usage};
 
 use super::*;
+use crate::credential::CodexSelectionModel;
 use gateway_core::operation::RawJsonPayload;
 
 impl CodexProvider {
@@ -150,6 +151,15 @@ impl CodexProvider {
         context: AttemptContext,
         request: RawJsonEndpointRequest,
     ) -> Result<ProviderStream, ProviderError> {
+        let requested_model = match &request.operation {
+            Operation::GenerateImage(image) => endpoint_requested_model(image.payload()),
+            _ => None,
+        };
+        let model = if matches!(&request.operation, Operation::GenerateImage(_)) {
+            CodexSelectionModel::Image(requested_model.as_ref().map(|model| model.as_str()))
+        } else {
+            CodexSelectionModel::NotApplicable
+        };
         let selection_started_at = Instant::now();
         let lease = self
             .selector
@@ -157,8 +167,7 @@ impl CodexProvider {
                 request_url: &request.response_origin,
                 attempt: &context,
                 session_affinity: request.session_affinity.as_ref(),
-                // 图像/搜索端点没有对应的上游模型权限，也不限定认证类型。
-                upstream_model: None,
+                model,
                 requires_oauth: false,
             })
             .await
@@ -175,7 +184,7 @@ impl CodexProvider {
             .execute_middleware(
                 operation,
                 provider_kind,
-                None,
+                requested_model.map(|model| model.as_str().to_owned()),
                 account_id,
                 Box::new(move |operation, middleware_headers| {
                     Box::pin(async move {
@@ -206,6 +215,23 @@ impl CodexProvider {
     ) -> Result<ProviderStream, ProviderError> {
         let affinity = match &operation {
             Operation::GenerateImage(image) => {
+                let model = endpoint_requested_model(image.payload());
+                let selection =
+                    CodexSelectionModel::Image(model.as_ref().map(|model| model.as_str()));
+                // 中间件可改写正文，最终图片模型必须仍被当前租约账号允许
+                // 校验先于亲和变更和发送，不能在持有租约时重新选号
+                if !selection.allows_account(lease.account())
+                    || (!context.is_diagnostic_required_account()
+                        && !context
+                            .account_scope()
+                            .is_some_and(|scope| selection.allows(scope, lease.account_id())))
+                {
+                    return Err(provider_error(
+                        ProviderErrorKind::NoEligibleAccount,
+                        UpstreamSendState::NotSent,
+                    )
+                    .with_retry_prohibited());
+                }
                 self.image_session_affinity(image.payload(), &middleware_headers, &context)
                     .await?
             }
@@ -314,6 +340,9 @@ impl CodexProvider {
                 provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
             })?,
         )
+        .with_account_snapshot(Some(
+            gateway_core::account::AccountHistorySnapshot::from_account(lease.account()),
+        ))
         .with_selection_observation(ProviderSelectionObservation::new(
             account_selection_wait_ms,
             lease.capacity_snapshot(),
@@ -336,7 +365,8 @@ impl CodexProvider {
                 .for_account(lease.account())
                 .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
-                .with_middleware_headers(middleware_headers),
+                .with_middleware_headers(middleware_headers)
+                .with_privacy(context.privacy(), context.cancellation().clone()),
             response_origin: request.response_origin,
             endpoint_path: request.endpoint_path,
             body: request.body,
@@ -736,7 +766,7 @@ fn image_response_metering(
     let mut usage = Usage::new();
     usage.input_tokens = raw.get("input_tokens").and_then(Value::as_u64);
     usage.output_tokens = raw.get("output_tokens").and_then(Value::as_u64);
-    usage.cached_tokens = raw
+    usage.cached_input_tokens = raw
         .pointer("/input_tokens_details/cached_tokens")
         .and_then(Value::as_u64);
     usage.image_input_tokens = raw
@@ -842,6 +872,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         &mut failure,
                         WebSocketRecoveryContext {
                             policy,
+                            replay_boundary: ReplayBoundary::BeforeSemanticOutput,
                             requirement: request_transport_requirement,
                             retry_count: websocket_retry_count,
                             max_retries: stream_max_retries,
@@ -907,18 +938,33 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
         }
         if allows_account_state_mutation
             && !response.set_cookie_headers.is_empty()
-            && let Ok(outcome) = selector
+        {
+            match selector
                 .capture_response_cookies(
                     &active_account,
                     &response_origin,
                     &response.set_cookie_headers,
                 )
                 .await
-                && let Some(revision) = outcome.credential_revision
-                && let Ok(current) = selector.current_account(active_account.id()).await
-                && current.revision().get() == revision
-        {
-            active_account = current;
+            {
+                Ok(outcome) => {
+                    if let Some(revision) = outcome.credential_revision
+                        && let Ok(current) = selector.current_account(active_account.id()).await
+                        && current.revision().get() == revision
+                    {
+                        active_account = current;
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        request_id = %request_id,
+                        account_id = %active_account.id(),
+                        credential_revision = active_account.revision().get(),
+                        error = %error,
+                        "Failed to persist OpenAI response cookies"
+                    );
+                }
+            }
         }
         let response_transport = response.transport;
         let websocket_connection_id = response.websocket_connection_id;
@@ -928,7 +974,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             // opening ID 标识连接，不可作为缺失请求级错误头时的当前请求 ID
             failure_diagnostics.request_id = None;
         }
-        let failure_set_cookie_headers = response.set_cookie_headers.clone();
         let failure_rate_limit_headers = response.rate_limit_headers.clone();
         let mut passive_quota_observation =
             OpenAiPassiveQuotaObservation::new(response.rate_limit_headers);
@@ -942,7 +987,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             .with_requested_service_tier(request.service_tier())
             .with_request_tool_pricing(upstream_model.as_str(), request.tools())
             .with_raw_sse_passthrough();
-        let mut pre_commit_events = PreCommitClientEvents::new(trace);
+        let mut client_events = ClientEventDelivery::new(context.allows_replayable_prelude());
         loop {
             if context.deadline().is_elapsed() {
                 if allows_account_state_mutation {
@@ -956,7 +1001,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 Err(provider_error(ProviderErrorKind::Timeout, UpstreamSendState::Sent))?;
                 return;
             };
-            let replay_grace_deadline = pre_commit_events.replay_grace_deadline();
             let next = tokio::select! {
                 biased;
                 _ = cancellation.cancelled() => Err(MappedProviderFailure::plain(provider_error(
@@ -967,9 +1011,8 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                     ProviderErrorKind::Timeout,
                     UpstreamSendState::Sent,
                 ))),
-                _ = wait_for_replay_grace(replay_grace_deadline) => Ok(PreCommitPoll::GraceElapsed),
                 chunk = body.next() => match chunk {
-                    Some(Ok(chunk)) => Ok(PreCommitPoll::Upstream(Some(chunk))),
+                    Some(Ok(chunk)) => Ok(Some(chunk)),
                     Some(Err(error)) => {
                         log_client_upstream_error(
                             UpstreamErrorLogContext::new(
@@ -981,17 +1024,11 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         );
                         Err(map_stream_error(error))
                     }
-                    None => Ok(PreCommitPoll::Upstream(None)),
+                    None => Ok(None),
                 },
             };
             let next = match next {
-                Ok(PreCommitPoll::Upstream(next)) => next,
-                Ok(PreCommitPoll::GraceElapsed) => {
-                    for event in pre_commit_events.commit_pending(PreCommitReleaseReason::GraceTimeout) {
-                        yield event;
-                    }
-                    continue;
-                }
+                Ok(next) => next,
                 Err(mut failure) => {
                     let updates = take_rate_limit_updates(rate_limit_updates.as_ref()).await;
                     let rate_limits_changed = if updates.is_empty() {
@@ -1008,22 +1045,21 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                         &mut decoder,
                     )
                     .await;
-                    let observation_event = if rate_limits_changed || metadata_merge.is_some() {
-                        observation_state.observation(None).map(ProviderEvent::observation)
+                    let observation_event = if rate_limits_changed || metadata_merge.is_some()
+                        || response_transport == CodexBackendTransport::WebSocket
+                    {
+                        observation_state.observation(Some(&failure.error)).map(ProviderEvent::observation)
                     } else {
                         None
                     };
                     if failure.websocket_transport_retryable
                         && response_transport == CodexBackendTransport::WebSocket
-                        && (matches!(
-                            failure.error.send_state(),
-                            UpstreamSendState::Sent | UpstreamSendState::Ambiguous
-                        ) || !pre_commit_events.is_committed())
                     {
                         apply_websocket_recovery_policy(
                             &mut failure,
                             WebSocketRecoveryContext {
                                 policy: WebSocketFailurePolicy::Budgeted,
+                                replay_boundary: ReplayBoundary::from_semantic_output(client_events.replay_closed()),
                                 requirement: request_transport_requirement,
                                 retry_count: websocket_retry_count,
                                 max_retries: stream_max_retries,
@@ -1052,7 +1088,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                     Err(quota_continuation_replay_error(
                         failure.error,
                         &request,
-                        ReplayBoundary::from_semantic_output(pre_commit_events.is_committed()),
+                        ReplayBoundary::from_semantic_output(client_events.replay_closed()),
                     ))?;
                     return;
                 }
@@ -1067,7 +1103,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             };
             let first_event_changed =
                 observation_state.observe_stream_chunk(&chunk, context.timing_started_at());
-            let chunk_len = chunk.len();
             let decoded = if websocket_transport {
                 let text = std::str::from_utf8(&chunk).map_err(|_| provider_error(ProviderErrorKind::Protocol, UpstreamSendState::Sent))?;
                 decoder.push_websocket(text)
@@ -1089,7 +1124,6 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             )
             .await;
             let metadata_changed = metadata_merge.unwrap_or(false);
-            pre_commit_events.observe_chunk(chunk_len);
             let response_model_changed = observation_state
                 .observe_upstream_response_model(decoder.response_model());
             let service_tier_changed = observation_state
@@ -1109,10 +1143,9 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                     map_canonical_error(
                         error,
                         &failure_diagnostics,
-                        &failure_set_cookie_headers,
                         &failure_rate_limit_headers,
                         ReplayBoundary::from_semantic_output(
-                            semantic_output_seen || pre_commit_events.is_committed(),
+                            semantic_output_seen || client_events.replay_closed(),
                         ),
                     ),
                     atomic_upstream_failure,
@@ -1178,15 +1211,15 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             }
             if let Some((mut failure, atomic_upstream_failure)) = terminal_failure {
                 let failure_after_commit =
-                    timing_signals.semantic_output || pre_commit_events.is_committed();
+                    timing_signals.semantic_output || client_events.replay_closed();
                 if failure_after_commit {
-                    for event in pre_commit_events.commit(events) {
+                    for event in client_events.commit(events) {
                         yield event;
                     }
                 } else if atomic_upstream_failure {
                     failure.error = failure
                         .error
-                        .with_atomic_client_events(pre_commit_events.take_for_failure(events));
+                        .with_atomic_client_events(events);
                 }
                 Err(quota_continuation_replay_error(
                     failure.error,
@@ -1195,7 +1228,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 ))?;
                 return;
             }
-            let events = pre_commit_events.stage(events, timing_signals, completed);
+            let events = client_events.forward(events, timing_signals, completed);
             for event in events {
                 yield event;
             }
@@ -1225,10 +1258,9 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
                 map_canonical_error(
                     error,
                     &failure_diagnostics,
-                    &failure_set_cookie_headers,
                     &failure_rate_limit_headers,
                     ReplayBoundary::from_semantic_output(
-                        semantic_output_seen || pre_commit_events.is_committed(),
+                        semantic_output_seen || client_events.replay_closed(),
                     ),
                 ),
                 atomic_upstream_failure,
@@ -1312,15 +1344,15 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
         }
         if let Some((mut failure, atomic_upstream_failure)) = terminal_failure {
             let failure_after_commit =
-                timing_signals.semantic_output || pre_commit_events.is_committed();
+                timing_signals.semantic_output || client_events.replay_closed();
             if failure_after_commit {
-                for event in pre_commit_events.commit(events) {
+                for event in client_events.commit(events) {
                     yield event;
                 }
             } else if atomic_upstream_failure {
                 failure.error = failure
                     .error
-                    .with_atomic_client_events(pre_commit_events.take_for_failure(events));
+                    .with_atomic_client_events(events);
             }
             Err(quota_continuation_replay_error(
                 failure.error,
@@ -1329,7 +1361,7 @@ pub(super) fn cold_response_stream(response: ColdResponse) -> EventStream {
             ))?;
             return;
         }
-        let events = pre_commit_events.finish(events, timing_signals, completed);
+        let events = client_events.forward(events, timing_signals, completed);
         for event in events {
             yield event;
         }

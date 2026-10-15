@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import type { BaseTableColumn } from '@codex-proxy/ui'
+import type { TableColumn } from '@codex-proxy/ui'
 import type { UsageListRecord } from '@/api'
 
-import { BaseTable } from '@codex-proxy/ui'
+import { ZTable } from '@codex-proxy/ui'
 import { Minimize2 } from '@lucide/vue'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
@@ -22,7 +22,7 @@ import {
 // 使用记录表只负责该领域的单元格呈现；筛选与分页由页面组合。
 withDefaults(
   defineProps<{
-    columns: BaseTableColumn<UsageListRecord>[]
+    columns: TableColumn<UsageListRecord>[]
     rows: UsageListRecord[]
     loading?: boolean
     emptyText?: string
@@ -35,9 +35,9 @@ withDefaults(
 </script>
 
 <template>
-  <BaseTable
+  <ZTable
     :columns="columns"
-    :rows="rows"
+    :data="rows"
     :loading="loading"
     :empty-text="emptyText"
   >
@@ -142,5 +142,5 @@ withDefaults(
     <template v-if="$slots.actions" #actions="scope">
       <slot name="actions" v-bind="scope" />
     </template>
-  </BaseTable>
+  </ZTable>
 </template>

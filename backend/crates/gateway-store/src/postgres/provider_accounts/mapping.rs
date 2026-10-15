@@ -10,6 +10,7 @@ pub(crate) fn admin_account_record(
     summary: ProviderAccountSummary,
 ) -> AdminStoreResult<AccountRecord> {
     Ok(AccountRecord {
+        outbound_proxy_enabled: summary.outbound_proxy_enabled,
         outbound_proxy: summary.outbound_proxy,
         id: summary.id,
         provider_kind: ProviderKind::new(summary.provider_kind).map_err(|_| {
@@ -86,9 +87,9 @@ pub(crate) fn admin_account_usage(usage: ProviderAccountUsageObservation) -> Acc
         success_count: usage.success_count,
         input_tokens: usage.input_tokens,
         output_tokens: usage.output_tokens,
-        cached_tokens: usage.cached_tokens,
-        cache_write_tokens: usage.cache_write_tokens,
-        reasoning_tokens: usage.reasoning_tokens,
+        cached_input_tokens: usage.cached_input_tokens,
+        cache_write_input_tokens: usage.cache_write_input_tokens,
+        reasoning_output_tokens: usage.reasoning_output_tokens,
         image_input_tokens: usage.image_input_tokens,
         image_output_tokens: usage.image_output_tokens,
         image_request_count: usage.image_request_count,
@@ -104,165 +105,4 @@ pub(crate) fn admin_account_usage(usage: ProviderAccountUsageObservation) -> Acc
             .map(admin_account_model_usage)
             .collect(),
     }
-}
-
-pub(crate) fn admin_account_usage_window(
-    row: &sqlx::postgres::PgRow,
-) -> AdminStoreResult<AccountUsageWindowResult> {
-    let provider_reported_count = window_usage_count(row, "provider_reported_count")?;
-    let calculated_count = window_usage_count(row, "calculated_count")?;
-    let unavailable_count = window_usage_count(row, "unavailable_count")?;
-    Ok(AccountUsageWindowResult {
-        account_id: window_usage_value(row, "account_id")?,
-        key: window_usage_value(row, "window_key")?,
-        usage: AccountUsage {
-            account_id: window_usage_value(row, "account_id")?,
-            request_count: window_usage_count(row, "request_count")?,
-            success_count: window_usage_count(row, "success_count")?,
-            input_tokens: optional_window_usage_count(row, "input_tokens")?,
-            output_tokens: optional_window_usage_count(row, "output_tokens")?,
-            cached_tokens: optional_window_usage_count(row, "cached_tokens")?,
-            cache_write_tokens: optional_window_usage_count(row, "cache_write_tokens")?,
-            reasoning_tokens: optional_window_usage_count(row, "reasoning_tokens")?,
-            image_input_tokens: optional_window_usage_count(row, "image_input_tokens")?,
-            image_output_tokens: optional_window_usage_count(row, "image_output_tokens")?,
-            image_request_count: window_usage_count(row, "image_request_count")?,
-            image_request_failed_count: window_usage_count(row, "image_request_failed_count")?,
-            total_tokens: optional_window_usage_count(row, "total_tokens")?,
-            cost_coverage: AdminCostCoverage {
-                provider_reported_count,
-                calculated_count,
-                partial_count: 0,
-                unavailable_count,
-                not_billable_count: 0,
-            },
-            costs: Vec::new(),
-            last_used_at: window_usage_value(row, "last_used_at")?,
-            request_buckets: Vec::new(),
-            models: Vec::new(),
-        },
-    })
-}
-
-pub(crate) fn admin_account_usage_window_model(
-    row: &sqlx::postgres::PgRow,
-) -> AdminStoreResult<((String, String, String), AccountModelUsage)> {
-    let account_id: String = window_usage_value(row, "account_id")?;
-    let window_key: String = window_usage_value(row, "window_key")?;
-    let model: String = window_usage_value(row, "model")?;
-    let provider_reported_count = window_usage_count(row, "provider_reported_count")?;
-    let calculated_count = window_usage_count(row, "calculated_count")?;
-    let unavailable_count = window_usage_count(row, "unavailable_count")?;
-    Ok((
-        (account_id, window_key, model.clone()),
-        AccountModelUsage {
-            model,
-            request_count: window_usage_count(row, "request_count")?,
-            success_count: window_usage_count(row, "success_count")?,
-            input_tokens: optional_window_usage_count(row, "input_tokens")?,
-            output_tokens: optional_window_usage_count(row, "output_tokens")?,
-            cached_tokens: optional_window_usage_count(row, "cached_tokens")?,
-            cache_write_tokens: optional_window_usage_count(row, "cache_write_tokens")?,
-            reasoning_tokens: optional_window_usage_count(row, "reasoning_tokens")?,
-            image_input_tokens: optional_window_usage_count(row, "image_input_tokens")?,
-            image_output_tokens: optional_window_usage_count(row, "image_output_tokens")?,
-            image_request_count: window_usage_count(row, "image_request_count")?,
-            image_request_failed_count: window_usage_count(row, "image_request_failed_count")?,
-            total_tokens: optional_window_usage_count(row, "total_tokens")?,
-            cost_coverage: AdminCostCoverage {
-                provider_reported_count,
-                calculated_count,
-                partial_count: 0,
-                unavailable_count,
-                not_billable_count: 0,
-            },
-            costs: Vec::new(),
-            last_used_at: window_usage_value(row, "last_used_at")?,
-        },
-    ))
-}
-
-pub(crate) fn admin_account_usage_window_model_cost(
-    row: &sqlx::postgres::PgRow,
-) -> AdminStoreResult<((String, String, String), AccountCost)> {
-    let key = (
-        window_usage_value(row, "account_id")?,
-        window_usage_value(row, "window_key")?,
-        window_usage_value(row, "model")?,
-    );
-    let amount = window_usage_value::<String>(row, "amount")?;
-    let amount = AdminDecimalAmount::from_str(&amount).map_err(|_| {
-        AdminStoreError::new(
-            AdminStoreErrorKind::Invalid,
-            ENTITY,
-            "persisted account model cost is invalid",
-        )
-    })?;
-    Ok((
-        key,
-        AccountCost {
-            currency: window_usage_value(row, "cost_currency")?,
-            amount,
-        },
-    ))
-}
-
-pub(crate) fn admin_account_usage_window_cost(
-    row: &sqlx::postgres::PgRow,
-) -> AdminStoreResult<((String, String), AccountCost)> {
-    let key = (
-        window_usage_value(row, "account_id")?,
-        window_usage_value(row, "window_key")?,
-    );
-    let amount = window_usage_value::<String>(row, "amount")?;
-    let amount = AdminDecimalAmount::from_str(&amount).map_err(|_| {
-        AdminStoreError::new(
-            AdminStoreErrorKind::Invalid,
-            ENTITY,
-            "persisted account cost is invalid",
-        )
-    })?;
-    Ok((
-        key,
-        AccountCost {
-            currency: window_usage_value(row, "cost_currency")?,
-            amount,
-        },
-    ))
-}
-
-pub(crate) fn window_usage_count(
-    row: &sqlx::postgres::PgRow,
-    column: &'static str,
-) -> AdminStoreResult<u64> {
-    let value = window_usage_value::<i64>(row, column)?;
-    u64::try_from(value).map_err(|_| invalid_window_usage(column))
-}
-
-pub(crate) fn optional_window_usage_count(
-    row: &sqlx::postgres::PgRow,
-    column: &'static str,
-) -> AdminStoreResult<Option<u64>> {
-    window_usage_value::<Option<i64>>(row, column)?
-        .map(|value| u64::try_from(value).map_err(|_| invalid_window_usage(column)))
-        .transpose()
-}
-
-pub(crate) fn window_usage_value<T>(
-    row: &sqlx::postgres::PgRow,
-    column: &'static str,
-) -> AdminStoreResult<T>
-where
-    for<'row> T: sqlx::Decode<'row, Postgres> + sqlx::Type<Postgres>,
-{
-    row.try_get(column)
-        .map_err(|_| invalid_window_usage(column))
-}
-
-pub(crate) fn invalid_window_usage(column: &'static str) -> AdminStoreError {
-    AdminStoreError::new(
-        AdminStoreErrorKind::Invalid,
-        ENTITY,
-        format!("invalid quota window usage column: {column}"),
-    )
 }

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { OutboundProxyRecord } from '@/api'
-import { BaseButton, BaseCard, BaseConfirmModal, BaseIconButton, BaseInput, BasePageHeader, BaseTable, BaseTablePagination } from '@codex-proxy/ui'
-import { LockKeyhole, MapPin, Pencil, Plus, Search, Trash2, Users, Wifi } from '@lucide/vue'
+import { ZButton, ZCard, ZConfirmDialog, ZInput, ZPageHeader, ZPagination, ZTable, ZTag } from '@codex-proxy/ui'
+import { LockKeyhole, MapPin, Plus, Search, Users } from '@lucide/vue'
 import { shallowRef } from 'vue'
 import ProxyAccountsModal from './components/ProxyAccountsModal.vue'
+import ProxyActions from './components/ProxyActions.vue'
 import ProxyFormModal from './components/ProxyFormModal.vue'
 import { useProxies } from './composables/useProxies'
 import { proxyColumns } from './constants'
@@ -24,6 +25,12 @@ const {
   pendingDelete,
   deleting,
   testingIds,
+  updatingIds,
+  showDisable,
+  pendingDisable,
+  disabling,
+  toggleEnabled,
+  confirmDisable,
   testingConnection,
   detectingLocation,
   openForm,
@@ -43,32 +50,32 @@ const inspected = shallowRef<OutboundProxyRecord | null>(null)
 
 <template>
   <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
-    <BasePageHeader
+    <ZPageHeader
       class="h-17"
       title="代理管理"
       description="管理账号使用的代理，测试连接并查看出口 IP"
     />
-    <BaseCard class="mt-5 flex h-[calc(100dvh-136px)] min-h-125 flex-col">
+    <ZCard class="mt-5 flex h-[calc(100dvh-136px)] min-h-125 flex-col">
       <template #header>
         <div class="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
-          <BaseInput v-model="search" class="sm:w-80" aria-label="搜索代理" placeholder="搜索代理名称...">
+          <ZInput v-model="search" class="sm:w-80" aria-label="搜索代理" placeholder="搜索代理名称...">
             <template #prefix>
               <Search class="size-4.5 text-cp-text-tertiary" />
             </template>
-          </BaseInput>
+          </ZInput>
           <div class="flex shrink-0 items-center justify-end gap-2 sm:ml-auto">
-            <BaseButton variant="primary" @click="openForm()">
+            <ZButton type="primary" @click="openForm()">
               <template #icon>
                 <Plus class="size-4" />
               </template>
               新增代理
-            </BaseButton>
+            </ZButton>
           </div>
         </div>
       </template>
       <template #body>
         <div class="flex h-full min-h-0 flex-col">
-          <BaseTable class="min-h-0 flex-1" :columns="proxyColumns" :rows="proxies" :loading="loading" :empty-text="search.trim() ? '没有找到匹配的代理，请尝试其他名称' : '暂无代理，请点击新增代理添加'">
+          <ZTable class="min-h-0 flex-1" :columns="proxyColumns" :data="proxies" :loading="loading" :empty-text="search.trim() ? '没有找到匹配的代理，请尝试其他名称' : '暂无代理，请点击新增代理添加'">
             <template #name="{ row }">
               <span class="block truncate text-cp text-cp-text" :title="row.name">{{ row.name }}</span>
             </template>
@@ -83,6 +90,11 @@ const inspected = shallowRef<OutboundProxyRecord | null>(null)
                   <span class="truncate" :title="`${effectiveProxyLocation(row)?.city} · ${effectiveProxyLocation(row)?.timezone}`">{{ effectiveProxyLocation(row)?.city }} · {{ effectiveProxyLocation(row)?.timezone }}</span>
                 </span>
               </div>
+            </template>
+            <template #status="{ row }">
+              <ZTag :type="row.enabled ? 'success' : 'default'">
+                {{ row.enabled ? '已启用' : '已禁用' }}
+              </ZTag>
             </template>
             <template #exitIp="{ row }">
               <div v-if="row.lastTest?.exitIpv4 && row.lastTest?.exitIpv6" class="flex flex-col gap-0.5 font-mono text-cp-xs">
@@ -120,23 +132,13 @@ const inspected = shallowRef<OutboundProxyRecord | null>(null)
               {{ row.lastTestAtDisplay ?? '-' }}
             </template>
             <template #actions="{ row }">
-              <div class="flex items-center gap-1">
-                <BaseIconButton size="sm" label="测试代理" :loading="testingIds.has(row.id)" :disabled="testingIds.has(row.id)" @click="checkProxy(row)">
-                  <Wifi class="size-3.5 text-cp-link" />
-                </BaseIconButton>
-                <BaseIconButton size="sm" label="编辑代理" :disabled="testingIds.has(row.id)" @click="openForm(row)">
-                  <Pencil class="size-3.5 text-cp-link" />
-                </BaseIconButton>
-                <BaseIconButton size="sm" :label="row.accountCount ? '代理正在被账号使用' : '删除代理'" :disabled="row.accountCount > 0 || testingIds.has(row.id)" @click="requestDelete(row)">
-                  <Trash2 class="size-3.5 text-cp-error" />
-                </BaseIconButton>
-              </div>
+              <ProxyActions :proxy="row" :testing="testingIds.has(row.id)" :updating="updatingIds.has(row.id)" @test="checkProxy" @edit="openForm" @toggle="toggleEnabled" @delete="requestDelete" />
             </template>
-          </BaseTable>
-          <BaseTablePagination :pagination="pagination" :loading="loading" @page-change="setPage" @page-size-change="setPageSize" />
+          </ZTable>
+          <ZPagination v-bind="pagination" :disabled="loading" @current-change="setPage" @size-change="setPageSize" />
         </div>
       </template>
-    </BaseCard>
+    </ZCard>
 
     <ProxyFormModal
       v-model="showForm"
@@ -155,11 +157,22 @@ const inspected = shallowRef<OutboundProxyRecord | null>(null)
       @detect-location="detectLocation"
       @after-leave="clearCredentials"
     />
-    <BaseConfirmModal v-model="showDelete" title="删除代理" destructive :loading="deleting" @confirm="confirmDelete">
+    <ZConfirmDialog v-model="showDisable" title="禁用代理" confirm-text="禁用代理" :loading="disabling" @confirm="confirmDisable">
+      <p class="m-0">
+        确定禁用“{{ pendingDisable?.name }}”吗？
+      </p>
+      <p class="mt-3 mb-0 text-cp-text-secondary">
+        关联账号的新请求将改为直连，代理配置和绑定会保留，重新启用后恢复使用
+      </p>
+    </ZConfirmDialog>
+    <ZConfirmDialog v-model="showDelete" title="删除代理" confirm-text="删除代理" destructive :loading="deleting" @confirm="confirmDelete">
       <p class="m-0">
         确定删除“{{ pendingDelete?.name }}”吗？
       </p>
-    </BaseConfirmModal>
+      <p class="mt-3 mb-0 text-cp-text-secondary">
+        将自动解除关联账号，关联账号的新请求将改为直连
+      </p>
+    </ZConfirmDialog>
     <ProxyAccountsModal v-model="showAccounts" :proxy="inspected" @removed="loadProxies({ silent: true })" />
   </div>
 </template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { getAccounts } from '@/api'
-import { BaseCard, BaseMotionIcon } from '@codex-proxy/ui'
+import { ZCard, ZMotionIcon } from '@codex-proxy/ui'
 
 import { AlertTriangle, Gauge, ShieldCheck, Users } from '@lucide/vue'
 import { computed } from 'vue'
@@ -57,7 +57,7 @@ function overviewIconClass(tone: string) {
 
 <template>
   <div class="mt-5 grid shrink-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-    <BaseCard v-for="item in overviewItems" :key="item.label" as="article" padding="compact">
+    <ZCard v-for="item in overviewItems" :key="item.label" as="article" padding="compact">
       <div class="flex items-stretch justify-between gap-3">
         <div class="flex min-w-0 flex-col">
           <p class="m-0 text-cp-sm leading-none font-heavy text-cp-text-secondary">
@@ -70,13 +70,13 @@ function overviewIconClass(tone: string) {
             {{ item.caption }}
           </p>
         </div>
-        <BaseMotionIcon
+        <ZMotionIcon
           class="inline-flex size-9 shrink-0 items-center justify-center self-start rounded-lg"
           :class="overviewIconClass(item.tone)"
         >
           <component :is="item.icon" class="size-4.5" />
-        </BaseMotionIcon>
+        </ZMotionIcon>
       </div>
-    </BaseCard>
+    </ZCard>
   </div>
 </template>

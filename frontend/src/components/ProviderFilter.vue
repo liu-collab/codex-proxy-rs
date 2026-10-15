@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseSegmented } from '@codex-proxy/ui'
+import { ZSegmented } from '@codex-proxy/ui'
 import { LayoutGrid } from '@lucide/vue'
 import { formatProviderLabel, PROVIDER_IDS, providerIcon } from '@/utils/providers'
 
@@ -14,9 +14,9 @@ const options = [
 <template>
   <div class="flex min-w-0 max-w-full items-center gap-1">
     <div class="min-w-0 overflow-x-auto">
-      <BaseSegmented
+      <ZSegmented
         v-model="provider"
-        label="按平台筛选"
+        aria-label="按平台筛选"
         display="icon"
         :style="{ width: `${options.length * 40 + 4}px` }"
         :options="options"

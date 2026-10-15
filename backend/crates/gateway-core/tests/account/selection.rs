@@ -13,7 +13,7 @@ use super::{candidate, candidate_with_concurrency, context};
 const FAILURE_RATE_HALF_LIFE: Duration = Duration::from_secs(15 * 60);
 
 #[test]
-fn unlimited_account_concurrency_preserves_overrides_intervals_and_finite_scores() {
+fn unlimited_account_concurrency_preserves_overrides_and_finite_scores() {
     use gateway_core::account::{AccountConcurrency, AccountSelectionPolicy};
 
     for strategy in [
@@ -23,8 +23,7 @@ fn unlimited_account_concurrency_preserves_overrides_intervals_and_finite_scores
         RotationStrategy::QuotaResetPriority,
     ] {
         let mut context = context(strategy);
-        context.policy =
-            AccountSelectionPolicy::new(strategy, AccountConcurrency::Unlimited, Duration::ZERO);
+        context.policy = AccountSelectionPolicy::new(strategy, AccountConcurrency::Unlimited);
         let candidates = [
             candidate("acct_unlimited", u32::MAX, None),
             candidate_with_concurrency("acct_limited", 2, 2),
@@ -60,14 +59,9 @@ fn unlimited_account_concurrency_preserves_overrides_intervals_and_finite_scores
                     .is_finite()
             );
         }
-        context.policy = AccountSelectionPolicy::new(
-            strategy,
-            AccountConcurrency::Unlimited,
-            Duration::from_secs(1),
-        );
         let mut recent = candidate("acct_unlimited", u32::MAX, None);
         recent.signals.last_started_at = Some(context.now);
-        assert!(AccountSelector.select(&[recent], &context).is_none());
+        assert!(AccountSelector.select(&[recent], &context).is_some());
     }
 }
 
@@ -77,11 +71,8 @@ fn unavailable_unlimited_account_does_not_hide_the_finite_pool_capacity() {
         AccountConcurrency, AccountSelectionPolicy, CredentialState, QuotaState,
     };
     let mut context = context(RotationStrategy::Smart);
-    context.policy = AccountSelectionPolicy::new(
-        RotationStrategy::Smart,
-        AccountConcurrency::Unlimited,
-        Duration::ZERO,
-    );
+    context.policy =
+        AccountSelectionPolicy::new(RotationStrategy::Smart, AccountConcurrency::Unlimited);
     let mut unavailable = candidate("acct_disabled", 0, None);
     unavailable.account = unavailable.account.with_account_facts(
         false,

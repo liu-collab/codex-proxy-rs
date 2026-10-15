@@ -106,6 +106,43 @@ impl MemoryProxies {
     }
 }
 
+#[tokio::test]
+async fn proxy_enabled_updates_preserve_connection_and_omitted_state() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let (status, created) = request(
+        &fixture,
+        "/api/admin/proxies/create",
+        Some(json!({
+            "name":"Office", "proxyUrl":"http://proxy.example:8080", "autoLocation":false
+        })),
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(created["data"]["record"]["enabled"], true);
+    for (revision, enabled, expected) in [
+        (1, Some(false), false),
+        (2, None, false),
+        (3, Some(true), true),
+    ] {
+        let mut body = json!({"id":"proxy_test", "revision":revision, "name":"Office"});
+        if let Some(enabled) = enabled {
+            body["enabled"] = json!(enabled);
+        }
+        let (status, changed) =
+            request(&fixture, "/api/admin/proxies/update", Some(body), true).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(changed["data"]["record"]["enabled"], expected);
+        assert_eq!(
+            changed["data"]["record"]["endpoint"],
+            created["data"]["record"]["endpoint"]
+        );
+        let (_, listed) = request(&fixture, "/api/admin/proxies", None, true).await;
+        assert_eq!(listed["data"]["items"][0]["enabled"], expected);
+    }
+}
+
 fn missing() -> AdminStoreError {
     AdminStoreError::new(AdminStoreErrorKind::NotFound, "proxy", "missing proxy")
 }
@@ -182,6 +219,7 @@ impl ProxyStore for MemoryProxies {
         _: &MutationContext,
     ) -> AdminStoreResult<ProxyMutation> {
         let mut record = ProxyRecord {
+            enabled: true,
             auto_location: command.auto_location,
             detected_location: None,
             location: command.location,
@@ -214,6 +252,9 @@ impl ProxyStore for MemoryProxies {
         let mut stored = self.0.lock().unwrap();
         let record = stored.as_mut().ok_or_else(missing)?;
         record.name = command.name;
+        if let Some(enabled) = command.enabled {
+            record.enabled = enabled;
+        }
         if let Some(auto_location) = command.auto_location {
             if auto_location != record.auto_location {
                 record.detected_location = None;

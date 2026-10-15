@@ -96,11 +96,11 @@ impl SettingsStore for AdminSettingsStoreAdapter {
                     "provider_request_profiles_json".to_owned(),
                     "request_location_enabled".to_owned(),
                     "request_location_json".to_owned(),
+                    "codex_privacy_policy_json".to_owned(),
                     "model_mappings_json".to_owned(),
                     "refresh_margin_seconds".to_owned(),
                     "refresh_concurrency".to_owned(),
                     "max_concurrent_per_account".to_owned(),
-                    "request_interval_ms".to_owned(),
                     "max_waiting_per_key".to_owned(),
                     "max_waiting_per_account".to_owned(),
                     "concurrency_wait_timeout_seconds".to_owned(),
@@ -286,17 +286,17 @@ impl AuthStore for AuthStoreAdapter {
         .map_err(|error| admin_store_error("authentication session", error))
     }
 
-    async fn renew_session(
+    async fn compare_exchange_session(
         &self,
         session_id: &str,
         expected: &AuthSession,
-        expires_at: chrono::DateTime<chrono::Utc>,
+        replacement: Option<&AuthSession>,
     ) -> AdminStoreResult<Option<AuthSession>> {
-        redis::AuthStateRepository::renew_session(
+        redis::AuthStateRepository::compare_exchange_session(
             &self.state,
             session_id,
             &auth_session_record(expected),
-            expires_at,
+            replacement.map(auth_session_record).as_ref(),
         )
         .await
         .map_err(|error| admin_store_error("authentication session renewal", error))?
@@ -399,6 +399,7 @@ fn auth_session(record: redis::AuthSessionRecord) -> AdminStoreResult<AuthSessio
         subject,
         expires_at: record.expires_at,
         absolute_expires_at: record.absolute_expires_at,
+        renewal: record.renewal,
     })
 }
 
@@ -419,5 +420,6 @@ fn auth_session_record(session: &AuthSession) -> redis::AuthSessionRecord {
         subject,
         expires_at: session.expires_at,
         absolute_expires_at: session.absolute_expires_at,
+        renewal: session.renewal.clone(),
     }
 }

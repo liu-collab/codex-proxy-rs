@@ -1629,7 +1629,7 @@ fn provider_request_with_model_capabilities(
     ));
     let snapshot = RuntimeSnapshot::new(
         ConfigRevision::new(1).expect("revision"),
-        gateway_core::settings::SettingsValues::new(2, 0, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(2, "smart", Default::default(), None, None),
         vec![provider],
         vec![provider_model],
         vec![],
@@ -1647,11 +1647,7 @@ fn provider_request_with_model_capabilities(
 }
 
 fn selection_policy() -> AccountSelectionPolicy {
-    AccountSelectionPolicy::new(
-        RotationStrategy::Smart,
-        NonZeroU32::new(2).expect("limit"),
-        Duration::ZERO,
-    )
+    AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(2).expect("limit"))
 }
 
 #[derive(Debug)]

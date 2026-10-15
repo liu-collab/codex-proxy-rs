@@ -34,6 +34,49 @@ fn generate_request(body: Value) -> DecodedResponsesRequest {
     decode_request(body.to_string().as_bytes()).expect("test request should decode")
 }
 
+#[test]
+fn decoder_should_attach_only_identified_codex_inference_turns() {
+    let body = json!({"model":"smart-code", "input":"hello", "client_metadata": {
+        "thread_id":"thread", "turn_id":"turn", "x-codex-turn-metadata": r#"{"request_kind":"turn"}"#
+    }});
+    let decoded = generate_request(body.clone());
+    let identity = generate_operation(&decoded).client_turn().unwrap();
+    assert_eq!(identity.thread_id(), "thread");
+    assert_eq!(identity.turn_id(), "turn");
+    assert_eq!(Value::Object(openai_wire_body(&decoded).clone()), body);
+    for variant in [
+        "warmup",
+        "compaction",
+        "missing_thread",
+        "missing_turn",
+        "unknown_kind",
+        "oversized_id",
+    ] {
+        let mut request = body.clone();
+        match variant {
+            "warmup" => request["generate"] = json!(false),
+            "compaction" => {
+                request["client_metadata"]["x-codex-turn-metadata"] =
+                    json!(r#"{"request_kind":"compaction"}"#)
+            }
+            "missing_thread" => request["client_metadata"]["thread_id"] = json!(""),
+            "missing_turn" => request["client_metadata"]["turn_id"] = json!(""),
+            "unknown_kind" => {
+                request["client_metadata"]["x-codex-turn-metadata"] =
+                    json!(r#"{"request_kind":"other"}"#)
+            }
+            "oversized_id" => request["client_metadata"]["turn_id"] = json!("x".repeat(257)),
+            _ => unreachable!(),
+        }
+        assert!(
+            generate_operation(&generate_request(request))
+                .client_turn()
+                .is_none(),
+            "{variant}"
+        );
+    }
+}
+
 fn generate_operation(
     decoded: &DecodedResponsesRequest,
 ) -> &gateway_core::operation::GenerateRequest {

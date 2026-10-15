@@ -148,10 +148,11 @@ impl CodexBackendClient {
 
     pub(super) fn request_headers_for_http_response(
         &self,
+        profile: &CodexWireProfile,
         request: &CodexResponsesRequest,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<HeaderMap> {
-        let mut headers = self.response_headers(request, context)?;
+        let mut headers = self.response_headers(profile, request, context)?;
         headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         insert_optional_protocol_header(
@@ -164,10 +165,11 @@ impl CodexBackendClient {
 
     pub(super) fn request_headers_for_websocket_response(
         &self,
+        profile: &CodexWireProfile,
         request: &CodexResponsesRequest,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<HeaderMap> {
-        let mut headers = self.response_headers(request, context)?;
+        let mut headers = self.response_headers(profile, request, context)?;
         if !headers.contains_key("x-responsesapi-include-timing-metrics") {
             headers.insert(
                 HeaderName::from_static("x-responsesapi-include-timing-metrics"),
@@ -184,19 +186,20 @@ impl CodexBackendClient {
     /// HTTP 和 WS 共用的 Core 会话字段；传输专属字段由各自入口生成
     fn response_headers(
         &self,
+        profile: &CodexWireProfile,
         request: &CodexResponsesRequest,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<HeaderMap> {
         // 出站 UA 的产品名与版本取画像，系统信息取下游真实客户端；下游 UA 不合官方
-        // 形状时 `apply` 整体返回画像值。两条传输共用这条构造，不会出现身份分叉。
-        let profile = request.client_environment.as_ref().map_or_else(
-            || self.profile.snapshot(),
-            |environment| environment.apply(&self.profile.snapshot()),
-        );
+        // 形状时 `apply` 整体返回画像值。两条传输共用这条构造，不会出现身份分叉
+        let profile = request
+            .client_environment
+            .as_ref()
+            .map_or_else(|| profile.clone(), |environment| environment.apply(profile));
         let mut headers = self.model_request_headers(&profile, context)?;
         // x-client-request-id 由网关重建：优先客户端逻辑请求 ID（官方客户端里与 session-id 同值），
         // 其次 thread/session；客户端值无法表示为 HTTP 头时回落到代理请求 ID，
-        // 保证该头始终存在。下游原始 x-client-request-id 不参与（见跳过名单）。
+        // 保证该头始终存在。下游原始 x-client-request-id 不参与（见跳过名单）
         let client_request_id = context
             .client_request_id
             .or(context.thread_id)

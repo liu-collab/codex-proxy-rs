@@ -29,7 +29,7 @@ fn snapshot(revision: u64, name: &str) -> Arc<RuntimeSnapshot> {
     Arc::new(
         RuntimeSnapshot::new(
             ConfigRevision::new(revision).unwrap(),
-            SettingsValues::new(3, 50, "smart", BTreeMap::new(), None, None)
+            SettingsValues::new(3, "smart", BTreeMap::new(), None, None)
                 .with_request_profiles(profiles(&[("openai", name), ("xai", name)])),
             vec![],
             vec![],

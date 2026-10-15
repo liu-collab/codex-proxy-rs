@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PluginArtifactMetadata, PluginCapabilityBinding, PluginInstance } from '@/api'
-import { BaseScrollbar } from '@codex-proxy/ui'
+import { ZScrollbar } from '@codex-proxy/ui'
 import { ChevronDown } from '@lucide/vue'
 import { computed } from 'vue'
 import { PLUGIN_OBSERVER_EVENT_LABELS, PLUGIN_REQUEST_STAGES } from '../constants'
@@ -93,7 +93,7 @@ function scopeLabel(binding: PluginCapabilityBinding) {
         <ChevronDown class="size-3.5 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
       </span>
     </summary>
-    <BaseScrollbar class="mt-4 -mr-3" max-height="min(22rem, 38dvh)" role="region" :aria-label="`${instance.name} 的功能详情`">
+    <ZScrollbar class="mt-4 -mr-3" max-height="min(22rem, 38dvh)" role="region" :aria-label="`${instance.name} 的功能详情`">
       <div class="grid gap-5 pr-6">
         <dl v-if="groups.length" class="m-0 grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
           <div v-for="group in groups" :key="group.id" class="grid min-w-0 content-start gap-1">
@@ -113,6 +113,6 @@ function scopeLabel(binding: PluginCapabilityBinding) {
           <code class="break-all">codex-proxy-rs plugin {{ instance.id }} --help</code>
         </div>
       </div>
-    </BaseScrollbar>
+    </ZScrollbar>
   </details>
 </template>

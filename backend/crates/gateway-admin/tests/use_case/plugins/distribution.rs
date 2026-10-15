@@ -534,6 +534,7 @@ fn preview_fixture() -> Fixture {
 fn source_proxy() -> ProxyRecord {
     let now = chrono::Utc::now();
     ProxyRecord {
+        enabled: true,
         auto_location: false,
         detected_location: None,
         location: None,
@@ -606,6 +607,38 @@ async fn saved_source_proxy_is_resolved_for_queries_and_frozen_into_verified_sou
             }),
         ]
     );
+}
+
+#[tokio::test]
+async fn disabled_source_proxy_rejects_queries_and_downloads_before_network_access() {
+    let mut fixture = preview_fixture();
+    fixture.binding.get_mut().unwrap().outbound_proxy_id = Some("source-proxy".into());
+    let mut proxy = source_proxy();
+    proxy.enabled = false;
+    *fixture.proxy.get_mut().unwrap() = Some(proxy);
+    let fixture = Arc::new(fixture);
+    assert_eq!(
+        fixture
+            .service()
+            .check_update("test.example", &[])
+            .await
+            .unwrap_err()
+            .kind(),
+        AdminErrorKind::Invalid
+    );
+    let mut request = preview_request();
+    request.outbound_proxy_id = Some("source-proxy".into());
+    assert_eq!(
+        fixture
+            .service()
+            .verify_remote(request)
+            .await
+            .unwrap_err()
+            .kind(),
+        AdminErrorKind::Invalid
+    );
+    assert!(fixture.egresses.lock().unwrap().is_empty());
+    assert_eq!(*fixture.downloads.lock().unwrap(), 0);
 }
 
 #[tokio::test]

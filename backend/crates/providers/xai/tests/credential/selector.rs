@@ -239,11 +239,7 @@ impl SelectorFixture {
             UpstreamModelId::new(upstream_model).expect("model"),
             excluded,
             required_account,
-            AccountSelectionPolicy::new(
-                strategy,
-                std::num::NonZeroU32::new(2).expect("limit"),
-                Duration::ZERO,
-            ),
+            AccountSelectionPolicy::new(strategy, std::num::NonZeroU32::new(2).expect("limit")),
             SystemTime::now() + Duration::from_secs(30),
             Arc::new(FrozenAccountScope::new(
                 Arc::new(RuntimeAccountDirectory::new(accounts)),
@@ -1317,7 +1313,6 @@ async fn model_access_excludes_a_required_xai_account_before_acquiring_a_lease()
             AccountSelectionPolicy::new(
                 RotationStrategy::Smart,
                 std::num::NonZeroU32::new(2).expect("limit"),
-                Duration::ZERO,
             )
             .with_queue(gateway_core::concurrency::ConcurrencyQueuePolicy {
                 max_waiting: 1,

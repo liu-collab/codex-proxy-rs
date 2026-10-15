@@ -1,12 +1,6 @@
-//! usage 观测节奏的共享随机源与抖动映射。
+//! usage 观测与服务错误重试的共享随机源和抖动映射
 //!
-//! 多账号池化代理的固定周期请求（整点目录轮询、固定延迟补查、批量首查）
-//! 会形成可识别的共享特征；官方 codex 客户端不存在任何周期 usage 轮询。
-//! 本模块集中提供观测节奏的随机化策略：周期任务用单侧附加抖动
-//! `[0, base + jitter)`（k8s `wait.Jitter`、systemd `RandomizedDelaySec`
-//! 同款惯例，不缩短基础周期、不增加请求速率），重试类延迟用小范围均匀
-//! 随机替换固定值。所有映射都是纯函数，`None`（系统随机源不可用）时
-//! 退化为旧的固定基准，与 `websocket_retry_backoff` 的降级风格一致。
+//! 纯函数接收随机样本，限定各场景的等待范围；系统随机源不可用时使用固定基准
 
 use std::time::Duration;
 
@@ -31,6 +25,20 @@ pub fn uniform_delay(sample: Option<u64>, max: Duration) -> Duration {
     }
     let nanos = (u128::from(sample) % max.as_nanos()).min(u64::MAX as u128);
     Duration::from_nanos(nanos as u64)
+}
+
+/// 服务错误同账号重试的单侧附加等待：`[50ms, 250ms)`，不缩短指数退避
+///
+/// 每次失败独立采样，避免并发请求同步重试；随机源不可用时固定追加 150ms
+/// 上游 Retry-After 的优先级由 Core 裁决，该场景不使用此附加等待
+#[doc(hidden)]
+pub fn server_error_retry_jitter(sample: Option<u64>) -> Duration {
+    match sample {
+        Some(sample) => {
+            Duration::from_millis(50) + uniform_delay(Some(sample), Duration::from_millis(200))
+        }
+        None => Duration::from_millis(150),
+    }
 }
 
 /// 额度失败补查的基准延迟；随机源不可用时退回该固定值。

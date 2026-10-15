@@ -165,9 +165,9 @@ fn extract_usage_should_read_codex_usage_shape() {
         Some(TokenUsage {
             input_tokens: 12,
             output_tokens: 5,
-            cached_tokens: 3,
-            cache_write_tokens: 4,
-            reasoning_tokens: 0,
+            cached_input_tokens: 3,
+            cache_write_input_tokens: 4,
+            reasoning_output_tokens: 0,
             image_input_tokens: 0,
             image_output_tokens: 0,
             total_tokens: 17,
@@ -191,9 +191,9 @@ fn extract_usage_should_read_openai_usage_shape() {
         Some(TokenUsage {
             input_tokens: 8,
             output_tokens: 4,
-            cached_tokens: 2,
-            cache_write_tokens: 0,
-            reasoning_tokens: 3,
+            cached_input_tokens: 2,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 3,
             image_input_tokens: 0,
             image_output_tokens: 0,
             total_tokens: 12,
@@ -217,9 +217,9 @@ fn extract_usage_should_preserve_explicit_total_and_reasoning_tokens() {
         Some(TokenUsage {
             input_tokens: 12,
             output_tokens: 8,
-            cached_tokens: 0,
-            cache_write_tokens: 0,
-            reasoning_tokens: 6,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 6,
             image_input_tokens: 0,
             image_output_tokens: 0,
             total_tokens: 20,
@@ -248,9 +248,9 @@ fn extract_usage_should_keep_image_tool_usage_separate_from_model_total() {
         Some(TokenUsage {
             input_tokens: 12,
             output_tokens: 5,
-            cached_tokens: 0,
-            cache_write_tokens: 0,
-            reasoning_tokens: 0,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
             image_input_tokens: 31,
             image_output_tokens: 9,
             total_tokens: 17,
@@ -278,9 +278,9 @@ fn extract_sse_usage_should_prefer_completed_response_usage() {
         Some(TokenUsage {
             input_tokens: 3,
             output_tokens: 5,
-            cached_tokens: 1,
-            cache_write_tokens: 0,
-            reasoning_tokens: 0,
+            cached_input_tokens: 1,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
             image_input_tokens: 0,
             image_output_tokens: 0,
             total_tokens: 8,
@@ -302,9 +302,9 @@ fn extract_sse_usage_should_fall_back_to_last_visible_usage() {
         Some(TokenUsage {
             input_tokens: 4,
             output_tokens: 6,
-            cached_tokens: 0,
-            cache_write_tokens: 0,
-            reasoning_tokens: 0,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
             image_input_tokens: 0,
             image_output_tokens: 0,
             total_tokens: 10,
@@ -324,9 +324,9 @@ fn extract_sse_usage_should_preserve_completed_image_tool_usage() {
         Some(TokenUsage {
             input_tokens: 12,
             output_tokens: 5,
-            cached_tokens: 3,
-            cache_write_tokens: 0,
-            reasoning_tokens: 0,
+            cached_input_tokens: 3,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
             image_input_tokens: 31,
             image_output_tokens: 9,
             total_tokens: 17,
@@ -348,9 +348,9 @@ fn extract_sse_usage_should_ignore_non_json_control_events() {
         Some(TokenUsage {
             input_tokens: 2,
             output_tokens: 3,
-            cached_tokens: 0,
-            cache_write_tokens: 0,
-            reasoning_tokens: 0,
+            cached_input_tokens: 0,
+            cache_write_input_tokens: 0,
+            reasoning_output_tokens: 0,
             image_input_tokens: 0,
             image_output_tokens: 0,
             total_tokens: 5,
@@ -392,6 +392,19 @@ fn retry_after_should_read_string_reset_timestamp() {
 
     let retry_after = retry_after_seconds_from_body(&body).expect("retry-after");
     assert!((59..=60).contains(&retry_after));
+}
+
+#[test]
+fn retry_after_should_ignore_elapsed_reset_timestamps_and_keep_later_advice() {
+    for reset_at in [json!(1), json!("1")] {
+        let mut body = json!({
+            "error": {"type": "usage_limit_reached", "resets_at": reset_at}
+        });
+        assert_eq!(retry_after_seconds_from_body(&body.to_string()), None);
+
+        body["retry_after_seconds"] = json!(7);
+        assert_eq!(retry_after_seconds_from_body(&body.to_string()), Some(7));
+    }
 }
 
 #[test]

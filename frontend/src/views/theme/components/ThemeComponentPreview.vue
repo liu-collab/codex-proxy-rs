@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { BaseTablePaginationState } from '@codex-proxy/ui'
+import type { PaginationState } from '@codex-proxy/ui'
 
-import { BaseButton, BaseCard, BaseCheckbox, BaseColorPicker, BaseEmpty, BaseForm, BaseIconButton, BaseInput, BaseMenuItem, BaseMotionIcon, BaseNumberInput, BasePopover, BaseRadio, BaseRange, BaseSegmented, BaseSelect, BaseSkeleton, BaseSwitch, BaseTable, BaseTablePagination, BaseTag, BaseTextarea, defineTableColumns, BaseFormItem as FormItem } from '@codex-proxy/ui'
+import { defineTableColumns, ZFormItem as FormItem, ZButton, ZCard, ZCheckbox, ZColorPicker, ZEmpty, ZForm, ZIconButton, ZInput, ZInputNumber, ZMenuItem, ZMotionIcon, ZPagination, ZPopover, ZRadio, ZSegmented, ZSelect, ZSkeleton, ZSlider, ZSwitch, ZTable, ZTag, ZTextarea } from '@codex-proxy/ui'
 
 import {
   Bell,
@@ -83,7 +83,7 @@ const tableRows: PreviewTableRow[] = [
   { id: 'fallback', account: 'fallback@example.com', provider: 'xAI', status: '异常', requests: '3,172', latency: '—', updatedAt: '12 分钟前' },
   { id: 'disabled', account: 'disabled@example.com', provider: 'OpenAI', status: '停用', requests: '0', latency: '—', updatedAt: '2 小时前' },
 ]
-const pagination: BaseTablePaginationState = {
+const pagination: PaginationState = {
   currentPage: 2,
   pageSize: 20,
   total: 1_182,
@@ -133,7 +133,7 @@ function statusClass(status: PreviewTableRow['status']) {
     </header>
 
     <section class="grid min-w-0 grid-cols-12 gap-6" aria-label="基础控制组件">
-      <BaseCard padding="compact" class="col-span-7 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="按钮与动作" description="BaseButton · BaseIconButton · BaseMotionIcon">
+      <ZCard padding="compact" class="col-span-7 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="按钮与动作" description="ZButton · ZIconButton · ZMotionIcon">
         <template #body>
           <div class="grid flex-1 content-start gap-6">
             <div>
@@ -141,27 +141,27 @@ function statusClass(status: PreviewTableRow['status']) {
                 Button / action
               </p>
               <div class="flex flex-wrap items-center gap-3">
-                <BaseButton variant="primary">
+                <ZButton type="primary">
                   <template #icon>
                     <Plus class="size-4" />
                   </template>
                   创建账号
-                </BaseButton>
-                <BaseButton variant="secondary">
+                </ZButton>
+                <ZButton>
                   <template #icon>
                     <Download class="size-4" />
                   </template>
                   导出数据
-                </BaseButton>
-                <BaseButton variant="ghost">
+                </ZButton>
+                <ZButton variant="text">
                   稍后处理
-                </BaseButton>
-                <BaseButton variant="destructive">
+                </ZButton>
+                <ZButton type="danger" variant="plain">
                   <template #icon>
                     <Trash2 class="size-4" />
                   </template>
                   删除
-                </BaseButton>
+                </ZButton>
               </div>
             </div>
 
@@ -171,112 +171,113 @@ function statusClass(status: PreviewTableRow['status']) {
                   尺寸与禁用状态
                 </p>
                 <div class="flex flex-wrap items-center gap-3">
-                  <BaseButton size="sm" variant="primary">
+                  <ZButton size="small" type="primary">
                     Small
-                  </BaseButton>
-                  <BaseButton size="md" variant="primary">
+                  </ZButton>
+                  <ZButton size="default" type="primary">
                     Medium
-                  </BaseButton>
-                  <BaseButton size="lg" variant="primary">
+                  </ZButton>
+                  <ZButton size="large" type="primary">
                     Large
-                  </BaseButton>
-                  <BaseButton disabled>
+                  </ZButton>
+                  <ZButton disabled>
                     不可操作
-                  </BaseButton>
-                  <BaseButton loading>
+                  </ZButton>
+                  <ZButton loading>
                     处理中
-                  </BaseButton>
+                  </ZButton>
                 </div>
               </div>
               <div class="flex items-center gap-2">
-                <BaseIconButton label="通知" variant="secondary">
-                  <BaseMotionIcon>
+                <ZIconButton aria-label="通知" variant="solid">
+                  <ZMotionIcon>
                     <Bell />
-                  </BaseMotionIcon>
-                </BaseIconButton>
-                <BaseIconButton label="更多操作" variant="secondary">
+                  </ZMotionIcon>
+                </ZIconButton>
+                <ZIconButton aria-label="更多操作" variant="solid">
                   <MoreHorizontal />
-                </BaseIconButton>
-                <BaseIconButton label="删除记录" variant="destructive">
+                </ZIconButton>
+                <ZIconButton aria-label="删除记录" type="danger">
                   <Trash2 />
-                </BaseIconButton>
+                </ZIconButton>
               </div>
             </div>
           </div>
         </template>
-      </BaseCard>
+      </ZCard>
 
-      <BaseCard padding="compact" class="col-span-5 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="表单与输入" description="BaseInput · BaseSelect · BaseNumberInput · BaseRange · BaseTextarea · BaseColorPicker">
+      <ZCard padding="compact" class="col-span-5 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="表单与输入" description="ZInput · ZSelect · ZInputNumber · ZSlider · ZTextarea · ZColorPicker">
         <template #body>
-          <BaseForm class="grid-cols-2 gap-3!">
-            <BaseInput v-model="search" aria-label="搜索账号" placeholder="搜索账号">
+          <ZForm class="grid-cols-2 gap-3!">
+            <ZInput v-model="search" aria-label="搜索账号" placeholder="搜索账号">
               <template #prefix>
                 <Search class="size-4" />
               </template>
-            </BaseInput>
-            <BaseSelect v-model="provider" aria-label="选择平台" :options="providerOptions" />
-            <BaseInput v-model="invalidKey" aria-label="访问密钥错误示例" aria-invalid="true">
+            </ZInput>
+            <ZSelect v-model="provider" aria-label="选择平台" :options="providerOptions" />
+            <ZInput v-model="invalidKey" aria-label="访问密钥错误示例" aria-invalid="true">
               <template #prefix>
                 <KeyRound class="size-4" />
               </template>
-            </BaseInput>
-            <BaseInput v-model="disabledText" aria-label="禁用输入框" disabled />
-            <FormItem label="品牌颜色" description="BaseColorPicker">
-              <BaseColorPicker
+            </ZInput>
+            <ZInput v-model="disabledText" aria-label="禁用输入框" disabled />
+            <FormItem label="品牌颜色" description="ZColorPicker">
+              <ZColorPicker
                 v-model="brandColor"
-                label="编辑品牌颜色"
+                aria-label="编辑品牌颜色"
                 :allow-alpha="false"
                 :presets="['#5983F4', '#0F766E', '#7C3AED', '#475569']"
               />
             </FormItem>
-            <FormItem label="调度备注" description="BaseTextarea">
-              <BaseTextarea v-model="notes" aria-label="调度备注" :rows="2" />
+            <FormItem label="调度备注" description="ZTextarea">
+              <ZTextarea v-model="notes" aria-label="调度备注" :rows="2" />
             </FormItem>
-            <FormItem class="col-span-2" label="控件高度" description="BaseNumberInput · BaseRange">
+            <FormItem class="col-span-2" label="控件高度" description="ZInputNumber · ZSlider">
               <div class="flex items-center gap-3">
-                <BaseNumberInput
+                <ZInputNumber
                   v-model="controlHeight"
-                  label="组件示例控件高度"
+                  size="small"
+                  aria-label="组件示例控件高度"
                   :min="28"
                   :max="52"
                   unit="px"
                 />
-                <BaseRange
+                <ZSlider
                   v-model="controlHeight"
                   class="min-w-0 flex-1"
-                  label="组件示例控件高度"
+                  aria-label="组件示例控件高度"
                   :min="28"
                   :max="52"
                   unit="px"
                 />
               </div>
             </FormItem>
-          </BaseForm>
+          </ZForm>
         </template>
-      </BaseCard>
+      </ZCard>
     </section>
 
     <section class="grid min-w-0 grid-cols-12 gap-6" aria-label="选择与反馈组件">
-      <BaseCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="选择与切换" description="BaseSegmented · BaseSwitch · BaseCheckbox · BaseRadio">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="选择与切换" description="ZSegmented · ZSwitch · ZCheckbox · ZRadio">
         <template #body>
           <div class="grid gap-5">
-            <BaseSegmented v-model="view" label="账号视图" :options="viewOptions" class="w-full" />
+            <ZSegmented v-model="view" aria-label="账号视图" :options="viewOptions" class="w-full" />
             <div class="flex flex-wrap items-center gap-x-7 gap-y-4">
-              <BaseSwitch v-model="notifications" label="实时通知" show-label />
-              <BaseSwitch v-model="autoRotate" label="自动轮换" show-label />
-              <BaseCheckbox v-model="selected" label="选择当前页" show-label />
-              <BaseCheckbox v-model="partialSelected" label="部分选择" indeterminate show-label />
+              <ZSwitch v-model="notifications" label="实时通知" />
+              <ZSwitch v-model="autoRotate" label="自动轮换" />
+              <ZCheckbox v-model="selected" label="选择当前页" />
+              <ZCheckbox v-model="partialSelected" label="部分选择" indeterminate />
             </div>
             <div class="flex items-center gap-6">
-              <BaseRadio v-model="strategy" value="balanced" name="strategy" label="均衡" show-label />
-              <BaseRadio v-model="strategy" value="sticky" name="strategy" label="粘性" show-label />
-              <BaseRadio v-model="strategy" value="manual" name="strategy" label="手动" show-label />
+              <ZRadio v-model="strategy" value="balanced" name="strategy" label="均衡" />
+              <ZRadio v-model="strategy" value="sticky" name="strategy" label="粘性" />
+              <ZRadio v-model="strategy" value="manual" name="strategy" label="手动" />
             </div>
           </div>
         </template>
-      </BaseCard>
+      </ZCard>
 
-      <BaseCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="反馈语义" description="Success · Warning · Error · Info">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="反馈语义" description="Success · Warning · Error · Info">
         <template #body>
           <div class="grid gap-2.5">
             <div class="flex items-center gap-3 rounded-cp bg-cp-success-container px-3.5 py-3 text-cp-success-on-container">
@@ -293,27 +294,27 @@ function statusClass(status: PreviewTableRow['status']) {
             </div>
           </div>
         </template>
-      </BaseCard>
+      </ZCard>
 
-      <BaseCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="状态与进度" description="BaseTag · Progress Token">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="状态与进度" description="ZTag · Progress Token">
         <template #body>
           <div class="grid gap-4">
             <div class="flex flex-wrap gap-2">
-              <BaseTag type="success" round>
+              <ZTag type="success" round>
                 运行正常
-              </BaseTag>
-              <BaseTag type="warning" round>
+              </ZTag>
+              <ZTag type="warning" round>
                 额度受限
-              </BaseTag>
-              <BaseTag type="danger" round>
+              </ZTag>
+              <ZTag type="danger" round>
                 需要处理
-              </BaseTag>
-              <BaseTag v-if="syncTagVisible" type="info" round closable @close="syncTagVisible = false">
+              </ZTag>
+              <ZTag v-if="syncTagVisible" type="info" round closable @close="syncTagVisible = false">
                 同步中
-              </BaseTag>
-              <BaseButton v-else size="sm" variant="ghost" @click="syncTagVisible = true">
+              </ZTag>
+              <ZButton v-else size="small" variant="text" @click="syncTagVisible = true">
                 恢复标签
-              </BaseButton>
+              </ZButton>
             </div>
             <div v-for="item in progressItems" :key="item.label" class="grid gap-2">
               <div class="flex justify-between text-cp-sm font-heavy text-cp-text-secondary">
@@ -325,20 +326,20 @@ function statusClass(status: PreviewTableRow['status']) {
             </div>
           </div>
         </template>
-      </BaseCard>
+      </ZCard>
     </section>
 
-    <BaseCard padding="compact" class="h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="数据表格" description="BaseTable · BaseScrollbar · BaseTablePagination（标准行高）">
+    <ZCard padding="compact" class="h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="数据表格" description="ZTable · ZScrollbar · ZPagination（标准行高）">
       <template #actions>
-        <BaseInput aria-label="筛选表格" size="sm" placeholder="筛选账号" class="w-64">
+        <ZInput aria-label="筛选表格" size="small" placeholder="筛选账号" class="w-64">
           <template #prefix>
             <Search class="size-3.5" />
           </template>
-        </BaseInput>
+        </ZInput>
       </template>
       <template #body>
         <div class="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto]">
-          <BaseTable :columns="tableColumns" :rows="tableRows">
+          <ZTable :columns="tableColumns" :data="tableRows">
             <template #account="{ row }">
               <div class="grid gap-1">
                 <strong class="font-mono text-cp-sm text-cp-text">{{ row.account }}</strong>
@@ -350,52 +351,52 @@ function statusClass(status: PreviewTableRow['status']) {
                 {{ row.status }}
               </span>
             </template>
-          </BaseTable>
-          <BaseTablePagination :pagination="pagination" :loading="false" />
+          </ZTable>
+          <ZPagination v-bind="pagination" :disabled="false" />
         </div>
       </template>
-    </BaseCard>
+    </ZCard>
 
     <section class="grid min-w-0 grid-cols-12 gap-6 overflow-hidden" aria-label="边界状态组件">
-      <BaseCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="空状态" description="BaseEmpty · BaseButton">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="空状态" description="ZEmpty · ZButton">
         <template #body>
-          <BaseEmpty title="暂无匹配账号" description="调整筛选条件，或添加一个新的上游账号" class="flex-1">
+          <ZEmpty title="暂无匹配账号" description="调整筛选条件，或添加一个新的上游账号" class="flex-1">
             <template #action>
-              <BaseButton size="sm" variant="primary">
+              <ZButton size="small" type="primary">
                 添加账号
-              </BaseButton>
+              </ZButton>
             </template>
-          </BaseEmpty>
+          </ZEmpty>
         </template>
-      </BaseCard>
+      </ZCard>
 
-      <BaseCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="加载与骨架" description="BaseSkeleton · BaseButton loading">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="加载与骨架" description="ZSkeleton · ZButton loading">
         <template #body>
           <div class="grid flex-1 content-between gap-5 rounded-cp-lg bg-cp-fill-quaternary p-4">
             <div class="grid gap-4">
               <div class="flex items-center gap-3">
-                <BaseSkeleton class="size-10 shrink-0" />
+                <ZSkeleton class="size-10 shrink-0" />
                 <div class="grid flex-1 gap-2">
-                  <BaseSkeleton shape="text" class="w-2/5" />
-                  <BaseSkeleton shape="text" class="h-2.5 w-3/5 opacity-60" />
+                  <ZSkeleton shape="text" class="w-2/5" />
+                  <ZSkeleton shape="text" class="h-2.5 w-3/5 opacity-60" />
                 </div>
               </div>
-              <BaseSkeleton class="h-18 opacity-60" />
+              <ZSkeleton class="h-18 opacity-60" />
               <div class="grid grid-cols-3 gap-3">
-                <BaseSkeleton v-for="index in 3" :key="index" class="h-12 opacity-60" />
+                <ZSkeleton v-for="index in 3" :key="index" class="h-12 opacity-60" />
               </div>
             </div>
             <div class="flex items-center justify-between">
               <span class="text-cp-sm font-emphasis text-cp-text-secondary">正在同步账号状态</span>
-              <BaseButton size="sm" loading>
+              <ZButton size="small" loading>
                 同步中
-              </BaseButton>
+              </ZButton>
             </div>
           </div>
         </template>
-      </BaseCard>
+      </ZCard>
 
-      <BaseCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="浮层与菜单" description="BasePopover · BaseMenuItem · Elevated Surface">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="浮层与菜单" description="ZPopover · ZMenuItem · Elevated Surface">
         <template #body>
           <div class="grid min-w-0 flex-1 grid-rows-[auto_1fr_auto] overflow-hidden rounded-cp-lg bg-cp-bg-container p-4">
             <div class="flex items-center justify-between rounded-cp bg-cp-bg-container px-4 py-3 shadow-cp-tertiary">
@@ -403,41 +404,41 @@ function statusClass(status: PreviewTableRow['status']) {
                 <strong class="block text-cp-sm text-cp-text">relay@example.com</strong>
                 <span class="mt-1 block text-[10px] text-cp-text-quaternary">OpenAI · OAuth</span>
               </div>
-              <BasePopover>
-                <template #trigger>
-                  <BaseIconButton label="账号操作" variant="secondary">
+              <ZPopover>
+                <template #reference>
+                  <ZIconButton aria-label="账号操作" variant="solid">
                     <MoreHorizontal />
-                  </BaseIconButton>
+                  </ZIconButton>
                 </template>
                 <div class="w-64 max-w-full p-2">
-                  <BaseMenuItem>编辑账号</BaseMenuItem>
-                  <BaseMenuItem>测试连接</BaseMenuItem>
-                  <BaseMenuItem tone="destructive">
+                  <ZMenuItem>编辑账号</ZMenuItem>
+                  <ZMenuItem>测试连接</ZMenuItem>
+                  <ZMenuItem type="danger">
                     停用账号
-                  </BaseMenuItem>
+                  </ZMenuItem>
                 </div>
-              </BasePopover>
+              </ZPopover>
             </div>
 
             <div class="mt-3 ml-auto w-64 max-w-full self-start rounded-cp-lg bg-cp-bg-elevated p-2 shadow-cp">
-              <BaseMenuItem>
+              <ZMenuItem>
                 <template #icon>
                   <KeyRound class="size-3.5" />
                 </template>
                 编辑账号
-              </BaseMenuItem>
-              <BaseMenuItem>
+              </ZMenuItem>
+              <ZMenuItem>
                 <template #icon>
                   <Info class="size-3.5" />
                 </template>
                 测试连接
-              </BaseMenuItem>
-              <BaseMenuItem tone="destructive">
+              </ZMenuItem>
+              <ZMenuItem type="danger">
                 <template #icon>
                   <Trash2 class="size-3.5" />
                 </template>
                 停用账号
-              </BaseMenuItem>
+              </ZMenuItem>
             </div>
 
             <div class="flex min-w-0 items-center gap-3 rounded-cp bg-cp-bg-spotlight px-4 py-3 text-cp-text-light-solid shadow-cp-popup">
@@ -446,7 +447,7 @@ function statusClass(status: PreviewTableRow['status']) {
             </div>
           </div>
         </template>
-      </BaseCard>
+      </ZCard>
     </section>
   </div>
 </template>

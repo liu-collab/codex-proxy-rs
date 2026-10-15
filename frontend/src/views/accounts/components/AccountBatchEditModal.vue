@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AccountGroupRef, AccountModelAccess } from '@/api'
 
-import { BaseButton, BaseModal } from '@codex-proxy/ui'
+import { ZButton, ZDialog } from '@codex-proxy/ui'
 import AccountSettingsFields from './AccountSettingsFields.vue'
 
 defineProps<{
@@ -10,7 +10,6 @@ defineProps<{
   groups: AccountGroupRef[]
   groupsLoading: boolean
   saving: boolean
-  hasChanges: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,12 +27,12 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="批量编辑账号"
     :description="`编辑 ${selectedCount} 个账号`"
-    size="lg"
-    :dismissible="!saving"
+    width="48rem"
+    :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving"
   >
     <div class="grid gap-5">
       <AccountSettingsFields
@@ -53,17 +52,17 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
     </div>
 
     <template #footer>
-      <BaseButton variant="secondary" :disabled="saving" @click="open = false">
+      <ZButton :disabled="saving" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton
-        variant="primary"
+      </ZButton>
+      <ZButton
+        type="primary"
         :loading="saving"
-        :disabled="selectedCount === 0 || groupsLoading || !hasChanges"
+        :disabled="selectedCount === 0 || groupsLoading"
         @click="emit('save')"
       >
         保存更改
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

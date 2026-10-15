@@ -53,8 +53,19 @@ pub(super) fn router<S: SessionState + Clone + Send + Sync + 'static>() -> Route
         .route("/api/admin/plugins/extensions/{instance_id}/{artifact_sha256}/{revision}/callback-tickets", post(start_callback::<S>))
         .route("/api/admin/plugins/extensions/{instance_id}/{artifact_sha256}/{revision}/api/{*path}", any(handle::<S>))
         .route("/api/admin/plugins/extensions/{instance_id}/{artifact_sha256}/{revision}/resources/{*path}", get(resource::<S>))
-        .route("/plugins/resources/{instance_id}/{artifact_sha256}/{revision}/{*path}", get(public_resource::<S>))
-        .route("/plugins/callbacks/{instance_id}/{artifact_sha256}/{revision}/{*path}", get(callback::<S>))
+}
+
+pub(in crate::admin) fn public_router<S: SessionState + Clone + Send + Sync + 'static>() -> Router<S>
+{
+    Router::new()
+        .route(
+            "/plugins/resources/{instance_id}/{artifact_sha256}/{revision}/{*path}",
+            get(public_resource::<S>),
+        )
+        .route(
+            "/plugins/callbacks/{instance_id}/{artifact_sha256}/{revision}/{*path}",
+            get(callback::<S>),
+        )
 }
 
 pub(in crate::admin) fn model_router() -> Router<crate::ApiState> {

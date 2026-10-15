@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PluginArtifactMetadata, PluginCapabilityBinding } from '@/api'
-import { BaseCheckbox, BaseFormItem, BaseNumberInput, BaseSelect, BaseSwitch } from '@codex-proxy/ui'
+import { ZCheckbox, ZFormItem, ZInputNumber, ZSelect, ZSwitch } from '@codex-proxy/ui'
 import { computed, ref, watch } from 'vue'
 import { pluginCapabilityLabel, pluginRequestBindingEntries } from '../utils/model'
 import PluginHelpPopover from './PluginHelpPopover.vue'
@@ -63,7 +63,7 @@ watch(valid, value => emit('validityChange', value), { immediate: true })
   <div class="grid gap-4">
     <article v-for="entry in entries" :key="entry.key" class="grid gap-4 rounded-cp bg-cp-fill-alter p-4">
       <div class="flex items-center gap-2">
-        <BaseSwitch :model-value="Boolean(bindingFor(entry.key))" :label="`${pluginCapabilityLabel(entry.capability)} · ${entry.label}`" show-label :disabled="disabled" @update:model-value="toggle(entry, $event)" />
+        <ZSwitch :model-value="Boolean(bindingFor(entry.key))" :label="`${pluginCapabilityLabel(entry.capability)} · ${entry.label}`" :disabled="disabled" @update:model-value="toggle(entry, $event)" />
         <PluginHelpPopover v-if="entry.stage === 'observation'" label="请求观察说明">
           仅观察请求，不改变请求结果
         </PluginHelpPopover>
@@ -73,33 +73,33 @@ watch(valid, value => emit('validityChange', value), { immediate: true })
           {{ entry.globalLabel }}
         </p>
         <div v-else class="flex items-center gap-2">
-          <BaseCheckbox :model-value="globalScopes.has(entry.key)" label="应用于所有请求" show-label :disabled="disabled" @update:model-value="setGlobal(entry.key, $event)" />
+          <ZCheckbox :model-value="globalScopes.has(entry.key)" label="应用于所有请求" :disabled="disabled" @update:model-value="setGlobal(entry.key, $event)" />
           <PluginHelpPopover label="生效请求范围说明">
             关闭后至少选择一项范围，不同条件同时满足才生效，同一条件内任意一项匹配即可
           </PluginHelpPopover>
         </div>
         <div v-if="entry.scope !== 'none' && !globalScopes.has(entry.key)" class="grid gap-4 sm:grid-cols-2">
-          <BaseFormItem label="客户端 Key">
+          <ZFormItem label="客户端 Key">
             <PluginResourcePicker :model-value="bindingFor(entry.key)!.clientKeyIds" kind="keys" :active="active" :disabled="disabled" @update:model-value="patch(entry.key, { clientKeyIds: $event })" />
-          </BaseFormItem>
-          <BaseFormItem label="账号分组">
+          </ZFormItem>
+          <ZFormItem label="账号分组">
             <PluginResourcePicker :model-value="bindingFor(entry.key)!.accountGroupIds" kind="groups" :active="active" :disabled="disabled" @update:model-value="patch(entry.key, { accountGroupIds: $event })" />
-          </BaseFormItem>
+          </ZFormItem>
           <PluginScopeInput :model-value="bindingFor(entry.key)!.models" label="模型范围" placeholder="每行一个模型名称，精确匹配" :class="entry.scope === 'model' ? 'sm:col-span-2' : undefined" :disabled="disabled" @update:model-value="patch(entry.key, { models: $event })" />
           <PluginScopeInput v-if="entry.scope === 'provider'" :model-value="bindingFor(entry.key)!.providerIds" label="Provider 范围" placeholder="每行一个 Provider 标识" :disabled="disabled" @update:model-value="patch(entry.key, { providerIds: $event })" />
         </div>
         <div v-if="entry.stage !== 'observation'" class="grid items-end gap-4" :class="entry.stage !== 'upstream' ? 'sm:grid-cols-2' : undefined">
-          <BaseFormItem v-if="entry.stage !== 'upstream'" label="执行顺序">
+          <ZFormItem v-if="entry.stage !== 'upstream'" label="执行顺序">
             <template #label-extra>
               <PluginHelpPopover label="执行顺序说明">
                 数值较小的先执行
               </PluginHelpPopover>
             </template>
-            <BaseNumberInput :model-value="bindingFor(entry.key)!.order" label="执行顺序" size="md" :min="-2147483648" :max="2147483647" :disabled="disabled" class="w-full" @update:model-value="patch(entry.key, { order: $event })" />
-          </BaseFormItem>
-          <BaseFormItem label="插件失败时">
-            <BaseSelect :model-value="bindingFor(entry.key)!.failurePolicy" :options="entry.stage === 'retry' ? [{ label: '交给后续处理', value: 'delegate' }] : entry.stage === 'upstream' ? [{ label: '拒绝请求', value: 'reject' }] : [{ label: '拒绝请求', value: 'reject' }, { label: '交给后续处理', value: 'delegate' }]" :disabled="disabled || ['retry', 'upstream'].includes(entry.stage)" class="w-full" @update:model-value="patch(entry.key, { failurePolicy: $event as 'reject' | 'delegate' })" />
-          </BaseFormItem>
+            <ZInputNumber :model-value="bindingFor(entry.key)!.order" aria-label="执行顺序" size="default" :min="-2147483648" :max="2147483647" :disabled="disabled" class="w-full" @update:model-value="patch(entry.key, { order: $event })" />
+          </ZFormItem>
+          <ZFormItem label="插件失败时">
+            <ZSelect :model-value="bindingFor(entry.key)!.failurePolicy" :options="entry.stage === 'retry' ? [{ label: '交给后续处理', value: 'delegate' }] : entry.stage === 'upstream' ? [{ label: '拒绝请求', value: 'reject' }] : [{ label: '拒绝请求', value: 'reject' }, { label: '交给后续处理', value: 'delegate' }]" :disabled="disabled || ['retry', 'upstream'].includes(entry.stage)" class="w-full" @update:model-value="patch(entry.key, { failurePolicy: $event as 'reject' | 'delegate' })" />
+          </ZFormItem>
         </div>
       </template>
     </article>

@@ -101,6 +101,51 @@ async fn client_profile_preview_rejects_unknown_provider_before_loading_settings
 }
 
 #[tokio::test]
+async fn pricing_accepts_ultrafast_for_openai_but_rejects_it_for_xai() {
+    for provider in ["openai", "xai"] {
+        let store = Arc::new(PricingSettingsStore::default());
+        let services = super::AdminHarness::new()
+            .settings(store.clone())
+            .provider(super::test_provider(provider))
+            .build()
+            .await;
+        let context = MutationContext {
+            actor: gateway_admin::model::MutationActor::System,
+            request_id: "request-ultrafast-pricing".to_owned(),
+        };
+        for band in ["ultrafast", "long_ultrafast"] {
+            let pricing = serde_json::from_value(serde_json::json!({
+                "multiplierBps": 10000,
+                "bands": {
+                    "standard": {"input":"2", "output":"10", "cacheRead":"0.1", "cacheWrite":"2.5"},
+                    (band): {"input":"12", "output":"60", "cacheRead":"0.6", "cacheWrite":"15"}
+                }
+            }))
+            .expect("Ultrafast override");
+            let update = UpdatePricing {
+                provider: provider.to_owned(),
+                models: vec!["example-model".to_owned()],
+                change: PricingChange::Replace(pricing),
+            };
+            let result = services
+                .settings()
+                .update_pricing(&context, update.clone())
+                .await;
+            if provider == "openai" {
+                result.expect("OpenAI accepts Ultrafast overrides");
+                assert_eq!(store.updated.lock().unwrap().as_ref(), Some(&update));
+            } else {
+                assert_eq!(
+                    result.expect_err("xAI rejects Ultrafast").kind(),
+                    AdminErrorKind::Invalid
+                );
+                assert!(store.updated.lock().unwrap().is_none());
+            }
+        }
+    }
+}
+
+#[tokio::test]
 async fn pricing_accepts_native_provider_and_rejects_unknown_sync_provider() {
     let store = Arc::new(PricingSettingsStore::default());
     let services = super::AdminHarness::new()
@@ -280,12 +325,12 @@ async fn settings_should_reject_zero_refresh_margin_before_store_call() {
                 model_mappings: Default::default(),
                 rotation_strategy: RotationStrategy::Smart,
                 values: gateway_admin::model::settings::RuntimeSettingsValues {
+                    codex_privacy_policy: Default::default(),
                     request_location_enabled: false,
                     request_location: Default::default(),
                     refresh_margin_seconds: 0,
                     refresh_concurrency: 1,
                     max_concurrent_per_account: 1,
-                    request_interval_ms: 0,
                     max_waiting_per_key: 0,
                     max_waiting_per_account: 0,
                     concurrency_wait_timeout_seconds: 30,

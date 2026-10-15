@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountGroup } from '@/api'
-import { BaseIconButton } from '@codex-proxy/ui'
+import { ZIconButton } from '@codex-proxy/ui'
 
 import { Pencil, Power, Trash2 } from '@lucide/vue'
 
@@ -18,18 +18,16 @@ const emit = defineEmits<{
 
 <template>
   <div class="flex items-center gap-1">
-    <BaseIconButton
-      variant="ghost"
-      size="sm"
-      label="编辑分组"
+    <ZIconButton
+      size="small"
+      aria-label="编辑分组"
       @click.stop="emit('edit', group)"
     >
       <Pencil class="size-3.5 text-cp-link" />
-    </BaseIconButton>
-    <BaseIconButton
-      variant="ghost"
-      size="sm"
-      :label="group.enabled ? '禁用分组' : '启用分组'"
+    </ZIconButton>
+    <ZIconButton
+      size="small"
+      :aria-label="group.enabled ? '禁用分组' : '启用分组'"
       :loading="updatingStatus"
       @click.stop="emit('toggle', group)"
     >
@@ -37,15 +35,14 @@ const emit = defineEmits<{
         class="size-3.5"
         :class="group.enabled ? 'text-cp-warning' : 'text-cp-success'"
       />
-    </BaseIconButton>
-    <BaseIconButton
-      variant="ghost"
-      size="sm"
-      label="删除分组"
+    </ZIconButton>
+    <ZIconButton
+      size="small"
+      aria-label="删除分组"
       :disabled="deleting"
       @click.stop="emit('delete', group)"
     >
       <Trash2 class="size-3.5 text-cp-error" />
-    </BaseIconButton>
+    </ZIconButton>
   </div>
 </template>

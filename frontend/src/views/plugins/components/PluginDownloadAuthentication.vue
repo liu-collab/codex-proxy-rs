@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CreatePluginSourceCredentialRequest, PluginSourceAuthentication, PluginSourceCredential } from '@/api'
-import { BaseFormItem, BaseInput, BaseSelect } from '@codex-proxy/ui'
+import { ZFormItem, ZInput, ZSelect } from '@codex-proxy/ui'
 import { computed, reactive, shallowRef, watch } from 'vue'
 import { normalizePluginRepository } from '../utils/model'
 import PluginHelpPopover from './PluginHelpPopover.vue'
@@ -62,8 +62,8 @@ function clearSecrets() {
   Object.assign(form, { token: '', username: '', password: '', headerName: '', headerValue: '' })
 }
 
-function changeMode(value: string) {
-  mode.value = value
+function changeMode(value: string | undefined) {
+  mode.value = value ?? 'public'
   selected.value = []
   clearSecrets()
 }
@@ -103,7 +103,7 @@ watch([mode, scope, authentication], () => {
 
 <template>
   <div class="grid gap-4">
-    <BaseFormItem label="下载认证">
+    <ZFormItem label="下载认证">
       <template #label-extra>
         <PluginHelpPopover label="下载认证说明">
           <p class="m-0">
@@ -114,30 +114,30 @@ watch([mode, scope, authentication], () => {
           </p>
         </PluginHelpPopover>
       </template>
-      <BaseSelect :model-value="mode" :options="modeOptions" :disabled="disabled" class="w-full" aria-label="下载认证" @update:model-value="changeMode" />
-    </BaseFormItem>
+      <ZSelect :model-value="mode" :options="modeOptions" :disabled="disabled" class="w-full" aria-label="下载认证" @update:model-value="changeMode" />
+    </ZFormItem>
     <template v-if="mode === 'new'">
-      <BaseFormItem v-if="kind === 'url'" label="认证方式">
-        <BaseSelect v-model="form.kind" :options="authOptions" :disabled="disabled" class="w-full" aria-label="认证方式" @update:model-value="clearSecrets" />
-      </BaseFormItem>
-      <BaseFormItem v-if="kind === 'github' || form.kind === 'bearer'" :label="kind === 'github' ? 'GitHub 令牌' : '访问令牌'" required>
-        <BaseInput v-model="form.token" type="password" autocomplete="new-password" :disabled="disabled" aria-label="下载令牌" placeholder="输入令牌" />
-      </BaseFormItem>
+      <ZFormItem v-if="kind === 'url'" label="认证方式">
+        <ZSelect v-model="form.kind" :options="authOptions" :disabled="disabled" class="w-full" aria-label="认证方式" @update:model-value="clearSecrets" />
+      </ZFormItem>
+      <ZFormItem v-if="kind === 'github' || form.kind === 'bearer'" :label="kind === 'github' ? 'GitHub 令牌' : '访问令牌'" required>
+        <ZInput v-model="form.token" type="password" autocomplete="new-password" :disabled="disabled" aria-label="下载令牌" placeholder="输入令牌" />
+      </ZFormItem>
       <div v-else-if="form.kind === 'basic'" class="grid gap-4 sm:grid-cols-2">
-        <BaseFormItem label="用户名" required>
-          <BaseInput v-model="form.username" autocomplete="off" :disabled="disabled" aria-label="下载用户名" />
-        </BaseFormItem>
-        <BaseFormItem label="密码" required>
-          <BaseInput v-model="form.password" type="password" autocomplete="new-password" :disabled="disabled" aria-label="下载密码" />
-        </BaseFormItem>
+        <ZFormItem label="用户名" required>
+          <ZInput v-model="form.username" autocomplete="off" :disabled="disabled" aria-label="下载用户名" />
+        </ZFormItem>
+        <ZFormItem label="密码" required>
+          <ZInput v-model="form.password" type="password" autocomplete="new-password" :disabled="disabled" aria-label="下载密码" />
+        </ZFormItem>
       </div>
       <div v-else class="grid gap-4 sm:grid-cols-2">
-        <BaseFormItem label="请求头名称" required>
-          <BaseInput v-model="form.headerName" :disabled="disabled" aria-label="请求头名称" placeholder="X-Download-Token" />
-        </BaseFormItem>
-        <BaseFormItem label="请求头值" required>
-          <BaseInput v-model="form.headerValue" type="password" autocomplete="new-password" :disabled="disabled" aria-label="请求头值" />
-        </BaseFormItem>
+        <ZFormItem label="请求头名称" required>
+          <ZInput v-model="form.headerName" :disabled="disabled" aria-label="请求头名称" placeholder="X-Download-Token" />
+        </ZFormItem>
+        <ZFormItem label="请求头值" required>
+          <ZInput v-model="form.headerValue" type="password" autocomplete="new-password" :disabled="disabled" aria-label="请求头值" />
+        </ZFormItem>
       </div>
     </template>
     <SourceCredentialPicker

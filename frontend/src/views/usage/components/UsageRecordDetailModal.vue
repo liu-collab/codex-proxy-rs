@@ -2,7 +2,7 @@
 import type { EChartsOption } from 'echarts'
 import type { UsageRecordDetail } from '@/api'
 
-import { BaseButton, BaseModal, BaseTable, defineTableColumns } from '@codex-proxy/ui'
+import { defineTableColumns, ZButton, ZDialog, ZTable } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { chartTooltipStyle } from '@/components/charts/tooltip'
@@ -13,12 +13,11 @@ import {
   usageLatencyDetails,
   usageModelDisplay,
   usageReasoningEffort,
-  usageTokenDetails,
   usageTransportType,
   usageUserAgent,
 } from '@/components/usage/shared/presenter'
 import { useChartPalette } from '@/composables/useChartPalette'
-import { formatDuration } from '@/utils/format'
+import { formatDuration, formatInteger } from '@/utils/format'
 import { displayValue, fieldLabelClass, fieldValueBaseClass, fieldValueClass, visibleRequestText, visibleResponseText } from '../utils/detail'
 import RequestDiagnosticsPanel from './RequestDiagnosticsPanel.vue'
 import UsageDetailCodePanel from './UsageDetailCodePanel.vue'
@@ -38,7 +37,7 @@ const responseText = computed(() => props.record ? visibleResponseText(props.rec
 const modelDisplay = computed(() => props.record
   ? usageModelDisplay(props.record)
   : { primary: '—', secondary: '' })
-const tokenDetails = computed(() => props.record ? usageTokenDetails(props.record.tokenDetails) : null)
+const tokenDetails = computed(() => props.record?.tokenDetails ?? null)
 const billing = computed(() => props.record ? props.record.billing : null)
 const latencyDetails = computed(() => props.record ? usageLatencyDetails(props.record) : null)
 
@@ -192,41 +191,73 @@ const billingItems = computed(() => {
   ]
 })
 
-const tokenChartItems = computed(() => [
-  {
-    label: '输入',
-    value: Number(tokenDetails.value?.inputTokens || 0),
-    display: tokenDetails.value?.inputTokensDisplay ?? '—',
-    color: palette.value.info,
-  },
-  {
-    label: '输出',
-    value: Number(tokenDetails.value?.outputTokens || 0),
-    display: tokenDetails.value?.outputTokensDisplay ?? '—',
-    color: palette.value.success,
-  },
-  {
-    label: '缓存读取',
-    value: Number(tokenDetails.value?.cachedTokens || 0),
-    display: tokenDetails.value?.cachedTokensDisplay ?? '—',
-    color: palette.value.warning,
-  },
-  {
-    label: '缓存写入',
-    value: Number(tokenDetails.value?.cacheWriteTokens || 0),
-    display: tokenDetails.value?.cacheWriteTokensDisplay ?? '—',
-    color: palette.value.danger,
-  },
-  {
-    label: '推理',
-    value: Number(tokenDetails.value?.reasoningTokens || 0),
-    display: tokenDetails.value?.reasoningTokensDisplay ?? '—',
-    color: palette.value.reasoning,
-  },
+function tokenCount(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+}
+
+function remainingTokenCount(total: number | null | undefined, ...parts: (number | null | undefined)[]): number | null {
+  const knownTotal = tokenCount(total)
+  if (knownTotal === null)
+    return null
+
+  let remainder = knownTotal
+  for (const part of parts) {
+    const knownPart = tokenCount(part)
+    if (knownPart === null)
+      return null
+    remainder -= knownPart
+  }
+  // 未上报或子项越界时不能补零，否则环图会伪造完整的占比
+  return remainder >= 0 ? remainder : null
+}
+
+const tokenChartItems = computed(() => {
+  const details = tokenDetails.value
+  const freshInputTokens = remainingTokenCount(details?.inputTokens, details?.cachedInputTokens, details?.cacheWriteInputTokens)
+  const nonReasoningOutputTokens = remainingTokenCount(details?.outputTokens, details?.reasoningOutputTokens)
+  return [
+    {
+      label: '新增输入',
+      value: freshInputTokens,
+      display: freshInputTokens === null ? '—' : formatInteger(freshInputTokens),
+      color: palette.value.info,
+    },
+    {
+      label: '非推理输出',
+      value: nonReasoningOutputTokens,
+      display: nonReasoningOutputTokens === null ? '—' : formatInteger(nonReasoningOutputTokens),
+      color: palette.value.success,
+    },
+    {
+      label: '缓存读取',
+      value: tokenCount(details?.cachedInputTokens),
+      display: details?.cachedInputTokensDisplay ?? '—',
+      color: palette.value.warning,
+    },
+    {
+      label: '缓存写入',
+      value: tokenCount(details?.cacheWriteInputTokens),
+      display: details?.cacheWriteInputTokensDisplay ?? '—',
+      color: palette.value.danger,
+    },
+    {
+      label: '推理',
+      value: tokenCount(details?.reasoningOutputTokens),
+      display: details?.reasoningOutputTokensDisplay ?? '—',
+      color: palette.value.reasoning,
+    },
+  ]
+})
+const tokenChartComplete = computed(() => tokenChartItems.value.every(item => item.value !== null))
+const tokenDetailItems = computed(() => [
+  ...tokenChartItems.value,
+  { label: '总输出', display: tokenDetails.value?.outputTokensDisplay ?? '—', color: null },
 ])
 
 const tokenDonutOption = computed<EChartsOption>(() => {
-  const items = tokenChartItems.value.filter(item => item.value > 0)
+  const items = tokenChartComplete.value
+    ? tokenChartItems.value.flatMap(item => item.value !== null && item.value > 0 ? [{ ...item, value: item.value }] : [])
+    : []
 
   return {
     tooltip: {
@@ -275,12 +306,12 @@ const tokenDonutOption = computed<EChartsOption>(() => {
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="使用记录详情"
     description="单次请求的完整链路信息"
-    tone="info"
-    size="xl"
+    type="info"
+    width="64rem"
   >
     <div v-if="record" class="grid min-w-0 gap-3">
       <section :class="panelClass">
@@ -366,9 +397,12 @@ const tokenDonutOption = computed<EChartsOption>(() => {
 
       <section class="grid min-w-0 gap-3 lg:grid-cols-2">
         <section class="flex min-h-0 flex-col" :class="panelClass">
-          <h3 :class="panelTitleClass">
-            Token
-          </h3>
+          <div class="flex items-center justify-between gap-2">
+            <h3 :class="panelTitleClass">
+              Token
+            </h3>
+            <span v-if="!tokenChartComplete" class="text-cp-xs text-cp-text-tertiary">明细不完整</span>
+          </div>
           <div
             class="mt-3 grid min-h-38 min-w-0 flex-1 grid-cols-1 content-center items-center gap-3 sm:grid-cols-[150px_minmax(0,1fr)]"
           >
@@ -389,9 +423,10 @@ const tokenDonutOption = computed<EChartsOption>(() => {
             </div>
 
             <dl class="grid min-w-0 grid-cols-2 gap-x-4 gap-y-3">
-              <div v-for="item in tokenChartItems" :key="item.label" class="min-w-0">
+              <div v-for="item in tokenDetailItems" :key="item.label" class="min-w-0">
                 <dt class="flex min-w-0 items-center gap-1.5" :class="fieldLabelClass">
                   <i
+                    v-if="item.color"
                     class="size-1.75 shrink-0 rounded-full"
                     :style="{ backgroundColor: item.color }"
                   />
@@ -420,11 +455,11 @@ const tokenDonutOption = computed<EChartsOption>(() => {
         <h3 :class="panelTitleClass">
           尝试链路
         </h3>
-        <BaseTable
+        <ZTable
           class="attempt-table mt-2.5 h-auto! min-w-0 font-mono tabular-nums"
           :columns="attemptColumns"
-          :rows="attemptRows"
-          density="compact"
+          :data="attemptRows"
+          size="small"
           row-key="id"
         >
           <template #outcome="{ row }">
@@ -450,7 +485,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
               {{ formatDuration(row.latencyMs) }}
             </span>
           </template>
-        </BaseTable>
+        </ZTable>
       </section>
 
       <section
@@ -478,11 +513,11 @@ const tokenDonutOption = computed<EChartsOption>(() => {
     <RequestDiagnosticsPanel v-if="record" :request-id="record.requestId" :active="open" />
 
     <template #footer>
-      <BaseButton variant="primary" @click="open = false">
+      <ZButton type="primary" @click="open = false">
         关闭
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>
 
 <style scoped>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseButton, BaseFormItem, BaseTextarea } from '@codex-proxy/ui'
+import { ZButton, ZFormItem, ZTextarea } from '@codex-proxy/ui'
 import { Upload } from '@lucide/vue'
 import { useFileDialog } from '@vueuse/core'
 import { onScopeDispose, ref } from 'vue'
@@ -45,16 +45,16 @@ function updateText(value: string) {
 </script>
 
 <template>
-  <BaseFormItem :label="label" required :error="fileError || undefined">
+  <ZFormItem :label="label" required :error="fileError || undefined">
     <template v-if="uploadable" #extra>
-      <BaseButton size="sm" :disabled="disabled" @click="openFile()">
+      <ZButton size="small" :disabled="disabled" @click="openFile()">
         <template #icon>
           <Upload class="size-3.5" aria-hidden="true" />
         </template>
         上传文件
-      </BaseButton>
+      </ZButton>
     </template>
-    <BaseTextarea
+    <ZTextarea
       :model-value="text"
       :aria-label="label"
       :rows="9"
@@ -62,5 +62,5 @@ function updateText(value: string) {
       :disabled="disabled"
       @update:model-value="updateText"
     />
-  </BaseFormItem>
+  </ZFormItem>
 </template>

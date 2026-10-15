@@ -22,7 +22,7 @@ fn credential_lease_rejects_zero_ttl() {
 
 #[test]
 fn only_account_scheduling_leases_allow_unlimited_concurrency() {
-    let mut request = scheduling_request("acct_unlimited", "worker-unlimited", 0, Duration::ZERO);
+    let mut request = scheduling_request("acct_unlimited", "worker-unlimited", 0);
     request.validate().expect("unlimited account concurrency");
     for scope in [
         CredentialLeaseScope::OAuthRefresh,
@@ -38,7 +38,7 @@ async fn reserved_and_normal_leases_enforce_independent_atomic_limits_and_releas
     let Some((repository, _, _)) = repository().await else {
         return;
     };
-    let normal = scheduling_request("acct_independent", "normal", 2, Duration::ZERO);
+    let normal = scheduling_request("acct_independent", "normal", 2);
     let reserved = CredentialBoundedLeaseRequest {
         scope: CredentialLeaseScope::ProviderAccountReserved,
         max_concurrent: 3,
@@ -119,17 +119,13 @@ async fn reserved_and_normal_leases_enforce_independent_atomic_limits_and_releas
 }
 
 #[tokio::test]
-async fn independent_capacity_pools_preserve_the_shared_account_request_interval() {
+async fn independent_capacity_pools_share_last_started_signal_without_blocking() {
     let Some((repository, _, _)) = repository().await else {
         return;
     };
     for first_reserved in [false, true] {
-        let normal = scheduling_request(
-            &format!("acct_interval_{first_reserved}"),
-            "worker",
-            2,
-            Duration::from_secs(30),
-        );
+        let normal =
+            scheduling_request(&format!("acct_shared_signal_{first_reserved}"), "worker", 2);
         let reserved = CredentialBoundedLeaseRequest {
             scope: CredentialLeaseScope::ProviderAccountReserved,
             ..normal.clone()
@@ -139,14 +135,54 @@ async fn independent_capacity_pools_preserve_the_shared_account_request_interval
         } else {
             (&normal, &reserved)
         };
-        acquired(repository.try_acquire_bounded_lease(first).await.unwrap())
-            .release()
+        let first_lease = acquired(repository.try_acquire_bounded_lease(first).await.unwrap());
+        let signals = repository
+            .credential_runtime_signals(std::slice::from_ref(&normal.resource_id))
             .await
             .unwrap();
-        assert!(
-            matches!(repository.try_acquire_bounded_lease(second).await.unwrap(), CredentialBoundedLeaseAcquisition::Busy { retry_after: Some(value) } if value > Duration::ZERO)
-        );
+        assert!(signals[0].last_started_at.is_some());
+        let second_lease = acquired(repository.try_acquire_bounded_lease(second).await.unwrap());
+        first_lease.release().await.unwrap();
+        second_lease.release().await.unwrap();
     }
+}
+
+#[tokio::test]
+async fn scheduling_lease_ignores_future_last_started_signal() {
+    let Some((repository, mut connection, namespace)) = repository().await else {
+        return;
+    };
+    let request = scheduling_request("acct_future_start", "worker", 2);
+    let first = acquired(
+        repository
+            .try_acquire_bounded_lease(&request)
+            .await
+            .unwrap(),
+    );
+    let keys = redis::cmd("KEYS")
+        .arg(format!("{namespace}:*:last-started"))
+        .query_async::<Vec<String>>(&mut connection)
+        .await
+        .unwrap();
+    assert_eq!(keys.len(), 1);
+    // 模拟旧信号或时钟偏差，排序时间不能阻止尚有容量的账号取得租约
+    redis::Script::new("local t = redis.call('TIME'); return redis.call('SET', KEYS[1], tonumber(t[1]) * 1000 + 60000, 'PX', 120000)")
+        .key(&keys[0]).invoke_async::<String>(&mut connection).await.unwrap();
+    let second = acquired(
+        repository
+            .try_acquire_bounded_lease(&request)
+            .await
+            .unwrap(),
+    );
+    assert!(matches!(
+        repository
+            .try_acquire_bounded_lease(&request)
+            .await
+            .unwrap(),
+        CredentialBoundedLeaseAcquisition::Busy { .. }
+    ));
+    first.release().await.unwrap();
+    second.release().await.unwrap();
 }
 
 #[tokio::test]
@@ -158,7 +194,7 @@ async fn maintained_scheduling_lease_survives_initial_ttl_and_releases_on_drop()
         let Some((repository, _, _)) = repository().await else {
             return;
         };
-        let mut request = scheduling_request("acct_long_request", "worker-long", 1, Duration::ZERO);
+        let mut request = scheduling_request("acct_long_request", "worker-long", 1);
         request.scope = scope;
         request.ttl = Duration::from_secs(1);
         let lease = acquired(
@@ -208,7 +244,7 @@ async fn maintained_scheduling_lease_does_not_resurrect_a_lost_slot() {
         let Some((repository, _, _)) = repository().await else {
             return;
         };
-        let mut request = scheduling_request("acct_lost_request", "worker-lost", 1, Duration::ZERO);
+        let mut request = scheduling_request("acct_lost_request", "worker-lost", 1);
         request.scope = scope;
         let lease = acquired(
             repository
@@ -254,11 +290,11 @@ async fn maintained_scheduling_lease_does_not_resurrect_a_lost_slot() {
 }
 
 #[tokio::test]
-async fn unlimited_scheduling_leases_still_count_release_and_enforce_request_interval() {
+async fn unlimited_scheduling_leases_still_count_and_release() {
     let Some((repository, mut connection, namespace)) = repository().await else {
         return;
     };
-    let request = scheduling_request("acct_unlimited", "worker-unlimited", 0, Duration::ZERO);
+    let request = scheduling_request("acct_unlimited", "worker-unlimited", 0);
     let mut leases = Vec::new();
     for _ in 0..5 {
         leases.push(acquired(
@@ -298,24 +334,6 @@ async fn unlimited_scheduling_leases_still_count_release_and_enforce_request_int
             .in_flight,
         0
     );
-    let interval = scheduling_request(
-        "acct_unlimited_interval",
-        "worker-interval",
-        0,
-        Duration::from_secs(30),
-    );
-    acquired(
-        repository
-            .try_acquire_bounded_lease(&interval)
-            .await
-            .expect("first start"),
-    )
-    .release()
-    .await
-    .expect("release interval slot");
-    assert!(
-        matches!(repository.try_acquire_bounded_lease(&interval).await.expect("interval decision"), CredentialBoundedLeaseAcquisition::Busy { retry_after: Some(value) } if value > Duration::ZERO)
-    );
     let keys = redis::cmd("KEYS")
         .arg(format!("{namespace}:*"))
         .query_async::<Vec<String>>(&mut connection)
@@ -339,13 +357,13 @@ async fn unlimited_scheduling_leases_still_count_release_and_enforce_request_int
 }
 
 #[tokio::test]
-async fn scheduling_lease_counts_concurrency_interval_and_drop_release() {
+async fn scheduling_lease_counts_concurrency_and_drop_release() {
     let Some((repository, mut connection, namespace)) = repository().await else {
         return;
     };
     let resource_id = "acct_runtime_signal";
     let owner_id = "worker-runtime-signal";
-    let request = scheduling_request(resource_id, owner_id, 2, Duration::ZERO);
+    let request = scheduling_request(resource_id, owner_id, 2);
 
     let first = acquired(
         repository
@@ -415,32 +433,6 @@ async fn scheduling_lease_counts_concurrency_interval_and_drop_release() {
         0
     );
 
-    let interval_request = scheduling_request(
-        "acct_interval",
-        "worker-interval",
-        2,
-        Duration::from_secs(30),
-    );
-    acquired(
-        repository
-            .try_acquire_bounded_lease(&interval_request)
-            .await
-            .expect("acquire interval slot"),
-    )
-    .release()
-    .await
-    .expect("release interval slot");
-    let interval_denied = repository
-        .try_acquire_bounded_lease(&interval_request)
-        .await
-        .expect("interval decision");
-    assert!(matches!(
-        interval_denied,
-        CredentialBoundedLeaseAcquisition::Busy {
-            retry_after: Some(value)
-        } if value > Duration::ZERO && value <= Duration::from_secs(30)
-    ));
-
     let keys = redis::cmd("KEYS")
         .arg(format!("{namespace}:*"))
         .query_async::<Vec<String>>(&mut connection)
@@ -463,7 +455,7 @@ async fn scheduling_lease_ttl_and_cache_loss_rebuild_empty_runtime_signal() {
     let Some((repository, mut connection, namespace)) = repository().await else {
         return;
     };
-    let mut request = scheduling_request("acct_crash_ttl", "worker-crash", 1, Duration::ZERO);
+    let mut request = scheduling_request("acct_crash_ttl", "worker-crash", 1);
     request.ttl = Duration::from_millis(25);
     let crashed = acquired(
         repository
@@ -652,7 +644,6 @@ async fn refresh_capacity_is_shared_across_provider_callers() {
         resource_id: "oauth-refresh-global".to_owned(),
         owner_id: owner_id.to_owned(),
         max_concurrent: 2,
-        request_interval: Duration::ZERO,
         ttl: Duration::from_secs(60),
     };
 
@@ -706,14 +697,12 @@ fn scheduling_request(
     resource_id: &str,
     owner_id: &str,
     max_concurrent: u32,
-    request_interval: Duration,
 ) -> CredentialBoundedLeaseRequest {
     CredentialBoundedLeaseRequest {
         scope: CredentialLeaseScope::ProviderAccount,
         resource_id: resource_id.to_owned(),
         owner_id: owner_id.to_owned(),
         max_concurrent,
-        request_interval,
         ttl: Duration::from_secs(60),
     }
 }
@@ -752,7 +741,7 @@ async fn runtime_signals_preserve_order_and_counts_across_batches() {
         .collect::<Vec<_>>();
     let mut guards = Vec::new();
     for index in [0, 127, 128, 500, 999] {
-        let request = scheduling_request(&ids[index], "batch-test", 2, Duration::ZERO);
+        let request = scheduling_request(&ids[index], "batch-test", 2);
         guards.push(acquired(
             repository
                 .try_acquire_bounded_lease(&request)

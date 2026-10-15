@@ -1,5 +1,5 @@
 import type { Account, AccountModelsResponse } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 
 import { CheckCircle2, Clock3, Wifi, XCircle } from '@lucide/vue'
 import { useEventSource } from '@vueuse/core'
@@ -424,7 +424,7 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
         return
       applyConnectionTestModels(result, refresh)
       if (refresh) {
-        toast.success(`已刷新 ${connectionTestModelOptions.value.length} 个上游模型`)
+        ZNotification.success({ message: `已刷新 ${connectionTestModelOptions.value.length} 个上游模型` })
       }
       else if (!connectionTestSelectedModel.value) {
         connectionTestError.value = '没有可测试模型'

@@ -73,14 +73,14 @@ fn snapshot_at_a_block_boundary_keeps_only_three_recent_blocks() {
 }
 
 #[test]
-fn large_percentage_reversal_restarts_sampling_without_crossing_old_consumption() {
+fn large_percentage_reversal_restarts_only_sampling_without_crossing_old_consumption() {
     let sample = select(
         vec![point(1, 40.0, 100), point(2, 50.0, 200), point(3, 1.0, 210)],
         point(4, 8.0, 280),
     );
     assert_eq!(sample.baseline_percent, 1.0);
     assert_eq!(sample.usage.tokens, 70);
-    assert_eq!(sample.cycle_usage.tokens, 70);
+    assert_eq!(sample.cycle_usage.tokens, 280);
     assert_eq!(sample.sampled_percent, 7.0);
     assert!(!sample.discontinuous);
     let waiting = select(
@@ -88,6 +88,30 @@ fn large_percentage_reversal_restarts_sampling_without_crossing_old_consumption(
         point(3, 2.0, 210),
     );
     assert!(waiting.discontinuous);
+}
+
+#[test]
+fn same_window_reversal_preserves_all_recorded_cycle_usage() {
+    let current = point(3, 35.0, 140);
+    let recorded = current.usage.clone();
+    let sample = select(vec![point(1, 32.0, 100), point(2, 30.0, 120)], current);
+    assert_eq!(sample.cycle_usage, recorded);
+    assert_eq!(sample.usage.tokens, 20);
+    assert!((sample.usage.usd - 0.02).abs() < 1e-10);
+    assert!(!sample.discontinuous);
+}
+
+#[test]
+fn small_reversals_after_full_usage_preserve_cycle_totals_and_cumulative_forecasts() {
+    let current = point(3, 99.5, 10_020);
+    let recorded = current.usage.clone();
+    let sample = select(
+        vec![point(1, 100.0, 10_000), point(2, 99.0, 10_010)],
+        current,
+    );
+    assert_eq!(sample.cycle_usage, recorded);
+    assert_eq!(sample.method, QuotaForecastMethod::Cumulative);
+    assert!(!sample.discontinuous);
 }
 
 #[test]
@@ -128,14 +152,38 @@ fn counter_regressions_fail_closed_and_future_points_are_not_used() {
 }
 
 #[test]
-fn exhausted_history_is_retained_to_detect_a_reset_with_an_unchanged_deadline() {
+fn same_window_recovery_restarts_sampling_but_preserves_recorded_cycle_usage() {
     let sample = select(
         vec![point(1, 100.0, 10_000), point(2, 0.0, 10_000)],
         point(3, 10.0, 10_100),
     );
-    assert_eq!(sample.cycle_usage.tokens, 100);
+    assert_eq!(sample.cycle_usage.tokens, 10_100);
+    assert!((sample.cycle_usage.usd - 10.1).abs() < 1e-10);
     assert_eq!(sample.usage.tokens, 100);
     assert_eq!(sample.sampled_percent, 10.0);
+    assert!(!sample.discontinuous);
+}
+
+#[test]
+fn a_single_non_exhausted_observation_does_not_restart_cycle_usage() {
+    let sample = select(vec![point(1, 100.0, 10_000)], point(2, 0.0, 10_000));
+    assert_eq!(sample.cycle_usage.tokens, 10_000);
+    assert!(sample.discontinuous);
+}
+
+#[test]
+fn repeated_same_window_recoveries_preserve_recorded_cycle_usage() {
+    let sample = select(
+        vec![
+            point(1, 100.0, 10_000),
+            point(2, 0.0, 10_000),
+            point(3, 100.0, 10_100),
+            point(4, 0.0, 10_100),
+        ],
+        point(5, 10.0, 10_200),
+    );
+    assert_eq!(sample.cycle_usage.tokens, 10_200);
+    assert_eq!(sample.usage.tokens, 100);
     assert!(!sample.discontinuous);
 }
 

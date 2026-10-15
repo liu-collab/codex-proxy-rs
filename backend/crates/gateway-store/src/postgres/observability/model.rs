@@ -198,8 +198,8 @@ pub struct CalculatedUsageBillingFact {
     pub service_tier: Option<String>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
-    pub cached_tokens: Option<u64>,
-    pub cache_write_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u64>,
+    pub cache_write_input_tokens: Option<u64>,
     pub total: CurrencyCostTotal,
 }
 
@@ -219,9 +219,9 @@ pub struct ProviderAccountUsageObservation {
     pub success_count: u64,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
-    pub cached_tokens: Option<u64>,
-    pub cache_write_tokens: Option<u64>,
-    pub reasoning_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u64>,
+    pub cache_write_input_tokens: Option<u64>,
+    pub reasoning_output_tokens: Option<u64>,
     pub image_input_tokens: Option<u64>,
     pub image_output_tokens: Option<u64>,
     pub image_request_count: u64,
@@ -241,9 +241,9 @@ pub struct ProviderAccountModelUsageObservation {
     pub success_count: u64,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
-    pub cached_tokens: Option<u64>,
-    pub cache_write_tokens: Option<u64>,
-    pub reasoning_tokens: Option<u64>,
+    pub cached_input_tokens: Option<u64>,
+    pub cache_write_input_tokens: Option<u64>,
+    pub reasoning_output_tokens: Option<u64>,
     pub image_input_tokens: Option<u64>,
     pub image_output_tokens: Option<u64>,
     pub image_request_count: u64,
@@ -311,6 +311,7 @@ pub use gateway_admin::model::observability::DashboardTotals;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DashboardObservation {
+    pub analytics: admin_observability::AnalyticsMetadata,
     pub range: ObservabilityRange,
     pub totals: DashboardTotals,
     pub provider_accounts: ProviderAccountMetrics,
@@ -335,6 +336,7 @@ pub use gateway_admin::model::observability::ProviderObservation;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UsageOverview {
+    pub analytics: admin_observability::AnalyticsMetadata,
     pub range: ObservabilityRange,
     pub requests: RequestMetrics,
     pub attempts: AttemptMetrics,
@@ -343,6 +345,7 @@ pub struct UsageOverview {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiagnosticsObservation {
+    pub analytics: admin_observability::AnalyticsMetadata,
     pub total_request_count: u64,
     pub items: Vec<DiagnosticObservation>,
 }

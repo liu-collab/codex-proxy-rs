@@ -3,9 +3,11 @@ import type { ModelPricing, PriceBand, PricingCatalog, TokenPrices } from '@/api
 export const bands: { value: PriceBand, label: string }[] = [
   { value: 'standard', label: '标准' },
   { value: 'fast', label: 'Priority / Fast' },
+  { value: 'ultrafast', label: 'Ultrafast' },
   { value: 'flex', label: 'Flex' },
   { value: 'long_standard', label: '长上下文 · 标准' },
   { value: 'long_fast', label: '长上下文 · Priority' },
+  { value: 'long_ultrafast', label: '长上下文 · Ultrafast' },
   { value: 'long_flex', label: '长上下文 · Flex' },
   { value: 'image', label: '图像 Token' },
 ]

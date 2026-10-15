@@ -17,6 +17,7 @@ pub struct StoreBundle {
     worker_contributions: Vec<WorkerContribution>,
     command_writers: Option<CommandStoreWriters>,
     command_drain: Option<CommandStoreDrain>,
+    analytics: postgres::PgRequestAnalyticsRepository,
 }
 
 impl StoreBundle {
@@ -53,6 +54,14 @@ impl StoreBundle {
     #[must_use]
     pub fn health_probes(&self) -> Vec<Arc<dyn HealthProbe>> {
         self.health_probes.clone()
+    }
+
+    /// Provider 计价规则在应用组装阶段注入，Store 只负责持久化投影
+    pub fn request_analytics_worker(
+        &self,
+        projector: Arc<dyn gateway_admin::ports::store::UsageBillingProjector>,
+    ) -> StoreResult<WorkerContribution> {
+        request_analytics_worker(self.analytics.clone().with_billing_projector(projector))
     }
 
     pub fn take_worker_contributions(&mut self) -> Vec<WorkerContribution> {
@@ -117,6 +126,7 @@ async fn connect(
     let observability_query_budget = postgres::ObservabilityQueryBudget::try_new(
         config.pool.observability_max_connections(),
         config.pool.acquire_timeout(),
+        config.pool.observability_timeout(),
     )?;
     let redis_client = ::redis::Client::open(config.redis_url()?)
         .map_err(|source| redis_unavailable("create Redis client", source))?;
@@ -171,8 +181,11 @@ async fn connect(
             )),
             admin_account_runtime,
             Arc::new(
-                postgres::PgAccountGroupRepository::new(pool.clone())
-                    .with_timezone(config.timezone),
+                postgres::PgAccountGroupRepository::new(
+                    pool.clone(),
+                    observability_query_budget.clone(),
+                )
+                .with_timezone(config.timezone),
             ),
             Arc::new(postgres::PgProxyRepository::new(pool.clone())),
         ),
@@ -188,7 +201,7 @@ async fn connect(
                 pool.clone(),
                 Some(credential_leases.clone()),
                 Some(Arc::clone(&cooldowns) as Arc<dyn ProviderCooldownPort>),
-                observability_query_budget,
+                observability_query_budget.clone(),
             )
             .with_timezone(config.timezone),
         ),
@@ -242,7 +255,11 @@ async fn connect(
     .with_budget(Arc::new(
         postgres::PgClientBudgetStore::new(pool.clone()).with_timezone(config.timezone),
     ))
-    .with_session_affinity(Arc::clone(&provider_session_affinity));
+    .with_session_affinity(Arc::clone(&provider_session_affinity))
+    .with_client_retry_store(Arc::new(redis::RedisClientRetryRepository::new(
+        redis_connection.clone(),
+        REDIS_NAMESPACE,
+    )?));
 
     let provider_ports = ProviderStorePorts::new(
         account_store,
@@ -291,7 +308,9 @@ async fn connect(
             }),
         ),
     };
+    let analytics = postgres::PgRequestAnalyticsRepository::new(pool, observability_query_budget);
     Ok(StoreBundle {
+        analytics,
         diagnostics,
         admin_ports,
         core_ports,

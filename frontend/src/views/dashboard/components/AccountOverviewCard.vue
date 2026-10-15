@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { dashboardSnapshotView, MetricTone } from '../presenter'
-import { BaseCard, BaseEmpty } from '@codex-proxy/ui'
+import { ZCard, ZEmpty } from '@codex-proxy/ui'
 
 import { CircleCheck, RefreshCw, ShieldAlert, TriangleAlert } from '@lucide/vue'
 import { computed } from 'vue'
@@ -160,7 +160,7 @@ const statusBars = computed(() => {
 </script>
 
 <template>
-  <BaseCard as="article" class="w-full xl:h-112.5">
+  <ZCard as="article" class="w-full xl:h-112.5">
     <div
       class="grid xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.28fr)_minmax(280px,0.9fr)] xl:gap-7"
     >
@@ -225,7 +225,7 @@ const statusBars = computed(() => {
         <div
           class="mt-5 flex w-full flex-col gap-2 overflow-hidden xl:mt-6.75 xl:h-82.5 xl:gap-2.5"
         >
-          <BaseEmpty
+          <ZEmpty
             v-if="accounts.length === 0"
             title="暂无账号请求记录"
             surface="inset"
@@ -340,5 +340,5 @@ const statusBars = computed(() => {
         </div>
       </section>
     </div>
-  </BaseCard>
+  </ZCard>
 </template>

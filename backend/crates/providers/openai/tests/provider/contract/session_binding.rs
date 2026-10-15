@@ -1074,7 +1074,7 @@ async fn relaxed_and_preferred_session_requests_apply_distinct_scheduling_polici
                 let provider_kind = ProviderKind::new("openai").unwrap();
                 let snapshot = RuntimeSnapshot::new(
                     ConfigRevision::new(1).unwrap(),
-                    SettingsValues::new(2, 10, "smart", BTreeMap::new(), None, None),
+                    SettingsValues::new(2, "smart", BTreeMap::new(), None, None),
                     vec![provider_kind.clone()],
                     Vec::new(),
                     Vec::new(),
@@ -1391,14 +1391,8 @@ async fn preferred_final_thread_rewrite_within_the_session_preserves_the_primary
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_subagent_a").await;
     let affinity = Arc::new(MemorySessionAffinity::default());
-    let leases = Arc::new(TestLeaseCoordinator::default());
     let server = MockServer::start().await;
-    let provider = provider_with_affinity_and_base_url_and_leases(
-        &store,
-        affinity,
-        server.uri(),
-        leases.clone(),
-    );
+    let provider = provider_with_affinity_and_base_url(&store, affinity, server.uri());
     let request = |thread| {
         planned_request(
             "openai",
@@ -1417,19 +1411,7 @@ async fn preferred_final_thread_rewrite_within_the_session_preserves_the_primary
     );
     create_account(&store, "acct_subagent_b").await;
     let a = store.account("acct_subagent_a").unwrap();
-    // 并发占满是暂时性分流：子线程临时落到 b，会话主账号仍是 a
-    leases.signals.lock().unwrap().insert(
-        a.id().clone(),
-        gateway_core::account::AccountRuntimeSignals {
-            in_flight: 2,
-            last_started_at: None,
-            quota_reset_at: None,
-            quota_remaining_rank: None,
-            cooldown: None,
-            failure_rate_basis_points: None,
-            first_output_latency_ms: None,
-        },
-    );
+    store.set_enabled(a.id(), false).await.unwrap();
     drop(
         provider
             .clone()
@@ -1440,7 +1422,7 @@ async fn preferred_final_thread_rewrite_within_the_session_preserves_the_primary
             .await
             .unwrap(),
     );
-    leases.signals.lock().unwrap().clear();
+    store.set_enabled(a.id(), true).await.unwrap();
     let plan = FrozenMiddlewarePlan::new(
         Arc::new(ChangeTurnMetadata(
             br#"{"session_id":"root","thread_id":"child"}"#,
@@ -1542,7 +1524,7 @@ async fn preferred_spillover_uses_selected_credentials_on_the_wire() {
 }
 
 #[tokio::test]
-async fn preferred_transient_spillover_recovers_while_persistent_loss_migrates_the_binding() {
+async fn preferred_unavailable_primary_can_recover_without_losing_its_binding() {
     use gateway_core::account::{
         AccountAffinity, AccountRuntimeSignals, AccountSelectionPolicy, RotationStrategy,
     };
@@ -1558,16 +1540,12 @@ async fn preferred_transient_spillover_recovers_while_persistent_loss_migrates_t
         server.uri(),
         leases.clone(),
     );
-    let policy = AccountSelectionPolicy::new(
-        RotationStrategy::Smart,
-        NonZeroU32::new(2).unwrap(),
-        Duration::from_secs(30),
-    )
-    .with_openai_account_affinity(AccountAffinity::Preferred)
-    .with_queue(ConcurrencyQueuePolicy {
-        max_waiting: 10,
-        timeout: Duration::from_secs(1),
-    });
+    let policy = AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(2).unwrap())
+        .with_openai_account_affinity(AccountAffinity::Preferred)
+        .with_queue(ConcurrencyQueuePolicy {
+            max_waiting: 10,
+            timeout: Duration::from_secs(1),
+        });
     let select = || {
         provider.clone().execute(
             planned_request("openai", turn_request("root", "availability-turn")),
@@ -1581,10 +1559,7 @@ async fn preferred_transient_spillover_recovers_while_persistent_loss_migrates_t
     drop(select().await.unwrap());
     create_account(&store, "acct_subagent_b").await;
     let primary = ProviderAccountId::new("acct_subagent_a").unwrap();
-    // 并发与请求间隔是秒级状态：分流后主账号保留，恢复即回流
-    // 停用与额度耗尽是持续状态：分流同时迁移绑定，主账号恢复后会话仍留在新账号
-    for reason in ["concurrency", "interval", "disabled", "quota"] {
-        let persistent = matches!(reason, "disabled" | "quota");
+    for reason in ["concurrency", "disabled", "quota"] {
         let mut signals = AccountRuntimeSignals {
             in_flight: 0,
             last_started_at: None,
@@ -1596,7 +1571,6 @@ async fn preferred_transient_spillover_recovers_while_persistent_loss_migrates_t
         };
         match reason {
             "concurrency" => signals.in_flight = 2,
-            "interval" => signals.last_started_at = Some(SystemTime::now()),
             "disabled" => {
                 store.set_enabled(&primary, false).await.unwrap();
             }
@@ -1641,11 +1615,6 @@ async fn preferred_transient_spillover_recovers_while_persistent_loss_migrates_t
             })
             .await
             .unwrap();
-        let expected = if persistent {
-            "acct_subagent_b"
-        } else {
-            "acct_subagent_a"
-        };
         assert_eq!(
             select()
                 .await
@@ -1653,30 +1622,9 @@ async fn preferred_transient_spillover_recovers_while_persistent_loss_migrates_t
                 .metadata()
                 .provider_account_id()
                 .as_str(),
-            expected,
+            "acct_subagent_a",
             "{reason}"
         );
-        if persistent {
-            // 下一轮从主账号重新开始：把绑定迁回 a，再验证下一个原因
-            store
-                .set_enabled(&ProviderAccountId::new("acct_subagent_b").unwrap(), false)
-                .await
-                .unwrap();
-            assert_eq!(
-                select()
-                    .await
-                    .unwrap()
-                    .metadata()
-                    .provider_account_id()
-                    .as_str(),
-                "acct_subagent_a",
-                "{reason} rebind"
-            );
-            store
-                .set_enabled(&ProviderAccountId::new("acct_subagent_b").unwrap(), true)
-                .await
-                .unwrap();
-        }
     }
 }
 

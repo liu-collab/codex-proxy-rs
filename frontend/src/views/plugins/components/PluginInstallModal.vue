@@ -13,7 +13,7 @@ import type {
 } from '@/api'
 
 import { Github } from '@boxicons/vue'
-import { BaseButton, BaseCheckbox, BaseForm, BaseFormItem, BaseInput, BaseModal, BaseSegmented, BaseTag, toast } from '@codex-proxy/ui'
+import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput, ZNotification, ZSegmented, ZTag } from '@codex-proxy/ui'
 
 import { CheckCircle2, Download, FileArchive, Link, PackageOpen } from '@lucide/vue'
 import { useEventListener, useSessionStorage } from '@vueuse/core'
@@ -302,7 +302,7 @@ useEventListener('pagehide', () => {
 function chooseFile(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0] ?? null
   if (file && file.size > 32 * 1024 * 1024) {
-    toast.warning('插件包不能超过 32 MiB')
+    ZNotification.warning({ message: '插件包不能超过 32 MiB' })
     uploadFile.value = null
     ;(event.target as HTMLInputElement).value = ''
     return
@@ -316,7 +316,7 @@ function installSelected() {
     return
   }
   if (!selection.value || !verified.value) {
-    toast.warning('请先校验当前选择的插件包')
+    ZNotification.warning({ message: '请先校验当前选择的插件包' })
     return
   }
   emit('install', selection.value)
@@ -332,11 +332,11 @@ async function queryRelease() {
   const repository = githubRepository()
   const tag = githubForm.tag.trim()
   if (!/^[-\w.]+\/[-\w.]+$/.test(repository)) {
-    toast.warning('请输入 GitHub 仓库链接或 owner/repo')
+    ZNotification.warning({ message: '请输入 GitHub 仓库链接或 owner/repo' })
     return
   }
   if (githubForm.allowPrerelease && !tag) {
-    toast.warning('查询预发行版需要明确填写 tag')
+    ZNotification.warning({ message: '查询预发行版需要明确填写 tag' })
     return
   }
   submitting.value = true
@@ -415,25 +415,25 @@ watch(
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     :title="updateSource ? '更新插件' : '安装插件'"
     :description="acceptanceArtifact ? '确认来源与版本后安装' : updateSource ? '检查设置兼容性后切换版本' : '支持本地插件包、URL 与 GitHub'"
-    size="md"
-    :dismissible="!busy"
-    @after-leave="clearCredentials"
+    width="36rem"
+    :show-close="!busy" :close-on-click-modal="!busy" :close-on-press-escape="!busy"
+    @closed="clearCredentials"
   >
-    <BaseSegmented
+    <ZSegmented
       v-if="!acceptanceArtifact && !verified"
       :model-value="mode"
       :options="modeOptions"
       :disabled="busy"
-      label="安装方式"
+      aria-label="安装方式"
       class="mb-5 w-full"
       @update:model-value="changeMode"
     />
-    <BaseForm v-if="!verified && mode === 'upload'">
-      <BaseFormItem label="插件包" required>
+    <ZForm v-if="!verified && mode === 'upload'">
+      <ZFormItem label="插件包" required>
         <!-- 原生文件输入放在样式化上传区内，保留键盘与读屏语义。 -->
         <!-- eslint-disable-next-line vue-a11y/label-has-for -->
         <label
@@ -454,38 +454,38 @@ watch(
             @change="chooseFile"
           >
         </label>
-      </BaseFormItem>
-    </BaseForm>
+      </ZFormItem>
+    </ZForm>
 
-    <BaseForm v-else-if="!verified && mode === 'url'" class="grid gap-4">
-      <BaseFormItem label="下载 URL" required>
+    <ZForm v-else-if="!verified && mode === 'url'" class="grid gap-4">
+      <ZFormItem label="下载 URL" required>
         <template #label-extra>
           <PluginHelpPopover label="下载地址说明">
             仅支持 HTTPS，本机回环地址可使用 HTTP
           </PluginHelpPopover>
         </template>
-        <BaseInput v-model="urlForm.url" :disabled="busy" aria-label="下载 URL" placeholder="https://downloads.example.org/plugin.tar.gz" />
-      </BaseFormItem>
-    </BaseForm>
+        <ZInput v-model="urlForm.url" :disabled="busy" aria-label="下载 URL" placeholder="https://downloads.example.org/plugin.tar.gz" />
+      </ZFormItem>
+    </ZForm>
 
-    <BaseForm v-else-if="!verified" class="grid gap-4">
-      <BaseFormItem label="GitHub 仓库" required>
-        <BaseInput v-model="githubForm.repository" :disabled="busy" aria-label="GitHub 仓库" placeholder="仓库链接或 owner/repo">
+    <ZForm v-else-if="!verified" class="grid gap-4">
+      <ZFormItem label="GitHub 仓库" required>
+        <ZInput v-model="githubForm.repository" :disabled="busy" aria-label="GitHub 仓库" placeholder="仓库链接或 owner/repo">
           <template #prefix>
             <Github class="size-4" />
           </template>
-        </BaseInput>
-      </BaseFormItem>
-      <BaseFormItem label="版本标签">
+        </ZInput>
+      </ZFormItem>
+      <ZFormItem label="版本标签">
         <template #label-extra>
           <PluginHelpPopover label="版本标签说明">
             留空查询最新稳定版，查询预发行版时必须指定标签
           </PluginHelpPopover>
         </template>
-        <BaseInput v-model="githubForm.tag" :disabled="busy" aria-label="版本标签" placeholder="留空查最新稳定版" />
-      </BaseFormItem>
-      <BaseCheckbox v-model="githubForm.allowPrerelease" label="允许查询预发行版" show-label :disabled="busy" />
-    </BaseForm>
+        <ZInput v-model="githubForm.tag" :disabled="busy" aria-label="版本标签" placeholder="留空查最新稳定版" />
+      </ZFormItem>
+      <ZCheckbox v-model="githubForm.allowPrerelease" label="允许查询预发行版" :disabled="busy" />
+    </ZForm>
 
     <div v-if="!verified && mode !== 'upload'" class="mt-4 grid gap-4">
       <PluginDownloadAuthentication
@@ -500,14 +500,14 @@ watch(
         @delete-credential="$emit('deleteCredential', $event)"
       />
       <div class="grid items-end gap-4 sm:grid-cols-2">
-        <BaseFormItem label="校验摘要">
+        <ZFormItem label="校验摘要">
           <template #label-extra>
             <PluginHelpPopover label="校验摘要说明">
               可选，填写发布者提供的 64 位 SHA-256 十六进制摘要，用于核对下载内容
             </PluginHelpPopover>
           </template>
-          <BaseInput v-model="connectionForm.sha256" :disabled="busy" :aria-invalid="Boolean(digestError)" maxlength="64" aria-label="SHA-256 校验摘要" placeholder="可选，SHA-256" class="font-mono [&_input::placeholder]:font-normal" />
-        </BaseFormItem>
+          <ZInput v-model="connectionForm.sha256" :disabled="busy" :aria-invalid="Boolean(digestError)" maxlength="64" aria-label="SHA-256 校验摘要" placeholder="可选，SHA-256" class="font-mono [&_input::placeholder]:font-normal" />
+        </ZFormItem>
         <PluginSourceProxyField v-model="connectionForm.outboundProxyId" :disabled="busy" />
       </div>
     </div>
@@ -516,13 +516,13 @@ watch(
       <div class="flex min-w-0 flex-wrap items-center gap-2">
         <span class="text-cp-sm text-cp-text-secondary">已找到版本</span>
         <strong class="min-w-0 wrap-break-word text-cp-sm font-emphasis text-cp-text">{{ release.tag }}</strong>
-        <BaseTag v-if="release.prerelease" type="warning">
+        <ZTag v-if="release.prerelease" type="warning">
           预发行版
-        </BaseTag>
+        </ZTag>
       </div>
-      <BaseFormItem v-if="releaseAssets.length > 1" label="插件包" required>
+      <ZFormItem v-if="releaseAssets.length > 1" label="插件包" required>
         <PluginAssetPicker v-model="githubForm.asset" :assets="releaseAssets" :disabled="busy" />
-      </BaseFormItem>
+      </ZFormItem>
       <p v-else class="m-0 break-all text-cp-sm text-cp-text-secondary">
         {{ githubForm.asset || '此版本没有 tar.gz 或 tgz 插件包' }}
       </p>
@@ -538,7 +538,7 @@ watch(
             <h3 class="m-0 min-w-0 wrap-break-word text-cp-sm font-emphasis text-cp-text">
               {{ verified.metadata.displayName }}
             </h3>
-            <BaseTag>{{ verified.metadata.version }}</BaseTag>
+            <ZTag>{{ verified.metadata.version }}</ZTag>
             <span role="status" class="ml-auto inline-flex shrink-0 items-center gap-1 text-cp-xs text-cp-success-text">
               <CheckCircle2 class="size-3.5" aria-hidden="true" />
               解析完成
@@ -560,9 +560,9 @@ watch(
           适用平台
         </dt>
         <dd class="m-0 flex min-w-0 flex-wrap gap-1.5">
-          <BaseTag v-for="platform in verified.metadata.platforms" :key="platform" size="sm">
+          <ZTag v-for="platform in verified.metadata.platforms" :key="platform" size="small">
             {{ platform }}
-          </BaseTag>
+          </ZTag>
         </dd>
       </dl>
       <p class="mt-4 mb-0 text-cp-xs leading-relaxed text-cp-text-secondary">
@@ -577,33 +577,33 @@ watch(
     </section>
 
     <template #footer>
-      <BaseButton v-if="verified && !acceptanceArtifact" variant="ghost" :disabled="busy" class="mr-auto" @click="$emit('resetVerification')">
+      <ZButton v-if="verified && !acceptanceArtifact" variant="text" :disabled="busy" class="mr-auto" @click="$emit('resetVerification')">
         返回
-      </BaseButton>
-      <BaseButton v-if="!verified && mode === 'github' && release" variant="secondary" :disabled="busy || authenticationIncomplete" @click="queryRelease">
+      </ZButton>
+      <ZButton v-if="!verified && mode === 'github' && release" :disabled="busy || authenticationIncomplete" @click="queryRelease">
         重新查询
-      </BaseButton>
-      <BaseButton variant="secondary" :disabled="busy" @click="open = false">
+      </ZButton>
+      <ZButton :disabled="busy" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton v-if="mode === 'github' && !release" variant="primary" :loading="submitting || querying" :disabled="busy || authenticationIncomplete || !githubForm.repository.trim()" @click="queryRelease">
+      </ZButton>
+      <ZButton v-if="mode === 'github' && !release" type="primary" :loading="submitting || querying" :disabled="busy || authenticationIncomplete || !githubForm.repository.trim()" @click="queryRelease">
         {{ querying ? '正在查询版本' : sourceChanged ? '保存来源并继续' : '下一步' }}
-      </BaseButton>
-      <BaseButton
+      </ZButton>
+      <ZButton
         v-else-if="!verified"
-        variant="primary"
+        type="primary"
         :loading="submitting || verifying"
         :disabled="!selection || busy || authenticationIncomplete"
         @click="verifySelected"
       >
         {{ verifying ? '正在解析插件包' : sourceChanged ? '保存来源并继续' : '下一步' }}
-      </BaseButton>
-      <BaseButton v-if="verified" variant="primary" :loading="saving" :disabled="busy || pendingAuthentication" @click="installSelected">
+      </ZButton>
+      <ZButton v-if="verified" type="primary" :loading="saving" :disabled="busy || pendingAuthentication" @click="installSelected">
         <template #icon>
           <Download class="size-4" />
         </template>
         {{ installationLabel }}
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

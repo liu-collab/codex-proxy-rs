@@ -1,4 +1,4 @@
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { computed, shallowRef, watch } from 'vue'
 import { getProxyAccounts, removeProxyAccount } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
@@ -50,7 +50,7 @@ export function useProxyAccounts(options: {
     return await removeAction.run(async () => {
       await removeProxyAccount({ proxyId, accountId })
       options.onRemoved()
-      toast.success('账号已移出当前代理，改为直连')
+      ZNotification.success({ message: '账号已移出当前代理，改为直连' })
       if (options.isOpen() && options.proxyId() === proxyId) {
         query.invalidate()
         query.items.value = query.items.value.filter(account => account.id !== accountId)

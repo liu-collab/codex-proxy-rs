@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import type { TableColumnSize } from '@codex-proxy/ui'
 import type { getUsageRecordInsightsDiagnostics } from '@/api'
-import { BaseCard, BaseEmpty, BaseSegmented, BaseTable, defineTableColumns } from '@codex-proxy/ui'
+import { defineTableColumns, ZCard, ZEmpty, ZSegmented, ZTable } from '@codex-proxy/ui'
 
 import { CornerDownRight } from '@lucide/vue'
 import { computed } from 'vue'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import { formatLocalizedCompactNumber as formatCompactNumber, formatDuration, formatPercent, formatUsd } from '@/utils/format'
 
-type Diagnostics = Awaited<ReturnType<typeof getUsageRecordInsightsDiagnostics>>
+type Diagnostics = Omit<Awaited<ReturnType<typeof getUsageRecordInsightsDiagnostics>>, 'analytics'>
 
 const props = withDefaults(
   defineProps<{
@@ -108,16 +108,16 @@ function diagnosticNameDisplay(name: string) {
 </script>
 
 <template>
-  <BaseCard
+  <ZCard
     as="article"
     title="热点诊断"
     :description="`按${resultDimensionLabel}聚合`"
     class="max-h-105 min-w-0 w-full xl:h-full"
   >
     <template #actions>
-      <BaseSegmented
+      <ZSegmented
         v-model="dimension"
-        label="诊断维度"
+        aria-label="诊断维度"
         :options="dimensionOptions"
         :disabled="loading"
         class="w-full min-w-0 lg:w-80"
@@ -125,13 +125,13 @@ function diagnosticNameDisplay(name: string) {
     </template>
 
     <template #body>
-      <BaseTable
+      <ZTable
         v-if="hasData"
         :key="resultDimension"
         class="min-h-0 max-h-80 w-full xl:max-h-none xl:contain-[size]"
         :columns="diagnosticColumns"
-        :rows="displayItems"
-        density="compact"
+        :data="displayItems"
+        size="small"
         row-key="key"
         empty-text="暂无诊断数据"
       >
@@ -222,15 +222,15 @@ function diagnosticNameDisplay(name: string) {
             {{ formatUsd(row.estimatedCost) }}
           </span>
         </template>
-      </BaseTable>
-      <BaseEmpty
+      </ZTable>
+      <ZEmpty
         v-else
-        size="sm"
+        size="small"
         surface="none"
         :title="loading ? '正在加载热点诊断数据' : '暂无诊断数据'"
         description="当前范围没有可诊断的请求记录"
         class="h-full min-h-40 place-content-center"
       />
     </template>
-  </BaseCard>
+  </ZCard>
 </template>

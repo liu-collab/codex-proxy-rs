@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseButton, BaseInput, BaseModal, BaseFormItem as FormItem, toast } from '@codex-proxy/ui'
+import { ZFormItem as FormItem, ZButton, ZDialog, ZInput, ZNotification } from '@codex-proxy/ui'
 import { computed, reactive, shallowRef, useId, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { changeAdminPassword } from '@/api'
@@ -46,32 +46,32 @@ async function submit() {
     await changeAdminPassword({ currentPassword: form.currentPassword, newPassword: form.newPassword })
     auth.invalidateSession()
     open.value = false
-    toast.success('密码已修改，请使用新密码重新登录')
+    ZNotification.success({ message: '密码已修改，请使用新密码重新登录' })
     await router.replace('/login')
   })
 }
 </script>
 
 <template>
-  <BaseModal v-model="open" title="修改管理员密码" description="验证当前密码后，设置新的登录密码" size="sm" :dismissible="!loading" @after-leave="clearForm">
+  <ZDialog v-model="open" title="修改管理员密码" description="验证当前密码后，设置新的登录密码" width="28rem" :show-close="!loading" :close-on-click-modal="!loading" :close-on-press-escape="!loading" @closed="clearForm">
     <form :id="formId" class="grid gap-5" @submit.prevent="submit">
       <FormItem label="当前密码" required>
-        <BaseInput v-model="form.currentPassword" type="password" autocomplete="current-password" placeholder="输入当前密码" :disabled="loading" maxlength="4096" />
+        <ZInput v-model="form.currentPassword" type="password" autocomplete="current-password" placeholder="输入当前密码" :disabled="loading" maxlength="4096" />
       </FormItem>
       <FormItem label="新密码" description="至少 12 个字符，建议混合使用字母、数字和符号" :error="passwordError" required>
-        <BaseInput v-model="form.newPassword" type="password" autocomplete="new-password" placeholder="设置新密码" :disabled="loading" maxlength="1024" />
+        <ZInput v-model="form.newPassword" type="password" autocomplete="new-password" placeholder="设置新密码" :disabled="loading" maxlength="1024" />
       </FormItem>
       <FormItem label="确认新密码" :error="confirmationError" required>
-        <BaseInput v-model="form.confirmation" type="password" autocomplete="new-password" placeholder="再次输入新密码" :disabled="loading" maxlength="1024" />
+        <ZInput v-model="form.confirmation" type="password" autocomplete="new-password" placeholder="再次输入新密码" :disabled="loading" maxlength="1024" />
       </FormItem>
     </form>
     <template #footer>
-      <BaseButton variant="secondary" :disabled="loading" @click="open = false">
+      <ZButton :disabled="loading" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton type="submit" :form="formId" variant="primary" :loading="loading">
+      </ZButton>
+      <ZButton native-type="submit" :form="formId" type="primary" :loading="loading">
         保存并重新登录
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

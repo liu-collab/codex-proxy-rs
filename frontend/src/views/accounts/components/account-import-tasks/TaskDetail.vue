@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountImportTaskDetail } from '@/api'
-import { BaseButton, BaseEmpty, BaseScrollbar, BaseSegmented } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZScrollbar, ZSegmented } from '@codex-proxy/ui'
 import { ArrowUpRight, Check, CircleAlert, Square, X } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
@@ -40,9 +40,9 @@ watch(hasAttention, (value) => {
           {{ task.createdAtDisplay }} 创建
         </p>
       </div>
-      <BaseButton
+      <ZButton
         v-if="!task.finishedAt"
-        size="sm"
+        size="small"
         :loading="stopping"
         :disabled="task.stopRequested || task.counts.pending === 0"
         @click="emit('stop')"
@@ -51,10 +51,10 @@ watch(hasAttention, (value) => {
           <Square class="size-3 text-cp-error" />
         </template>
         {{ task.stopRequested || task.counts.pending === 0 ? '等待当前条目结束' : '停止未开始条目' }}
-      </BaseButton>
-      <BaseButton v-else size="sm" variant="soft" @click="emit('viewAccounts')">
+      </ZButton>
+      <ZButton v-else size="small" type="primary" variant="plain" @click="emit('viewAccounts')">
         查看账号 <ArrowUpRight class="size-3.5" />
-      </BaseButton>
+      </ZButton>
     </div>
 
     <div>
@@ -86,17 +86,17 @@ watch(hasAttention, (value) => {
           <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
           待核对条目可能已入库，请先查看账号，再决定是否重新导入
         </p>
-        <BaseSegmented
+        <ZSegmented
           v-model="filter"
           class="ml-auto shrink-0"
-          label="筛选导入明细"
+          aria-label="筛选导入明细"
           :options="filterOptions"
-          size="sm"
+          size="small"
         />
       </div>
       <div>
-        <BaseScrollbar :key="`${task.taskId}-${filter}`" max-height="min(18rem, 32dvh)">
-          <BaseEmpty v-if="!visibleItems.length" size="sm" title="暂无需要处理的条目" surface="none" />
+        <ZScrollbar :key="`${task.taskId}-${filter}`" max-height="min(18rem, 32dvh)">
+          <ZEmpty v-if="!visibleItems.length" size="small" title="暂无需要处理的条目" surface="none" />
           <ol v-else class="m-0 list-none space-y-1 p-0" aria-label="导入条目结果">
             <li
               v-for="item in visibleItems"
@@ -120,7 +120,7 @@ watch(hasAttention, (value) => {
               </span>
             </li>
           </ol>
-        </BaseScrollbar>
+        </ZScrollbar>
       </div>
     </div>
   </section>

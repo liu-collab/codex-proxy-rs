@@ -221,7 +221,7 @@ async fn turns_refresh_host_settings_and_key_identity_while_preserving_handshake
                 .unwrap();
             let baseline = settings.runtime.as_ref().unwrap();
             let mut values = serde_json::to_value(baseline.values()).unwrap();
-            values["request_interval_ms"] = json!(0);
+            values["max_account_rotations"] = json!(0);
             settings.runtime = Some(
                 baseline
                     .replace(serde_json::from_value(values).unwrap(), "handshake")
@@ -292,7 +292,7 @@ async fn turns_refresh_host_settings_and_key_identity_while_preserving_handshake
     for round in 0..3 {
         if round == 1 {
             let mut settings = serde_json::to_value(initial.settings()).unwrap();
-            settings["request_interval_ms"] = json!(50);
+            settings["max_account_rotations"] = json!(5);
             settings["responses_max_decompressed_body_bytes"] = json!(2048);
             snapshots.publish(
                 initial
@@ -337,8 +337,8 @@ async fn turns_refresh_host_settings_and_key_identity_while_preserving_handshake
             observed[1]["runtime"]["responses_max_decompressed_body_bytes"],
             2048
         );
-        assert_eq!(observed[0]["runtime"]["request_interval_ms"], 0);
-        assert_eq!(observed[1]["runtime"]["request_interval_ms"], 0);
+        assert_eq!(observed[0]["runtime"]["max_account_rotations"], 0);
+        assert_eq!(observed[1]["runtime"]["max_account_rotations"], 0);
     }
     socket.close(None).await.unwrap();
     server.abort();

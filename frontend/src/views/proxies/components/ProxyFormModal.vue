@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { OutboundProxyRecord, OutboundProxyTest, RequestLocation } from '@/api'
-import { BaseButton, BaseForm, BaseFormItem, BaseIconButton, BaseInput, BaseModal, BaseSelect, BaseSwitch } from '@codex-proxy/ui'
-import { Eye, EyeOff, LocateFixed, Save, Wifi } from '@lucide/vue'
-import { computed, shallowRef, watch } from 'vue'
+import { ZButton, ZDialog, ZForm, ZFormItem, ZIconButton, ZInput, ZSelect, ZSwitch } from '@codex-proxy/ui'
+import { LocateFixed, Save, Wifi } from '@lucide/vue'
+import { computed } from 'vue'
 import { PROXY_PROTOCOL_OPTIONS } from '@/api'
 import RequestLocationFields from '@/components/RequestLocationFields.vue'
 
@@ -32,50 +32,37 @@ const manualLocationWarning = computed(() => {
     return location.message
   return ''
 })
-const showSecret = shallowRef(false)
 const busy = computed(() => props.saving || props.testingConnection || props.detectingLocation)
 const title = computed(() => props.proxy ? '编辑代理' : '新增代理')
 const connectionDescription = computed(() => props.proxy
   ? '留空保留当前连接和认证信息；也可以直接粘贴「主机:端口:用户名:密码」并选择协议'
   : '可直接粘贴代理商的「主机:端口:用户名:密码」，选择协议即可；也可填完整 URL')
-
-watch(open, (value) => {
-  if (value)
-    showSecret.value = false
-})
 </script>
 
 <template>
-  <BaseModal v-model="open" :title="title" size="md" :dismissible="!busy">
-    <BaseForm class="grid gap-5">
-      <BaseFormItem label="代理名称" required>
-        <BaseInput v-model="name" maxlength="100" :disabled="busy" aria-label="代理名称" placeholder="请输入代理名称" />
-      </BaseFormItem>
-      <BaseFormItem label="协议" description="粘贴「主机:端口:用户名:密码」时必须选择；填完整 URL 时以 URL 里的协议为准">
-        <BaseSelect v-model="proxyProtocol" :options="PROXY_PROTOCOL_OPTIONS" :disabled="busy" aria-label="代理协议" class="w-40" />
-      </BaseFormItem>
-      <BaseFormItem label="代理地址" :required="!proxy" :description="connectionDescription">
-        <BaseInput
+  <ZDialog v-model="open" :title="title" width="36rem" :show-close="!busy" :close-on-click-modal="!busy" :close-on-press-escape="!busy">
+    <ZForm class="grid gap-5">
+      <ZFormItem label="代理名称" required>
+        <ZInput v-model="name" maxlength="100" :disabled="busy" aria-label="代理名称" placeholder="请输入代理名称" />
+      </ZFormItem>
+      <ZFormItem label="协议" description="粘贴「主机:端口:用户名:密码」时必须选择；填完整 URL 时以 URL 里的协议为准">
+        <ZSelect v-model="proxyProtocol" :options="PROXY_PROTOCOL_OPTIONS" :disabled="busy" aria-label="代理协议" class="w-40" />
+      </ZFormItem>
+      <ZFormItem label="代理地址" :required="!proxy" :description="connectionDescription">
+        <ZInput
           v-model="proxyUrl"
-          :type="showSecret ? 'text' : 'password'"
+          show-password
           autocomplete="new-password"
           :disabled="busy"
           aria-label="代理地址"
           placeholder="主机:端口:用户名:密码 或 socks5://用户名:密码@主机:端口"
-        >
-          <template #suffix>
-            <BaseIconButton :label="showSecret ? '隐藏代理地址' : '显示代理地址'" :disabled="busy" @click="showSecret = !showSecret">
-              <EyeOff v-if="showSecret" class="size-4" />
-              <Eye v-else class="size-4" />
-            </BaseIconButton>
-          </template>
-        </BaseInput>
-      </BaseFormItem>
+        />
+      </ZFormItem>
       <div class="flex items-center justify-between gap-3">
-        <BaseSwitch v-model="customLocation" label="自定义时区位置" show-label :disabled="busy" />
-        <BaseIconButton
-          size="md"
-          :label="detectingLocation ? '正在解析出口位置' : '解析出口位置并填入表单'"
+        <ZSwitch v-model="customLocation" label="自定义时区位置" :disabled="busy" />
+        <ZIconButton
+          size="default"
+          :aria-label="detectingLocation ? '正在解析出口位置' : '解析出口位置并填入表单'"
           :title="detectingLocation ? '正在解析出口位置' : '解析出口位置并填入表单'"
           :aria-busy="detectingLocation"
           :disabled="busy"
@@ -86,7 +73,7 @@ watch(open, (value) => {
             <span v-if="detectingLocation" class="location-ripple location-ripple-delayed" aria-hidden="true" />
             <LocateFixed class="relative z-10 size-4" aria-hidden="true" />
           </span>
-        </BaseIconButton>
+        </ZIconButton>
       </div>
       <p class="m-0 text-cp-sm text-cp-text-secondary">
         {{ customLocation ? '保存后按手填位置发送请求' : '关闭时跟随出口 IP 的时区，保存时解析一次' }}
@@ -101,25 +88,25 @@ watch(open, (value) => {
       <p v-if="proxy?.accountCount && proxyUrl.trim()" class="m-0 text-cp-sm text-cp-warning-text">
         将更新 {{ proxy.accountCount }} 个关联账号的出口
       </p>
-    </BaseForm>
+    </ZForm>
     <template #footer>
-      <BaseButton variant="secondary" :disabled="busy" @click="open = false">
+      <ZButton :disabled="busy" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton variant="secondary" :loading="testingConnection" :disabled="saving || detectingLocation" @click="emit('test')">
+      </ZButton>
+      <ZButton :loading="testingConnection" :disabled="saving || detectingLocation" @click="emit('test')">
         <template #icon>
           <Wifi class="size-4" />
         </template>
         测试连接
-      </BaseButton>
-      <BaseButton variant="primary" :loading="saving" :disabled="testingConnection || detectingLocation" @click="emit('save')">
+      </ZButton>
+      <ZButton type="primary" :loading="saving" :disabled="testingConnection || detectingLocation" @click="emit('save')">
         <template #icon>
           <Save class="size-4" />
         </template>
         保存代理
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>
 
 <style scoped>

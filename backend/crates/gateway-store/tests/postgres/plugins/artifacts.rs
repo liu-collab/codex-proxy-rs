@@ -289,6 +289,10 @@ async fn plugin_migration_preserves_main_settings_and_accepts_new_installations(
             .await
             .unwrap();
     for (key, value) in before.as_object().unwrap() {
+        if key == "request_interval_ms" {
+            assert!(after.get(key).is_none(), "removed setting {key}");
+            continue;
+        }
         assert_eq!(after.get(key), Some(value), "existing setting {key}");
     }
     let store = PgPluginStore::new(database.pool.clone());

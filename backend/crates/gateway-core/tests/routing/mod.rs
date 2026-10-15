@@ -18,11 +18,12 @@ use gateway_core::routing::{
     UpstreamModelId,
 };
 
+mod privacy;
 mod request_settings;
 mod snapshot;
 
 fn settings() -> gateway_core::settings::SettingsValues {
-    gateway_core::settings::SettingsValues::new(3, 50, "smart", BTreeMap::new(), None, None)
+    gateway_core::settings::SettingsValues::new(3, "smart", BTreeMap::new(), None, None)
 }
 
 fn capabilities() -> ModelCapabilities {

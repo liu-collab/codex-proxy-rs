@@ -1,6 +1,6 @@
 import type { Account, AccountModelAccess, ApiKeyConfiguration } from '@/api'
 
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { ref, shallowRef, watch } from 'vue'
 import { getAccountDetail, updateAccount } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
@@ -96,22 +96,22 @@ export function useAccountEditor(options: {
     if (isApiKey) {
       const error = apiKeyAccountError(apiKey.value, true)
       if (error) {
-        toast.warning(error)
+        ZNotification.warning({ message: error })
         return
       }
     }
     const modelError = accountModelAccessError(modelAccess.value)
     if (modelError) {
-      toast.warning(modelError)
+      ZNotification.warning({ message: modelError })
       return
     }
     const scheduling = parseAccountSchedulingForm(concurrencyLimit.value, weight.value)
     if (proxyMode.value === 'proxy' && !proxyId.value.trim()) {
-      toast.warning('请选择已通过测试的代理')
+      ZNotification.warning({ message: '请选择已通过测试的代理' })
       return
     }
     if (!scheduling.valid) {
-      toast.warning(scheduling.message)
+      ZNotification.warning({ message: scheduling.message })
       return
     }
 
@@ -140,7 +140,7 @@ export function useAccountEditor(options: {
             : undefined,
       })
       showEditModal.value = false
-      toast.success('账号已更新')
+      ZNotification.success({ message: '账号已更新' })
       void Promise.allSettled([options.reloadAccounts(), options.reloadGroups()])
     })
   }

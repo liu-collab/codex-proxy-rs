@@ -5,7 +5,9 @@ use std::{borrow::Cow, fmt, net::IpAddr};
 use axum::http::HeaderMap;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use bytes::Bytes;
-use gateway_core::operation::{GenerateRequest, Operation, ProtocolPayload, ProviderSessionState};
+use gateway_core::operation::{
+    ClientTurn, GenerateRequest, Operation, ProtocolPayload, ProviderSessionState,
+};
 use gateway_protocol::openai::{
     X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER, X_OPENAI_MEMGEN_REQUEST_HEADER,
     is_transport_managed_request_header,
@@ -508,12 +510,30 @@ pub(super) fn decode_request_object(
     };
     let protocol_context = request_headers.protocol_context(use_websocket, frame_turn_metadata);
 
+    let semantics =
+        gateway_protocol::openai::codex_responses_request_semantics(&object, &protocol_context);
+    let client_turn = if object.get("generate").and_then(Value::as_bool) != Some(false)
+        && semantics.request_kind.as_deref() == Some("turn")
+        && !semantics.compact
+    {
+        gateway_protocol::openai::codex_account_thread_id(&object, &protocol_context)
+            .zip(gateway_protocol::openai::codex_turn_id(
+                &object,
+                &protocol_context,
+            ))
+            .and_then(|(thread, turn)| ClientTurn::new(thread, turn))
+    } else {
+        None
+    };
+
     let payload = ProtocolPayload::json_object(OPENAI_PROTOCOL, object)
         .map_err(|_| RequestDecodeError::CanonicalContract {
             field: "request".to_owned(),
         })?
         .with_context(protocol_context);
-    let operation = Operation::Generate(GenerateRequest::from_protocol_payload(payload));
+    let operation = Operation::Generate(
+        GenerateRequest::from_protocol_payload(payload).with_client_turn(client_turn),
+    );
     Ok(DecodedResponsesRequest {
         operation,
         metadata: ResponsesRequestMetadata {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AccountCreateForm } from '../../utils/accountCreate'
 import type { AccountGroupRef } from '@/api'
-import { BaseFormItem, BaseTextarea } from '@codex-proxy/ui'
+import { ZFormItem, ZTextarea } from '@codex-proxy/ui'
 import AccountSettingsFields from '../AccountSettingsFields.vue'
 import AccountProviderChooser from './AccountProviderChooser.vue'
 
@@ -37,14 +37,14 @@ const form = defineModel<AccountCreateForm>({ required: true })
       :disabled="disabled"
       :proxy-error="proxyError"
     />
-    <BaseFormItem label="备注">
-      <BaseTextarea
+    <ZFormItem label="备注">
+      <ZTextarea
         v-model="form.notes"
         :rows="3"
         :maxlength="500"
         placeholder="最多 500 字，可不填"
         :disabled="disabled"
       />
-    </BaseFormItem>
+    </ZFormItem>
   </div>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseIconButton } from '@codex-proxy/ui'
+import { ZIconButton } from '@codex-proxy/ui'
 
 import { Copy } from '@lucide/vue'
 
@@ -18,15 +18,14 @@ const emit = defineEmits<{
     <code class="block min-w-0 overflow-hidden whitespace-nowrap font-mono text-cp-sm font-emphasis text-cp-text">
       {{ prefix }}••••••••••••••••
     </code>
-    <BaseIconButton
-      variant="ghost"
-      size="sm"
-      label="复制完整密钥"
+    <ZIconButton
+      size="small"
+      aria-label="复制完整密钥"
       :loading="revealing"
       :disabled="revealing"
       @click="emit('copy')"
     >
       <Copy class="size-3.5" />
-    </BaseIconButton>
+    </ZIconButton>
   </div>
 </template>

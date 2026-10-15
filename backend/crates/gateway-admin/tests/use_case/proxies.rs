@@ -126,6 +126,7 @@ async fn authorization_uses_selected_proxy_regardless_of_probe_status() {
                 .accounts(FakeAccountStore::new(kind, events.clone()))
                 .proxies(Arc::new(TestProxies {
                     record: Some(ProxyRecord {
+                        enabled: true,
                         auto_location: false,
                         detected_location: None,
                         location: None,

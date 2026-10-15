@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ThemeName } from '@codex-proxy/ui/theme'
 import type { CSSProperties } from 'vue'
-import { BaseButton, BaseIconButton } from '@codex-proxy/ui'
+import { ZButton, ZIconButton } from '@codex-proxy/ui'
 
 import { Maximize2, Minus, Move, Plus } from '@lucide/vue'
 import { computed, useTemplateRef } from 'vue'
@@ -69,25 +69,24 @@ const boardStyle = computed<CSSProperties>(() => ({
       @dblclick.stop
       @wheel.stop
     >
-      <BaseIconButton label="缩小画板" size="sm" variant="ghost" :disabled="!canZoomOut" @click="zoomOut">
+      <ZIconButton aria-label="缩小画板" size="small" :disabled="!canZoomOut" @click="zoomOut">
         <Minus class="size-3.5" />
-      </BaseIconButton>
-      <BaseButton
-        size="sm"
-        variant="ghost"
+      </ZIconButton>
+      <ZButton
+        size="small" variant="text"
         class="min-w-14 px-2! font-mono tabular-nums"
         title="恢复 100%"
         @click="resetScale"
       >
         {{ scalePercent }}%
-      </BaseButton>
-      <BaseIconButton label="放大画板" size="sm" variant="ghost" :disabled="!canZoomIn" @click="zoomIn">
+      </ZButton>
+      <ZIconButton aria-label="放大画板" size="small" :disabled="!canZoomIn" @click="zoomIn">
         <Plus class="size-3.5" />
-      </BaseIconButton>
+      </ZIconButton>
       <span class="mx-0.5 h-4 w-px bg-cp-fill-secondary" />
-      <BaseIconButton label="适应画板" size="sm" variant="ghost" @click="fitToViewport()">
+      <ZIconButton aria-label="适应画板" size="small" @click="fitToViewport()">
         <Maximize2 class="size-3.5" />
-      </BaseIconButton>
+      </ZIconButton>
     </div>
   </div>
 </template>

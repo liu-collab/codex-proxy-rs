@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import type { BaseTablePaginationState as Pagination } from '@codex-proxy/ui'
+import type { PaginationState as Pagination } from '@codex-proxy/ui'
 import type { KeyUsageRecord, KeyUsageRecordKind } from '@/api/modules/key-usage'
-import { BaseCard, BaseSegmented, BaseTable, BaseTablePagination, defineTableColumns } from '@codex-proxy/ui'
+import { defineTableColumns, ZCard, ZPagination, ZSegmented, ZTable } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import UsageBillingCell from '@/components/usage/UsageBillingCell.vue'
 import UsageClientIpCell from '@/components/usage/UsageClientIpCell.vue'
@@ -31,15 +31,15 @@ const columns = computed(() => defineTableColumns<KeyUsageRecord>([
 </script>
 
 <template>
-  <BaseCard title="请求日志" description="当前请求记录">
+  <ZCard title="请求日志" description="当前请求记录">
     <template #actions>
-      <BaseSegmented v-model="kind" label="请求结果" :options="[{ label: '成功请求', value: 'success' }, { label: '错误记录', value: 'error' }]" />
+      <ZSegmented v-model="kind" aria-label="请求结果" :options="[{ label: '成功请求', value: 'success' }, { label: '错误记录', value: 'error' }]" />
     </template>
     <p v-if="error || stale" role="status" class="mt-0 mb-3 text-cp-sm text-cp-error-text">
       {{ error || '请求日志刷新失败，暂时保留上次结果' }}
     </p>
     <div class="flex h-120 min-h-0 overflow-hidden">
-      <BaseTable class="min-w-0 flex-1" :columns="columns" :rows="rows" :loading="loading" scrollbar-always-visible :empty-text="error ? '请求日志加载失败，请点击顶部刷新重试' : '所选条件下暂无记录'">
+      <ZTable class="min-w-0 flex-1" :columns="columns" :data="rows" :loading="loading" scrollbar-always-visible :empty-text="error ? '请求日志加载失败，请点击顶部刷新重试' : '所选条件下暂无记录'">
         <template #model="{ row }">
           <code class="block max-w-full truncate font-mono text-cp-sm leading-none font-heavy text-cp-text">{{ row.model || '—' }}</code>
         </template>
@@ -77,8 +77,8 @@ const columns = computed(() => defineTableColumns<KeyUsageRecord>([
         <template #userAgent="{ row }">
           <span class="block max-w-full wrap-break-word whitespace-normal font-mono text-cp-sm leading-[1.4] font-emphasis text-cp-text-secondary">{{ row.userAgent || '—' }}</span>
         </template>
-      </BaseTable>
+      </ZTable>
     </div>
-    <BaseTablePagination :pagination="pagination" :loading="loading" @page-change="$emit('pageChange', $event)" @page-size-change="$emit('pageSizeChange', $event)" />
-  </BaseCard>
+    <ZPagination v-bind="pagination" :disabled="loading" @current-change="$emit('pageChange', $event)" @size-change="$emit('pageSizeChange', $event)" />
+  </ZCard>
 </template>

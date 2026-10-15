@@ -1205,6 +1205,8 @@ fn billing_should_follow_requested_tier_independently_of_response_tier() {
     for (requested, actual, expected) in [
         (Some("priority"), Some("default"), Some(2_000_000_000)),
         (Some("fast"), Some("default"), Some(2_000_000_000)),
+        (Some("ultrafast"), Some("default"), Some(6_000_000_000)),
+        (Some("ultrafast"), None, Some(6_000_000_000)),
         (Some("auto"), Some("fast"), None),
         (Some("default"), Some("flex"), Some(1_000_000_000)),
         (Some("flex"), Some("priority"), Some(500_000_000)),
@@ -1213,6 +1215,7 @@ fn billing_should_follow_requested_tier_independently_of_response_tier() {
         (Some("default"), Some("future"), Some(1_000_000_000)),
         (Some("future"), Some("default"), None),
         (None, Some("priority"), Some(1_000_000_000)),
+        (None, Some("ultrafast"), Some(1_000_000_000)),
         (None, None, Some(1_000_000_000)),
     ] {
         assert_eq!(
@@ -1230,7 +1233,11 @@ fn billing_should_add_file_and_web_search_fees_without_tier_markup() {
         {"type": "file_search_call", "id": "fs_2", "status": "completed"},
         {"type": "web_search_call", "id": "ws_1", "status": "completed", "action": {"type": "search"}}
     ]);
-    for (tier, expected) in [("default", 1_150_000_000), ("fast", 2_150_000_000)] {
+    for (tier, expected) in [
+        ("default", 1_150_000_000),
+        ("fast", 2_150_000_000),
+        ("ultrafast", 6_150_000_000),
+    ] {
         assert_eq!(
             pricing_response_cost(
                 Some(tier),

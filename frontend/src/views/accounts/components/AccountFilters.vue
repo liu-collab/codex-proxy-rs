@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountGroupRef } from '@/api'
-import { BaseButton, BaseInput, BaseSelect } from '@codex-proxy/ui'
+import { ZButton, ZInput, ZSelect } from '@codex-proxy/ui'
 
 import { Download, ListTodo, Pencil, Search, Trash2, Upload } from '@lucide/vue'
 import { computed } from 'vue'
@@ -49,7 +49,7 @@ const groupOptions = computed(() => [
     <div
       class="grid w-full min-w-0 grid-cols-2 items-center gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7.75rem] xl:flex xl:w-auto xl:flex-none xl:flex-wrap xl:gap-3"
     >
-      <BaseInput
+      <ZInput
         v-model="search"
         placeholder="搜索账号"
         class="col-span-2 min-w-0 sm:col-span-3 xl:w-80 xl:flex-none"
@@ -57,16 +57,16 @@ const groupOptions = computed(() => [
         <template #prefix>
           <Search class="size-4.5 text-cp-text-tertiary" />
         </template>
-      </BaseInput>
+      </ZInput>
 
-      <BaseSelect
+      <ZSelect
         v-model="status"
         :options="accountStatusFilterOptions"
         aria-label="按账号状态筛选"
         class="w-full min-w-0 xl:w-40 xl:shrink-0"
       />
 
-      <BaseSelect
+      <ZSelect
         v-model="group"
         :options="groupOptions"
         :disabled="groupsLoading"
@@ -83,28 +83,28 @@ const groupOptions = computed(() => [
     <div
       class="grid w-full grid-cols-2 gap-2 xl:flex xl:w-auto xl:flex-wrap xl:shrink-0 xl:self-end xl:items-center xl:justify-end xl:ml-auto"
     >
-      <BaseButton
+      <ZButton
         v-if="selectedCount > 0"
-        variant="secondary"
+        type="default" variant="solid"
         class="w-full whitespace-nowrap xl:w-auto"
         @click="emit('editSelected')"
       >
         <Pencil class="size-4 text-cp-link" />
         批量编辑账号
-      </BaseButton>
-      <BaseButton
+      </ZButton>
+      <ZButton
         v-if="selectedCount > 0"
-        variant="destructive"
+        type="danger" variant="plain"
         class="w-full whitespace-nowrap xl:w-auto"
         :disabled="batchDeleting"
         @click="emit('deleteSelected')"
       >
         <Trash2 class="size-4" />
         删除选中 ({{ selectedCount }})
-      </BaseButton>
-      <BaseButton
+      </ZButton>
+      <ZButton
         v-if="selectedCount > 0"
-        variant="secondary"
+        type="default" variant="solid"
         class="w-full whitespace-nowrap xl:w-auto"
         :loading="exportingAccounts"
         :disabled="Boolean(exportDisabledReason)"
@@ -116,25 +116,25 @@ const groupOptions = computed(() => [
           <Download class="size-4" />
         </template>
         导出选中 ({{ selectedCount }})
-      </BaseButton>
+      </ZButton>
       <div
         class="col-span-2 flex min-w-0 items-center justify-end gap-2"
         :class="selectedCount > 0 ? 'w-full xl:w-auto' : 'justify-self-end'"
       >
-        <BaseButton v-if="hasImportTasks" variant="secondary" class="whitespace-nowrap" @click="emit('importTasks')">
+        <ZButton v-if="hasImportTasks" class="whitespace-nowrap" @click="emit('importTasks')">
           <ListTodo class="size-4" />
           导入任务 <span v-if="activeImportCount" class="font-mono text-cp-link">{{ activeImportCount }}</span>
-        </BaseButton>
+        </ZButton>
         <slot name="actions" />
-        <BaseButton
-          variant="primary"
+        <ZButton
+          type="primary"
           class="whitespace-nowrap"
           :class="selectedCount > 0 ? 'flex-1 xl:flex-none' : undefined"
           @click="emit('create')"
         >
           <Upload class="size-4" />
           导入账号
-        </BaseButton>
+        </ZButton>
       </div>
     </div>
   </div>

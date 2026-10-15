@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
 
-import { BaseEmpty, BaseIconButton } from '@codex-proxy/ui'
+import { ZEmpty, ZIconButton } from '@codex-proxy/ui'
 
 import { ChartNoAxesCombined, RefreshCw, UserRound } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
@@ -59,37 +59,34 @@ watch(hasPersonalInfo, (available) => {
         </p>
       </div>
       <div v-if="hasActions" class="flex shrink-0 items-center gap-0.5 [&_svg]:size-3.5 [&_svg]:stroke-2">
-        <BaseIconButton
+        <ZIconButton
           v-if="hasPersonalInfo"
-          label="查看个人信息"
-          size="sm"
-          variant="ghost"
+          aria-label="查看个人信息"
+          size="small"
           :pressed="profileOpen"
           @click="profileOpen = true"
         >
           <UserRound class="size-3.5" />
-        </BaseIconButton>
+        </ZIconButton>
         <AccountResetCredits
           v-if="account.capabilities.resetCredits"
           :account="account"
           @consumed="emit('quotaReset', $event)"
         />
-        <BaseIconButton
+        <ZIconButton
           v-if="hasForecast"
-          label="预测周/月额度"
-          size="sm"
-          variant="ghost"
+          aria-label="预测周/月额度"
+          size="small"
           aria-haspopup="dialog"
           :pressed="forecastOpen"
           @click="forecastOpen = true"
         >
           <ChartNoAxesCombined class="size-3.5" />
-        </BaseIconButton>
-        <BaseIconButton
+        </ZIconButton>
+        <ZIconButton
           v-if="account.capabilities.quotaRefresh"
-          variant="ghost"
-          size="sm"
-          label="刷新额度"
+          size="small"
+          aria-label="刷新额度"
           :loading="refreshing"
           :disabled="refreshing"
           @click="emit('refreshQuota', account.id)"
@@ -98,12 +95,12 @@ watch(hasPersonalInfo, (available) => {
             <RefreshCw class="size-3.5 animate-spin motion-reduce:animate-none" />
           </template>
           <RefreshCw class="size-3.5" />
-        </BaseIconButton>
+        </ZIconButton>
       </div>
     </div>
 
     <div v-if="!account.capabilities.quota && quotaEntries.length === 0" class="grid flex-1 place-items-center">
-      <BaseEmpty title="暂不支持查询上游额度" surface="none" />
+      <ZEmpty title="暂不支持查询上游额度" surface="none" />
     </div>
     <div v-else class="grid min-h-0 gap-3">
       <AccountQuotaPanelEntry

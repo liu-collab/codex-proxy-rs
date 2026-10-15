@@ -1,22 +1,30 @@
-//! 按大小轮转、压缩已关闭分片、按部署时区自然日期组清理
+//! 按大小与时间轮转、压缩已关闭分片，按自然日期或实际时长清理
 
 use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime};
 
 use chrono::{NaiveDate, Utc};
 use flate2::{Compression, write::GzEncoder};
 
 use super::sink::LogHealth;
 
+#[derive(Clone, Copy)]
+pub(super) enum LogRetention {
+    CalendarDays(usize),
+    Elapsed(Duration),
+}
+
 pub(super) struct RotatingLogWriter {
     timezone: gateway_core::time::DeploymentTimeZone,
     directory: PathBuf,
     prefix: &'static str,
     maximum_bytes: u64,
-    retention_days: usize,
+    retention: LogRetention,
+    opened_at: Instant,
     date: NaiveDate,
     segment: usize,
     bytes_written: u64,
@@ -29,19 +37,23 @@ impl RotatingLogWriter {
         directory: PathBuf,
         prefix: &'static str,
         maximum_bytes: u64,
-        retention_days: usize,
+        retention: LogRetention,
         health: Arc<LogHealth>,
         timezone: gateway_core::time::DeploymentTimeZone,
     ) -> io::Result<Self> {
         fs::create_dir_all(&directory)?;
         let date = timezone.local(Utc::now()).date_naive();
-        cleanup_log_files(&directory, prefix, date, retention_days, timezone)?;
+        cleanup_log_files(&directory, prefix, retention, timezone, None)?;
         let latest = managed_log_files(&directory, prefix)?
             .into_iter()
             .filter(|entry| entry.date == date)
             .max_by_key(|entry| (entry.segment, entry.compressed));
         let (segment, bytes_written) = match latest {
-            Some(entry) if !entry.compressed && entry.path.metadata()?.len() < maximum_bytes => {
+            Some(entry)
+                if matches!(retention, LogRetention::CalendarDays(_))
+                    && !entry.compressed
+                    && entry.path.metadata()?.len() < maximum_bytes =>
+            {
                 (entry.segment, entry.path.metadata()?.len())
             }
             Some(entry) => (next_segment(entry.segment)?, 0),
@@ -54,7 +66,8 @@ impl RotatingLogWriter {
             directory,
             prefix,
             maximum_bytes,
-            retention_days,
+            retention,
+            opened_at: Instant::now(),
             date,
             segment,
             bytes_written,
@@ -78,7 +91,14 @@ impl RotatingLogWriter {
         let day_changed = date != self.date;
         let size_exceeded = self.bytes_written > 0
             && self.bytes_written.saturating_add(incoming_bytes as u64) > self.maximum_bytes;
-        if !day_changed && !size_exceeded {
+        // 小流量转储也需及时关闭分片，避免小数保留期仍要等自然日切换才能生效
+        let age_exceeded = match self.retention {
+            LogRetention::CalendarDays(_) => false,
+            LogRetention::Elapsed(duration) => {
+                self.opened_at.elapsed() >= duration.min(Duration::from_secs(3600))
+            }
+        };
+        if !day_changed && !size_exceeded && !age_exceeded {
             return Ok(());
         }
         let previous = self
@@ -104,6 +124,7 @@ impl RotatingLogWriter {
         self.date = date;
         self.segment = segment;
         self.bytes_written = self.file.get_ref().metadata()?.len();
+        self.opened_at = Instant::now();
         if let Err(error) = compress_log_file(&previous) {
             self.health.maintenance_failed(error.kind());
         }
@@ -111,9 +132,9 @@ impl RotatingLogWriter {
         if let Err(error) = cleanup_log_files(
             &self.directory,
             self.prefix,
-            date,
-            self.retention_days,
+            self.retention,
             self.timezone,
+            Some(&path),
         ) {
             self.health.maintenance_failed(error.kind());
         }
@@ -203,17 +224,38 @@ fn managed_log_files(directory: &Path, prefix: &str) -> io::Result<Vec<ManagedLo
 fn cleanup_log_files(
     directory: &Path,
     prefix: &str,
-    today: NaiveDate,
-    retention_days: usize,
+    retention: LogRetention,
     timezone: gateway_core::time::DeploymentTimeZone,
+    active_path: Option<&Path>,
 ) -> io::Result<()> {
+    let files = managed_log_files(directory, prefix)?;
+    let retention_days = match retention {
+        LogRetention::CalendarDays(days) => days,
+        LogRetention::Elapsed(duration) => {
+            let now = SystemTime::now();
+            for entry in files {
+                if active_path == Some(entry.path.as_path()) {
+                    continue;
+                }
+                let modified = entry.path.metadata()?.modified()?;
+                if now
+                    .duration_since(modified)
+                    .is_ok_and(|age| age >= duration)
+                {
+                    fs::remove_file(entry.path)?;
+                }
+            }
+            return Ok(());
+        }
+    };
+    let today = timezone.local(Utc::now()).date_naive();
     let days =
         u64::try_from(retention_days).map_err(|_| io::Error::other("log retention overflow"))?;
     let cutoff = today
         .checked_sub_days(chrono::Days::new(days))
         .unwrap_or(NaiveDate::MIN);
     let mut dates = BTreeMap::<NaiveDate, Vec<PathBuf>>::new();
-    for entry in managed_log_files(directory, prefix)? {
+    for entry in files {
         dates.entry(entry.date).or_default().push(entry.path);
     }
     for (date, paths) in dates {

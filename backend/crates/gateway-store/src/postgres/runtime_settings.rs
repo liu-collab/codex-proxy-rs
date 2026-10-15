@@ -150,8 +150,8 @@ impl RuntimeSettingsRepository for PgRuntimeSettingsRepository {
 
 pub(crate) async fn load_runtime_settings_from_pool(pool: &PgPool) -> StoreResult<RuntimeSettings> {
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
-            "select provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled,
-                    refresh_concurrency, max_concurrent_per_account, request_interval_ms,
+            "select provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, codex_privacy_policy_json,
+                    refresh_concurrency, max_concurrent_per_account,
                     rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                     audit_retention_days, min_codex_desktop_version,
                     min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, openai_session_affinity_ttl_hours,
@@ -328,8 +328,8 @@ pub(crate) async fn load_runtime_settings_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
 ) -> StoreResult<RuntimeSettings> {
     let row = sqlx::query_as::<_, RuntimeSettingsRow>(
-        "select provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled,
-                refresh_concurrency, max_concurrent_per_account, request_interval_ms,
+        "select provider_request_profiles_json, config_revision, admin_api_key, refresh_margin_seconds, request_location_json, request_location_enabled, codex_privacy_policy_json,
+                refresh_concurrency, max_concurrent_per_account,
                 rotation_strategy, smart_scheduling_json, model_mappings_json, usage_retention_days, ops_event_retention_days,
                 audit_retention_days, min_codex_desktop_version,
                 min_codex_cli_version, updated_at, responses_max_decompressed_body_bytes, max_waiting_per_key, max_waiting_per_account, concurrency_wait_timeout_seconds, openai_guardian_reserved_concurrency, openai_account_affinity, max_account_rotations, openai_session_affinity_ttl_hours,
@@ -382,36 +382,36 @@ pub(crate) async fn update_runtime_settings_in_transaction(
 	                 refresh_margin_seconds = $1,
 	                 refresh_concurrency = $2,
 	                 max_concurrent_per_account = $3,
-	                 request_interval_ms = $4,
-	                 rotation_strategy = $5,
-	                 model_mappings_json = $6,
-	                 usage_retention_days = $7,
-	                 ops_event_retention_days = $8,
-	                 audit_retention_days = $9,
-	                 min_codex_desktop_version = $10,
-	                 min_codex_cli_version = $11,
-                     max_waiting_per_key = $12,
-                     max_waiting_per_account = $13,
-                     concurrency_wait_timeout_seconds = $14,
-                     account_auto_freeze_enabled = $15,
-                     account_auto_freeze_threshold = $16,
-                     account_auto_freeze_window_seconds = $17,
-                     account_auto_freeze_duration_seconds = $18,
-                     account_auto_freeze_probe_enabled = $19,
-                     account_auto_freeze_probe_model = $20,
-                     account_auto_freeze_adaptive_concurrency = $21,
-                     request_location_json = $22,
-                     request_location_enabled = $23,
-                     responses_max_decompressed_body_bytes = $24,
-	                 provider_request_profiles_json = (provider_request_profiles_json - $25::text[]) || $26::jsonb,
-                     account_warmup_enabled = $27,
-                     account_warmup_schedule_time = $28,
-                     account_warmup_model = $29,
-                     smart_scheduling_json = $30,
-                     openai_guardian_reserved_concurrency = $31,
-                     openai_account_affinity = $32,
-                     max_account_rotations = $33,
-                     openai_session_affinity_ttl_hours = $34,
+	                 rotation_strategy = $4,
+	                 model_mappings_json = $5,
+	                 usage_retention_days = $6,
+	                 ops_event_retention_days = $7,
+	                 audit_retention_days = $8,
+	                 min_codex_desktop_version = $9,
+	                 min_codex_cli_version = $10,
+                     max_waiting_per_key = $11,
+                     max_waiting_per_account = $12,
+                     concurrency_wait_timeout_seconds = $13,
+                     account_auto_freeze_enabled = $14,
+                     account_auto_freeze_threshold = $15,
+                     account_auto_freeze_window_seconds = $16,
+                     account_auto_freeze_duration_seconds = $17,
+                     account_auto_freeze_probe_enabled = $18,
+                     account_auto_freeze_probe_model = $19,
+                     account_auto_freeze_adaptive_concurrency = $20,
+                     request_location_json = $21,
+                     request_location_enabled = $22,
+                     responses_max_decompressed_body_bytes = $23,
+	                 provider_request_profiles_json = (provider_request_profiles_json - $24::text[]) || $25::jsonb,
+                     account_warmup_enabled = $26,
+                     account_warmup_schedule_time = $27,
+                     account_warmup_model = $28,
+                     smart_scheduling_json = $29,
+                     openai_guardian_reserved_concurrency = $30,
+                     openai_account_affinity = $31,
+                     max_account_rotations = $32,
+                     openai_session_affinity_ttl_hours = $33,
+                     codex_privacy_policy_json = $34,
 	                 updated_at = now()
 	             where id = 1
 	             returning config_revision",
@@ -419,7 +419,6 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     .bind(refresh_margin_seconds)
     .bind(i64::from(update.values.refresh_concurrency))
     .bind(i64::from(update.values.max_concurrent_per_account))
-    .bind(i64::try_from(update.values.request_interval_ms).map_err(|_| invalid_numeric())?)
     .bind(&update.rotation_strategy)
     .bind(sqlx::types::Json(&update.model_mappings))
     .bind(i64::from(update.values.usage_retention_days))
@@ -461,6 +460,7 @@ pub(crate) async fn update_runtime_settings_in_transaction(
     .bind(update.values.openai_account_affinity.as_str())
     .bind(i64::from(update.values.max_account_rotations))
     .bind(i64::from(update.values.openai_session_affinity_ttl_hours))
+    .bind(sqlx::types::Json(&update.values.codex_privacy_policy))
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|source| postgres_unavailable("update runtime settings in transaction", source))?
@@ -520,9 +520,10 @@ struct RuntimeSettingsRow {
     refresh_margin_seconds: i64,
     refresh_concurrency: i64,
     max_concurrent_per_account: i64,
-    request_interval_ms: i64,
     smart_scheduling_json: sqlx::types::Json<gateway_core::account::SmartSchedulingConfig>,
     rotation_strategy: String,
+    codex_privacy_policy_json:
+        sqlx::types::Json<gateway_core::settings::privacy::CodexPrivacyPolicy>,
     request_location_enabled: bool,
     request_location_json: sqlx::types::Json<gateway_core::account::RequestLocation>,
     model_mappings_json: sqlx::types::Json<BTreeMap<String, String>>,
@@ -577,8 +578,8 @@ fn runtime_settings_from_row(row: RuntimeSettingsRow) -> StoreResult<RuntimeSett
             refresh_margin_seconds: to_u64(row.refresh_margin_seconds)?,
             refresh_concurrency: to_u32(row.refresh_concurrency)?,
             max_concurrent_per_account: to_u32(row.max_concurrent_per_account)?,
-            request_interval_ms: to_u64(row.request_interval_ms)?,
             smart_scheduling: row.smart_scheduling_json.0,
+            codex_privacy_policy: row.codex_privacy_policy_json.0,
             request_location_enabled: row.request_location_enabled,
             request_location: row
                 .request_location_json

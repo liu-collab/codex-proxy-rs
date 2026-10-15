@@ -69,9 +69,11 @@ impl ModelPriceOverride {
                 band.as_str(),
                 "standard"
                     | "fast"
+                    | "ultrafast"
                     | "flex"
                     | "long_standard"
                     | "long_fast"
+                    | "long_ultrafast"
                     | "long_flex"
                     | "image"
             )

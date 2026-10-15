@@ -67,8 +67,8 @@ pub(crate) struct ProviderAccountStatus {
     pub facts: AccountStatusFacts,
 }
 
-pub(crate) async fn load_account_statuses(
-    pool: &sqlx::PgPool,
+pub(crate) async fn load_account_statuses<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+    executor: E,
 ) -> crate::StoreResult<Vec<ProviderAccountStatus>> {
     use super::rows::{account_status_facts_from_row, get};
     let rows = sqlx::query(
@@ -77,7 +77,7 @@ pub(crate) async fn load_account_statuses(
                 last_error_reason, last_error_message
          from provider_accounts",
     )
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .map_err(|source| crate::postgres_unavailable("load account status facts", source))?;
     rows.iter()

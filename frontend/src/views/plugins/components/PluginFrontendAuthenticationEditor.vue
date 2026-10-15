@@ -7,7 +7,7 @@ import type {
   PluginFrontendIdentityBinding,
 } from '@/api'
 
-import { BaseButton, BaseFormItem, BaseIconButton, BaseInput, BaseSegmented, BaseSelect, BaseSwitch, toast } from '@codex-proxy/ui'
+import { ZButton, ZFormItem, ZIconButton, ZInput, ZNotification, ZSegmented, ZSelect, ZSwitch } from '@codex-proxy/ui'
 
 import { Plus, RefreshCw, Trash2 } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
@@ -182,7 +182,7 @@ async function loadClientKeys() {
   catch (error: unknown) {
     if (!controller.signal.aborted) {
       keysFailed.value = true
-      toast.error(errorMessage(error, '加载客户端 Key 失败'))
+      ZNotification.error({ message: errorMessage(error, '加载客户端 Key 失败') })
     }
   }
   finally {
@@ -210,10 +210,9 @@ defineExpose({ validationError })
 <template>
   <div class="grid gap-4">
     <div class="flex items-center gap-2 rounded-cp-lg bg-cp-fill-alter p-4">
-      <BaseSwitch
+      <ZSwitch
         :model-value="Boolean(binding)"
         label="启用客户端认证"
-        show-label
         :disabled="disabled"
         @update:model-value="enableAuthentication"
       />
@@ -231,7 +230,7 @@ defineExpose({ validationError })
     </div>
 
     <template v-if="binding">
-      <BaseFormItem label="未匹配处理">
+      <ZFormItem label="未匹配处理">
         <template #label-extra>
           <PluginHelpPopover label="未匹配处理说明">
             <p class="m-0">
@@ -245,14 +244,14 @@ defineExpose({ validationError })
             </p>
           </PluginHelpPopover>
         </template>
-        <BaseSegmented
+        <ZSegmented
           :model-value="binding.failurePolicy"
           :options="fallbackOptions"
-          label="客户端认证未匹配处理"
+          aria-label="客户端认证未匹配处理"
           :disabled="disabled"
           @update:model-value="setFailurePolicy"
         />
-      </BaseFormItem>
+      </ZFormItem>
 
       <div class="grid gap-2">
         <div class="flex min-w-0 items-end justify-between gap-3">
@@ -270,12 +269,11 @@ defineExpose({ validationError })
             </PluginHelpPopover>
           </div>
           <div class="flex shrink-0 items-center gap-1">
-            <BaseIconButton v-if="keysFailed" size="sm" label="重新加载客户端 Key" :disabled="disabled" :loading="loadingKeys" @click="loadClientKeys()">
+            <ZIconButton v-if="keysFailed" size="small" aria-label="重新加载客户端 Key" :disabled="disabled" :loading="loadingKeys" @click="loadClientKeys()">
               <RefreshCw class="size-3.5" />
-            </BaseIconButton>
-            <BaseButton
-              size="sm"
-              variant="secondary"
+            </ZIconButton>
+            <ZButton
+              size="small"
               :disabled="disabled || binding.identityBindings.length >= 256"
               @click="addIdentity"
             >
@@ -283,7 +281,7 @@ defineExpose({ validationError })
                 <Plus class="size-3.5" />
               </template>
               添加映射
-            </BaseButton>
+            </ZButton>
           </div>
         </div>
 
@@ -292,17 +290,17 @@ defineExpose({ validationError })
           :key="index"
           class="grid min-w-0 gap-3 rounded-cp-lg bg-cp-fill-alter p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
         >
-          <BaseFormItem label="身份标识" required>
-            <BaseInput
+          <ZFormItem label="身份标识" required>
+            <ZInput
               :model-value="identity.principal"
               maxlength="256"
               placeholder="填写插件返回的身份标识"
               :disabled="disabled"
               @update:model-value="updateIdentity(index, { principal: $event })"
             />
-          </BaseFormItem>
-          <BaseFormItem label="客户端 Key" required>
-            <BaseSelect
+          </ZFormItem>
+          <ZFormItem label="客户端 Key" required>
+            <ZSelect
               :model-value="identity.clientKeyId"
               :options="keyOptions"
               :disabled="disabled || loadingKeys"
@@ -311,17 +309,16 @@ defineExpose({ validationError })
               class="w-full min-w-0"
               @update:model-value="updateIdentity(index, { clientKeyId: $event })"
             />
-          </BaseFormItem>
-          <BaseIconButton
-            size="md"
-            variant="ghost"
+          </ZFormItem>
+          <ZIconButton
+            size="default"
             :disabled="disabled"
-            :label="`移除第 ${index + 1} 条身份映射`"
+            :aria-label="`移除第 ${index + 1} 条身份映射`"
             class="justify-self-end"
             @click="removeIdentity(index)"
           >
             <Trash2 class="size-3.5" />
-          </BaseIconButton>
+          </ZIconButton>
         </div>
       </div>
     </template>

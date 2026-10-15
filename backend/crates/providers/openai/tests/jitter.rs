@@ -1,8 +1,32 @@
-//! usage 观测抖动映射的确定性边界。
+//! usage 观测与服务错误重试抖动映射的确定性边界
 
 use std::time::Duration;
 
-use provider_openai::{catalog_refresh_jitter, quota_failure_refresh_delay, uniform_delay};
+use provider_openai::{
+    catalog_refresh_jitter, quota_failure_refresh_delay, server_error_retry_jitter, uniform_delay,
+};
+
+#[test]
+fn server_error_retry_jitter_only_adds_a_small_bounded_delay() {
+    assert_eq!(server_error_retry_jitter(None), Duration::from_millis(150));
+    assert_eq!(
+        server_error_retry_jitter(Some(0)),
+        Duration::from_millis(50)
+    );
+    assert_eq!(
+        server_error_retry_jitter(Some(199_999_999)),
+        Duration::from_nanos(249_999_999)
+    );
+    assert_eq!(
+        server_error_retry_jitter(Some(200_000_000)),
+        Duration::from_millis(50)
+    );
+    for sample in [1, 1_000, u64::MAX / 3, u64::MAX / 2, u64::MAX - 1, u64::MAX] {
+        let jitter = server_error_retry_jitter(Some(sample));
+        assert!(jitter >= Duration::from_millis(50));
+        assert!(jitter < Duration::from_millis(250));
+    }
+}
 
 #[test]
 fn uniform_delay_maps_samples_into_half_open_range() {

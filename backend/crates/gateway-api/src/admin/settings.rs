@@ -36,12 +36,12 @@ pub type ProviderRequestProfileUpdates =
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSettingsFields {
+    pub codex_privacy_policy: gateway_core::settings::privacy::CodexPrivacyPolicy,
     pub request_location_enabled: bool,
     pub request_location: gateway_core::account::RequestLocation,
     pub refresh_margin_seconds: u64,
     pub refresh_concurrency: u64,
     pub max_concurrent_per_account: u64,
-    pub request_interval_ms: u64,
     pub max_waiting_per_key: u32,
     pub max_waiting_per_account: u32,
     pub concurrency_wait_timeout_seconds: u32,
@@ -282,6 +282,10 @@ where
         .route(
             "/api/admin/settings/client-profiles/{provider}/preview",
             post(preview_client_profile::<S>),
+        )
+        .route(
+            "/api/admin/settings/privacy/preview",
+            post(preview_privacy::<S>),
         )
         .route("/api/admin/settings/update", post(update_settings::<S>))
         .route(
@@ -719,6 +723,7 @@ impl RuntimeSettingsFields {
         self,
     ) -> Result<gateway_admin::model::settings::RuntimeSettingsValues, WireValidationError> {
         let values = gateway_admin::model::settings::RuntimeSettingsValues {
+            codex_privacy_policy: self.codex_privacy_policy,
             request_location_enabled: self.request_location_enabled,
             request_location: self
                 .request_location
@@ -729,7 +734,6 @@ impl RuntimeSettingsFields {
                 .map_err(|_| WireValidationError::new("settingsRefreshConcurrencyOverflow"))?,
             max_concurrent_per_account: u32::try_from(self.max_concurrent_per_account)
                 .map_err(|_| WireValidationError::new("settingsMaxConcurrencyOverflow"))?,
-            request_interval_ms: self.request_interval_ms,
             max_waiting_per_key: self.max_waiting_per_key,
             max_waiting_per_account: self.max_waiting_per_account,
             concurrency_wait_timeout_seconds: self.concurrency_wait_timeout_seconds,
@@ -767,12 +771,12 @@ impl RuntimeSettingsFields {
 impl From<gateway_admin::model::settings::RuntimeSettingsValues> for RuntimeSettingsFields {
     fn from(settings: gateway_admin::model::settings::RuntimeSettingsValues) -> Self {
         crate::admin::settings::RuntimeSettingsFields {
+            codex_privacy_policy: settings.codex_privacy_policy,
             request_location_enabled: settings.request_location_enabled,
             request_location: settings.request_location,
             refresh_margin_seconds: settings.refresh_margin_seconds,
             refresh_concurrency: u64::from(settings.refresh_concurrency),
             max_concurrent_per_account: u64::from(settings.max_concurrent_per_account),
-            request_interval_ms: settings.request_interval_ms,
             max_waiting_per_key: settings.max_waiting_per_key,
             max_waiting_per_account: settings.max_waiting_per_account,
             concurrency_wait_timeout_seconds: settings.concurrency_wait_timeout_seconds,
@@ -828,7 +832,6 @@ fn settings_validation_error(field: &'static str) -> WireValidationError {
         "ops_event_retention_days" => "opsEventRetentionDays",
         "refresh_concurrency" => "refreshConcurrency",
         "refresh_margin_seconds" => "refreshMarginSeconds",
-        "request_interval_ms" => "requestIntervalMs",
         "request_location" => "requestLocation",
         "request_location_enabled" => "requestLocationEnabled",
         "responses_max_decompressed_body_bytes" => "responsesMaxDecompressedBodyBytes",
@@ -836,4 +839,24 @@ fn settings_validation_error(field: &'static str) -> WireValidationError {
         "usage_retention_days" => "usageRetentionDays",
         _ => "settings",
     })
+}
+
+async fn preview_privacy<S>(
+    State(state): State<S>,
+    _auth: AdminAuth,
+    AdminJson(request): AdminJson<gateway_core::settings::privacy::PrivacyPreviewRequest>,
+) -> Result<impl IntoResponse, AdminError>
+where
+    S: SessionState + Send + Sync,
+{
+    let result = state
+        .admin_services()
+        .settings()
+        .preview_privacy_policy(request)
+        .await
+        .map_err(map_service_error)?;
+    Ok(AdminResponse::new(
+        StatusCode::OK,
+        AdminEnvelope::ok(result),
+    ))
 }

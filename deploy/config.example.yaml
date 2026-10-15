@@ -24,6 +24,7 @@ host:
     oauth_recovery: false
     # 将完整请求与响应头、正文写入独立文件；包含凭据，仅排障时开启。
     request_dump: false
+    # 按实际时长保留，支持正小数天数，例如 0.5 为 12 小时
     request_dump_retention_days: 1
     file:
       enabled: true
@@ -53,6 +54,7 @@ store:
   # pool:
   #   max_connections: 20
   #   acquire_timeout_seconds: 5
+  #   observability_timeout_seconds: 120 # 观测操作保护时限，不是性能目标
 
 admin:
   # 不活动期限与从登录起计算的最长有效期，单位为分钟

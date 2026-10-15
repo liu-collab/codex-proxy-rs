@@ -7,11 +7,13 @@ use std::time::{Duration, SystemTime};
 
 use gateway_core::error::ErrorSource;
 
+use gateway_core::account::scope::FrozenAccountScope;
 use gateway_core::account::{
     AccountAffinity, AccountCandidate, AccountCapacitySnapshot, AccountEligibilityPolicy,
-    AccountErrorReason, AccountFeedbackStats, AccountRuntimeSignals, AccountSchedulingBlocker,
-    AccountSelectionContext, AccountSelectionPolicy, AccountSelector, AccountStatus,
-    CredentialState, PreferredAccountSelection, ProviderAccount, ProviderAccountId, QuotaEvidence,
+    AccountErrorReason, AccountFeedbackStats, AccountModelAccessMode, AccountRuntimeSignals,
+    AccountSchedulingBlocker, AccountSelectionContext, AccountSelectionPolicy, AccountSelector,
+    AccountStatus, CredentialState, PreferredAccountSelection, ProviderAccount, ProviderAccountId,
+    QuotaEvidence,
 };
 use gateway_core::concurrency::{CapacityWait, ConcurrencyWaitQueue, QueueRejection, WaitPriority};
 use gateway_core::engine::{AttemptContext, ContinuationAttempt, policy::AccountPolicyError};
@@ -101,10 +103,64 @@ pub(crate) struct SelectCodexProviderEndpointCredential<'a> {
     pub request_url: &'a Url,
     pub attempt: &'a AttemptContext,
     pub session_affinity: Option<&'a CodexSessionAffinity>,
-    /// 本端点的上游模型；提供后按账号模型权限过滤候选（如 live 语音）。
-    pub upstream_model: Option<&'a str>,
+    pub model: CodexSelectionModel<'a>,
     /// 本端点只接受 OAuth 凭据时排除 API Key 账号，避免混合池选中后必然失败。
     pub requires_oauth: bool,
+}
+
+/// 选号使用的模型类别，区分图片资格与不涉及模型的端点
+#[derive(Clone, Copy)]
+pub(crate) enum CodexSelectionModel<'a> {
+    NotApplicable,
+    Requested(&'a str),
+    Image(Option<&'a str>),
+}
+
+impl<'a> CodexSelectionModel<'a> {
+    pub(crate) const fn model(self) -> Option<&'a str> {
+        match self {
+            Self::NotApplicable => None,
+            Self::Requested(model) => Some(model),
+            Self::Image(model) => model,
+        }
+    }
+
+    pub(crate) fn allows_account(self, account: &ProviderAccount) -> bool {
+        if account.authentication_kind() != CODEX_AUTHENTICATION_KIND_OAUTH {
+            return true;
+        }
+        // API Key 兼容上游可以提供 Grok；ChatGPT OAuth 不能因共用 Provider 被选中
+        // 使用路由映射后的模型，不限制未知别名或尚未被目录收录的 OpenAI 模型
+        if self.model().is_some_and(|model| {
+            let model = model.rsplit('/').next().unwrap_or(model);
+            model.eq_ignore_ascii_case("grok")
+                || model
+                    .get(..5)
+                    .is_some_and(|prefix| prefix.eq_ignore_ascii_case("grok-"))
+        }) {
+            return false;
+        }
+        // 官方 Codex 的 image_generation_available 排除 Free，API Key 不套用 ChatGPT 套餐
+        // https://github.com/openai/codex/commit/0a0a9b6c8f
+        !(matches!(self, Self::Image(_))
+            && account
+                .plan_type()
+                .is_some_and(|plan| plan.trim().eq_ignore_ascii_case("free")))
+    }
+
+    pub(crate) fn allows(self, scope: &FrozenAccountScope, account: &ProviderAccountId) -> bool {
+        match self {
+            Self::NotApplicable => scope.allows(account),
+            Self::Requested(model) | Self::Image(Some(model)) => scope.allows_model(account, model),
+            // 缺失、重复或不可解析的图片模型不能绕过黑白名单；不猜上游默认值
+            Self::Image(None) => {
+                scope.allows(account)
+                    && scope.directory().account(account).is_some_and(|account| {
+                        account.model_access().mode() == AccountModelAccessMode::All
+                    })
+            }
+        }
+    }
 }
 
 struct CredentialSelectionInput<'a> {
@@ -216,9 +272,6 @@ impl AffinitySelection {
             PreferredAccountSelection::Blocked(AccountSchedulingBlocker::ConcurrencyLimit) => {
                 self.escape(AffinityEscapeReason::LeaseSaturated);
             }
-            PreferredAccountSelection::Blocked(AccountSchedulingBlocker::RequestInterval) => {
-                self.escape(AffinityEscapeReason::Cooldown);
-            }
             PreferredAccountSelection::Blocked(AccountSchedulingBlocker::LowerWeight) => {
                 self.escape(AffinityEscapeReason::HigherPriority);
             }
@@ -240,18 +293,6 @@ impl AffinitySelection {
         if self.bound_account.as_ref() == Some(account_id) {
             self.escape(AffinityEscapeReason::LeaseSaturated);
         }
-    }
-
-    /// preferred 模式下本次分流后会话主账号是否保留
-    ///
-    /// 并发占满、请求间隔与短冷却是秒级状态，保留主账号让会话回流；额度耗尽、凭据
-    /// 失效、停用或离开范围通常持续数小时到数天，继续保留会让会话每个请求都临时分流
-    /// 到不同账号，同一会话被摊到大量账号上，因此迁到本次选中的账号
-    fn keeps_primary_after_spillover(&self) -> bool {
-        !matches!(
-            self.escape_reason,
-            Some(AffinityEscapeReason::QuotaExhausted | AffinityEscapeReason::HardUnavailable)
-        )
     }
 
     fn telemetry(&self, selected_account: &ProviderAccountId) -> AffinityTelemetry {
@@ -316,8 +357,12 @@ impl CodexCredentialSelector {
             session_affinity_observation: None,
             guardian: false,
         };
-        self.select_inner(&input, None, Some(request.upstream_model))
-            .await
+        self.select_inner(
+            &input,
+            None,
+            CodexSelectionModel::Requested(request.upstream_model),
+        )
+        .await
     }
 
     pub(crate) async fn select_with_cyber_policy(
@@ -340,7 +385,7 @@ impl CodexCredentialSelector {
         self.select_inner(
             &input,
             cyber_policy_session_key,
-            Some(request.upstream_model),
+            CodexSelectionModel::Requested(request.upstream_model),
         )
         .await
     }
@@ -397,9 +442,8 @@ impl CodexCredentialSelector {
     /// 为不属于 Responses 文本模型目录的 Provider 原生端点选择账号
     ///
     /// 账号范围、健康度、配额、并发租约、cookie 与认证准备仍走同一套选择链路；
-    /// 原生端点默认没有 Responses 模型，不套用管理员配置的文本模型权限。
-    /// 端点有明确上游模型（如 live 语音）时通过 `upstream_model` 让账号
-    /// 模型权限参与候选过滤；`requires_oauth` 限定本端点支持的认证类型。
+    /// Images 与 live 语音按实际请求模型执行账号权限，不依赖文本模型目录
+    /// `requires_oauth` 限定本端点支持的认证类型
     pub(crate) async fn select_for_provider_endpoint(
         &self,
         request: &SelectCodexProviderEndpointCredential<'_>,
@@ -413,15 +457,14 @@ impl CodexCredentialSelector {
             session_affinity_observation: request.session_affinity,
             guardian: false,
         };
-        self.select_inner(&input, None, request.upstream_model)
-            .await
+        self.select_inner(&input, None, request.model).await
     }
 
     async fn select_inner(
         &self,
         request: &CredentialSelectionInput<'_>,
         cyber_policy_session_key: Option<&ProviderSessionAffinityKey>,
-        upstream_model: Option<&str>,
+        model: CodexSelectionModel<'_>,
     ) -> Result<CodexCredentialLease, CredentialSelectionError> {
         let follow_only = !request.attempt.is_diagnostic_required_account()
             && request
@@ -435,7 +478,7 @@ impl CodexCredentialSelector {
         let result = tokio::select! {
             biased;
             () = request.attempt.cancellation().cancelled() => Err(CredentialSelectionError::Cancelled),
-            result = self.select_inner_loop(request, cyber_policy_session_key, upstream_model, follow_only) => result,
+            result = self.select_inner_loop(request, cyber_policy_session_key, model, follow_only) => result,
         };
         result.map_err(|error| {
             if follow_only
@@ -458,7 +501,7 @@ impl CodexCredentialSelector {
         &self,
         request: &CredentialSelectionInput<'_>,
         cyber_policy_session_key: Option<&ProviderSessionAffinityKey>,
-        upstream_model: Option<&str>,
+        model: CodexSelectionModel<'_>,
         follow_only: bool,
     ) -> Result<CodexCredentialLease, CredentialSelectionError> {
         let diagnostic = request.attempt.is_diagnostic_required_account();
@@ -573,17 +616,17 @@ impl CodexCredentialSelector {
                                 .is_some_and(|scope| scope.allows(account.id())))
                         && (!request.requires_oauth
                             || account.authentication_kind() == CODEX_AUTHENTICATION_KIND_OAUTH)
-                        && (diagnostic
-                            || upstream_model.is_none_or(|upstream_model| {
-                                let allowed =
-                                    request.attempt.account_scope().is_some_and(|scope| {
-                                        scope.allows_model(account.id(), upstream_model)
-                                    });
-                                if !allowed {
-                                    model_access_rejected += 1;
-                                }
-                                allowed
-                            }))
+                        && model.allows_account(account)
+                        && (diagnostic || {
+                            let allowed = request
+                                .attempt
+                                .account_scope()
+                                .is_some_and(|scope| model.allows(scope, account.id()));
+                            if !allowed {
+                                model_access_rejected += 1;
+                            }
+                            allowed
+                        })
                 })
                 .collect::<Vec<_>>();
             let mut eligible = Vec::with_capacity(accounts.len());
@@ -591,8 +634,8 @@ impl CodexCredentialSelector {
                 if request.requires_websocket
                     && pinned_account.as_ref().is_none_or(|id| id == account.id())
                 {
-                    let runtime = match self.repository.load_runtime_credential(&account).await {
-                        Ok(runtime) => runtime,
+                    let runtime = match self.repository.reload_selected_credential(&account).await {
+                        Ok((_, runtime)) => runtime,
                         Err(CredentialRepositoryError::RevisionConflict(_)) => {
                             retry_account_snapshot(
                                 request.attempt,
@@ -754,7 +797,7 @@ impl CodexCredentialSelector {
                 }
                 let selection = match request
                     .attempt
-                    .select_account(&self.provider_kind, upstream_model, &candidates, &context)
+                    .select_account(&self.provider_kind, model.model(), &candidates, &context)
                     .await
                 {
                     Ok(selection) => selection,
@@ -804,7 +847,6 @@ impl CodexCredentialSelector {
                             selection.preferred(),
                             PreferredAccountSelection::Blocked(
                                 AccountSchedulingBlocker::ConcurrencyLimit
-                                    | AccountSchedulingBlocker::RequestInterval
                                     | AccountSchedulingBlocker::Excluded
                             )
                         )
@@ -874,10 +916,15 @@ impl CodexCredentialSelector {
                     .find(|candidate| candidate.account.id() == selected.account.id())
                     .map(|candidate| candidate.account.clone())
                     .ok_or(CredentialSelectionError::InvalidCredential(None))?;
-                // 额度观测等并发更新会使整个账号快照失效，必须重新选号并校验资格
-                // 在占用租约和请求间隔前完成校验，避免重读被自己的异步释放挡住
-                let runtime = match self.repository.load_runtime_credential(&account).await {
-                    Ok(runtime) => runtime,
+                // 凭据、状态或额度结论的并发更新会使账号快照失效，必须重新选号并校验资格；
+                // 仅额度观测时刻前进时沿用最新快照
+                // 在占用租约前完成校验，避免重读被自己的异步释放挡住
+                let (account, runtime) = match self
+                    .repository
+                    .reload_selected_credential(&account)
+                    .await
+                {
+                    Ok(reloaded) => reloaded,
                     Err(CredentialRepositoryError::RevisionConflict(_)) => {
                         retry_account_snapshot(request.attempt, &account, &mut snapshot_retries)?;
                         continue 'capacity;
@@ -898,7 +945,6 @@ impl CodexCredentialSelector {
                             account.id().clone(),
                             account.revision(),
                             context.concurrency_limit(&account),
-                            policy.request_interval(),
                             request.attempt.deadline(),
                         )
                         .with_concurrency_pool(concurrency_pool)
@@ -919,14 +965,10 @@ impl CodexCredentialSelector {
                                 .admit_session(
                                     key,
                                     binding.as_ref(),
-                                    // 暂时性分流只改变本次租约，CAS 续期仍保留会话主账号；
-                                    // 主账号持续不可用时迁移，避免会话被逐请求摊到多个账号
+                                    // 分流只改变本次租约，CAS 续期仍保留会话主账号
                                     binding
                                         .as_ref()
-                                        .filter(|_| {
-                                            affinity_mode == AccountAffinity::Preferred
-                                                && affinity.keeps_primary_after_spillover()
-                                        })
+                                        .filter(|_| affinity_mode == AccountAffinity::Preferred)
                                         .map_or(account.id(), ProviderSessionBinding::account_id),
                                     request
                                         .attempt
@@ -1716,6 +1758,8 @@ pub enum CredentialSelectionError {
     InvalidCredential(#[source] Option<ErrorSource>),
     #[error("Codex account changed repeatedly during selection")]
     AccountSnapshotChanged,
+    #[error("Codex credential revision conflict")]
+    RevisionConflict(#[source] ErrorSource),
     #[error("Codex account store is unavailable")]
     Store(#[source] ErrorSource),
     #[error("Codex account lease runtime is unavailable")]
@@ -1734,8 +1778,10 @@ impl From<CredentialRepositoryError> for CredentialSelectionError {
             CredentialRepositoryError::InvalidCredentialData(_) => {
                 Self::InvalidCredential(Some(ErrorSource::new(error)))
             }
-            CredentialRepositoryError::RevisionConflict(_)
-            | CredentialRepositoryError::Store(_) => Self::Store(ErrorSource::new(error)),
+            CredentialRepositoryError::RevisionConflict(_) => {
+                Self::RevisionConflict(ErrorSource::new(error))
+            }
+            CredentialRepositoryError::Store(_) => Self::Store(ErrorSource::new(error)),
         }
     }
 }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { JsonSchema } from '../utils/model'
 import type { ConfigurePluginInstanceRequest, PluginArtifactMetadata, PluginInstance } from '@/api'
-import { BaseButton, BaseModal, BaseTag } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZTag } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import PluginConfigurationSummary from './PluginConfigurationSummary.vue'
 import PluginHelpPopover from './PluginHelpPopover.vue'
@@ -27,17 +27,17 @@ const parameters = computed(() => {
 </script>
 
 <template>
-  <BaseModal v-model="open" :title="replacements.length ? '切换启用配置' : '启用插件配置'" size="md" :dismissible="!saving">
+  <ZDialog v-model="open" :title="replacements.length ? '切换启用配置' : '启用插件配置'" width="36rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
     <div v-if="request" class="grid gap-4">
       <div class="grid gap-3 rounded-cp bg-cp-fill-alter p-4">
         <div class="flex min-w-0 flex-wrap items-center gap-2">
           <strong class="min-w-0 flex-1 wrap-anywhere text-cp-sm">{{ request.name }}</strong>
-          <BaseTag v-if="metadata">
+          <ZTag v-if="metadata">
             {{ metadata.version }}
-          </BaseTag>
-          <BaseTag type="primary">
+          </ZTag>
+          <ZTag type="primary">
             将启用
-          </BaseTag>
+          </ZTag>
         </div>
         <dl v-if="parameters.length" class="m-0 grid grid-cols-1 gap-3 text-cp-sm sm:grid-cols-2">
           <div v-for="parameter in parameters" :key="parameter.key" class="grid min-w-0 gap-1">
@@ -62,24 +62,24 @@ const parameters = computed(() => {
           <li v-for="instance in replacements" :key="instance.id" class="flex items-center gap-3 rounded-cp bg-cp-fill-alter p-3">
             <span class="min-w-0 flex-1 wrap-anywhere text-cp-sm font-emphasis">{{ instance.name }}</span>
             <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
-              <BaseTag v-if="instance.version">
+              <ZTag v-if="instance.version">
                 {{ instance.version }}
-              </BaseTag>
-              <BaseTag type="warning">
+              </ZTag>
+              <ZTag type="warning">
                 将停用
-              </BaseTag>
+              </ZTag>
             </div>
           </li>
         </ul>
       </div>
     </div>
     <template #footer>
-      <BaseButton variant="secondary" :disabled="saving" @click="open = false">
+      <ZButton :disabled="saving" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton variant="primary" :loading="saving" :disabled="!request" @click="$emit('confirm')">
+      </ZButton>
+      <ZButton type="primary" :loading="saving" :disabled="!request" @click="$emit('confirm')">
         {{ replacements.length ? '确认切换' : '确认启用' }}
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

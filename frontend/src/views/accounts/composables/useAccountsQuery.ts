@@ -1,4 +1,4 @@
-import type { BaseTableSort } from '@codex-proxy/ui'
+import type { TableSort } from '@codex-proxy/ui'
 import type { Account } from '@/api'
 
 import { computed, onMounted, shallowRef, watch } from 'vue'
@@ -10,7 +10,7 @@ export function useAccountsQuery() {
   const providerQuery = shallowRef('')
   const statusQuery = shallowRef('')
   const groupQuery = shallowRef('')
-  const sort = shallowRef<BaseTableSort>()
+  const sort = shallowRef<TableSort>()
   const accountSummary = shallowRef({
     total: 0,
     normal: 0,
@@ -55,7 +55,7 @@ export function useAccountsQuery() {
     void query.execute()
   }
 
-  function handleSortChange(nextSort: BaseTableSort | undefined) {
+  function handleSortChange(nextSort: TableSort | undefined) {
     sort.value = nextSort
     query.page.value = 1
     void query.execute()

@@ -21,6 +21,7 @@ use url::Url;
 use self::desktop_artifact::{CodexDesktopArtifactError, fetch_codex_core_version};
 
 pub mod cli_release;
+mod context;
 pub mod desktop_artifact;
 pub mod identity;
 pub mod platform_release;

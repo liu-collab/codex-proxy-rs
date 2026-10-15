@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Account, AccountResetCredit } from '@/api'
-import { BaseButton, BaseEmpty, BaseIconButton, BaseModal } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZEmpty, ZIconButton } from '@codex-proxy/ui'
 
 import { AlertTriangle, RefreshCw, TicketCheck } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
@@ -121,12 +121,12 @@ function handleRequestConsume(creditId: string) {
     </span>
   </button>
 
-  <BaseModal
+  <ZDialog
     v-model="panelOpen"
     :title="modalTitle"
-    :tone="confirmation ? 'warning' : 'neutral'"
-    :size="confirmation ? 'sm' : 'md'"
-    :dismissible="!consuming"
+    :type="confirmation ? 'warning' : 'default'"
+    :width="confirmation ? '28rem' : '36rem'"
+    :show-close="!consuming" :close-on-click-modal="!consuming" :close-on-press-escape="!consuming"
   >
     <div v-if="confirmation" class="grid gap-3">
       <section class="rounded-cp bg-cp-fill-quaternary px-4 py-3.5">
@@ -158,9 +158,9 @@ function handleRequestConsume(creditId: string) {
             请继续确认上次重置结果
           </p>
         </div>
-        <BaseButton size="sm" variant="soft" :disabled="loading || consuming || !canRequestConsume" @click="requestConsume">
+        <ZButton size="small" type="primary" variant="plain" :disabled="loading || consuming || !canRequestConsume" @click="requestConsume">
           继续确认
-        </BaseButton>
+        </ZButton>
       </section>
 
       <section class="overflow-hidden rounded-cp bg-cp-fill-quaternary" aria-label="使用限额重置">
@@ -178,10 +178,9 @@ function handleRequestConsume(creditId: string) {
           >
             {{ countLabel }}
           </span>
-          <BaseIconButton
-            variant="ghost"
-            size="sm"
-            label="刷新主动重置卡"
+          <ZIconButton
+            size="small"
+            aria-label="刷新主动重置卡"
             :loading="loading"
             :disabled="loading || consuming"
             @click="loadCredits"
@@ -190,7 +189,7 @@ function handleRequestConsume(creditId: string) {
               <RefreshCw class="size-3.5 animate-spin motion-reduce:animate-none" />
             </template>
             <RefreshCw class="size-3.5" />
-          </BaseIconButton>
+          </ZIconButton>
         </div>
 
         <div :aria-busy="loading || consuming">
@@ -222,22 +221,22 @@ function handleRequestConsume(creditId: string) {
                   {{ credit.expiry }}
                 </p>
               </div>
-              <BaseButton
-                size="sm"
-                variant="primary"
+              <ZButton
+                size="small"
+                type="primary"
                 :disabled="!account.capabilities.consumeResetCredit || loading || consuming || ambiguous || availableCount <= 0"
                 :aria-label="`使用重置：${credit.title}，${credit.expiry}`"
                 @click="handleRequestConsume(credit.id)"
               >
                 使用重置
-              </BaseButton>
+              </ZButton>
             </li>
           </ul>
 
-          <BaseEmpty
+          <ZEmpty
             v-else-if="!showCountOnlyAction"
             :icon="TicketCheck"
-            size="sm"
+            size="small"
             surface="none"
             title="当前没有可用重置次数"
             description="可刷新列表，重新读取上游状态"
@@ -250,22 +249,22 @@ function handleRequestConsume(creditId: string) {
 
     <template v-if="confirmation || showCountOnlyAction" #footer>
       <template v-if="confirmation">
-        <BaseButton variant="secondary" :disabled="consuming" @click="cancelConsume">
+        <ZButton :disabled="consuming" @click="cancelConsume">
           返回
-        </BaseButton>
-        <BaseButton variant="primary" :loading="consuming" :disabled="loading || !canRequestConsume" @click="confirmConsume">
+        </ZButton>
+        <ZButton type="primary" :loading="consuming" :disabled="loading || !canRequestConsume" @click="confirmConsume">
           {{ confirmation.ambiguous ? '再次确认' : '确认重置' }}
-        </BaseButton>
+        </ZButton>
       </template>
-      <BaseButton
+      <ZButton
         v-else
-        size="sm"
-        variant="primary"
+        size="small"
+        type="primary"
         :disabled="loading || consuming || ambiguous || !canRequestConsume"
         @click="requestConsume"
       >
         使用一次重置（由上游选择）
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

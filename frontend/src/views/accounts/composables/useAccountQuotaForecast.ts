@@ -1,6 +1,6 @@
 import type { Ref } from 'vue'
 import type { Account, AccountQuotaForecastResponse } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { onScopeDispose, shallowRef, watch } from 'vue'
 import { getAccountQuotaForecast, refreshAccountQuota } from '@/api'
 
@@ -66,7 +66,7 @@ export function useAccountQuotaForecast(
         return
       onAccountUpdated(result.account)
       if (accountId.value === targetAccountId && await load())
-        toast.success('额度已刷新')
+        ZNotification.success({ message: '额度已刷新' })
     }
     catch {
       if (!disposed && accountId.value === targetAccountId) {

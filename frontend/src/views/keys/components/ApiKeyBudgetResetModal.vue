@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ApiKey } from '@/api'
-import { BaseButton, BaseModal, BaseSegmented, toast } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZNotification, ZSegmented } from '@codex-proxy/ui'
 import { ArrowRight } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { resetApiKeyBudget } from '@/api'
@@ -36,24 +36,24 @@ async function resetBudget() {
   await run(async () => {
     await resetApiKeyBudget({ id: key.id, period: selectedPeriod })
     open.value = false
-    toast.success('已重置密钥额度')
+    ZNotification.success({ message: '已重置密钥额度' })
     emit('reset')
   })
 }
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="重置已用额度"
     description="清零所选周期的已用金额，下次使用时重新确定重置日期"
-    size="sm"
-    :dismissible="!loading"
+    width="28rem"
+    :show-close="!loading" :close-on-click-modal="!loading" :close-on-press-escape="!loading"
   >
     <div class="grid gap-5">
       <div class="grid min-w-0 gap-1.5">
         <span class="text-cp-xs text-cp-text-quaternary">目标密钥</span>
-        <p class="m-0 break-words text-cp text-cp-text">
+        <p class="m-0 wrap-break-word text-cp text-cp-text">
           {{ apiKey?.name }}
         </p>
       </div>
@@ -62,7 +62,7 @@ async function resetBudget() {
         <legend class="mb-2.5 p-0 text-cp-sm text-cp-text-secondary">
           重置范围
         </legend>
-        <BaseSegmented v-model="period" class="w-full" label="重置范围" :options="periods" :disabled="loading" />
+        <ZSegmented v-model="period" class="w-full" aria-label="重置范围" :options="periods" :disabled="loading" />
       </fieldset>
 
       <div v-if="apiKey" class="rounded-cp bg-cp-fill-quaternary p-3.5" aria-live="polite" aria-atomic="true">
@@ -87,12 +87,12 @@ async function resetBudget() {
     </div>
 
     <template #footer>
-      <BaseButton variant="secondary" :disabled="loading" @click="open = false">
+      <ZButton :disabled="loading" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton variant="primary" :loading="loading" :disabled="!apiKey" @click="resetBudget">
+      </ZButton>
+      <ZButton type="primary" :loading="loading" :disabled="!apiKey" @click="resetBudget">
         确认重置
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

@@ -6,7 +6,6 @@ use std::{collections::BTreeMap, net::IpAddr, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use futures::stream::BoxStream;
 
 use super::backup::BackupStorePorts;
 use crate::model::{
@@ -30,7 +29,8 @@ use crate::model::{
     observability::{
         DashboardObservation, DashboardQuery, DiagnosticDimension, DiagnosticsObservation,
         Granularity, OpsErrorPage, OpsErrorQuery, RequestMetricPoint, TimeRange,
-        UsageCalculatedBillingFact, UsageDetail, UsageFilter, UsageOverview, UsagePage, UsageQuery,
+        UsageBillingProjection, UsageCalculatedBillingFact, UsageDetail, UsageFilter,
+        UsageInsightsObservation, UsageOverview, UsagePage, UsageQuery,
     },
     provider_credentials::{
         AuthorizationCommit, CredentialDetails, CredentialImportCommit, CredentialImportResult,
@@ -294,12 +294,12 @@ pub trait AuthStore: Send + Sync {
 
     async fn store_session(&self, session_id: &str, session: &AuthSession) -> AdminStoreResult<()>;
 
-    /// 只延长仍存在且匹配的会话；并发续期返回当前值，已退出或过期时不重建
-    async fn renew_session(
+    /// 原子替换或撤销仍匹配的会话并返回当前值；过期或退出后不重新创建
+    async fn compare_exchange_session(
         &self,
         session_id: &str,
         expected: &AuthSession,
-        expires_at: chrono::DateTime<chrono::Utc>,
+        replacement: Option<&AuthSession>,
     ) -> AdminStoreResult<Option<AuthSession>>;
 
     async fn delete_session(&self, session_id: &str) -> AdminStoreResult<Option<AuthSession>>;
@@ -421,13 +421,23 @@ pub trait AccountGroupStore: Send + Sync {
     ) -> AdminStoreResult<AccountGroupMutation>;
 }
 
-/// 逐条读取的已计算费用事实；消费结束或丢弃时释放查询资源
-pub type UsageCalculatedBillingStream<'a> =
-    BoxStream<'a, AdminStoreResult<UsageCalculatedBillingFact>>;
+/// 后台投影复用 Admin 与 Provider 的费用规则，Store 不重新解释价格
+pub trait UsageBillingProjector: Send + Sync {
+    fn project(
+        &self,
+        fact: &UsageCalculatedBillingFact,
+    ) -> Result<UsageBillingProjection, crate::model::AdminError>;
+}
 
 /// 用量、趋势、诊断与运维错误的只读能力
 #[async_trait]
 pub trait ObservabilityStore: Send + Sync {
+    /// 读取实现声明的总预算，缓存等待沿用同一配置，避免外层提前截断
+    fn query_timeout(&self) -> std::time::Duration;
+
+    /// 缓存必须与删除和后台投影提交的版本一致
+    async fn analytics_cache_generation(&self) -> AdminStoreResult<u64>;
+
     /// 返回历史统计区间和指定观测时刻下的实时账号状态
     async fn dashboard_summary(
         &self,
@@ -448,14 +458,13 @@ pub trait ObservabilityStore: Send + Sync {
         granularity: Granularity,
     ) -> AdminStoreResult<Vec<RequestMetricPoint>>;
 
-    /// 流式返回可由 Provider 重新校验的已计算费用事实，不保证顺序
-    /// 查询及解码错误由流返回；调用方应逐条聚合，避免收集整个区间
-    fn usage_calculated_billing_facts(
+    /// 同一读取快照中的汇总、趋势和已投影情景费用
+    async fn usage_insights_observation(
         &self,
         range: TimeRange,
         filter: UsageFilter,
         granularity: Granularity,
-    ) -> UsageCalculatedBillingStream<'_>;
+    ) -> AdminStoreResult<UsageInsightsObservation>;
 
     async fn list_usage_records(&self, query: UsageQuery) -> AdminStoreResult<UsagePage>;
 

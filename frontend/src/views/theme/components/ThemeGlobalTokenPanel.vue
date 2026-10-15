@@ -2,7 +2,7 @@
 import type { ResolvedTheme, ThemeColorPreset, ThemeColorPresetId, ThemeMode, ThemeSeedOverrides } from '@codex-proxy/ui/theme'
 import type { ThemeEditorDraft, ThemeEditorGlobalCategory } from '../composables/useThemeEditor'
 
-import { BaseSegmented } from '@codex-proxy/ui'
+import { ZSegmented } from '@codex-proxy/ui'
 import { resolveTheme, THEME_COLOR_PRESETS } from '@codex-proxy/ui/theme'
 
 import { Check, ChevronDown, Laptop, Moon, Sun } from '@lucide/vue'
@@ -136,9 +136,9 @@ function presetSwatches(preset: ThemeColorPreset) {
 <template>
   <div class="grid gap-4">
     <div class="grid gap-2 rounded-cp-lg bg-cp-bg-container p-2 shadow-cp-tertiary">
-      <BaseSegmented
+      <ZSegmented
         :model-value="draft.mode"
-        label="主题模式"
+        aria-label="主题模式"
         display="icon"
         :options="modeOptions"
         class="w-full"
@@ -146,7 +146,7 @@ function presetSwatches(preset: ThemeColorPreset) {
       />
     </div>
 
-    <BaseSegmented v-model="category" label="全局 Token 分类" :options="categoryOptions" class="w-full" />
+    <ZSegmented v-model="category" aria-label="全局 Token 分类" :options="categoryOptions" class="w-full" />
 
     <template v-if="category === 'color'">
       <section v-if="matches('预置主题 品牌色 colorPrimary')" class="grid gap-2" aria-labelledby="theme-preset-title">

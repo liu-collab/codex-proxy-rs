@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BasePopover } from '@codex-proxy/ui'
+import { ZPopover } from '@codex-proxy/ui'
 
 import { Info } from '@lucide/vue'
 
@@ -12,11 +12,11 @@ defineProps<{
 </script>
 
 <template>
-  <BasePopover
+  <ZPopover
     trigger="hover"
     placement="right"
   >
-    <template #trigger>
+    <template #reference>
       <button
         type="button"
         class="inline-flex size-4 items-center justify-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline"
@@ -35,5 +35,5 @@ defineProps<{
       </p>
       <slot />
     </div>
-  </BasePopover>
+  </ZPopover>
 </template>

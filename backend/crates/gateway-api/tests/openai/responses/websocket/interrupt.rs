@@ -1,9 +1,191 @@
 //! 验证未知控制消息、迟到中断、结算期间收发和创建请求的串行准入
 
 use super::*;
+use gateway_core::engine::client_retry::{ClientRetryKey, ClientRetryStore};
 use gateway_core::engine::response_control::{
     ResponseControlTransport, ResponseControlUnavailable,
 };
+
+#[derive(Default)]
+struct RetryMarker(Mutex<Option<ModelRequestId>>);
+
+impl ClientRetryStore for RetryMarker {
+    fn load<'a>(
+        &'a self,
+        _: &'a ClientRetryKey,
+    ) -> BoxFuture<'a, Result<Option<ModelRequestId>, StoreError>> {
+        Box::pin(async { Ok(self.0.lock().unwrap().clone()) })
+    }
+    fn record_failure<'a>(
+        &'a self,
+        _: &'a ClientRetryKey,
+        version: &'a ModelRequestId,
+        _: Duration,
+    ) -> BoxFuture<'a, Result<(), StoreError>> {
+        Box::pin(async move {
+            *self.0.lock().unwrap() = Some(version.clone());
+            Ok(())
+        })
+    }
+    fn clear_failure<'a>(
+        &'a self,
+        _: &'a ClientRetryKey,
+        expected: &'a ModelRequestId,
+    ) -> BoxFuture<'a, Result<(), StoreError>> {
+        Box::pin(async move {
+            let mut marker = self.0.lock().unwrap();
+            if marker.as_ref() == Some(expected) {
+                *marker = None;
+            }
+            Ok(())
+        })
+    }
+}
+
+#[derive(Default)]
+struct RetryBudgetProvider(AtomicUsize);
+
+#[async_trait]
+impl Provider for RetryBudgetProvider {
+    fn name(&self) -> &'static str {
+        "openai"
+    }
+    fn catalog_generation(&self) -> ProviderCatalogGeneration {
+        ProviderCatalogGeneration::default()
+    }
+    async fn query_model_capabilities(
+        &self,
+    ) -> Result<Vec<ProviderModelCapabilities>, ProviderError> {
+        Ok(Vec::new())
+    }
+    async fn execute(
+        self: Arc<Self>,
+        request: ProviderRequest,
+        context: AttemptContext,
+    ) -> Result<ProviderStream, ProviderError> {
+        let number = self.0.fetch_add(1, Ordering::SeqCst) + 1;
+        if number <= 7 || matches!(number, 9 | 10) {
+            let error = ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::Sent)
+                .with_status(503)
+                .with_replay_safe()
+                .with_client_visible_upstream_response(gateway_core::error::ClientVisibleUpstreamResponse::new(
+                    503, Some(b"application/json".to_vec()),
+                    Bytes::from_static(br#"{"error":{"code":"server_error","message":"synthetic unavailable"}}"#),
+                ))
+                .with_transient_retry(
+                    std::num::NonZeroU32::new(5).unwrap(),
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    Duration::ZERO,
+                    gateway_core::error::TransientRetryPolicy::RetryThenReturnError,
+                );
+            return Ok(ProviderStream::new(
+                ProviderCallMetadata::new(
+                    request.candidate().provider().clone(),
+                    request.candidate().upstream_model().unwrap().clone(),
+                    ProviderAccountId::new("acct_api_test").unwrap(),
+                    UpstreamTransport::new("websocket").unwrap(),
+                ),
+                futures::stream::iter([Err(error)]),
+                (),
+            ));
+        }
+        Arc::new(ChargedWebSocketProvider)
+            .execute(request, context)
+            .await
+    }
+}
+
+#[tokio::test]
+async fn client_retry_budget_should_flow_through_http_and_live_websocket() {
+    for websocket in [false, true] {
+        let provider = Arc::new(RetryBudgetProvider::default());
+        let marker = Arc::new(RetryMarker::default());
+        let execution = Arc::new(
+            DefaultExecutionService::new(
+                RuntimeSnapshotHandle::new(snapshot("sk_retry_probe", "openai")),
+                Arc::new(SettlementPorts::default()),
+                ProviderRegistry::new([provider.clone() as Arc<dyn Provider>]).unwrap(),
+                Arc::new(InterruptAdmissions::default()),
+                Arc::new(UnusedContinuation),
+                Arc::new(IgnoredClientApiKeyUsage),
+                Arc::new(crate::support::RecordingDiagnostics::default()),
+            )
+            .with_client_retry_store(marker.clone()),
+        );
+        let app = api_router(execution).await;
+        let mut body = json!({"model":"model-a", "input":"hello", "stream":true, "client_metadata": {
+            "thread_id":"thread", "turn_id":"turn", "x-codex-turn-metadata":r#"{"request_kind":"turn"}"#
+        }});
+        let mut socket = None;
+        let mut server = None;
+        if websocket {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let app = app.clone();
+            server = Some(Server(tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap()
+            })));
+            let mut request = format!("ws://{address}/v1/responses")
+                .into_client_request()
+                .unwrap();
+            request.headers_mut().insert(
+                AUTHORIZATION,
+                HeaderValue::from_static("Bearer sk_retry_probe"),
+            );
+            socket = Some(connect_async(request).await.unwrap().0);
+            body["type"] = json!("response.create");
+        }
+        for (expected_attempts, success) in [(6, false), (7, false), (8, true), (11, true)] {
+            if let Some(socket) = &mut socket {
+                send(socket, body.clone()).await;
+                loop {
+                    let event = next(socket).await;
+                    match event["type"].as_str() {
+                        Some("response.completed") => {
+                            assert!(success);
+                            break;
+                        }
+                        Some("response.failed" | "error") => {
+                            assert!(!success);
+                            break;
+                        }
+                        _ => {}
+                    }
+                }
+            } else {
+                let request = Request::builder()
+                    .method("POST")
+                    .uri("/v1/responses")
+                    .header(AUTHORIZATION, "Bearer sk_retry_probe")
+                    .header("content-type", "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap();
+                let response = app.clone().oneshot(request).await.unwrap();
+                assert_eq!(
+                    response.status(),
+                    if success {
+                        StatusCode::OK
+                    } else {
+                        StatusCode::SERVICE_UNAVAILABLE
+                    }
+                );
+                let payload = axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
+                if success {
+                    assert!(String::from_utf8_lossy(&payload).contains("response.completed"));
+                }
+            }
+            assert_eq!(provider.0.load(Ordering::SeqCst), expected_attempts);
+            assert_eq!(marker.0.lock().unwrap().is_none(), success);
+        }
+        if let Some(mut socket) = socket {
+            socket.close(None).await.unwrap();
+        }
+        drop(server);
+    }
+}
 
 struct ControlTransport {
     id: String,
@@ -62,6 +244,9 @@ impl ResponseControlTransport for ControlTransport {
 #[derive(Default)]
 struct InterruptProvider {
     calls: AtomicUsize,
+    fail_first: bool,
+    retry_started: tokio::sync::Notify,
+    retry_release: tokio::sync::Notify,
     transport: Mutex<Option<Arc<ControlTransport>>>,
     complete: tokio::sync::Notify,
     initial_messages: Mutex<std::collections::VecDeque<ProtocolWireEvent>>,
@@ -87,6 +272,15 @@ impl Provider for InterruptProvider {
         context: AttemptContext,
     ) -> Result<ProviderStream, ProviderError> {
         let number = self.calls.fetch_add(1, Ordering::SeqCst);
+        if number == 1 && self.fail_first {
+            self.retry_started.notify_one();
+            self.retry_release.notified().await;
+            assert!(
+                context
+                    .excluded_accounts()
+                    .contains(&ProviderAccountId::new("acct_api_test").unwrap())
+            );
+        }
         let id = format!("resp_interrupt_{number}");
         let transport = Arc::new(ControlTransport::new(id));
         let owner: Arc<dyn ResponseControlTransport> = transport.clone();
@@ -96,7 +290,12 @@ impl Provider for InterruptProvider {
         let metadata = ProviderCallMetadata::new(
             candidate.provider().clone(),
             candidate.upstream_model().unwrap().clone(),
-            ProviderAccountId::new("acct_api_test").unwrap(),
+            ProviderAccountId::new(if self.fail_first && number > 0 {
+                "acct_api_retry"
+            } else {
+                "acct_api_test"
+            })
+            .unwrap(),
             UpstreamTransport::new("websocket").unwrap(),
         );
         let body = futures::stream::unfold(
@@ -109,6 +308,18 @@ impl Provider for InterruptProvider {
                 };
                 if let Some(wire) = pending {
                     return Some((Ok(ProviderEvent::wire(wire)), (phase, transport, provider)));
+                }
+                if phase == 1 && provider.fail_first && transport.id == "resp_interrupt_0" {
+                    provider.complete.notified().await;
+                    transport.active.store(false, Ordering::SeqCst);
+                    return Some((
+                        Err(ProviderError::new(
+                            gateway_core::error::ProviderErrorKind::QuotaExhausted,
+                            UpstreamSendState::Sent,
+                        )
+                        .with_replay_safe()),
+                        (2, transport, provider),
+                    ));
                 }
                 let (wire, events, next_phase) = match phase {
                     0 => (
@@ -144,10 +355,13 @@ impl Provider for InterruptProvider {
                     _ => return None,
                 };
                 let event_type = wire["type"].as_str().unwrap().to_owned();
-                let event = ProviderEvent::canonical_with_wire(
+                let mut event = ProviderEvent::canonical_with_wire(
                     events,
                     ProtocolWireEvent::json("openai", Some(event_type), wire).unwrap(),
                 );
+                if phase == 0 && provider.fail_first {
+                    event = event.with_replayable_prelude();
+                }
                 Some((Ok(event), (next_phase, transport, provider)))
             },
         );
@@ -233,7 +447,16 @@ async fn connect(
     admissions: Arc<InterruptAdmissions>,
 ) -> (TestSocket, Server) {
     let execution = Arc::new(DefaultExecutionService::new(
-        RuntimeSnapshotHandle::new(snapshot("sk_ws_interrupt", "openai")),
+        RuntimeSnapshotHandle::new(if provider.fail_first {
+            crate::openai::snapshot_with_accounts(
+                "sk_ws_interrupt",
+                "openai",
+                "key_api_test",
+                &["acct_api_test", "acct_api_retry"],
+            )
+        } else {
+            snapshot("sk_ws_interrupt", "openai")
+        }),
         Arc::new(SettlementPorts::default()),
         ProviderRegistry::new([provider as Arc<dyn Provider>]).unwrap(),
         admissions,
@@ -447,4 +670,103 @@ async fn active_websocket_delivery_preserves_unparsed_messages_and_business_meta
     }
     provider.complete.notify_one();
     assert_eq!(next(&mut socket).await["type"], "response.completed");
+}
+
+#[tokio::test]
+async fn prelude_retry_retains_interrupt_during_account_switch() {
+    for interrupt_before_new_created in [true, false] {
+        let provider = Arc::new(InterruptProvider {
+            fail_first: true,
+            ..Default::default()
+        });
+        let admissions = Arc::new(InterruptAdmissions::default());
+        let (mut socket, _server) = connect(provider.clone(), admissions.clone()).await;
+        send(
+            &mut socket,
+            json!({"type":"response.create","model":"model-a","input":"hello"}),
+        )
+        .await;
+        assert_eq!(
+            next(&mut socket).await["response"]["id"],
+            "resp_interrupt_0"
+        );
+        let old = provider.transport.lock().unwrap().clone().unwrap();
+        provider.complete.notify_one();
+        tokio::time::timeout(Duration::from_secs(5), provider.retry_started.notified())
+            .await
+            .unwrap();
+        if interrupt_before_new_created {
+            send(
+                &mut socket,
+                interrupt("resp_interrupt_0", "discard_partial_items"),
+            )
+            .await;
+            // 等待服务端处理控制帧，随后才允许新 attempt 建立连接
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while old.requests.lock().unwrap().is_empty() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+        }
+        provider.retry_release.notify_one();
+        assert_eq!(
+            next(&mut socket).await["response"]["id"],
+            "resp_interrupt_1"
+        );
+        if !interrupt_before_new_created {
+            // 迟到的旧 ID 也应作用于当前逻辑响应
+            send(
+                &mut socket,
+                interrupt("resp_interrupt_0", "discard_partial_items"),
+            )
+            .await;
+        }
+        let terminal = next(&mut socket).await;
+        assert_eq!(terminal["type"], "response.incomplete");
+        assert_eq!(terminal["response"]["id"], "resp_interrupt_1");
+        let current = provider.transport.lock().unwrap().clone().unwrap();
+        let requests = current.requests.lock().unwrap().clone();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            serde_json::from_str::<Value>(&requests[0]).unwrap(),
+            interrupt("resp_interrupt_1", "discard_partial_items")
+        );
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 2);
+        socket.close(None).await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn non_replayable_delivery_blocks_retry_even_after_a_replayable_prelude() {
+    for event in [
+        json!({"type":"response.output_text.delta","delta":"visible","output_index":0,"content_index":0}),
+        json!({"type":"response.future_progress","marker":"preserved"}),
+    ] {
+        let provider = Arc::new(InterruptProvider {
+            fail_first: true,
+            ..Default::default()
+        });
+        provider.initial_messages.lock().unwrap().push_back(
+            ProtocolWireEvent::json(
+                "openai",
+                Some(event["type"].as_str().unwrap().to_owned()),
+                event.clone(),
+            )
+            .unwrap(),
+        );
+        let (mut socket, _server) = connect(provider.clone(), Arc::default()).await;
+        send(
+            &mut socket,
+            json!({"type":"response.create","model":"model-a","input":"hello"}),
+        )
+        .await;
+        assert_eq!(next(&mut socket).await["type"], "response.created");
+        assert_eq!(next(&mut socket).await, event);
+        provider.complete.notify_one();
+        assert_eq!(next(&mut socket).await["type"], "error");
+        assert_eq!(provider.calls.load(Ordering::SeqCst), 1);
+        socket.close(None).await.unwrap();
+    }
 }

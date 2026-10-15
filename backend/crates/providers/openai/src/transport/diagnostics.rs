@@ -36,7 +36,7 @@ pub enum CodexUpstreamSendPhase {
     Ambiguous,
 }
 
-/// Transport 边界对上游失败的账号级分类
+/// Transport 边界对上游失败的分类
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CodexFailureCategory {
     ModelUnsupported,
@@ -46,6 +46,8 @@ pub enum CodexFailureCategory {
     /// 当前用量窗口已经耗尽，但存在自动恢复的重置时间
     UsageLimitExhausted,
     RateLimited,
+    /// 当前 turn 的限流交给客户端等待，不据此推导账号级冷却
+    TurnRateLimited,
     QuotaExhausted,
     CloudflareChallenge,
     CloudflarePathBlocked,
@@ -174,35 +176,40 @@ impl CodexUpstreamFailure {
         }
     }
 
-    /// 返回账号级失败分类
+    /// 返回上游失败分类
     #[must_use]
     pub const fn category(&self) -> CodexFailureCategory {
         self.category
     }
 
-    /// 返回该拒绝是否允许换号重放
+    /// 明确的 503 server_error 允许有界恢复，不把普通 5xx 当作容量或账号故障
+    pub(crate) fn is_retryable_server_error(&self) -> bool {
+        self.category == CodexFailureCategory::Unavailable
+            && self.status == Some(StatusCode::SERVICE_UNAVAILABLE)
+            && self
+                .code
+                .as_deref()
+                .is_some_and(|code| code.trim().eq_ignore_ascii_case("server_error"))
+    }
+
+    /// 只对明确识别的账号、容量拒绝或 503 server_error 提供重放资格
     #[must_use]
-    pub const fn replay_is_safe(&self) -> bool {
-        if matches!(self.category, CodexFailureCategory::FlexUnavailable) {
-            return false;
-        }
-        match self.send_phase {
-            CodexUpstreamSendPhase::BeforePayload => true,
-            CodexUpstreamSendPhase::Ambiguous => false,
-            CodexUpstreamSendPhase::AfterPayload => matches!(
-                self.category,
-                CodexFailureCategory::ModelUnsupported
-                    | CodexFailureCategory::CredentialExpired
-                    | CodexFailureCategory::IdentityVerificationRequired
-                    | CodexFailureCategory::Banned
-                    | CodexFailureCategory::UsageLimitExhausted
-                    | CodexFailureCategory::RateLimited
-                    | CodexFailureCategory::QuotaExhausted
-                    | CodexFailureCategory::CloudflareChallenge
-                    | CodexFailureCategory::CloudflarePathBlocked
-                    | CodexFailureCategory::CapacityUnavailable
-            ),
-        }
+    pub fn replay_is_safe(&self) -> bool {
+        !matches!(self.send_phase, CodexUpstreamSendPhase::Ambiguous)
+            && (self.is_retryable_server_error()
+                || matches!(
+                    self.category,
+                    CodexFailureCategory::ModelUnsupported
+                        | CodexFailureCategory::CredentialExpired
+                        | CodexFailureCategory::IdentityVerificationRequired
+                        | CodexFailureCategory::Banned
+                        | CodexFailureCategory::UsageLimitExhausted
+                        | CodexFailureCategory::RateLimited
+                        | CodexFailureCategory::QuotaExhausted
+                        | CodexFailureCategory::CloudflareChallenge
+                        | CodexFailureCategory::CloudflarePathBlocked
+                        | CodexFailureCategory::CapacityUnavailable
+                ))
     }
 
     pub(crate) fn upstream_code(&self) -> Option<&str> {
@@ -383,6 +390,9 @@ fn classify_upstream_failure(
 
     if code == "flex_unavailable" {
         return CodexFailureCategory::FlexUnavailable;
+    }
+    if code == "turn_rate_limit_exceeded" {
+        return CodexFailureCategory::TurnRateLimited;
     }
 
     // 容量拒绝可能带 400/429/503；仅用结构化错误字段识别，不能扫描任意正文

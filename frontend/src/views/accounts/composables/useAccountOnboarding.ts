@@ -1,27 +1,27 @@
 import type { Account, AccountImportTask } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { computed, ref, shallowRef, watch } from 'vue'
 import { createAccountImportTask, importAccounts } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { errorMessage, generateRequestId } from '@/utils/operation'
 import { formatProviderLabel, isSupportedProvider } from '@/utils/providers'
 import { accountCreateProvider, accountCreateSourceKey, accountImportModes, accountImportSettings, accountProxyError, emptyAccountCreateForm } from '../utils/accountCreate'
-import { accountImportDocuments, MAX_ACCOUNT_IMPORT_COUNT, mixedImportDocuments } from '../utils/accountImport'
+import { accountImportBatches, accountImportDocuments, mixedImportDocuments } from '../utils/accountImport'
 import { apiKeyAccountError, emptyApiKeyAccountForm } from '../utils/upstreamApiKey'
 import { useAccountAuthorization } from './useAccountAuthorization'
 
 export function useAccountOnboarding(options: {
   reload: () => Promise<unknown>
-  onImportTaskCreated: (task: AccountImportTask) => void
+  onImportTaskCreated: (task: AccountImportTask, reveal?: boolean) => void
 }) {
   const createModalOpen = shallowRef(false)
   const reauthorizingAccount = shallowRef<Account | null>(null)
   const creatingAccountAction = useAsyncAction()
   const createForm = ref(emptyAccountCreateForm())
   const authorization = useAccountAuthorization(() => finishCreate(reauthorizingAccount.value ? '账号重新授权成功' : '账号已添加'))
-  let submissionId: string | undefined
+  let submissionIds: string[] = []
   watch(createForm, () => {
-    submissionId = undefined
+    submissionIds = []
   }, { deep: true, flush: 'sync' })
 
   const showCreateModal = computed({
@@ -52,6 +52,7 @@ export function useAccountOnboarding(options: {
       await authorization.complete()
       return
     }
+    let submitted = 0
     await creatingAccountAction.run(async () => {
       const form = createForm.value
       const proxyError = accountProxyError(form)
@@ -81,18 +82,25 @@ export function useAccountOnboarding(options: {
       const documents = form.source?.kind === 'bundle'
         ? mixedImportDocuments(form.importTexts.json)
         : accountImportDocuments(requireImportProvider(provider), mode, form.importTexts[mode])
-      if (documents.length > MAX_ACCOUNT_IMPORT_COUNT)
-        throw new Error(`单次最多导入 ${MAX_ACCOUNT_IMPORT_COUNT} 个条目`)
       for (const document of documents)
         requireImportProvider(document.provider)
-      submissionId ??= generateRequestId()
-      const task = await createAccountImportTask({
-        submissionId,
-        items: documents.map(entry => ({ provider: entry.provider, data: entry.document, settings, outboundProxyId })),
-      })
-      showCreateModal.value = false
-      options.onImportTaskCreated(task)
-      toast.success('导入任务已创建')
+      const batches = accountImportBatches(documents.map(entry => ({ provider: entry.provider, data: entry.document, settings, outboundProxyId })))
+      // 同一输入重试时复用每批标识，恢复丢失响应或部分提交，不重复执行 RT 交换
+      const ids = submissionIds
+      for (const [index, items] of batches.entries()) {
+        const task = await createAccountImportTask({ submissionId: ids[index] ??= generateRequestId(), items })
+        submitted += 1
+        const finished = index === batches.length - 1
+        if (finished)
+          showCreateModal.value = false
+        options.onImportTaskCreated(task, finished)
+      }
+      ZNotification.success({ message: submitted > 1 ? `已创建 ${submitted} 个导入任务` : '导入任务已创建' })
+    }, {
+      onError: () => {
+        if (submitted)
+          ZNotification.warning({ message: '部分导入任务已创建，保持输入不变重试可继续提交' })
+      },
     })
   }
 
@@ -119,7 +127,7 @@ export function useAccountOnboarding(options: {
       })
     }
     catch (cause) {
-      toast.error(errorMessage(cause, '启动授权失败'))
+      ZNotification.error({ message: errorMessage(cause, '启动授权失败') })
     }
   }
 
@@ -142,7 +150,7 @@ export function useAccountOnboarding(options: {
 
   async function finishCreate(message: string) {
     showCreateModal.value = false
-    toast.success(message)
+    ZNotification.success({ message })
     await options.reload()
   }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseFormItem, BaseSelect } from '@codex-proxy/ui'
+import { ZFormItem, ZSelect } from '@codex-proxy/ui'
 import { computed } from 'vue'
 import { useProxyCatalog } from '@/composables/useProxyCatalog'
 
@@ -18,9 +18,10 @@ const options = computed(() => [
     : []),
   { label: '直连', value: 'direct', description: '不使用代理' },
   ...proxies.value.map(proxy => ({
-    label: `${proxy.name}${proxy.lastTest?.success ? '' : proxy.lastTest ? '（测试失败）' : '（未测试）'}`,
+    label: `${proxy.name}${!proxy.enabled ? '（已禁用）' : proxy.lastTest?.success ? '' : proxy.lastTest ? '（测试失败）' : '（未测试）'}`,
     value: proxy.id,
     description: proxy.endpoint,
+    disabled: !proxy.enabled,
   })),
 ])
 const selection = computed({
@@ -34,7 +35,7 @@ const selection = computed({
 </script>
 
 <template>
-  <BaseFormItem label="出站隧道" :error="error">
-    <BaseSelect v-model="selection" class="w-full" :options="options" :disabled="disabled || loading" aria-label="出站隧道" />
-  </BaseFormItem>
+  <ZFormItem label="出站隧道" :error="error">
+    <ZSelect v-model="selection" class="w-full" :options="options" :disabled="disabled || loading" aria-label="出站隧道" />
+  </ZFormItem>
 </template>

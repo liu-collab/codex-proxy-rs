@@ -63,6 +63,8 @@ pnpm --dir frontend dev
 后端职责和依赖方向见 [Workspace 边界](architecture.md#3-workspace-边界)，页面与共享逻辑见 [前端模块职责](architecture.md#34-前端模块职责)。
 先按所属模块定位，再跟踪请求、状态与展示的调用关系
 
+共享 UI 的命名与目录见[组件架构](../modules/ui/playground/guide/architecture.md)
+
 ## 源码联调
 
 宿主、组件库和官方插件保留独立仓库，通过 Git 子模块在同一目录开发：

@@ -2,18 +2,16 @@
 import type { DashboardHealthTimelinePoint } from '@/api'
 
 import { computed } from 'vue'
-import { formatHealthCount, healthReliabilityValueClass, healthStatusMeta } from '@/components/usage/shared/health'
+import { formatHealthCount, healthEligibleRequestCount, healthObservedRequestCount, healthServiceFailureCount, healthStatusMeta } from '@/components/usage/shared/health'
 
 const props = defineProps<{
   point: DashboardHealthTimelinePoint
 }>()
 
 const status = computed(() => healthStatusMeta[props.point.status])
-const eligibleRequests = computed(() => props.point.successRequests + props.point.failedRequests)
-const observedRequests = computed(
-  () => eligibleRequests.value + props.point.cancelledRequests + props.point.callerErrorRequests,
-)
-// 四类结果的标签/取值/配色单一来源；分段条与明细行都由此派生。
+const eligibleRequests = computed(() => healthEligibleRequestCount(props.point))
+const observedRequests = computed(() => healthObservedRequestCount(props.point))
+// 结果标签、取值与配色集中维护，分段条与明细行都由此派生
 const outcomeMeta = computed(() => [
   {
     label: '成功',
@@ -23,7 +21,7 @@ const outcomeMeta = computed(() => [
   },
   {
     label: '服务失败',
-    value: props.point.failedRequests,
+    value: healthServiceFailureCount(props.point),
     dotClass: 'bg-cp-error',
     valueClass: 'text-cp-error-text',
   },
@@ -86,7 +84,7 @@ const metricItems = outcomeMeta
           </p>
           <strong
             class="mt-2 block font-mono text-[25px] leading-none font-heavy tabular-nums"
-            :class="healthReliabilityValueClass(point.successRequests, point.failedRequests)"
+            :class="status.valueClass"
           >
             {{ point.reliabilityDisplay }}
           </strong>
@@ -126,7 +124,7 @@ const metricItems = outcomeMeta
       </div>
 
       <p class="m-0 border-t border-cp-split pt-3 text-[10px] leading-[1.45] font-emphasis text-cp-text-quaternary">
-        客户端取消与调用方错误单独记录，不计入可用性
+        取消与调用方错误不计入可用性
       </p>
     </div>
   </section>

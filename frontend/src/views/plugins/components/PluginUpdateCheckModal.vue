@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { PluginUpdateSelection } from '../composables/usePluginUpdateCheck'
 import type { InstalledPlugin } from '../utils/catalog'
-import { BaseButton, BaseModal, BaseTag } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZTag } from '@codex-proxy/ui'
 import { ArrowRight, Download, LoaderCircle } from '@lucide/vue'
 import { computed } from 'vue'
 import { isNewerPluginVersion } from '../utils/updates'
@@ -26,7 +26,7 @@ const status = computed(() => {
 </script>
 
 <template>
-  <BaseModal v-model="open" title="插件更新" :description="plugin?.artifact.metadata.displayName" size="md" :dismissible="!upgrading">
+  <ZDialog v-model="open" title="插件更新" :description="plugin?.artifact.metadata.displayName" width="36rem" :show-close="!upgrading" :close-on-click-modal="!upgrading" :close-on-press-escape="!upgrading">
     <div v-if="checking" role="status" class="flex items-center gap-2 py-4 text-cp-sm text-cp-text-secondary">
       <LoaderCircle class="size-4 animate-spin motion-reduce:animate-none" />
       正在检查版本并校验插件包
@@ -41,9 +41,9 @@ const status = computed(() => {
         <div class="grid min-w-0 gap-2">
           <div class="flex flex-wrap items-center gap-2 text-cp-xs text-cp-text-secondary">
             <span>{{ candidate ? '目标版本' : '发布标签' }}</span>
-            <BaseTag v-if="result.release?.prerelease" type="warning" size="sm">
+            <ZTag v-if="result.release?.prerelease" type="warning" size="small">
               预发行版
-            </BaseTag>
+            </ZTag>
           </div>
           <strong class="break-all font-mono text-cp font-emphasis" :class="newer ? 'text-cp-primary-text' : 'text-cp-text'">{{ candidate?.version ?? result.release?.tag }}</strong>
         </div>
@@ -60,18 +60,18 @@ const status = computed(() => {
       <span v-if="!canInstall" class="text-cp-xs text-cp-text-secondary">此发布没有 tar.gz 或 tgz 插件包</span>
     </div>
     <template #footer>
-      <BaseButton variant="secondary" :disabled="upgrading" @click="open = false">
+      <ZButton :disabled="upgrading" @click="open = false">
         {{ checking ? '取消' : '关闭' }}
-      </BaseButton>
-      <BaseButton v-if="result?.instance && result.request && newer" variant="primary" :loading="upgrading" :disabled="upgrading" @click="$emit('upgrade', result)">
+      </ZButton>
+      <ZButton v-if="result?.instance && result.request && newer" type="primary" :loading="upgrading" :disabled="upgrading" @click="$emit('upgrade', result)">
         <template #icon>
           <Download class="size-4" />
         </template>
         升级到 {{ candidate?.version }}
-      </BaseButton>
-      <BaseButton v-else-if="result && canInstall && (!candidate || (newer && !result.instance))" variant="primary" :disabled="upgrading" @click="$emit('install', result)">
+      </ZButton>
+      <ZButton v-else-if="result && canInstall && (!candidate || (newer && !result.instance))" type="primary" :disabled="upgrading" @click="$emit('install', result)">
         {{ candidate ? '继续安装' : '选择插件包' }}
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

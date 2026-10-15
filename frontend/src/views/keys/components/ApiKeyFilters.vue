@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseButton, BaseInput } from '@codex-proxy/ui'
+import { ZButton, ZInput } from '@codex-proxy/ui'
 
 import { Plus, Search, Trash2 } from '@lucide/vue'
 
@@ -23,17 +23,17 @@ const search = defineModel<string>('search', { required: true })
     aria-label="API Key 筛选与操作"
   >
     <div class="min-w-0 flex-1 md:w-96 md:flex-none">
-      <BaseInput v-model="search" placeholder="搜索名称或标签" aria-label="搜索 API Key 名称或标签" class="w-full">
+      <ZInput v-model="search" placeholder="搜索名称或标签" aria-label="搜索 API Key 名称或标签" class="w-full">
         <template #prefix>
           <Search class="size-4.5 text-cp-text-tertiary" />
         </template>
-      </BaseInput>
+      </ZInput>
     </div>
 
     <div class="flex shrink-0 items-center justify-end gap-2 md:ml-auto">
-      <BaseButton
+      <ZButton
         v-if="selectedCount > 0"
-        variant="destructive"
+        type="danger" variant="plain"
         :disabled="batchDeleting"
         @click="emit('deleteSelected')"
       >
@@ -41,13 +41,13 @@ const search = defineModel<string>('search', { required: true })
           <Trash2 class="size-4" />
         </template>
         删除选中 ({{ selectedCount }})
-      </BaseButton>
-      <BaseButton variant="primary" @click="emit('create')">
+      </ZButton>
+      <ZButton type="primary" @click="emit('create')">
         <template #icon>
           <Plus class="size-4" />
         </template>
         创建 API Key
-      </BaseButton>
+      </ZButton>
     </div>
   </div>
 </template>

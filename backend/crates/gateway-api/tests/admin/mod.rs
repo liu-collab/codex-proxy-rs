@@ -88,6 +88,7 @@ mod account_groups;
 mod accounts;
 mod auth;
 mod client_keys;
+mod compression;
 mod error_diagnostics;
 mod errors;
 mod observability;
@@ -112,8 +113,9 @@ pub(super) struct AdminTestFixture {
     pub dashboard_summary_range: Arc<Mutex<Option<TimeRange>>>,
     pub provider_error: Arc<Mutex<Option<ProviderAdminError>>>,
     pub account: Arc<Mutex<Option<AccountPageItem>>>,
-    /// 代理用例核对实际落库的规范 URL：凭据只在存储层可见，响应里已脱敏。
+    /// 代理用例核对实际落库的规范 URL：凭据只在存储层可见，响应里已脱敏
     pub proxies: Arc<proxies::MemoryProxies>,
+    pub account_usage: Arc<Mutex<Vec<AccountUsage>>>,
 }
 
 impl AdminTestFixture {
@@ -156,6 +158,7 @@ impl AdminTestFixture {
         let dashboard_summary_range = Arc::new(Mutex::new(None));
         let provider_error = Arc::new(Mutex::new(None));
         let account = Arc::new(Mutex::new(None));
+        let account_usage = Arc::new(Mutex::new(Vec::new()));
         let unused = Arc::new(UnusedStore {
             observations: observations.clone(),
             usage_records: Arc::clone(&usage_records),
@@ -165,6 +168,7 @@ impl AdminTestFixture {
             dashboard_observation: Arc::clone(&dashboard_observation),
             dashboard_summary_range: Arc::clone(&dashboard_summary_range),
             account: Arc::clone(&account),
+            account_usage: Arc::clone(&account_usage),
         });
         let plugin_ports = Arc::new(plugins::TestPluginPorts::default());
         let published_snapshot = gateway_core::runtime::RuntimeSnapshotHandle::default();
@@ -238,6 +242,7 @@ impl AdminTestFixture {
             provider_error,
             account,
             proxies: memory_proxies,
+            account_usage,
         }
     }
 
@@ -323,6 +328,7 @@ impl MemoryAuthStore {
                     },
                     admin_user_id: "admin_1".to_owned(),
                 },
+                renewal: None,
                 absolute_expires_at: None,
                 expires_at: Utc::now() + Duration::hours(1),
             },
@@ -341,7 +347,7 @@ impl MemoryAuthStore {
         self.sessions
             .lock()
             .unwrap()
-            .get_mut(session_id)
+            .get_mut(session_id.split('.').nth(1).unwrap_or(session_id))
             .unwrap()
             .expires_at = expires_at;
     }
@@ -417,19 +423,24 @@ impl AuthStore for MemoryAuthStore {
         Ok(())
     }
 
-    async fn renew_session(
+    async fn compare_exchange_session(
         &self,
         session_id: &str,
         expected: &AuthSession,
-        expires_at: chrono::DateTime<chrono::Utc>,
+        replacement: Option<&AuthSession>,
     ) -> AdminStoreResult<Option<AuthSession>> {
         let mut sessions = self.sessions.lock().unwrap();
         if let Some(session) = sessions.get_mut(session_id) {
-            if session.expires_at <= chrono::Utc::now() {
+            if session.retained_until() <= chrono::Utc::now() {
                 return Ok(None);
             }
             if session == expected {
-                session.expires_at = expires_at;
+                if let Some(replacement) = replacement {
+                    *session = replacement.clone();
+                } else {
+                    sessions.remove(session_id);
+                    return Ok(None);
+                }
             }
             return Ok(Some(session.clone()));
         }
@@ -606,12 +617,12 @@ impl SettingsStore for MemorySettingsStore {
             rotation_strategy: command.rotation_strategy,
             updated_at: Utc::now(),
             values: gateway_admin::model::settings::RuntimeSettingsValues {
+                codex_privacy_policy: command.values.codex_privacy_policy,
                 request_location_enabled: command.values.request_location_enabled,
                 request_location: command.values.request_location,
                 refresh_margin_seconds: command.values.refresh_margin_seconds,
                 refresh_concurrency: command.values.refresh_concurrency,
                 max_concurrent_per_account: command.values.max_concurrent_per_account,
-                request_interval_ms: command.values.request_interval_ms,
                 max_waiting_per_key: command.values.max_waiting_per_key,
                 max_waiting_per_account: command.values.max_waiting_per_account,
                 concurrency_wait_timeout_seconds: command.values.concurrency_wait_timeout_seconds,
@@ -1105,6 +1116,7 @@ struct UnusedStore {
     dashboard_observation: Arc<Mutex<Option<DashboardObservation>>>,
     dashboard_summary_range: Arc<Mutex<Option<TimeRange>>>,
     account: Arc<Mutex<Option<AccountPageItem>>>,
+    account_usage: Arc<Mutex<Vec<AccountUsage>>>,
 }
 
 struct UnusedClientKeyVerifier;
@@ -1166,18 +1178,41 @@ impl AccountStore for UnusedStore {
     async fn load_account_usage(
         &self,
         _: TimeRange,
-        _: &[String],
+        account_ids: &[String],
     ) -> AdminStoreResult<Vec<AccountUsage>> {
         if self.account.lock().expect("account").is_some() {
-            return Ok(Vec::new());
+            return Ok(self
+                .account_usage
+                .lock()
+                .expect("account usage")
+                .iter()
+                .filter(|usage| account_ids.contains(&usage.account_id))
+                .cloned()
+                .collect());
         }
         Err(unavailable("account usage"))
     }
 
     async fn load_account_usage_by_windows(
         &self,
-        _: &[AccountUsageWindowQuery],
+        windows: &[AccountUsageWindowQuery],
     ) -> AdminStoreResult<Vec<AccountUsageWindowResult>> {
+        if self.account.lock().expect("account").is_some() {
+            let usage = self.account_usage.lock().expect("account usage");
+            return Ok(windows
+                .iter()
+                .filter_map(|window| {
+                    usage
+                        .iter()
+                        .find(|usage| usage.account_id == window.account_id)
+                        .map(|usage| AccountUsageWindowResult {
+                            account_id: window.account_id.clone(),
+                            key: window.key.clone(),
+                            usage: usage.clone(),
+                        })
+                })
+                .collect());
+        }
         Err(unavailable("account quota window usage"))
     }
 
@@ -1351,6 +1386,10 @@ impl AccountRuntimeStore for UnusedStore {
 
 #[async_trait]
 impl ObservabilityStore for UnusedStore {
+    fn query_timeout(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(10)
+    }
+
     async fn dashboard_summary(
         &self,
         query: DashboardQuery,
@@ -1386,15 +1425,39 @@ impl ObservabilityStore for UnusedStore {
         data.trend.clone().ok_or_else(|| unavailable("usage trend"))
     }
 
-    fn usage_calculated_billing_facts(
+    async fn analytics_cache_generation(&self) -> AdminStoreResult<u64> {
+        Ok(self
+            .observations
+            .lock()
+            .expect("observations")
+            .summary
+            .as_ref()
+            .map_or(0, |summary| summary.analytics.generation))
+    }
+
+    async fn usage_insights_observation(
         &self,
-        _: TimeRange,
-        _: UsageFilter,
+        range: TimeRange,
+        filter: UsageFilter,
         _: Granularity,
-    ) -> gateway_admin::ports::store::UsageCalculatedBillingStream<'_> {
-        Box::pin(futures::stream::once(async {
-            Err(unavailable("usage billing facts"))
-        }))
+    ) -> AdminStoreResult<gateway_admin::model::observability::UsageInsightsObservation> {
+        let mut data = self.observations.lock().expect("observations");
+        data.summaries.push((range, filter.clone()));
+        data.trends.push((range, filter));
+        Ok(
+            gateway_admin::model::observability::UsageInsightsObservation {
+                overview: data
+                    .summary
+                    .clone()
+                    .map(|summary| UsageOverview { range, ..summary })
+                    .ok_or_else(|| unavailable("usage summary"))?,
+                trend: data
+                    .trend
+                    .clone()
+                    .ok_or_else(|| unavailable("usage trend"))?,
+                costs: Vec::new(),
+            },
+        )
     }
 
     async fn list_usage_records(&self, query: UsageQuery) -> AdminStoreResult<UsagePage> {
@@ -1673,12 +1736,12 @@ fn test_runtime_settings() -> RuntimeSettings {
         rotation_strategy: RotationStrategy::Smart,
         updated_at: Utc::now(),
         values: gateway_admin::model::settings::RuntimeSettingsValues {
+            codex_privacy_policy: Default::default(),
             request_location_enabled: false,
             request_location: Default::default(),
             refresh_margin_seconds: 3_600,
             refresh_concurrency: 2,
             max_concurrent_per_account: 3,
-            request_interval_ms: 50,
             max_waiting_per_key: 0,
             max_waiting_per_account: 0,
             concurrency_wait_timeout_seconds: 30,

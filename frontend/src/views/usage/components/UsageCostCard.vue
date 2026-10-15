@@ -2,7 +2,7 @@
 import type { EChartsOption, LineSeriesOption } from 'echarts'
 import type { getUsageRecordInsightsOverview } from '@/api'
 
-import { BaseCard, BaseEmpty, BaseSegmented } from '@codex-proxy/ui'
+import { ZCard, ZEmpty, ZSegmented } from '@codex-proxy/ui'
 import { computed, shallowRef } from 'vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import {
@@ -224,14 +224,14 @@ function costAmount(value: string | null, pointIndex: number) {
 </script>
 
 <template>
-  <BaseCard
+  <ZCard
     as="article"
     title="成本效率"
     description="实际费用、缓存节省、服务层溢价与单位成本"
     class="min-h-90 xl:h-full"
   >
     <template #actions>
-      <BaseSegmented v-model="activeView" label="成本视图" :options="viewOptions" :disabled="loading" class="w-50" />
+      <ZSegmented v-model="activeView" aria-label="成本视图" :options="viewOptions" :disabled="loading" class="w-50" />
     </template>
 
     <template #body>
@@ -269,9 +269,9 @@ function costAmount(value: string | null, pointIndex: number) {
           </div>
         </div>
         <BaseChart v-if="hasData" :option="chartOption" :height="210" />
-        <BaseEmpty
+        <ZEmpty
           v-else
-          size="sm"
+          size="small"
           surface="none"
           :title="loading ? '正在加载成本数据' : '暂无成本效率数据'"
           description="当前范围没有可绘制的费用或缓存收益数据"
@@ -279,5 +279,5 @@ function costAmount(value: string | null, pointIndex: number) {
         />
       </div>
     </template>
-  </BaseCard>
+  </ZCard>
 </template>

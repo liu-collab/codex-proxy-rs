@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ClientProfilePreview } from '@/api/modules/settings/profiles'
-import { BaseSkeleton } from '@codex-proxy/ui'
+import { ZSkeleton } from '@codex-proxy/ui'
 
 defineProps<{
   preview?: Pick<ClientProfilePreview, 'userAgent' | 'versionSource' | 'checkedAtDisplay' | 'error'> & { versionLag?: number | null }
@@ -25,10 +25,10 @@ defineProps<{
   >
     <template v-if="previewing">
       <div class="flex h-lh items-center text-cp-sm" role="status" aria-label="正在解析客户端身份">
-        <BaseSkeleton shape="text" class="w-4/5" aria-hidden="true" />
+        <ZSkeleton shape="text" class="w-4/5" aria-hidden="true" />
       </div>
       <div class="flex h-lh items-center text-cp-xs" aria-hidden="true">
-        <BaseSkeleton shape="text" class="w-52 max-w-full" />
+        <ZSkeleton shape="text" class="w-52 max-w-full" />
       </div>
     </template>
     <template v-else-if="preview">

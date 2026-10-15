@@ -69,6 +69,7 @@ pub struct ProxyTestResult {
 
 #[derive(Debug, Clone)]
 pub struct ProxyRecord {
+    pub enabled: bool,
     pub auto_location: bool,
     pub detected_location: Option<DetectedProxyLocation>,
     pub location: Option<gateway_core::account::RequestLocation>,
@@ -112,6 +113,7 @@ pub struct NewProxy {
 
 #[derive(Debug, Clone)]
 pub struct UpdateProxy {
+    pub enabled: Option<bool>,
     pub auto_location: Option<bool>,
     pub test: Option<ProxyTestResult>,
     /// 外层为空保留配置，内层为空恢复全局继承

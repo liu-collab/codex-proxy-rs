@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use gateway_plugin_sdk::{
     ErrorCode, Frame, Message, PluginFault,
+    call::middleware::NEXT_METHOD,
     client::{read_frame, validate_frame, write_frame},
 };
 use tokio::{
@@ -124,16 +125,26 @@ async fn read_loop<R: AsyncRead + Unpin>(
                     Err(RpcError::Protocol(None))
                 } else if let Some(context) = shared.context(parent_id) {
                     last_callback = id;
-                    if let Some(permit) = shared.try_callback_slot() {
+                    if let Some(permit) = shared.try_callback_slot(&method) {
                         let handler = Arc::clone(&callbacks);
                         let response = Arc::clone(&shared);
                         let (ready, started) = oneshot::channel();
+                        let pause = (method == NEXT_METHOD)
+                            .then(|| shared.pause_next(parent_id))
+                            .flatten();
                         let task = tokio::spawn(async move {
                             // 先把任务归属登记到父调用，再允许执行宿主操作
                             if started.await.is_err() {
                                 return;
                             }
                             let result = handler.call(context, method, params, frame.payload).await;
+                            if pause.is_some()
+                                && let Err(error) = response.resume_next(parent_id).await
+                            {
+                                response.cancel(parent_id, error);
+                                return;
+                            }
+                            drop(pause);
                             let mut reply = match result {
                                 Ok(reply) => Frame {
                                     message: Message::Result {

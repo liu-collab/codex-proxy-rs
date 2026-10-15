@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
 
-import { BaseIconButton, BaseMenuItem, BasePopover } from '@codex-proxy/ui'
+import { ZIconButton, ZMenuItem, ZPopover } from '@codex-proxy/ui'
 
 import { Download, KeyRound, MoreHorizontal, Pencil, Power, RefreshCw, RotateCcw, Trash2, Wifi } from '@lucide/vue'
 import { computed } from 'vue'
@@ -31,35 +31,33 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
 
 <template>
   <div class="relative flex items-center justify-start gap-1">
-    <BaseIconButton
-      variant="ghost"
-      size="sm"
-      label="编辑账号"
+    <ZIconButton
+      size="small"
+      aria-label="编辑账号"
       @click.stop="emit('edit', account)"
     >
       <Pencil class="size-3.5 text-cp-link" />
-    </BaseIconButton>
+    </ZIconButton>
 
-    <BaseIconButton
-      variant="ghost"
-      size="sm"
-      label="删除账号"
+    <ZIconButton
+      size="small"
+      aria-label="删除账号"
       :disabled="deleting"
       @click.stop="emit('delete', account)"
     >
       <Trash2 class="size-3.5 text-cp-error" />
-    </BaseIconButton>
+    </ZIconButton>
 
-    <BasePopover placement="bottom-end">
-      <template #trigger="{ open }">
-        <BaseIconButton variant="ghost" size="sm" label="更多操作" :pressed="open">
+    <ZPopover placement="bottom-end">
+      <template #reference="{ open }">
+        <ZIconButton size="small" aria-label="更多操作" :pressed="open">
           <MoreHorizontal class="size-4" />
-        </BaseIconButton>
+        </ZIconButton>
       </template>
 
       <template #default="{ close }">
         <div class="w-40 p-1.5">
-          <BaseMenuItem
+          <ZMenuItem
             :loading="testing"
             :disabled="testing"
             @click.stop="(close(), emit('test', account))"
@@ -68,8 +66,8 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
               <Wifi class="size-3.5 text-cp-text-quaternary" />
             </template>
             测试连接
-          </BaseMenuItem>
-          <BaseMenuItem
+          </ZMenuItem>
+          <ZMenuItem
             :loading="togglingScheduling"
             :disabled="togglingScheduling"
             @click.stop="(close(), emit('toggleScheduling', account))"
@@ -78,8 +76,8 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
               <Power class="size-3.5 text-cp-text-quaternary" />
             </template>
             {{ account.enabled ? '停用调度' : '启用调度' }}
-          </BaseMenuItem>
-          <BaseMenuItem
+          </ZMenuItem>
+          <ZMenuItem
             v-if="credentialEligible"
             :loading="refreshing"
             :disabled="refreshing"
@@ -92,14 +90,14 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
               <RefreshCw class="size-3.5 text-cp-text-quaternary" />
             </template>
             刷新令牌
-          </BaseMenuItem>
-          <BaseMenuItem v-if="credentialEligible" @click.stop="(close(), emit('reauthorize', account))">
+          </ZMenuItem>
+          <ZMenuItem v-if="credentialEligible" @click.stop="(close(), emit('reauthorize', account))">
             <template #icon>
               <KeyRound class="size-3.5 text-cp-text-quaternary" />
             </template>
             重新授权
-          </BaseMenuItem>
-          <BaseMenuItem
+          </ZMenuItem>
+          <ZMenuItem
             v-if="account.provider === 'openai' && account.authenticationKind === 'oauth'"
             :loading="downloadingCatalog"
             :disabled="downloadingCatalog"
@@ -112,8 +110,8 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
               <Download class="size-3.5 text-cp-text-quaternary" />
             </template>
             下载模型目录
-          </BaseMenuItem>
-          <BaseMenuItem
+          </ZMenuItem>
+          <ZMenuItem
             :loading="recovering"
             :disabled="recovering"
             @click.stop="(close(), emit('recover', account.id))"
@@ -122,9 +120,9 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
               <RotateCcw class="size-3.5 text-cp-text-quaternary" />
             </template>
             恢复状态
-          </BaseMenuItem>
+          </ZMenuItem>
         </div>
       </template>
-    </BasePopover>
+    </ZPopover>
   </div>
 </template>

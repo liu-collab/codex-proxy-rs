@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseCard, BaseForm, BaseFormItem, BaseInput } from '@codex-proxy/ui'
+import { ZCard, ZForm, ZFormItem, ZIconButton, ZInput } from '@codex-proxy/ui'
 
 import { CircleHelp, MonitorUp, TerminalSquare } from '@lucide/vue'
 
@@ -27,28 +27,28 @@ const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required:
 </script>
 
 <template>
-  <BaseCard>
+  <ZCard>
     <template #title>
       <span class="inline-flex items-center gap-1.5">
         <span>客户端版本限制</span>
-        <button
-          type="button"
-          class="inline-flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-cp-sm border-0 bg-transparent p-0 text-cp-text-tertiary outline-none transition-colors hover:text-cp-text focus-visible:ring-2 focus-visible:ring-cp-control-outline motion-reduce:transition-none"
+        <ZIconButton
           aria-label="查看安装与升级说明"
+          :title="undefined"
+          class="size-6! hover:bg-transparent! active:bg-transparent!"
           @click="emit('help')"
         >
           <CircleHelp class="size-3.5" aria-hidden="true" />
-        </button>
+        </ZIconButton>
       </span>
     </template>
 
-    <BaseForm class="max-w-6xl sm:grid-cols-2">
-      <BaseFormItem
+    <ZForm class="max-w-6xl sm:grid-cols-2">
+      <ZFormItem
         label="Codex Desktop 最低版本"
         description="只检查桌面端应用版本，例如 26.825.51511"
         :error="desktopError"
       >
-        <BaseInput
+        <ZInput
           v-model="minCodexDesktopVersion"
           aria-label="Codex Desktop 最低版本"
           autocomplete="off"
@@ -59,15 +59,15 @@ const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required:
           <template #prefix>
             <MonitorUp class="size-4" />
           </template>
-        </BaseInput>
-      </BaseFormItem>
+        </ZInput>
+      </ZFormItem>
 
-      <BaseFormItem
+      <ZFormItem
         label="Codex CLI 最低版本"
         description="只检查独立终端版本，例如 0.152.0"
         :error="cliError"
       >
-        <BaseInput
+        <ZInput
           v-model="minCodexCliVersion"
           aria-label="Codex CLI 最低版本"
           autocomplete="off"
@@ -78,8 +78,8 @@ const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required:
           <template #prefix>
             <TerminalSquare class="size-4" />
           </template>
-        </BaseInput>
-      </BaseFormItem>
-    </BaseForm>
-  </BaseCard>
+        </ZInput>
+      </ZFormItem>
+    </ZForm>
+  </ZCard>
 </template>

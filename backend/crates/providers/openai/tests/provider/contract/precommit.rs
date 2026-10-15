@@ -1,4 +1,4 @@
-//! 验证结构事件缓冲、交付宽限与取消对重试边界的影响
+//! 验证事件即时交付、长时间进度与取消对重试边界的影响
 
 use gateway_core::diagnostics::TraceContext;
 use gateway_core::engine::provider::ProviderStream;
@@ -16,7 +16,7 @@ fn traced_context(trace: &TraceContext, cancellation: CancellationToken) -> Atte
         )
         .with_trace(trace.clone()),
         NonZeroU32::new(1).unwrap(),
-        SystemTime::now() + Duration::from_secs(30),
+        SystemTime::now() + Duration::from_secs(3_600),
         account_policy(),
         AccountAttemptContext::new(BTreeSet::new(), None, None)
             .with_account_scope(contract_account_scope()),
@@ -49,17 +49,7 @@ fn sse(event: &Value) -> String {
     encode_sse_event(event["type"].as_str().unwrap(), &event.to_string())
 }
 
-fn releases(trace: &TraceContext) -> Vec<Value> {
-    trace.snapshot().unwrap()["events"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|event| event["stage"] == "provider.precommit.released")
-        .cloned()
-        .collect()
-}
-
-async fn next_client_event(stream: &mut ProviderStream) -> ProviderEvent {
+pub(super) async fn next_client_event(stream: &mut ProviderStream) -> ProviderEvent {
     loop {
         let event = stream.next().await.unwrap().unwrap();
         if event.has_client_event() {
@@ -68,7 +58,9 @@ async fn next_client_event(stream: &mut ProviderStream) -> ProviderEvent {
     }
 }
 
-async fn stream_failure(stream: &mut ProviderStream) -> (Vec<ProviderEvent>, ProviderError) {
+pub(super) async fn stream_failure(
+    stream: &mut ProviderStream,
+) -> (Vec<ProviderEvent>, ProviderError) {
     let mut events = Vec::new();
     loop {
         match stream.next().await.expect("upstream failure") {
@@ -79,7 +71,7 @@ async fn stream_failure(stream: &mut ProviderStream) -> (Vec<ProviderEvent>, Pro
 }
 
 #[tokio::test]
-async fn large_structural_events_preserve_overload_replay_on_http_and_websocket() {
+async fn large_preludes_are_forwarded_before_failure_on_http_and_websocket() {
     for websocket in [false, true] {
         let store = Arc::new(MemoryAccountStore::default());
         create_account(&store, "acct_provider_contract").await;
@@ -87,7 +79,7 @@ async fn large_structural_events_preserve_overload_replay_on_http_and_websocket(
         let created = structural_event("response.created", 300 * 1024);
         let progress = structural_event("response.in_progress", 300 * 1024);
         let failure = overload();
-        let expected = vec![created.clone(), progress.clone(), failure.clone()];
+        let expected = vec![failure.clone()];
         let (base_url, release, server) = if websocket {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base_url = format!("http://{}", listener.local_addr().unwrap());
@@ -126,11 +118,13 @@ async fn large_structural_events_preserve_overload_replay_on_http_and_websocket(
             .await
             .unwrap();
 
-        assert!(
-            timeout(Duration::from_millis(1_500), next_client_event(&mut stream))
+        for kind in ["response.created", "response.in_progress"] {
+            let event = timeout(Duration::from_secs(1), next_client_event(&mut stream))
                 .await
-                .is_err()
-        );
+                .unwrap();
+            assert_eq!(event.wire_event().unwrap().event_type(), Some(kind));
+            assert!(event.is_replayable_prelude());
+        }
         release.send(()).unwrap();
         let (events, mut error) = timeout(Duration::from_secs(1), stream_failure(&mut stream))
             .await
@@ -147,21 +141,16 @@ async fn large_structural_events_preserve_overload_replay_on_http_and_websocket(
             .filter_map(|event| event.wire_event().map(|wire| wire.data().clone()))
             .collect();
         assert_eq!(actual, expected);
-        assert!(
-            releases(&trace).is_empty(),
-            "discardable failure must not be reported as a release"
-        );
         server.await.unwrap();
     }
 }
 
 #[tokio::test]
-async fn later_structural_events_do_not_extend_grace_and_late_overload_is_not_replayable() {
+async fn late_overload_after_multiple_structural_events_remains_replayable() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_provider_contract").await;
     let created = sse(&structural_event("response.created", 96 * 1024));
     let progress = sse(&structural_event("response.in_progress", 96 * 1024));
-    let expected_bytes = created.len() + progress.len();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base_url = format!("http://{}", listener.local_addr().unwrap());
     let (release, released) = oneshot::channel();
@@ -184,35 +173,36 @@ async fn later_structural_events_do_not_extend_grace_and_late_overload_is_not_re
         )
         .await
         .unwrap();
-    let first = timeout(Duration::from_millis(3_500), next_client_event(&mut stream))
-        .await
-        .unwrap();
-    assert_eq!(
-        first.wire_event().unwrap().event_type(),
-        Some("response.created")
-    );
+    for kind in ["response.created", "response.in_progress"] {
+        let event = timeout(Duration::from_secs(2), next_client_event(&mut stream))
+            .await
+            .unwrap();
+        assert_eq!(event.wire_event().unwrap().event_type(), Some(kind));
+        assert!(event.is_replayable_prelude());
+    }
     release.send(()).unwrap();
-    let (events, error) = timeout(Duration::from_secs(1), stream_failure(&mut stream))
+    let (events, mut error) = timeout(Duration::from_secs(1), stream_failure(&mut stream))
         .await
         .unwrap();
-    assert!(!error.replay_is_safe());
-    assert!(error.pre_delivery_retry().is_none());
-    assert!(events.iter().any(|event| {
-        event
-            .wire_event()
-            .is_some_and(|wire| wire.data() == &overload())
-    }));
-    let releases = releases(&trace);
-    assert_eq!(releases.len(), 1);
-    assert_eq!(releases[0]["attemptIndex"], 1);
-    assert_eq!(releases[0]["data"]["reason"], "grace_timeout");
-    assert_eq!(releases[0]["data"]["prefetchedBytes"], expected_bytes);
-    assert!((2_500..3_500).contains(&releases[0]["data"]["waitMs"].as_u64().unwrap()));
+    assert!(events.iter().all(|event| !event.has_client_event()));
+    assert!(error.replay_is_safe());
+    assert!(matches!(
+        error.pre_delivery_retry(),
+        Some(PreDeliveryRetry::SameAccountTransientRetry { .. })
+    ));
+    assert_eq!(
+        error
+            .take_atomic_client_events()
+            .iter()
+            .filter_map(|event| event.wire_event()?.event_type())
+            .collect::<Vec<_>>(),
+        ["error"]
+    );
     server.await.unwrap();
 }
 
 #[tokio::test]
-async fn immediate_release_preserves_wire_and_records_the_boundary_once() {
+async fn immediate_delivery_preserves_wire_through_output_terminal_and_eof() {
     let semantic = json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "hello"});
     let terminal = json!({"type": "response.completed", "response": {"id": "resp_precommit", "model": "gpt-5.4", "status": "completed", "output": []}});
     let tool = json!({"type": "response.web_search_call.in_progress", "item_id": "search_precommit", "output_index": 0});
@@ -269,16 +259,12 @@ async fn immediate_release_preserves_wire_and_records_the_boundary_once() {
             }
         }
         assert_eq!(wire, body.as_bytes());
-        let releases = releases(&trace);
-        assert_eq!(releases.len(), 1);
-        assert_eq!(releases[0]["data"]["reason"], reason);
-        assert_eq!(releases[0]["data"]["prefetchedBytes"], body.len());
         server.await.unwrap();
     }
 }
 
 #[tokio::test]
-async fn cancelling_buffered_structural_events_does_not_release_or_offer_replay() {
+async fn cancelling_after_prelude_delivery_does_not_offer_replay() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_provider_contract").await;
     let (base_url, release, _, server) = paused_chunked_sse_server(
@@ -295,10 +281,12 @@ async fn cancelling_buffered_structural_events_does_not_release_or_offer_replay(
         )
         .await
         .unwrap();
-    assert!(
-        timeout(Duration::from_millis(100), next_client_event(&mut stream))
-            .await
-            .is_err()
+    let created = timeout(Duration::from_secs(1), next_client_event(&mut stream))
+        .await
+        .unwrap();
+    assert_eq!(
+        created.wire_event().unwrap().event_type(),
+        Some("response.created")
     );
     cancellation.cancel();
     let (events, error) = timeout(Duration::from_secs(1), stream_failure(&mut stream))
@@ -307,7 +295,279 @@ async fn cancelling_buffered_structural_events_does_not_release_or_offer_replay(
     assert_eq!(error.kind(), ProviderErrorKind::Cancelled);
     assert!(!error.replay_is_safe());
     assert!(events.iter().all(|event| !event.has_client_event()));
-    assert!(releases(&trace).is_empty());
     release.send(()).unwrap();
     server.await.unwrap();
+}
+
+#[tokio::test]
+async fn twenty_minute_structural_progress_preserves_late_overload_recovery() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_provider_contract").await;
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base_url = format!("http://{}", listener.local_addr().unwrap());
+    let (progress, mut progress_requests) = tokio::sync::mpsc::channel::<()>(1);
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        read_http_request(&mut socket).await;
+        socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n").await.unwrap();
+        write_http_chunk(
+            &mut socket,
+            &sse(&structural_event("response.created", 1024)),
+        )
+        .await;
+        while progress_requests.recv().await.is_some() {
+            write_http_chunk(
+                &mut socket,
+                &sse(&structural_event("response.in_progress", 1024)),
+            )
+            .await;
+        }
+        write_http_chunk(&mut socket, &sse(&overload())).await;
+        socket.write_all(b"0\r\n\r\n").await.unwrap();
+    });
+    let trace = TraceContext::new("req_precommit");
+    let mut stream = provider_with_base_url(&store, base_url)
+        .execute(
+            planned_request("openai", http_generate_operation()),
+            traced_context(&trace, CancellationToken::new()),
+        )
+        .await
+        .unwrap();
+    let created = timeout(Duration::from_secs(1), next_client_event(&mut stream))
+        .await
+        .unwrap();
+    assert_eq!(
+        created.wire_event().unwrap().event_type(),
+        Some("response.created")
+    );
+    // 结构进度保持上游传输活跃，长思考不能额外触发首内容等待期限
+    for _ in 0..20 {
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(60)).await;
+        tokio::time::resume();
+        progress.send(()).await.unwrap();
+        let event = timeout(Duration::from_secs(1), next_client_event(&mut stream))
+            .await
+            .unwrap();
+        assert_eq!(
+            event.wire_event().unwrap().event_type(),
+            Some("response.in_progress")
+        );
+        assert!(event.is_replayable_prelude());
+    }
+    drop(progress);
+    let (events, error) = timeout(Duration::from_secs(1), stream_failure(&mut stream))
+        .await
+        .unwrap();
+    assert!(events.iter().all(|event| !event.has_client_event()));
+    assert!(error.replay_is_safe());
+    assert!(matches!(
+        error.pre_delivery_retry(),
+        Some(PreDeliveryRetry::SameAccountTransientRetry { .. })
+    ));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn large_prelude_stream_is_forwarded_without_retaining_it_for_failure() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_provider_contract").await;
+    // 大段配置回显仍属于前导事件，累计体积不应改变上游失败的恢复方式
+    let preamble = sse(&structural_event("response.in_progress", 1024 * 1024)).repeat(17);
+    let (base_url, release, _, server) =
+        paused_chunked_sse_server(preamble, sse(&overload())).await;
+    let trace = TraceContext::new("req_precommit");
+    let mut stream = provider_with_base_url(&store, base_url)
+        .execute(
+            planned_request("openai", http_generate_operation()),
+            traced_context(&trace, CancellationToken::new()),
+        )
+        .await
+        .unwrap();
+    for _ in 0..17 {
+        let event = timeout(Duration::from_secs(2), next_client_event(&mut stream))
+            .await
+            .unwrap();
+        assert_eq!(
+            event.wire_event().unwrap().event_type(),
+            Some("response.in_progress")
+        );
+        assert!(event.is_replayable_prelude());
+    }
+    release.send(()).unwrap();
+    let (events, mut error) = timeout(Duration::from_secs(10), stream_failure(&mut stream))
+        .await
+        .unwrap();
+    assert!(events.iter().all(|event| !event.has_client_event()));
+    assert!(error.replay_is_safe());
+    assert!(matches!(
+        error.pre_delivery_retry(),
+        Some(PreDeliveryRetry::SameAccountTransientRetry { .. })
+    ));
+    let buffered_bytes: usize = error
+        .take_atomic_client_events()
+        .iter()
+        .filter_map(|event| event.wire_event()?.raw_sse_frame())
+        .map(bytes::Bytes::len)
+        .sum();
+    assert_eq!(buffered_bytes, sse(&overload()).len());
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn websocket_disconnect_recovery_honors_request_retry_budget_without_session_affinity() {
+    for max_retries in [0, 5] {
+        let store = Arc::new(MemoryAccountStore::default());
+        create_account(&store, "acct_provider_contract").await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            for _ in 0..=max_retries {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut ws = accept_codex_test_websocket(socket).await;
+                ws.next().await.unwrap().unwrap();
+                ws.send(Message::Text(
+                    structural_event("response.created", 1024)
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+                ws.close(None).await.unwrap();
+            }
+        });
+        let provider = provider_with_base_url_and_retry_budget(&store, base_url, max_retries);
+        for retry_count in 0..=max_retries {
+            let transport = NonZeroU32::new(retry_count)
+                .map_or(AttemptTransport::Default, AttemptTransport::Retry);
+            let trace = TraceContext::new("req_precommit");
+            let mut stream = Arc::clone(&provider)
+                .execute(
+                    planned_request("openai", generate_operation()),
+                    traced_context(&trace, CancellationToken::new()).with_transport(transport),
+                )
+                .await
+                .unwrap();
+            let (events, error) = stream_failure(&mut stream).await;
+            let delivered: Vec<_> = events
+                .iter()
+                .filter(|event| event.has_client_event())
+                .collect();
+            assert_eq!(delivered.len(), 1);
+            assert!(delivered[0].is_replayable_prelude());
+            assert_eq!(error.send_state(), UpstreamSendState::Ambiguous);
+            assert!(!error.replay_is_safe());
+            if retry_count < max_retries {
+                assert!(
+                    matches!(error.pre_delivery_retry(), Some(PreDeliveryRetry::SameAccountTransportRetry { retry_index, .. }) if retry_index.get() == retry_count + 1)
+                );
+            } else {
+                assert_eq!(
+                    error.pre_delivery_retry(),
+                    Some(PreDeliveryRetry::SameAccountTransportFallback)
+                );
+            }
+        }
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn sse_comments_are_forwarded_without_closing_the_retry_window() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_provider_contract").await;
+    let heartbeat = ": keep-alive\r\n\r\n";
+    let (base_url, release, _, server) =
+        paused_chunked_sse_server(heartbeat.to_owned(), sse(&overload())).await;
+    let mut stream = provider_with_base_url(&store, base_url)
+        .execute(
+            planned_request("openai", http_generate_operation()),
+            context("req_heartbeat_retry", CancellationToken::new()),
+        )
+        .await
+        .unwrap();
+    let event = timeout(Duration::from_secs(1), next_client_event(&mut stream))
+        .await
+        .expect("heartbeat cannot wait for a later event");
+    assert_eq!(
+        event.wire_event().unwrap().raw_sse_frame().unwrap(),
+        heartbeat.as_bytes()
+    );
+    assert!(event.is_replayable_prelude());
+    release.send(()).unwrap();
+    let (_, error) = stream_failure(&mut stream).await;
+    assert!(error.replay_is_safe());
+    assert!(matches!(
+        error.pre_delivery_retry(),
+        Some(PreDeliveryRetry::SameAccountTransientRetry { .. })
+    ));
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn ordinary_streams_forward_compaction_output_and_unknown_events_without_reopening_retry() {
+    for websocket in [false, true] {
+        for first in [
+            json!({"type":"response.compaction.compacting","item_id":"compact_test","output_index":0}),
+            json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"partial"}),
+            json!({"type":"response.future","value":"opaque"}),
+        ] {
+            let store = Arc::new(MemoryAccountStore::default());
+            create_account(&store, "acct_provider_contract").await;
+            let prelude = structural_event("response.created", 1024);
+            let (base_url, release, server) = if websocket {
+                let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+                let base_url = format!("http://{}", listener.local_addr().unwrap());
+                let (release, released) = oneshot::channel();
+                let first = first.clone();
+                let server = tokio::spawn(async move {
+                    let (socket, _) = listener.accept().await.unwrap();
+                    let mut socket = accept_codex_test_websocket(socket).await;
+                    socket.next().await.unwrap().unwrap();
+                    for event in [first, prelude] {
+                        socket
+                            .send(Message::Text(event.to_string().into()))
+                            .await
+                            .unwrap();
+                    }
+                    released.await.unwrap();
+                    socket
+                        .send(Message::Text(overload().to_string().into()))
+                        .await
+                        .unwrap();
+                });
+                (base_url, release, server)
+            } else {
+                let (base_url, release, _, server) =
+                    paused_chunked_sse_server(sse(&first) + &sse(&prelude), sse(&overload())).await;
+                (base_url, release, server)
+            };
+            let operation = if websocket {
+                generate_operation()
+            } else {
+                http_generate_operation()
+            };
+            let mut stream = provider_with_base_url(&store, base_url)
+                .execute(
+                    planned_request("openai", operation),
+                    context("req_closed_retry", CancellationToken::new()),
+                )
+                .await
+                .unwrap();
+            let delivered = timeout(Duration::from_secs(1), next_client_event(&mut stream))
+                .await
+                .unwrap();
+            assert_eq!(delivered.wire_event().unwrap().data(), &first);
+            assert!(!delivered.is_replayable_prelude());
+            let created = timeout(Duration::from_secs(1), next_client_event(&mut stream))
+                .await
+                .unwrap();
+            assert!(!created.is_replayable_prelude());
+            release.send(()).unwrap();
+            let (_, error) = stream_failure(&mut stream).await;
+            assert!(!error.replay_is_safe());
+            assert!(error.pre_delivery_retry().is_none());
+            server.await.unwrap();
+        }
+    }
 }

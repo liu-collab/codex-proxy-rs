@@ -70,3 +70,41 @@ async fn retention_batch_deletes_only_expired_rows_up_to_limit() {
     assert_eq!(retained, ["retention-6"]);
     database.close().await;
 }
+
+#[tokio::test]
+async fn empty_request_cleanup_does_not_conflict_with_analytics_publication() {
+    let Some(database) = TestDatabase::create("retention_empty_analytics").await else {
+        return;
+    };
+    let repository = PgRetentionRepository::new(database.pool.clone());
+    let mut publication = database.pool.begin().await.unwrap();
+    sqlx::query("set transaction isolation level repeatable read")
+        .execute(&mut *publication)
+        .await
+        .unwrap();
+    let generation: i64 =
+        sqlx::query_scalar("select generation from request_analytics_build_state where singleton")
+            .fetch_one(&mut *publication)
+            .await
+            .unwrap();
+    // 先固定回填事务快照，再让启动时的清理任务执行一次空删除
+    let deleted = repository
+        .purge_batch(
+            RetentionTarget::ModelRequests,
+            Utc::now(),
+            RetentionPolicy::try_new(31, 30, 90).unwrap(),
+            NonZeroU32::new(1000).unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(deleted, 0);
+    let published: i64 = sqlx::query_scalar(
+        "update request_analytics_build_state set backfill_complete=true where singleton returning generation",
+    )
+    .fetch_one(&mut *publication)
+    .await
+    .expect("empty cleanup must not invalidate the analytics transaction snapshot");
+    assert_eq!(published, generation);
+    publication.commit().await.unwrap();
+    database.close().await;
+}

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountCreateSource } from '../../utils/accountCreate'
-import { BaseSegmented } from '@codex-proxy/ui'
+import { ZSegmented } from '@codex-proxy/ui'
 import { LayoutGrid } from '@lucide/vue'
 import { computed } from 'vue'
 import { formatProviderLabel, PROVIDER_IDS, providerIcon } from '@/utils/providers'
@@ -26,12 +26,12 @@ const selected = computed({
 </script>
 
 <template>
-  <BaseSegmented
+  <ZSegmented
     v-model="selected"
     class="w-full"
-    label="选择账号平台"
+    aria-label="选择账号平台"
     :options="options"
     :disabled="disabled"
-    size="lg"
+    size="large"
   />
 </template>

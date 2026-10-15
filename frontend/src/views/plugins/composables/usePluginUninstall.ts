@@ -1,5 +1,5 @@
 import type { InstalledPlugin } from '../utils/catalog'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { deletePluginArtifact, deletePluginInstance, disablePluginInstance, getPluginArtifacts, getPluginInstances } from '@/api'
 import { notifyPluginError } from '../utils/actions'
@@ -52,7 +52,7 @@ export function usePluginUninstall(refresh: () => Promise<void>) {
       if ((await getPluginArtifacts(options)).some(artifact => artifact.metadata.pluginId === plugin.id))
         throw new Error('已删除确认范围，但还有新安装的版本，请关闭并重新确认剩余内容')
       open.value = false
-      toast.success('插件已卸载，相关数据与来源设置已清理')
+      ZNotification.success({ message: '插件已卸载，相关数据与来源设置已清理' })
       await refresh()
     }
     catch (cause) {

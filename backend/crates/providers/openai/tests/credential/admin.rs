@@ -24,6 +24,8 @@ use crate::support::{TestLeaseCoordinator, runtime_policy};
 
 struct UnusedRefresher;
 
+struct SuccessfulImportRefresher;
+
 #[tokio::test]
 async fn sub2api_import_resolves_distinct_proxy_bindings_and_encodes_credentials() {
     let service = CodexCredentialAdminService::new(
@@ -147,6 +149,76 @@ impl TokenRefresher for UnusedRefresher {
     async fn refresh(&self, _refresh_token: &str) -> Result<TokenPair, RefreshFailure> {
         panic!("a direct access-token import must not refresh its refresh token")
     }
+}
+
+#[async_trait]
+impl TokenRefresher for SuccessfulImportRefresher {
+    async fn refresh(&self, refresh_token: &str) -> Result<TokenPair, RefreshFailure> {
+        assert_eq!(refresh_token, "rt-only");
+        Ok(TokenPair {
+            access_token: Some(test_jwt(serde_json::json!({
+                "https://api.openai.com/auth": {"chatgpt_user_id": "refreshed-user"}
+            }))),
+            refresh_token: None,
+            id_token: None,
+        })
+    }
+}
+
+#[tokio::test]
+async fn access_token_only_import_keeps_token_without_refresh() {
+    let access_token = test_jwt(serde_json::json!({
+        "exp": (Utc::now() + chrono::Duration::days(1)).timestamp(),
+        "https://api.openai.com/auth": {"chatgpt_user_id": "at-only-user"}
+    }));
+    let service = CodexCredentialAdminService::new(
+        Arc::new(UnusedRefresher),
+        Arc::new(TestLeaseCoordinator::default()),
+        runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    let prepared = service
+        .prepare_import_document_with_proxy(
+            serde_json::json!({"accounts": [{"credentials": {"access_token": access_token}}]}),
+            None,
+        )
+        .await
+        .expect("unexpired AT-only account must import without refresh");
+
+    let account = prepared.accounts().first().expect("one prepared account");
+    let runtime = CodexCredentialCodec::decode(&account.credential).expect("stored credential");
+    let oauth = runtime.authentication.oauth().expect("OAuth credential");
+    assert!(oauth.refresh_token.is_none());
+    assert_eq!(account.account.upstream_user_id(), Some("at-only-user"));
+}
+
+#[tokio::test]
+async fn refresh_token_only_import_exchanges_and_keeps_original_refresh_token() {
+    let service = CodexCredentialAdminService::new(
+        Arc::new(SuccessfulImportRefresher),
+        Arc::new(TestLeaseCoordinator::default()),
+        runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    let prepared = service
+        .prepare_import_document_with_proxy(
+            serde_json::json!({"accounts": [{"credentials": {"refresh_token": "rt-only"}}]}),
+            None,
+        )
+        .await
+        .expect("RT-only account must import after a successful exchange");
+
+    let account = prepared.accounts().first().expect("one prepared account");
+    let runtime = CodexCredentialCodec::decode(&account.credential).expect("stored credential");
+    let oauth = runtime.authentication.oauth().expect("OAuth credential");
+    assert_eq!(account.account.upstream_user_id(), Some("refreshed-user"));
+    assert_eq!(
+        oauth
+            .refresh_token
+            .as_ref()
+            .map(|token| token.expose_secret()),
+        Some("rt-only")
+    );
 }
 
 #[tokio::test]
@@ -279,6 +351,28 @@ async fn direct_import_projects_access_token_jwt_expiry_without_persisting_refre
         Some(expires_at)
     );
     assert!(account.account.next_refresh_at().is_none());
+}
+
+#[tokio::test]
+async fn expired_access_token_without_refresh_token_is_not_imported() {
+    let access_token = test_jwt(serde_json::json!({
+        "exp": 1_600_000_000,
+        "https://api.openai.com/auth": {"chatgpt_user_id": "expired-user"}
+    }));
+    let service = CodexCredentialAdminService::new(
+        Arc::new(UnusedRefresher),
+        Arc::new(TestLeaseCoordinator::default()),
+        runtime_policy(),
+        Arc::new(crate::RecordingDiagnostics::default()),
+    );
+    let result = service
+        .prepare_import_document_with_proxy(serde_json::json!({"accessToken": access_token}), None)
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(provider_openai::credential::CodexCredentialAdminError::InvalidCredential)
+    ));
 }
 
 fn test_jwt(payload: serde_json::Value) -> String {
@@ -943,50 +1037,73 @@ async fn api_key_import_export_preserves_target_without_oauth_exchange() {
         runtime_policy(),
         Arc::new(crate::RecordingDiagnostics::default()),
     );
-    let imported = service.prepare_import_document_with_proxy(serde_json::json!({
-        "provider": "openai", "authentication_kind": "api_key", "name": "relay", "base_url": "https://relay.example/custom/v2", "api_key": "sk-test-only"
-    }), None).await.expect("import API account").into_accounts().pop().expect("one account");
-    assert_eq!(imported.account.authentication_kind(), "api_key");
-    assert!(!imported.account.has_refresh_token());
-    assert_eq!(imported.account.upstream_account_id(), None);
-    assert!(
-        !format!(
-            "{:?}",
-            CodexCredentialCodec::decode(&imported.credential).unwrap()
-        )
-        .contains("sk-test-only")
-    );
-    let now = Utc::now();
-    let document = CodexCredentialAdmin
-        .format_cpr_export(vec![ExportManagedCodexCredential {
-            current: LoadedCredential {
-                account: imported.account,
-                credential: imported.credential,
-            },
-            added_at: now,
-            updated_at: now,
-        }])
-        .expect("export")
-        .into_json()
-        .expect("JSON");
-    let restored = service
-        .prepare_import_document_with_proxy(document, None)
-        .await
-        .expect("reimport")
-        .into_accounts()
-        .pop()
-        .unwrap();
-    let CodexCredentialData::ApiKey(data) =
-        CodexCredentialCodec::decode_complete(&restored.credential).unwrap()
-    else {
-        panic!("API credential")
-    };
-    assert_eq!(data.base_url, "https://relay.example/custom/v2");
-    assert_eq!(data.api_key, "sk-test-only");
-    assert_eq!(
-        data.transport,
-        provider_openai::credential::ResponsesTransport::Http
-    );
+    for base_url in [
+        "https://relay.example/custom/v2",
+        "http://10.0.0.7:8080/v1",
+        "http://172.18.0.2:8080/v1",
+        "http://192.168.1.10:8080/v1",
+        "http://[fd00::7]:8080/v1",
+        "http://relay:8080/v1",
+        "http://remote.example/v1",
+    ] {
+        let imported = service
+            .prepare_import_document_with_proxy(
+                serde_json::json!({
+                    "provider": "openai",
+                    "authentication_kind": "api_key",
+                    "name": "relay",
+                    "base_url": base_url,
+                    "api_key": "sk-test-only"
+                }),
+                None,
+            )
+            .await
+            .expect("import API account")
+            .into_accounts()
+            .pop()
+            .expect("one account");
+        assert_eq!(imported.account.authentication_kind(), "api_key");
+        assert!(!imported.account.has_refresh_token());
+        assert_eq!(imported.account.upstream_account_id(), None);
+        assert!(
+            !format!(
+                "{:?}",
+                CodexCredentialCodec::decode(&imported.credential).unwrap()
+            )
+            .contains("sk-test-only")
+        );
+        let now = Utc::now();
+        let document = CodexCredentialAdmin
+            .format_cpr_export(vec![ExportManagedCodexCredential {
+                current: LoadedCredential {
+                    account: imported.account,
+                    credential: imported.credential,
+                },
+                added_at: now,
+                updated_at: now,
+            }])
+            .expect("export")
+            .into_json()
+            .expect("JSON");
+        let restored = service
+            .prepare_import_document_with_proxy(document, None)
+            .await
+            .expect("reimport")
+            .into_accounts()
+            .pop()
+            .unwrap();
+        let CodexCredentialData::ApiKey(data) =
+            CodexCredentialCodec::decode_complete(&restored.credential).unwrap()
+        else {
+            panic!("API credential")
+        };
+        assert_eq!(data.base_url, base_url);
+        assert_eq!(data.api_key, "sk-test-only");
+        assert_eq!(
+            data.transport,
+            provider_openai::credential::ResponsesTransport::Http
+        );
+    }
 }
 
 #[tokio::test]
@@ -998,7 +1115,10 @@ async fn api_key_import_rejects_unsafe_urls_and_empty_keys() {
         Arc::new(crate::RecordingDiagnostics::default()),
     );
     for (url, key) in [
-        ("http://remote.example/v1", "sk-test"),
+        ("ftp://remote.example/v1", "sk-test"),
+        ("http://user:password@relay:8080/v1", "sk-test"),
+        ("http://relay:8080/v1?token=secret", "sk-test"),
+        ("http://relay:8080/v1#fragment", "sk-test"),
         ("https://user:password@example.com", "sk-test"),
         ("https://example.com?token=secret", "sk-test"),
         ("https://example.com/#fragment", "sk-test"),
@@ -1025,6 +1145,9 @@ async fn sub2api_api_key_import_preserves_versioned_and_explicit_responses_paths
     );
     for (base, expected) in [
         ("https://example.com", "https://example.com/v1"),
+        ("http://relay:8080", "http://relay:8080/v1"),
+        ("http://10.0.0.7:8080/v1", "http://10.0.0.7:8080/v1"),
+        ("http://relay:8080/v1/responses", "http://relay:8080/v1"),
         (
             "https://example.com/custom/v4",
             "https://example.com/custom/v4",

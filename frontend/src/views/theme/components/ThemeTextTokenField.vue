@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseIconButton, BaseInput } from '@codex-proxy/ui'
+import { ZIconButton, ZInput } from '@codex-proxy/ui'
 
 import { RotateCcw } from '@lucide/vue'
 
@@ -23,17 +23,16 @@ const emit = defineEmits<{
         <strong class="text-cp-sm font-bold text-cp-text">{{ label }}</strong>
         <code class="mt-1 block truncate font-mono text-[10px] text-cp-text-quaternary">{{ token }}</code>
       </div>
-      <BaseIconButton
+      <ZIconButton
         v-if="overridden"
-        label="恢复派生值"
-        size="sm"
-        variant="ghost"
+        aria-label="恢复派生值"
+        size="small"
         @click="emit('reset')"
       >
         <RotateCcw class="size-3.5" />
-      </BaseIconButton>
+      </ZIconButton>
     </div>
-    <BaseInput
+    <ZInput
       :model-value="value"
       :aria-label="label"
       class="font-mono"

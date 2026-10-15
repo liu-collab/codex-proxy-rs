@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ConfigurePluginInstanceRequest, PluginArtifact, PluginInstance, PluginVersionPlan } from '@/api'
-import { BaseButton, BaseModal, BaseSegmented, toast } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZNotification, ZSegmented } from '@codex-proxy/ui'
 import { Blocks, Save, Settings2, ShieldCheck } from '@lucide/vue'
 import { cloneDeep } from 'es-toolkit'
 import { computed, nextTick, ref, shallowRef, useTemplateRef, watch } from 'vue'
@@ -63,18 +63,18 @@ async function submit() {
   if (!instance || !artifact)
     return
   if (!configurationValid.value) {
-    toast.warning(configurationFields.value?.validationMessage || '请检查插件参数')
+    ZNotification.warning({ message: configurationFields.value?.validationMessage || '请检查插件参数' })
     await focusConfigurationInvalid()
     return
   }
   if (!bindingsValid.value) {
     section.value = 'requests'
-    toast.warning('请设置请求范围，或勾选“应用于所有请求”')
+    ZNotification.warning({ message: '请设置请求范围，或勾选“应用于所有请求”' })
     return
   }
   if (!authenticationValid.value) {
     section.value = 'authentication'
-    toast.warning(authenticationEditor.value?.validationError || '请检查客户端认证身份映射')
+    ZNotification.warning({ message: authenticationEditor.value?.validationError || '请检查客户端认证身份映射' })
     return
   }
   const input: ConfigurePluginInstanceRequest = {
@@ -110,19 +110,19 @@ function clearSecrets() {
 </script>
 
 <template>
-  <BaseModal v-model="open" :title="versionChanged ? `切换至 ${artifact?.metadata.version}` : '插件设置'" :description="artifact ? `${artifact.metadata.displayName} · ${artifact.metadata.version}` : undefined" size="lg" :dismissible="!saving" @after-leave="clearSecrets">
+  <ZDialog v-model="open" :title="versionChanged ? `切换至 ${artifact?.metadata.version}` : '插件设置'" :description="artifact ? `${artifact.metadata.displayName} · ${artifact.metadata.version}` : undefined" width="48rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving" @closed="clearSecrets">
     <div v-if="artifact && instance" class="grid gap-5">
       <div v-if="error" role="alert" class="grid gap-1 text-cp-sm text-cp-warning-text">
         <span>{{ error }}</span>
         <span class="text-cp-xs text-cp-text-secondary">当前版本保持不变，修改后再应用</span>
       </div>
-      <BaseSegmented v-if="sections.length > 1" v-model="section" :options="sections" label="插件设置分区" :disabled="saving" class="w-fit max-w-full" />
+      <ZSegmented v-if="sections.length > 1" v-model="section" :options="sections" aria-label="插件设置分区" :disabled="saving" class="w-fit max-w-full" />
       <div v-show="section === 'general'" class="grid gap-5">
-        <BaseSegmented
+        <ZSegmented
           v-if="existingSecretFields.length"
           v-model="secretMode"
           :options="secretModes"
-          label="敏感配置保存方式"
+          aria-label="敏感配置保存方式"
           :disabled="saving"
           class="w-full sm:w-auto"
         />
@@ -160,15 +160,15 @@ function clearSecrets() {
       />
     </div>
     <template #footer>
-      <BaseButton variant="secondary" :disabled="saving" @click="open = false">
+      <ZButton :disabled="saving" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton variant="primary" :loading="saving" :disabled="!instance || !artifact" @click="submit">
+      </ZButton>
+      <ZButton type="primary" :loading="saving" :disabled="!instance || !artifact" @click="submit">
         <template #icon>
           <Save class="size-4" />
         </template>
         {{ primaryLabel }}
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

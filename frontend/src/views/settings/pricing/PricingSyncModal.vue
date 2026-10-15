@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PricingCatalog, PricingSyncPreview } from '@/api'
-import { BaseButton, BaseCheckbox, BaseModal, BaseScrollbar, BaseTag } from '@codex-proxy/ui'
+import { ZButton, ZCheckbox, ZDialog, ZScrollbar, ZTag } from '@codex-proxy/ui'
 import { computed, shallowRef, watch } from 'vue'
 import { bands, effectivePrice, priceFields } from './model'
 
@@ -64,36 +64,34 @@ function confirm() {
 </script>
 
 <template>
-  <BaseModal v-model="open" title="确认同步来源价目" description="USD / 1M Tokens" size="lg" :dismissible="!saving">
+  <ZDialog v-model="open" title="确认同步来源价目" description="USD / 1M Tokens" width="48rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
     <div class="grid gap-4">
       <p class="m-0 text-cp text-cp-text-secondary">
         仅同步所选模型的来源价格，保留自定义单价和倍率
       </p>
       <div v-if="changes.length" class="flex items-center justify-between gap-3">
-        <BaseCheckbox
+        <ZCheckbox
           :model-value="allSelected"
           :indeterminate="partiallySelected"
           label="全选"
-          show-label
           :disabled="saving"
           @update:model-value="selected = new Set($event ? changes.map(item => item.id) : [])"
         />
         <span class="text-cp-sm text-cp-text-tertiary" aria-live="polite">已选 {{ selectedChanges.length }} / {{ changes.length }}</span>
       </div>
-      <BaseScrollbar max-height="20rem" class="rounded-cp bg-cp-fill-quaternary">
+      <ZScrollbar max-height="20rem" class="rounded-cp bg-cp-fill-quaternary">
         <div class="p-4">
           <div v-for="item in changes" :key="item.id" class="grid gap-2 py-3 text-cp-sm">
-            <BaseCheckbox
+            <ZCheckbox
               :model-value="selected.has(item.id)"
               :label="item.id"
-              show-label
               :disabled="saving"
               @update:model-value="toggle(item.id, $event)"
             >
               <template #label>
                 <span class="break-all font-mono text-cp-sm font-normal">{{ item.id }}</span>
               </template>
-            </BaseCheckbox>
+            </ZCheckbox>
             <span v-if="item.custom" class="pl-6.5 text-cp-xs text-cp-primary-text">保留人工覆盖</span>
             <div v-if="item.details.length" class="ml-6.5 grid gap-1">
               <div v-for="detail in item.details" :key="detail.label" class="grid grid-cols-2 items-center gap-x-4 rounded-cp-sm bg-cp-bg-container px-2 py-1.5 text-cp-xs">
@@ -108,28 +106,28 @@ function confirm() {
             来源价格没有变化
           </p>
         </div>
-      </BaseScrollbar>
+      </ZScrollbar>
       <details v-if="preview?.skipped.length" class="text-cp-sm text-cp-text-secondary">
         <summary class="cursor-pointer">
           跳过 {{ preview.skipped.length }} 个缺少完整价格或计价方式不匹配的模型
         </summary>
-        <BaseScrollbar max-height="10rem" class="mt-3">
+        <ZScrollbar max-height="10rem" class="mt-3">
           <ul class="m-0 flex list-none flex-wrap gap-2 p-0 pr-2" aria-label="跳过同步的模型">
             <li v-for="model in preview.skipped" :key="model" class="flex max-w-full min-w-0">
-              <BaseTag class="font-mono">
+              <ZTag class="font-mono">
                 {{ model }}
-              </BaseTag>
+              </ZTag>
             </li>
           </ul>
-        </BaseScrollbar>
+        </ZScrollbar>
       </details>
     </div>
     <template #footer>
-      <BaseButton :disabled="saving" @click="open = false">
+      <ZButton :disabled="saving" @click="open = false">
         取消
-      </BaseButton><BaseButton variant="primary" :loading="saving" :disabled="!selectedChanges.length" @click="confirm">
+      </ZButton><ZButton type="primary" :loading="saving" :disabled="!selectedChanges.length" @click="confirm">
         确认同步
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

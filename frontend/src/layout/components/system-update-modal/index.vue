@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SystemRestartPlan, SystemUpdateChannel, SystemUpdateDetail } from '@/api'
-import { BaseButton, BaseConfirmModal, BaseMarkdown, BaseModal, BasePopover, BaseScrollbar, BaseSegmented, BaseSkeleton, toast } from '@codex-proxy/ui'
+import { ZButton, ZConfirmDialog, ZDialog, ZMarkdown, ZNotification, ZPopover, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
 
 import {
   ArrowUpCircle,
@@ -49,7 +49,7 @@ const {
 } = storeToRefs(systemUpdateStore)
 const { loadSystem, checkUpdates, changeChannel, updateNow, restartNow } = systemUpdateStore
 
-const updateLogScrollbar = useTemplateRef<InstanceType<typeof BaseScrollbar>>('updateLogScrollbar')
+const updateLogScrollbar = useTemplateRef<InstanceType<typeof ZScrollbar>>('updateLogScrollbar')
 const updateConfirmOpen = shallowRef(false)
 const updateConfirmInfo = shallowRef<SystemUpdateDetail | null>(null)
 const updateConfirmPreviousTarget = shallowRef('')
@@ -125,10 +125,10 @@ async function handleCheckUpdates(force = true) {
   try {
     const data = await checkUpdates(force)
     if (data?.warning) {
-      toast.error(data.warning)
+      ZNotification.error({ message: data.warning })
       return
     }
-    toast.success(data?.hasUpdate ? '发现可用更新' : '当前没有可用更新')
+    ZNotification.success({ message: data?.hasUpdate ? '发现可用更新' : '当前没有可用更新' })
   }
   catch {}
 }
@@ -142,16 +142,16 @@ async function handleUpdateRequest() {
   try {
     const data = await checkUpdates(true)
     if (data?.warning) {
-      toast.error(data.warning)
+      ZNotification.error({ message: data.warning })
       return
     }
     if (!data?.hasUpdate || !canUpdate.value) {
-      toast.success('当前没有可用更新')
+      ZNotification.success({ message: '当前没有可用更新' })
       return
     }
     const remoteTargetVersion = normalizeSystemVersion(data.latestVersion)
     if (!remoteTargetVersion) {
-      toast.error('远端目标版本为空')
+      ZNotification.error({ message: '远端目标版本为空' })
       return
     }
     if (previousTargetVersion && previousTargetVersion !== remoteTargetVersion) {
@@ -172,7 +172,7 @@ async function runConfirmedUpdate(targetVersion: string, channel: SystemUpdateCh
   try {
     const result = await updateNow(targetVersion, channel)
     if (result) {
-      toast.success('更新已开始')
+      ZNotification.success({ message: '更新已开始' })
     }
   }
   catch {}
@@ -196,11 +196,6 @@ async function handleRestart() {
   try {
     if (!updateInfo.value)
       throw new Error('请等待系统更新信息加载完成')
-    // 文件已更新但旧进程仍在运行时，旧 API 继续使用安装前的兼容预检。
-    if (!updateInfo.value.restartConfirmationSupported) {
-      await restartNow()
-      return
-    }
     restartPlan.value = await checkSystemRestart()
     if (restartPlan.value.incompatiblePlugins.length) {
       restartConfirmOpen.value = true
@@ -209,7 +204,7 @@ async function handleRestart() {
     await restartNow(restartPlan.value)
   }
   catch (error: unknown) {
-    toast.error(errorMessage(error, '重启前检查失败'))
+    ZNotification.error({ message: errorMessage(error, '重启前检查失败') })
   }
   finally {
     checkingRestart.value = false
@@ -225,7 +220,7 @@ async function handleConfirmRestart() {
   }
   catch (error: unknown) {
     restartConfirmOpen.value = false
-    toast.error(errorMessage(error, '重启失败，请重新检查'))
+    ZNotification.error({ message: errorMessage(error, '重启失败，请重新检查') })
   }
 }
 
@@ -248,13 +243,13 @@ watch(
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="系统更新"
     description="检查版本、查看发布说明并执行在线更新"
-    tone="success"
-    size="lg"
-    :dismissible="!restarting"
+    type="success"
+    width="48rem"
+    :show-close="!restarting" :close-on-click-modal="!restarting" :close-on-press-escape="!restarting"
   >
     <template #icon>
       <ArrowUpCircle class="size-4.5 text-cp-success" />
@@ -310,7 +305,7 @@ watch(
               class="mt-2 mb-0 h-[1em] truncate font-mono text-cp leading-none font-bold text-cp-text"
               :title="item.title || item.value"
             >
-              <BaseSkeleton
+              <ZSkeleton
                 v-if="loading || ((checking || changingChannel) && item.key === 'latest')"
                 class="h-full w-20 max-w-full"
                 aria-label="正在检查版本"
@@ -331,14 +326,14 @@ watch(
         >
           {{ updateError || updateInfo?.warning }}
         </p>
-        <BasePopover v-if="lastFailedOperation" placement="bottom-start" class="justify-self-start">
-          <template #trigger>
-            <BaseButton variant="ghost" size="sm">
+        <ZPopover v-if="lastFailedOperation" placement="bottom-start" class="justify-self-start">
+          <template #reference>
+            <ZButton variant="text" size="small">
               <template #icon>
                 <History class="size-3.5" />
               </template>
               上次操作失败
-            </BaseButton>
+            </ZButton>
           </template>
           <div class="grid w-80 max-w-[calc(100vw-2rem)] gap-2 p-3 text-cp-sm">
             <div v-if="lastFailedOperation.targetVersion || lastFailedOperation.finishedAt" class="flex flex-wrap gap-x-3 gap-y-1 text-cp-xs text-cp-text-quaternary">
@@ -349,7 +344,7 @@ watch(
               {{ lastFailedOperation.error || lastFailedOperation.message || '操作失败' }}
             </p>
           </div>
-        </BasePopover>
+        </ZPopover>
       </section>
 
       <section
@@ -361,26 +356,26 @@ watch(
             发布说明
           </p>
           <span class="font-mono text-cp-xs font-emphasis text-cp-text-quaternary">
-            <BaseSkeleton v-if="releaseNotesLoading" shape="text" class="w-14" aria-hidden="true" />
+            <ZSkeleton v-if="releaseNotesLoading" shape="text" class="w-14" aria-hidden="true" />
             <template v-else>{{ presentation.releaseVersion }}</template>
           </span>
         </div>
-        <BaseScrollbar class="-mx-4" max-height="160px">
+        <ZScrollbar class="-mx-4" max-height="160px">
           <div
             class="relative px-4"
             :class="{ 'min-h-40': releaseNotesLoading && !hasReleaseNotes }"
             :aria-busy="releaseNotesLoading"
           >
             <div :class="{ invisible: releaseNotesLoading }" :aria-hidden="releaseNotesLoading || undefined">
-              <BaseMarkdown :source="updateInfo?.notes" />
+              <ZMarkdown :source="updateInfo?.notes" />
             </div>
             <div v-if="releaseNotesLoading" class="absolute inset-x-4 top-0 grid h-full content-start gap-3 overflow-hidden py-1" aria-hidden="true">
-              <BaseSkeleton shape="text" class="w-20" />
-              <BaseSkeleton shape="text" class="w-4/5" />
-              <BaseSkeleton shape="text" class="w-3/5" />
+              <ZSkeleton shape="text" class="w-20" />
+              <ZSkeleton shape="text" class="w-4/5" />
+              <ZSkeleton shape="text" class="w-3/5" />
             </div>
           </div>
-        </BaseScrollbar>
+        </ZScrollbar>
       </section>
 
       <section
@@ -406,7 +401,7 @@ watch(
           </span>
         </header>
 
-        <BaseScrollbar
+        <ZScrollbar
           ref="updateLogScrollbar"
           height="260px"
         >
@@ -428,27 +423,27 @@ watch(
               </p>
             </div>
           </div>
-        </BaseScrollbar>
+        </ZScrollbar>
       </section>
     </div>
 
     <template #footer>
       <div class="mr-auto flex min-w-0 basis-full items-center gap-2 sm:basis-auto">
-        <BaseSkeleton v-if="loading" class="h-8 w-52" aria-label="正在读取运行通道" />
-        <BaseSegmented
+        <ZSkeleton v-if="loading" class="h-8 w-52" aria-label="正在读取运行通道" />
+        <ZSegmented
           v-else
           :model-value="selectedChannel"
           :options="channelOptions"
-          label="更新通道"
-          size="sm"
+          aria-label="更新通道"
+          size="small"
           :disabled="!canChangeChannel || preparingUpdate || updateConfirmOpen"
           @update:model-value="handleChannelChange"
         />
-        <BasePopover placement="top-start">
-          <template #trigger>
-            <BaseButton variant="ghost" size="sm" square aria-label="更新通道说明">
+        <ZPopover placement="top-start">
+          <template #reference>
+            <ZButton variant="text" size="small" square aria-label="更新通道说明">
               <CircleHelp class="size-4" />
-            </BaseButton>
+            </ZButton>
           </template>
           <div class="grid w-72 gap-2 p-3 text-cp-sm text-cp-text-secondary">
             <p v-for="channel in availableChannels" :key="channel" class="m-0">
@@ -459,10 +454,9 @@ watch(
               选择仅用于本次检查，重新打开时按运行版本选择通道，不会自动安装或降级
             </p>
           </div>
-        </BasePopover>
+        </ZPopover>
       </div>
-      <BaseButton
-        variant="secondary"
+      <ZButton
         :loading="checking"
         :disabled="loading || updating || restarting || changingChannel || preparingUpdate"
         @click="handleCheckUpdates(true)"
@@ -474,10 +468,10 @@ watch(
           <RefreshCw class="size-3.5" />
         </template>
         检查更新
-      </BaseButton>
-      <BaseButton
+      </ZButton>
+      <ZButton
         v-if="needRestart"
-        variant="primary"
+        type="primary"
         :loading="restarting || checkingRestart"
         :disabled="loading || updating || restartConfirmOpen"
         @click="handleRestart"
@@ -486,10 +480,10 @@ watch(
           <Power class="size-4" />
         </template>
         {{ presentation.restartButtonLabel }}
-      </BaseButton>
-      <BaseButton
+      </ZButton>
+      <ZButton
         v-else-if="hasUpdate || updating"
-        variant="primary"
+        type="primary"
         :loading="preparingUpdate || updating"
         :disabled="!canUpdate || preparingUpdate"
         @click="handleUpdateRequest"
@@ -498,11 +492,11 @@ watch(
           <Download class="size-4" />
         </template>
         {{ updating ? '更新中' : '下载并更新' }}
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 
-  <BaseConfirmModal
+  <ZConfirmDialog
     v-model="restartConfirmOpen"
     title="插件兼容性提醒"
     description="重启后保留启用配置，逐个尝试启动插件"
@@ -525,9 +519,9 @@ watch(
         </li>
       </ul>
     </div>
-  </BaseConfirmModal>
+  </ZConfirmDialog>
 
-  <BaseConfirmModal
+  <ZConfirmDialog
     v-model="updateConfirmOpen"
     title="发现新的更新版本"
     description="所选通道的最新版本已变化"
@@ -557,5 +551,5 @@ watch(
         点击确认后弹窗会关闭，并按远端最新目标版本开始更新
       </p>
     </div>
-  </BaseConfirmModal>
+  </ZConfirmDialog>
 </template>

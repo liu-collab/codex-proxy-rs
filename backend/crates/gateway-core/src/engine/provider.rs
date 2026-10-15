@@ -13,7 +13,8 @@ use futures::{Stream, StreamExt, future::BoxFuture};
 use thiserror::Error;
 
 use crate::account::{
-    AccountAttemptFeedback, AccountCapacitySnapshot, AccountFeedbackStats, ProviderAccountId,
+    AccountAttemptFeedback, AccountCapacitySnapshot, AccountFeedbackStats, AccountHistorySnapshot,
+    ProviderAccountId,
 };
 use crate::engine::AttemptContext;
 use crate::engine::execution::ClientTransport;
@@ -39,7 +40,7 @@ use crate::upstream::{UpstreamSendState, UpstreamTransport};
 pub type EventStream =
     Pin<Box<dyn Stream<Item = Result<ProviderEvent, ProviderError>> + Send + 'static>>;
 
-/// Provider 选定单个 credential 后返回的事实
+/// Provider 选定单个 credential 后返回的调用事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderCallMetadata {
     provider: ProviderKind,
@@ -48,6 +49,7 @@ pub struct ProviderCallMetadata {
     upstream_request_id: Option<OpaqueUpstreamValue>,
     transport: UpstreamTransport,
     selection_observation: Option<ProviderSelectionObservation>,
+    account_snapshot: Option<AccountHistorySnapshot>,
 }
 
 /// Provider 账号选择阶段输出的中立运行压力事实
@@ -96,6 +98,7 @@ impl ProviderCallMetadata {
             upstream_request_id: None,
             transport,
             selection_observation: None,
+            account_snapshot: None,
         }
     }
 
@@ -113,7 +116,19 @@ impl ProviderCallMetadata {
             upstream_request_id: None,
             transport,
             selection_observation: None,
+            account_snapshot: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_account_snapshot(mut self, snapshot: Option<AccountHistorySnapshot>) -> Self {
+        self.account_snapshot = snapshot;
+        self
+    }
+
+    #[must_use]
+    pub const fn account_snapshot(&self) -> Option<&AccountHistorySnapshot> {
+        self.account_snapshot.as_ref()
     }
 
     /// 设置 adapter 已分类为非 bearer 的 request ID
@@ -623,7 +638,8 @@ fn provider_event_to_middleware_frame(
 
 fn encode_sse_wire_event(wire: &ProtocolWireEvent) -> Result<Bytes, ProviderError> {
     let mut encoded = Vec::new();
-    if let Some(id) = wire.sse_id() {
+    // 源事件元数据保持不透明；仅编码可表示为单行 SSE 字段的值，避免生成额外帧
+    if let Some(id) = wire.sse_id().filter(|id| !id.contains(['\r', '\n', '\0'])) {
         encoded.extend_from_slice(b"id: ");
         encoded.extend_from_slice(id.as_bytes());
         encoded.push(b'\n');
@@ -631,7 +647,10 @@ fn encode_sse_wire_event(wire: &ProtocolWireEvent) -> Result<Bytes, ProviderErro
     if let Some(retry) = wire.sse_retry() {
         encoded.extend_from_slice(format!("retry: {retry}\n").as_bytes());
     }
-    if let Some(event_type) = wire.event_type() {
+    if let Some(event_type) = wire
+        .event_type()
+        .filter(|event_type| !event_type.is_empty() && !event_type.contains(['\r', '\n']))
+    {
         encoded.extend_from_slice(b"event: ");
         encoded.extend_from_slice(event_type.as_bytes());
         encoded.push(b'\n');
@@ -965,6 +984,20 @@ impl fmt::Debug for ProviderRequest {
 /// 新的 attempt 再次调用
 #[async_trait]
 pub trait Provider: Send + Sync {
+    /// Provider 解释自己的隐私规则，Core 仅冻结编译结果
+    fn compile_privacy_policy(
+        &self,
+        _policy: &crate::settings::privacy::CodexPrivacyPolicy,
+    ) -> Result<
+        Arc<dyn crate::settings::privacy::CompiledPrivacyPolicy>,
+        crate::settings::privacy::PrivacyError,
+    > {
+        Err(crate::settings::privacy::PrivacyError {
+            rule_index: 0,
+            reason: "Provider 不支持隐私策略",
+        })
+    }
+
     /// 从已冻结的配置解析请求身份；只读取本地发布资料，不执行网络请求
     fn resolve_request_profile(
         &self,
@@ -1195,5 +1228,33 @@ impl ProviderCatalogPort for ProviderRegistry {
                 .await
                 .map_err(|_| ProviderCatalogUnavailable)
         })
+    }
+}
+
+impl std::fmt::Debug for ProviderRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ProviderRegistry")
+            .field("providers", &self.providers.keys())
+            .finish()
+    }
+}
+
+impl crate::settings::privacy::PrivacyPolicyCompiler for ProviderRegistry {
+    fn compile(
+        &self,
+        policy: &crate::settings::privacy::CodexPrivacyPolicy,
+    ) -> Result<
+        Arc<dyn crate::settings::privacy::CompiledPrivacyPolicy>,
+        crate::settings::privacy::PrivacyError,
+    > {
+        self.providers
+            .iter()
+            .find(|(kind, _)| kind.as_str() == "openai")
+            .ok_or(crate::settings::privacy::PrivacyError {
+                rule_index: 0,
+                reason: "OpenAI Provider 不可用",
+            })?
+            .1
+            .compile_privacy_policy(policy)
     }
 }

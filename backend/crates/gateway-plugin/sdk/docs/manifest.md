@@ -42,6 +42,9 @@
 
 当前支持范围由[宿主兼容声明](../../runtime/plugin-host-compatibility.json)给出，弃用状态、剩余兼容窗口及作者说明以[弃用清单](../../runtime/plugin-api-deprecations.json)为准，管理端和加载日志展示同一提示
 
+执行设置与来源使用 `fast_mode` 的 `default`、`enabled`、`disabled` 三态，宿主不转换旧 `disable_fast` 字段。
+使用 `middleware v3` 或 `upstream_adapter v1` 的插件需按当前 SDK 更新字段处理、升级能力版本并重新构建，仅修改版本声明不能替代迁移
+
 兼容窗口自替代合同首次正式发布起至少覆盖 7 个后续正式版本；主版本、次版本和补丁版本各计一次，预发行与同标签重试不计。
 窗口内提供适配，窗口外不保证兼容；是否使用过特定字段不改变判断，版本号差值也不能代替清单中的计数
 

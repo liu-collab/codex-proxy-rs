@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseConfirmModal } from '@codex-proxy/ui'
+import { ZConfirmDialog } from '@codex-proxy/ui'
 import { onMounted } from 'vue'
 import { useAdminApiKey } from '../composables/useAdminApiKey'
 import AdminApiKeyCard from './AdminApiKeyCard.vue'
@@ -60,7 +60,7 @@ onMounted(loadStatus)
       <ResponseBodyLimitCard v-model="responsesMaxDecompressedBodyMiB" />
     </fieldset>
 
-    <BaseConfirmModal
+    <ZConfirmDialog
       v-model="showDeleteModal"
       title="删除管理员 API Key"
       description="删除后外部系统将无法继续使用该 Key 调用管理接口"
@@ -72,6 +72,6 @@ onMounted(loadStatus)
       <p class="m-0">
         确定要删除当前管理员 API Key 吗？此操作会立即生效
       </p>
-    </BaseConfirmModal>
+    </ZConfirmDialog>
   </div>
 </template>

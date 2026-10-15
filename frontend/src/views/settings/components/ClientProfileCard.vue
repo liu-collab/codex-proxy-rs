@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ProviderRequestProfiles } from '@/api/modules/settings/profiles'
-import { BaseCard } from '@codex-proxy/ui'
+import { ZCard } from '@codex-proxy/ui'
 import ProviderRequestProfilesEditor from '@/components/client-profile/ProviderRequestProfilesEditor.vue'
 
 withDefaults(defineProps<{ active?: boolean, disabled?: boolean }>(), {
@@ -12,7 +12,7 @@ const model = defineModel<ProviderRequestProfiles>({ required: true })
 </script>
 
 <template>
-  <BaseCard>
+  <ZCard>
     <ProviderRequestProfilesEditor
       v-model="model"
       :active="active"
@@ -30,5 +30,5 @@ const model = defineModel<ProviderRequestProfiles>({ required: true })
         </div>
       </template>
     </ProviderRequestProfilesEditor>
-  </BaseCard>
+  </ZCard>
 </template>

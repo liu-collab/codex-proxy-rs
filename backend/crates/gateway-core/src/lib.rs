@@ -62,6 +62,7 @@ pub struct CoreStorePorts {
     client_api_key_usage: Arc<dyn ClientApiKeyUsageSink>,
     budget: Option<Arc<dyn engine::budget::ClientBudgetPort>>,
     session_affinity: Option<Arc<dyn ProviderSessionAffinityPort>>,
+    client_retry: Option<Arc<dyn engine::client_retry::ClientRetryStore>>,
 }
 
 impl CoreStorePorts {
@@ -91,12 +92,22 @@ impl CoreStorePorts {
             client_api_key_usage,
             budget: None,
             session_affinity: None,
+            client_retry: None,
         }
     }
 
     #[must_use]
     pub fn with_budget(mut self, budget: Arc<dyn engine::budget::ClientBudgetPort>) -> Self {
         self.budget = Some(budget);
+        self
+    }
+
+    #[must_use]
+    pub fn with_client_retry_store(
+        mut self,
+        store: Arc<dyn engine::client_retry::ClientRetryStore>,
+    ) -> Self {
+        self.client_retry = Some(store);
         self
     }
 
@@ -208,6 +219,9 @@ fn build_execution_service(
     );
     if let Some(budget) = &ports.budget {
         service = service.with_budget(Arc::clone(budget));
+    }
+    if let Some(store) = &ports.client_retry {
+        service = service.with_client_retry_store(Arc::clone(store));
     }
     if let Some(request_observers) = request_observers {
         service = service.with_request_observers(request_observers);
@@ -472,7 +486,8 @@ pub fn prepare_control_plane(
     providers: ProviderRegistry,
     extensions: Option<Arc<dyn routing::extensions::ExtensionPreparationPort>>,
 ) -> CoreControlPlaneStartup {
-    let mut compiler = RuntimeSnapshotCompiler::new(ports.snapshots, Arc::new(providers));
+    let mut compiler = RuntimeSnapshotCompiler::new(ports.snapshots, Arc::new(providers.clone()))
+        .with_privacy_compiler(Arc::new(providers));
     if let Some(extensions) = extensions {
         compiler = compiler.with_extensions(extensions);
     }

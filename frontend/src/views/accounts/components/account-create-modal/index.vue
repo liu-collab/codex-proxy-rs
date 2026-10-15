@@ -4,7 +4,7 @@ import type { AccountCreateForm, AccountImportMode } from '../../utils/accountCr
 
 import type { Account, AccountGroupRef } from '@/api'
 import { Openai, Xai } from '@boxicons/vue'
-import { BaseButton, BaseIconButton, BaseModal, BaseSegmented } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZIconButton, ZSegmented } from '@codex-proxy/ui'
 import { Copy, LayoutGrid, Settings2 } from '@lucide/vue'
 import { computed } from 'vue'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
@@ -76,13 +76,13 @@ function continueToImport() {
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     :title="view.modal.title"
     :description="view.modal.description"
-    :tone="view.modal.tone"
-    :size="view.modal.size"
-    :dismissible="!busy"
+    :type="view.modal.type"
+    :width="view.modal.width"
+    :show-close="!busy" :close-on-click-modal="!busy" :close-on-press-escape="!busy"
   >
     <template #icon>
       <Settings2 v-if="view.configuring" class="text-cp-text" :size="20" aria-hidden="true" />
@@ -111,15 +111,15 @@ function continueToImport() {
             :provider="account.provider"
             :authentication-kind="account.authenticationKind"
           />
-          <BaseIconButton
-            variant="secondary"
-            size="sm"
-            label="复制账号"
+          <ZIconButton
+            variant="solid"
+            size="small"
+            aria-label="复制账号"
             :disabled="busy || !accountCopyValue"
             @click="copyWithToast(accountCopyValue, { successText: '账号已复制' })"
           >
             <Copy class="size-3.5" />
-          </BaseIconButton>
+          </ZIconButton>
         </div>
       </div>
 
@@ -135,10 +135,10 @@ function continueToImport() {
         {{ scheduling.message }}
       </p>
       <template v-if="!view.configuring">
-        <BaseSegmented
+        <ZSegmented
           v-if="!reauthorizing && !view.isBatch"
           v-model="mode"
-          label="账号添加方式"
+          aria-label="账号添加方式"
           :options="view.modeOptions"
           :disabled="busy"
           class="w-full"
@@ -171,18 +171,18 @@ function continueToImport() {
     </div>
 
     <template #footer>
-      <BaseButton v-if="view.configuring || reauthorizing" variant="secondary" :disabled="busy" @click="open = false">
+      <ZButton v-if="view.configuring || reauthorizing" :disabled="busy" @click="open = false">
         取消
-      </BaseButton>
-      <BaseButton v-else class="mr-auto" variant="secondary" :disabled="busy" @click="form.step = 'settings'">
+      </ZButton>
+      <ZButton v-else class="mr-auto" :disabled="busy" @click="form.step = 'settings'">
         上一步
-      </BaseButton>
-      <BaseButton v-if="view.configuring" variant="primary" :disabled="!canSelect || !scheduling.valid || Boolean(modelError) || groupsLoading || Boolean(proxyError) || busy" @click="continueToImport">
+      </ZButton>
+      <ZButton v-if="view.configuring" type="primary" :disabled="!canSelect || !scheduling.valid || Boolean(modelError) || groupsLoading || Boolean(proxyError) || busy" @click="continueToImport">
         继续导入
-      </BaseButton>
-      <BaseButton v-else variant="primary" :loading="saving || oauthLoading" :disabled="!view.canSubmit" @click="emit('create')">
+      </ZButton>
+      <ZButton v-else type="primary" :loading="saving || oauthLoading" :disabled="!view.canSubmit" @click="emit('create')">
         {{ view.submitLabel }}
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

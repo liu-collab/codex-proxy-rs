@@ -52,8 +52,8 @@ async fn explicit_service_dispatch_composes_once_and_preserves_native_transactio
         .unwrap();
     let visible = services.settings().load().await.unwrap();
     assert_eq!(
-        visible.values.request_interval_ms,
-        original.values.request_interval_ms
+        visible.values.refresh_margin_seconds,
+        original.values.refresh_margin_seconds
     );
     assert_eq!(visible.config_revision, original.config_revision);
     let through_registry = services
@@ -63,7 +63,7 @@ async fn explicit_service_dispatch_composes_once_and_preserves_native_transactio
         .unwrap();
     let typed: gateway_plugin_sdk::call::services::settings::RuntimeSettings =
         serde_json::from_value(through_registry).unwrap();
-    assert_eq!(typed.request_interval_ms, 4321);
+    assert_eq!(typed.refresh_margin_seconds, 4321);
     // 返回层改写不是持久化写入；原 owner 保留真实配置事实
     assert_eq!(
         environment
@@ -74,12 +74,12 @@ async fn explicit_service_dispatch_composes_once_and_preserves_native_transactio
             .await
             .unwrap()
             .values
-            .request_interval_ms,
-        original.values.request_interval_ms
+            .refresh_margin_seconds,
+        original.values.refresh_margin_seconds
     );
 
     let mut command = ReplaceRuntimeSettings::from(original);
-    command.values.request_interval_ms = 999;
+    command.values.refresh_margin_seconds = 999;
     let saved = services
         .public_services()
         .call(
@@ -90,7 +90,7 @@ async fn explicit_service_dispatch_composes_once_and_preserves_native_transactio
         .unwrap();
     let saved: gateway_admin::model::settings::RuntimeSettings =
         serde_json::from_value(saved).unwrap();
-    assert_eq!(saved.values.request_interval_ms, 1234);
+    assert_eq!(saved.values.refresh_margin_seconds, 1234);
     assert!(saved.config_revision > command.expected_revision);
     let current = environment
         .store
@@ -99,7 +99,7 @@ async fn explicit_service_dispatch_composes_once_and_preserves_native_transactio
         .load_runtime_settings()
         .await
         .unwrap();
-    assert_eq!(current.values.request_interval_ms, 1234);
+    assert_eq!(current.values.refresh_margin_seconds, 1234);
     assert_eq!(
         core.snapshots()
             .snapshot_for_diagnostics()
@@ -323,7 +323,7 @@ async fn cli_service_callback_uses_the_same_public_settings_and_plugin_chain() {
         serde_json::from_str(&output.stdout).unwrap();
     let returned: gateway_plugin_sdk::call::services::settings::RuntimeSettings =
         serde_json::from_value(result.unwrap()).unwrap();
-    assert_eq!(returned.request_interval_ms, 4321);
+    assert_eq!(returned.refresh_margin_seconds, 4321);
     assert_ne!(
         environment
             .store
@@ -333,7 +333,7 @@ async fn cli_service_callback_uses_the_same_public_settings_and_plugin_chain() {
             .await
             .unwrap()
             .values
-            .request_interval_ms,
+            .refresh_margin_seconds,
         4321
     );
     commands.shutdown().await;

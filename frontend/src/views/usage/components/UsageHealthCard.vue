@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import type { BarSeriesOption, EChartsOption, LineSeriesOption } from 'echarts'
 import type { getUsageRecordInsightsOverview } from '@/api'
-import { BaseCard, BaseEmpty } from '@codex-proxy/ui'
+import { ZCard, ZEmpty } from '@codex-proxy/ui'
 
 import { BarChart } from 'echarts/charts'
 import { use } from 'echarts/core'
 import { computed } from 'vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { tooltipIndex, tooltipRows } from '@/components/charts/tooltip'
+import { healthEligibleRequestCount } from '@/components/usage/shared/health'
 import { useChartPalette } from '@/composables/useChartPalette'
 import { formatLocalizedCompactNumber as formatCompactNumber, formatPercent } from '@/utils/format'
 
@@ -113,9 +114,9 @@ function requestCount(point: HealthPoint) {
 }
 
 function serviceSuccessRate(point: HealthPoint) {
-  const total = Math.max(0, point.successRequests) + Math.max(0, point.failedRequests)
+  const total = healthEligibleRequestCount(point)
   if (total > 0)
-    return Math.max(0, point.successRequests ?? 0) / total
+    return 1 - point.errorRate
   return requestCount(point) === 0 ? 0 : null
 }
 
@@ -156,7 +157,7 @@ function formatTooltip(params: unknown) {
 </script>
 
 <template>
-  <BaseCard
+  <ZCard
     as="article"
     title="请求健康"
     :description="`按${granularityText}区分服务结果、取消、未完成与调用方错误`"
@@ -185,9 +186,9 @@ function formatTooltip(params: unknown) {
           </div>
         </div>
         <BaseChart v-if="hasData" :option="chartOption" :height="210" />
-        <BaseEmpty
+        <ZEmpty
           v-else
-          size="sm"
+          size="small"
           surface="none"
           :title="loading ? '正在加载请求健康数据' : '暂无请求健康数据'"
           description="当前范围没有可绘制的请求记录"
@@ -195,5 +196,5 @@ function formatTooltip(params: unknown) {
         />
       </div>
     </template>
-  </BaseCard>
+  </ZCard>
 </template>

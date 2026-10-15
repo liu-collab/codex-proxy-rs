@@ -1,5 +1,5 @@
 import type { AccountGroup, ApiKey, FastMode } from '@/api'
-import { normalizeRgbaHexColor, toast } from '@codex-proxy/ui'
+import { normalizeRgbaHexColor, ZNotification } from '@codex-proxy/ui'
 
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import {
@@ -131,12 +131,12 @@ export function useAccountGroups() {
       return
     const name = form.value.name.trim()
     if (!name) {
-      toast.warning('请输入分组名称')
+      ZNotification.warning({ message: '请输入分组名称' })
       return
     }
     const color = normalizeRgbaHexColor(form.value.color)
     if (!color) {
-      toast.warning('请选择有效的分组颜色')
+      ZNotification.warning({ message: '请选择有效的分组颜色' })
       return
     }
 
@@ -157,7 +157,7 @@ export function useAccountGroups() {
       }
       showFormModal.value = false
       await Promise.all([query.execute(), loadReferenceKeys()])
-      toast.success(updating ? '分组已更新' : '分组已创建')
+      ZNotification.success({ message: updating ? '分组已更新' : '分组已创建' })
     })
   }
 
@@ -178,7 +178,7 @@ export function useAccountGroups() {
       await disableAccountGroup({ id: group.id })
       showDisableModal.value = false
       await query.execute()
-      toast.success('分组已禁用')
+      ZNotification.success({ message: '分组已禁用' })
     })
   }
 
@@ -188,7 +188,7 @@ export function useAccountGroups() {
         const mutation = group.enabled ? disableAccountGroup : enableAccountGroup
         await mutation({ id: group.id })
         await query.execute()
-        toast.success(group.enabled ? '分组已禁用' : '分组已启用')
+        ZNotification.success({ message: group.enabled ? '分组已禁用' : '分组已启用' })
       }
       catch {}
     })
@@ -210,7 +210,7 @@ export function useAccountGroups() {
       selectedIds.value = remaining
       showDeleteModal.value = false
       await query.execute()
-      toast.success('分组已删除')
+      ZNotification.success({ message: '分组已删除' })
     }, { onError: () => void query.execute() })
   }
 
@@ -239,16 +239,14 @@ export function useAccountGroups() {
 
       await query.execute()
       showBatchDeleteModal.value = false
-      toast.success(`已删除 ${deletedCount} 个分组`)
+      ZNotification.success({ message: `已删除 ${deletedCount} 个分组` })
     }, {
       errorText: false,
       onError: (error) => {
         void query.execute().catch(() => undefined)
-        toast.error(
-          deletedCount > 0
-            ? `已删除 ${deletedCount} 个分组，其余未删除：${errorMessage(error, '操作失败')}`
-            : errorMessage(error, '批量删除失败'),
-        )
+        ZNotification.error({ message: deletedCount > 0
+          ? `已删除 ${deletedCount} 个分组，其余未删除：${errorMessage(error, '操作失败')}`
+          : errorMessage(error, '批量删除失败') })
       },
     })
   }

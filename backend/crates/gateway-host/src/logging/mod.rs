@@ -15,7 +15,7 @@ mod sink;
 mod writer;
 
 use sink::{FileLogGuard, FileLogSink, LogHealth};
-use writer::RotatingLogWriter;
+use writer::{LogRetention, RotatingLogWriter};
 
 // 文件前缀统一为 codex-proxy-rs-<kebab-case 类别>；专用 tracing target 使用 snake_case
 const APPLICATION_LOG_FILE_PREFIX: &str = "codex-proxy-rs-application";
@@ -45,9 +45,11 @@ pub enum LogError {
     AlreadyInitialized,
     #[error("logging size limit is too large")]
     SizeOverflow,
+    #[error(transparent)]
+    InvalidConfig(#[from] crate::config::ConfigError),
 }
 
-/// 初始化日志；文件按完整日期留存，不以分片数量淘汰窗口内记录
+/// 初始化日志；按各通道的保留窗口清理，不以分片数量淘汰记录
 pub fn initialize_logging(
     config: &LoggingConfig,
     timezone: gateway_core::time::DeploymentTimeZone,
@@ -74,7 +76,7 @@ pub fn initialize_logging(
         let (writer, guard) = create_file_writer(
             config,
             timezone,
-            config.file.retention_days,
+            LogRetention::CalendarDays(config.file.retention_days),
             APPLICATION_LOG_FILE_PREFIX,
             "gateway-log-application-file",
             Arc::clone(&health),
@@ -88,7 +90,7 @@ pub fn initialize_logging(
         let (writer, guard) = create_file_writer(
             config,
             timezone,
-            config.file.retention_days,
+            LogRetention::CalendarDays(config.file.retention_days),
             OAUTH_RECOVERY_LOG_FILE_PREFIX,
             "gateway-log-oauth-recovery-file",
             Arc::clone(&health),
@@ -102,7 +104,7 @@ pub fn initialize_logging(
         let (writer, guard) = create_file_writer(
             config,
             timezone,
-            config.request_dump_retention_days,
+            LogRetention::Elapsed(config.request_dump_retention()?),
             REQUEST_DUMP_LOG_FILE_PREFIX,
             "gateway-log-request-dump-file",
             Arc::clone(&health),
@@ -220,7 +222,7 @@ impl LogGuard {
 fn create_file_writer(
     config: &LoggingConfig,
     timezone: gateway_core::time::DeploymentTimeZone,
-    retention_days: usize,
+    retention: LogRetention,
     prefix: &'static str,
     thread_name: &'static str,
     health: Arc<LogHealth>,
@@ -234,7 +236,7 @@ fn create_file_writer(
         config.file.directory.clone(),
         prefix,
         maximum_bytes,
-        retention_days,
+        retention,
         Arc::clone(&health),
         timezone,
     )?;

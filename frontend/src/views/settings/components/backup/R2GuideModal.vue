@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { BaseButton, BaseModal } from '@codex-proxy/ui'
+import { ZButton, ZDialog } from '@codex-proxy/ui'
 
 const open = defineModel<boolean>({ default: false })
 </script>
 
 <template>
-  <BaseModal
+  <ZDialog
     v-model="open"
     title="Cloudflare R2 接入指南"
-    size="lg"
+    width="48rem"
   >
     <div class="flex flex-col gap-4 text-cp leading-relaxed text-cp-text-secondary">
       <section class="flex flex-col gap-1.5">
@@ -62,9 +62,9 @@ const open = defineModel<boolean>({ default: false })
     </div>
 
     <template #footer>
-      <BaseButton variant="primary" @click="open = false">
+      <ZButton type="primary" @click="open = false">
         知道了
-      </BaseButton>
+      </ZButton>
     </template>
-  </BaseModal>
+  </ZDialog>
 </template>

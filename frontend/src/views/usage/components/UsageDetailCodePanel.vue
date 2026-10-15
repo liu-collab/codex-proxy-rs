@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseScrollbar } from '@codex-proxy/ui'
+import { ZScrollbar } from '@codex-proxy/ui'
 
 // 详情弹窗的代码面板：标题 + 滚动区内的预格式化文本。
 defineProps<{
@@ -17,9 +17,9 @@ const codeBlockClass
   <h3 class="mb-3" :class="panelTitleClass">
     {{ title }}
   </h3>
-  <BaseScrollbar :max-height="maxHeight">
+  <ZScrollbar :max-height="maxHeight">
     <div class="rounded-cp bg-cp-bg-container px-3 py-2.5">
       <pre :class="codeBlockClass">{{ content }}</pre>
     </div>
-  </BaseScrollbar>
+  </ZScrollbar>
 </template>

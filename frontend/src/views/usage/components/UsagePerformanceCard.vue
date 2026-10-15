@@ -2,7 +2,7 @@
 import type { EChartsOption } from 'echarts'
 import type { getUsageRecordInsightsOverview } from '@/api'
 
-import { BaseCard, BaseEmpty, BaseSegmented } from '@codex-proxy/ui'
+import { ZCard, ZEmpty, ZSegmented } from '@codex-proxy/ui'
 import { computed, shallowRef } from 'vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { requestActivityByBucket, zeroInactiveValues } from '@/components/charts/timeSeriesGap'
@@ -235,14 +235,14 @@ function formatThroughput(value: number | null) {
 </script>
 
 <template>
-  <BaseCard
+  <ZCard
     as="article"
     title="响应速度"
     description="延迟、速率与调度分位"
     class="min-h-90 xl:h-full"
   >
     <template #actions>
-      <BaseSegmented v-model="activeView" label="性能指标" :options="viewOptions" :disabled="loading" class="w-68" />
+      <ZSegmented v-model="activeView" aria-label="性能指标" :options="viewOptions" :disabled="loading" class="w-68" />
     </template>
 
     <template #body>
@@ -256,9 +256,9 @@ function formatThroughput(value: number | null) {
           </div>
         </div>
         <BaseChart v-if="hasData" :option="chartOption" :height="210" />
-        <BaseEmpty
+        <ZEmpty
           v-else
-          size="sm"
+          size="small"
           surface="none"
           :title="loading ? '正在加载性能数据' : '暂无性能数据'"
           :description="
@@ -274,5 +274,5 @@ function formatThroughput(value: number | null) {
         />
       </div>
     </template>
-  </BaseCard>
+  </ZCard>
 </template>

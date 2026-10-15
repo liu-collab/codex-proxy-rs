@@ -301,7 +301,6 @@ impl GrokAccountSessionSelector {
                                     .account_selection_policy()
                                     .max_concurrent_per_account(),
                             ),
-                            request.account_selection_policy().request_interval(),
                             request.deadline(),
                         )
                         .with_cancellation(request.cancellation().clone()),
@@ -368,6 +367,9 @@ impl GrokAccountSessionSelector {
                         gateway_core::error::ErrorSource::new(source),
                     ))
                 })?
+                .with_account_snapshot(gateway_core::account::AccountHistorySnapshot::from_account(
+                    &loaded.account,
+                ))
                 .with_capacity_snapshot(
                     capacity.map(AccountCapacitySnapshot::with_acquired_request),
                 );

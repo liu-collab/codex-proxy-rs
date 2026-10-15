@@ -1,5 +1,5 @@
 import type { RequestContext, RequestNext } from './index'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { ApiError, isSessionRequired } from './error'
 
 // 共享刷新 Promise 的同一个失败只提示一次，弱引用不保留已结束请求
@@ -13,7 +13,7 @@ export async function feedbackPlugin(context: RequestContext, next: RequestNext)
     if (error instanceof ApiError && error.kind !== 'cancelled' && !isSessionRequired(error)
       && !context.config.silent && context.isCurrent() && !reported.has(error)) {
       reported.add(error)
-      toast.error(error.message)
+      ZNotification.error({ message: error.message })
     }
     throw error
   }

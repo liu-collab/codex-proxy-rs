@@ -4,6 +4,62 @@ use super::*;
 use provider_openai::transport::websocket::PreviousResponseUnavailableReason;
 
 #[tokio::test]
+async fn reused_websocket_does_not_replay_opening_response_cookies() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut websocket = accept_codex_test_websocket_with(socket, |_, response| {
+            response.headers_mut().append(
+                "set-cookie",
+                "__cf_bm=opening; Domain=chatgpt.com; Path=/; Secure; Max-Age=3600"
+                    .parse()
+                    .unwrap(),
+            );
+        })
+        .await;
+        for response_id in ["resp_cookie_first", "resp_cookie_reuse"] {
+            websocket.next().await.unwrap().unwrap();
+            websocket
+                .send(Message::Text(
+                    completed_websocket_response(response_id, 1, 1).into(),
+                ))
+                .await
+                .unwrap();
+        }
+    });
+    let backend = CodexBackendClient::new(
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+        format!("http://{addr}"),
+        test_wire_profile(),
+    )
+    .with_websocket_pool(Arc::new(CodexWebSocketPool::new(Duration::from_mins(1))));
+    let request = pooled_websocket_request("conversation-cookie-reuse");
+    let first = backend
+        .create_response(
+            &request,
+            request_context("req_cookie_first", Some("chatgpt-account")),
+        )
+        .await
+        .unwrap();
+    let second = backend
+        .create_response(
+            &request,
+            request_context("req_cookie_reuse", Some("chatgpt-account")),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first.set_cookie_headers.len(), 1);
+    assert!(
+        second
+            .websocket_pool_decision
+            .is_some_and(WebSocketPoolDecision::is_reuse)
+    );
+    assert!(second.set_cookie_headers.is_empty());
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn codex_backend_client_should_reuse_pooled_websocket_for_same_account_and_conversation() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { JsonSchema } from '../utils/model'
-import { BaseEmpty, BaseFormItem, BaseInput, BaseTag } from '@codex-proxy/ui'
+import { ZEmpty, ZFormItem, ZInput, ZTag } from '@codex-proxy/ui'
 
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
 
@@ -153,10 +153,10 @@ defineExpose({ focusInvalid, validationMessage })
 </script>
 
 <template>
-  <BaseEmpty
+  <ZEmpty
     v-if="!hasFields"
     title="无需填写插件参数"
-    size="sm"
+    size="small"
     surface="inset"
     class="min-h-40 content-center"
   />
@@ -177,15 +177,15 @@ defineExpose({ focusInvalid, validationMessage })
         <PluginHelpPopover label="敏感配置说明">
           敏感配置单独保存，不回显已有值，选择保留时不会更改，选择替换时以本次填写的全部值覆盖
         </PluginHelpPopover>
-        <BaseTag v-if="existingSecretFields.length > 0" type="success" size="sm">
+        <ZTag v-if="existingSecretFields.length > 0" type="success" size="small">
           已保存 {{ existingSecretFields.length }} 项
-        </BaseTag>
+        </ZTag>
       </div>
       <p v-if="secretMode === 'clear'" class="m-0 text-cp-xs text-cp-warning-text">
         保存时清除全部敏感配置
       </p>
       <div ref="secretFieldsRoot" class="contents">
-        <BaseFormItem
+        <ZFormItem
           v-for="field in secretMode === 'replace' ? secretSchemas : []"
           :key="field.name"
           :label="field.schema.title || field.name"
@@ -197,7 +197,7 @@ defineExpose({ focusInvalid, validationMessage })
               {{ field.schema.description }}
             </PluginHelpPopover>
           </template>
-          <BaseInput
+          <ZInput
             :model-value="secrets[field.name] ?? ''"
             type="password"
             autocomplete="new-password"
@@ -207,7 +207,7 @@ defineExpose({ focusInvalid, validationMessage })
             placeholder="输入新值"
             @update:model-value="setSecret(field.name, $event)"
           />
-        </BaseFormItem>
+        </ZFormItem>
       </div>
     </template>
   </div>

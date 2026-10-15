@@ -18,7 +18,7 @@ export const usageRecordColumns = defineTableColumns<UsageListRecord>([
     kind: 'status',
     size: 'md',
     fixedWidth: true,
-    format: (value: unknown) => formatProviderLabel(typeof value === 'string' ? value : null),
+    formatter: (value: unknown) => formatProviderLabel(typeof value === 'string' ? value : null),
   },
   { key: 'model', label: '模型', kind: 'custom', size: 'xl' },
   { key: 'reasoningEffort', label: '推理强度', kind: 'status', size: 'md', align: 'left' },

@@ -1,7 +1,7 @@
 import type { Ref } from 'vue'
 import type { PluginRefreshContext } from '../utils/actions'
 import type { ConfigurePluginInstanceRequest, PluginArtifact, PluginInstance, PluginVersionPlan } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { deletePluginInstance, disablePluginInstance, getPluginArtifacts, getPluginInstances, updatePluginInstance } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
@@ -86,7 +86,7 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
 
   async function requestInstanceEnable(instance: PluginInstance) {
     if (instance.loadError) {
-      toast.error(instance.loadError)
+      ZNotification.error({ message: instance.loadError })
       return
     }
     if ((instance.enabled && configurationStatus(instance) !== 'failed') || savingInstance.value || showEnableConfirmation.value)
@@ -141,7 +141,7 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
     await updatePluginInstance({ id: instanceId, instance: request }, { silent: true })
     showEnableConfirmation.value = false
     showInstance.value = false
-    toast.success(request.replaceInstances?.length ? '已切换当前配置' : request.enabled ? '插件设置已应用' : '设置已保存，插件保持停用')
+    ZNotification.success({ message: request.replaceInstances?.length ? '已切换当前配置' : request.enabled ? '插件设置已应用' : '设置已保存，插件保持停用' })
     await refresh(true)
     onSaved()
   }
@@ -152,7 +152,7 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
     busyInstanceId.value = instance.id
     try {
       await disablePluginInstance({ id: instance.id }, { silent: true })
-      toast.success('插件已停用')
+      ZNotification.success({ message: '插件已停用' })
       await refresh(true)
     }
     catch (error) {
@@ -176,7 +176,7 @@ export function usePluginInstances({ artifacts, refresh, onEdit, onSaved }: Inst
     try {
       await deletePluginInstance({ id: instance.id }, { silent: true })
       showInstanceDelete.value = false
-      toast.success('配置、密钥与私有数据已删除，无法恢复')
+      ZNotification.success({ message: '配置、密钥与私有数据已删除，无法恢复' })
       await refresh(true)
     }
     catch (error) {

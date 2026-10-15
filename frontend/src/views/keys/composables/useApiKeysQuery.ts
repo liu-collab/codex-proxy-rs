@@ -1,4 +1,4 @@
-import type { BaseTableSort } from '@codex-proxy/ui'
+import type { TableSort } from '@codex-proxy/ui'
 import type { ApiKey } from '@/api'
 
 import { computed, onMounted, shallowRef, watch } from 'vue'
@@ -7,7 +7,7 @@ import { useRequestState } from '@/composables/useRequestState'
 
 export function useApiKeysQuery() {
   const searchQuery = shallowRef('')
-  const sort = shallowRef<BaseTableSort>()
+  const sort = shallowRef<TableSort>()
   const page = shallowRef(1)
   const pageSize = shallowRef(20)
   const total = shallowRef(0)
@@ -109,7 +109,7 @@ export function useApiKeysQuery() {
     void reloadFromStart()
   }
 
-  function handleSortChange(nextSort: BaseTableSort | undefined) {
+  function handleSortChange(nextSort: TableSort | undefined) {
     sort.value = nextSort
     void reloadFromStart()
   }

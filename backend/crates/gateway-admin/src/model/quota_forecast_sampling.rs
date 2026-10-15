@@ -15,7 +15,7 @@ pub struct QuotaForecastUsage {
     pub tokens: u64,
     pub input_tokens: u64,
     pub output_tokens: u64,
-    pub cached_tokens: u64,
+    pub cached_input_tokens: u64,
     pub missing_token_count: u64,
     pub known_cost_count: u64,
     pub unavailable_cost_count: u64,
@@ -35,7 +35,9 @@ impl QuotaForecastUsage {
             tokens: self.tokens.checked_sub(baseline.tokens)?,
             input_tokens: self.input_tokens.checked_sub(baseline.input_tokens)?,
             output_tokens: self.output_tokens.checked_sub(baseline.output_tokens)?,
-            cached_tokens: self.cached_tokens.checked_sub(baseline.cached_tokens)?,
+            cached_input_tokens: self
+                .cached_input_tokens
+                .checked_sub(baseline.cached_input_tokens)?,
             missing_token_count: self
                 .missing_token_count
                 .checked_sub(baseline.missing_token_count)?,
@@ -140,7 +142,7 @@ pub fn select_forecast_sample(
     };
     history.push(current);
     // 重置边界不在查询起点时，从首个新观测重新计数，避免把旧周期累计带入总量
-    let mut cycle_baseline = interrupted.then(|| &history[0]);
+    let cycle_baseline = interrupted.then(|| &history[0]);
     let mut anchors: Vec<&QuotaForecastPoint> = Vec::new();
     let mut high_water: Option<&QuotaForecastPoint> = None;
     for point in &history {
@@ -153,9 +155,9 @@ pub fn select_forecast_sample(
                 if previous.used_percent - point.used_percent <= 1.0 {
                     continue;
                 }
+                // 同窗口回落不能证明周期重置，只重建采样并保留已记录累计
                 sample.discontinuous = true;
                 anchors.clear();
-                cycle_baseline = Some(point);
             }
         }
         high_water = Some(point);

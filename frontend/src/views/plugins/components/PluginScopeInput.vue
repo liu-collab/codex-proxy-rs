@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseFormItem, BaseTextarea } from '@codex-proxy/ui'
+import { ZFormItem, ZTextarea } from '@codex-proxy/ui'
 
 import { computed } from 'vue'
 
@@ -24,8 +24,8 @@ const text = computed({
 </script>
 
 <template>
-  <BaseFormItem :label="label" :description="description">
-    <BaseTextarea
+  <ZFormItem :label="label" :description="description">
+    <ZTextarea
       v-model="text"
       :rows="2"
       :disabled="disabled"
@@ -33,5 +33,5 @@ const text = computed({
       :aria-label="label"
       class="font-mono"
     />
-  </BaseFormItem>
+  </ZFormItem>
 </template>

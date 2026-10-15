@@ -1,6 +1,6 @@
 import type { PluginRefreshContext } from '../utils/actions'
 import type { PluginArtifact } from '@/api'
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { deletePluginArtifact } from '@/api'
 import { notifyPluginError } from '../utils/actions'
@@ -23,7 +23,7 @@ export function usePluginArtifactActions({ refresh }: PluginRefreshContext) {
     try {
       await deletePluginArtifact({ sha256: artifact.metadata.sha256 }, { silent: true })
       showArtifactDelete.value = false
-      toast.success('插件制品已删除')
+      ZNotification.success({ message: '插件制品已删除' })
       await refresh(true)
     }
     catch (error) {

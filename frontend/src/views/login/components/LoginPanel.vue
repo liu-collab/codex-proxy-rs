@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { BaseButton, BaseCard, BaseIconButton, BaseInput, BaseMotionIcon, BaseSegmented } from '@codex-proxy/ui'
+import { ZButton, ZCard, ZInput, ZMotionIcon, ZSegmented } from '@codex-proxy/ui'
 
-import { Eye, EyeOff, KeyRound, Mail, ShieldCheck } from '@lucide/vue'
-import { computed, shallowRef, watch } from 'vue'
+import { KeyRound, Mail, ShieldCheck } from '@lucide/vue'
+import { computed } from 'vue'
 import AppBrandMark from '@/components/AppBrandMark.vue'
 
 type LoginRealm = 'admin' | 'key'
-type SecretInputType = 'password' | 'text'
 
 const props = defineProps<{
   loading: boolean
@@ -21,7 +20,6 @@ const realm = defineModel<LoginRealm>('realm', { required: true })
 const username = defineModel<string>('username', { required: true })
 const password = defineModel<string>('password', { required: true })
 const apiKey = defineModel<string>('apiKey', { required: true })
-const isSecretVisible = shallowRef(false)
 
 const realmOptions = [
   { label: '管理员登录', value: 'admin', icon: ShieldCheck },
@@ -30,28 +28,15 @@ const realmOptions = [
 
 const isKeyRealm = computed(() => realm.value === 'key')
 const realmCaption = computed(() => isKeyRealm.value ? 'KEY REALM' : 'ADMIN REALM')
-const secretType = computed<SecretInputType>(() => (isSecretVisible.value ? 'text' : 'password'))
-const secretToggleLabel = computed(() => {
-  const target = isKeyRealm.value ? 'API Key' : '密码'
-  return `${isSecretVisible.value ? '隐藏' : '显示'}${target}`
-})
 const submitLabel = computed(() => {
   if (props.loading)
     return '正在登录...'
   return '登录'
 })
-
-watch(realm, () => {
-  isSecretVisible.value = false
-})
-
-function toggleSecretVisible(): void {
-  isSecretVisible.value = !isSecretVisible.value
-}
 </script>
 
 <template>
-  <BaseCard
+  <ZCard
     as="form"
     padding="none"
     class="login-form relative grid w-full content-start gap-8 rounded-lg px-7.5 pt-10 pb-6 max-[560px]:gap-6 max-[560px]:p-5.5"
@@ -61,9 +46,9 @@ function toggleSecretVisible(): void {
 
     <header class="flex min-w-0 items-center justify-between gap-4.5 max-[560px]:gap-3.5">
       <div class="flex min-w-0 items-center gap-2">
-        <BaseMotionIcon variant="brand" class="login-logo">
+        <ZMotionIcon variant="brand" class="login-logo">
           <AppBrandMark class="block size-10.5 select-none" />
-        </BaseMotionIcon>
+        </ZMotionIcon>
         <span class="grid min-w-0 gap-1">
           <strong
             class="text-[17px] leading-[1.3] font-semibold text-(--cp-login-brand-title-color) max-[560px]:text-cp-xl"
@@ -76,13 +61,13 @@ function toggleSecretVisible(): void {
         </span>
       </div>
 
-      <BaseSegmented
+      <ZSegmented
         v-model="realm"
         class="w-18 shrink-0 [--cp-color-bg-container:var(--cp-color-bg-elevated)] [--cp-color-fill-tertiary:var(--cp-login-input-bg)] [--cp-control-height-sm:34px] [&_svg]:size-4"
-        label="选择登录方式"
+        aria-label="选择登录方式"
         :options="realmOptions"
         display="icon"
-        size="sm"
+        size="small"
         :disabled="loading"
       />
     </header>
@@ -103,7 +88,7 @@ function toggleSecretVisible(): void {
       <template v-if="!isKeyRealm">
         <div class="grid min-w-0 gap-2">
           <span id="admin-username-label" class="text-cp leading-[1.1] font-bold text-(--cp-login-label-color)">管理员账号</span>
-          <BaseInput
+          <ZInput
             v-model="username"
             name="username"
             aria-label="管理员账号"
@@ -113,48 +98,35 @@ function toggleSecretVisible(): void {
             <template #prefix>
               <Mail :size="17" />
             </template>
-          </BaseInput>
+          </ZInput>
         </div>
 
         <div class="grid min-w-0 gap-2">
           <span class="text-cp leading-[1.1] font-bold text-(--cp-login-label-color)">访问密钥</span>
-          <BaseInput
+          <ZInput
             v-model="password"
             name="password"
             aria-label="访问密钥"
             placeholder="输入会话密钥"
-            :type="secretType"
+            show-password
             autocomplete="current-password"
           >
             <template #prefix>
               <KeyRound :size="17" />
             </template>
-            <template #suffix>
-              <BaseIconButton
-                variant="ghost"
-                size="sm"
-                class="login-password-toggle"
-                :label="secretToggleLabel"
-                @mousedown.prevent
-                @click="toggleSecretVisible"
-              >
-                <EyeOff v-if="isSecretVisible" :size="16" />
-                <Eye v-else :size="16" />
-              </BaseIconButton>
-            </template>
-          </BaseInput>
+          </ZInput>
         </div>
       </template>
 
       <div v-else class="grid min-w-0 gap-2">
         <span id="client-api-key-label" class="text-cp leading-[1.1] font-bold text-(--cp-login-label-color)">访问密钥</span>
-        <BaseInput
+        <ZInput
           id="client-api-key"
           v-model="apiKey"
           name="apiKey"
           aria-labelledby="client-api-key-label"
           placeholder="输入 API Key"
-          :type="secretType"
+          show-password
           autocomplete="off"
           autocapitalize="none"
           spellcheck="false"
@@ -162,35 +134,22 @@ function toggleSecretVisible(): void {
           <template #prefix>
             <KeyRound :size="17" />
           </template>
-          <template #suffix>
-            <BaseIconButton
-              variant="ghost"
-              size="sm"
-              class="login-password-toggle"
-              :label="secretToggleLabel"
-              @mousedown.prevent
-              @click="toggleSecretVisible"
-            >
-              <EyeOff v-if="isSecretVisible" :size="16" />
-              <Eye v-else :size="16" />
-            </BaseIconButton>
-          </template>
-        </BaseInput>
+        </ZInput>
       </div>
       <div class="min-w-0">
-        <BaseButton
-          variant="primary"
-          size="lg"
-          type="submit"
+        <ZButton
+          type="primary"
+          size="large"
+          native-type="submit"
           class="login-submit"
           :loading="props.loading"
           :disabled="props.submitDisabled"
         >
           <span>{{ submitLabel }}</span>
-        </BaseButton>
+        </ZButton>
       </div>
     </div>
-  </BaseCard>
+  </ZCard>
 </template>
 
 <style scoped>
@@ -262,18 +221,6 @@ function toggleSecretVisible(): void {
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
-}
-
-.login-password-toggle {
-  --cp-color-fill-quaternary: color-mix(in srgb, var(--cp-input-hover-bg) 62%, transparent);
-  --cp-color-fill-tertiary: color-mix(in srgb, var(--cp-input-hover-bg) 88%, transparent);
-
-  color: var(--cp-login-placeholder-color);
-  border-radius: 6px;
-}
-
-.login-password-toggle:hover {
-  color: var(--cp-login-title-color);
 }
 
 .login-submit {

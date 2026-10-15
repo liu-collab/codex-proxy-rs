@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ClientProfileSelection, ProviderRequestProfile, ProviderRequestProfiles, XaiClientProfileSelection } from '@/api/modules/settings/profiles'
-import { BaseSegmented } from '@codex-proxy/ui'
+import { ZSegmented } from '@codex-proxy/ui'
 import { computed, shallowRef } from 'vue'
 import { formatProviderLabel, PROVIDER_IDS, providerIcon } from '@/utils/providers'
 import ClientProfileEditor from './ClientProfileEditor.vue'
@@ -48,10 +48,10 @@ function updateProfile(providerId: string, value: ProviderRequestProfile | null)
   <div class="grid min-w-0 gap-4">
     <div v-if="!allowInherit" class="flex flex-wrap items-start justify-between gap-3">
       <slot name="heading" />
-      <BaseSegmented
+      <ZSegmented
         v-model="provider"
         class="ml-auto max-w-full shrink-0"
-        label="客户端身份 Provider"
+        aria-label="客户端身份 Provider"
         :options="providerOptions"
         :disabled="disabled"
         :style="providerSelectorStyle"
@@ -66,10 +66,10 @@ function updateProfile(providerId: string, value: ProviderRequestProfile | null)
       :disabled="disabled"
     >
       <template #source-extra>
-        <BaseSegmented
+        <ZSegmented
           v-model="provider"
           class="max-w-full shrink-0"
-          label="上游身份平台"
+          aria-label="上游身份平台"
           :options="providerOptions"
           :disabled="disabled"
           :style="providerSelectorStyle"
@@ -85,10 +85,10 @@ function updateProfile(providerId: string, value: ProviderRequestProfile | null)
       :disabled="disabled"
     >
       <template #source-extra>
-        <BaseSegmented
+        <ZSegmented
           v-model="provider"
           class="max-w-full shrink-0"
-          label="上游身份平台"
+          aria-label="上游身份平台"
           :options="providerOptions"
           :disabled="disabled"
           :style="providerSelectorStyle"

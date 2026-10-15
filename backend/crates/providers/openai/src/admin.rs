@@ -164,6 +164,26 @@ impl OpenAiAdminProvider {
 
 #[async_trait]
 impl ProviderAdmin for OpenAiAdminProvider {
+    fn compile_privacy_policy(
+        &self,
+        policy: &gateway_core::settings::privacy::CodexPrivacyPolicy,
+    ) -> Result<
+        Arc<dyn gateway_core::settings::privacy::CompiledPrivacyPolicy>,
+        gateway_core::settings::privacy::PrivacyError,
+    > {
+        crate::transport::privacy::compile(policy)
+    }
+
+    fn preview_privacy_policy(
+        &self,
+        request: gateway_core::settings::privacy::PrivacyPreviewRequest,
+    ) -> Result<
+        gateway_core::settings::privacy::PrivacyPreviewResult,
+        gateway_core::settings::privacy::PrivacyError,
+    > {
+        crate::transport::privacy::preview(request)
+    }
+
     fn account_capabilities(
         &self,
         _account_id: &ProviderAccountId,
@@ -380,8 +400,8 @@ impl ProviderAdmin for OpenAiAdminProvider {
             OpenAiBillingUsage::new(
                 input_tokens,
                 output_tokens,
-                input.cached_tokens.unwrap_or_default(),
-                input.cache_write_tokens.unwrap_or_default(),
+                input.cached_input_tokens.unwrap_or_default(),
+                input.cache_write_input_tokens.unwrap_or_default(),
             ),
             input.service_tier.as_deref(),
         ) else {
@@ -499,13 +519,13 @@ impl ProviderAdmin for OpenAiAdminProvider {
             (
                 AuthorizationMutationTarget::Create { .. },
                 CompletedCodexOAuthCredential::Create(credential),
-            ) => prepared_create(credential, Utc::now())
+            ) => prepared_create(*credential, Utc::now())
                 .map(|credential| PreparedAuthorizationCredential::Create(Box::new(credential))),
             (
                 AuthorizationMutationTarget::Reauthorize { .. },
                 CompletedCodexOAuthCredential::Reauthorize(credential),
             ) => {
-                prepared_rotation(credential, mutation.provider_kind().clone()).map(|credential| {
+                prepared_rotation(*credential, mutation.provider_kind().clone()).map(|credential| {
                     PreparedAuthorizationCredential::Reauthorize(Box::new(credential))
                 })
             }
@@ -1042,6 +1062,7 @@ fn account_from_record(account: &AccountRecord) -> Result<ProviderAccount, Provi
         account.access_token_expires_at.map(SystemTime::from),
     )
     .with_outbound_proxy(account.outbound_proxy.clone())
+    .with_notes(account.notes.clone())
     .with_profile(
         account.email.clone(),
         account.upstream_account_id.clone(),

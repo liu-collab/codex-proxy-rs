@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BaseButton, BaseInput, BaseSelect } from '@codex-proxy/ui'
+import { ZButton, ZInput, ZSelect } from '@codex-proxy/ui'
 
 import { Plus, Search, Trash2 } from '@lucide/vue'
 import { accountGroupStatusOptions } from '../constants'
@@ -18,7 +18,7 @@ const status = defineModel<string>('status', { required: true })
 
 <template>
   <div class="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
-    <BaseInput
+    <ZInput
       v-model="search"
       class="sm:w-80"
       aria-label="搜索账号分组"
@@ -27,17 +27,17 @@ const status = defineModel<string>('status', { required: true })
       <template #prefix>
         <Search class="size-4.5 text-cp-text-tertiary" />
       </template>
-    </BaseInput>
-    <BaseSelect
+    </ZInput>
+    <ZSelect
       v-model="status"
       :options="accountGroupStatusOptions"
       aria-label="按分组状态筛选"
       class="w-40"
     />
     <div class="flex shrink-0 items-center justify-end gap-2 sm:ml-auto">
-      <BaseButton
+      <ZButton
         v-if="selectedCount > 0"
-        variant="destructive"
+        type="danger" variant="plain"
         :disabled="batchDeleting"
         @click="emit('deleteSelected')"
       >
@@ -45,13 +45,13 @@ const status = defineModel<string>('status', { required: true })
           <Trash2 class="size-4" />
         </template>
         删除选中 ({{ selectedCount }})
-      </BaseButton>
-      <BaseButton variant="primary" @click="emit('create')">
+      </ZButton>
+      <ZButton type="primary" @click="emit('create')">
         <template #icon>
           <Plus class="size-4" />
         </template>
         创建分组
-      </BaseButton>
+      </ZButton>
     </div>
   </div>
 </template>

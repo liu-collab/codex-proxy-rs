@@ -1,4 +1,4 @@
-import { toast } from '@codex-proxy/ui'
+import { ZNotification } from '@codex-proxy/ui'
 
 import { shallowRef } from 'vue'
 import { ApiError } from '@/api/request'
@@ -42,7 +42,7 @@ export function useAsyncAction(defaults: AsyncActionRunOptions = {}) {
 
       const message = resolveErrorText(error, options.errorText)
       if (message) {
-        toast.error(message)
+        ZNotification.error({ message })
       }
 
       if (options.rethrow) {

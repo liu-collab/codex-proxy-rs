@@ -9,7 +9,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use chrono::Utc;
-use futures::stream;
+use futures::{StreamExt as _, stream};
 use gateway_admin::{
     model::system::{
         SystemOperationAccepted, SystemOperationKind, SystemOperationState, SystemOperationStatus,
@@ -19,6 +19,7 @@ use gateway_admin::{
     ports::system::{SystemOperationError, SystemOperations, SystemUpdateEventStream},
 };
 use gateway_api::admin::system::{self, UpdateDetailQuery, UpdateRequest};
+use http_body_util::BodyExt as _;
 use tower::ServiceExt as _;
 
 use super::{AdminTestFixture, AdminTestState, unavailable_system};
@@ -40,25 +41,39 @@ fn update_request_should_preserve_target_version_for_domain_validation() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn update_event_stream_should_preserve_event_id_and_download_progress_percent() {
-    let fixture = AdminTestFixture::with_system(Arc::new(ProgressSystem)).await;
+    let fixture = AdminTestFixture::with_system(Arc::new(ProgressSystem::default())).await;
     fixture.auth.insert_session("valid-session");
-    let response = app(fixture.state())
+    let response = gateway_api::admin::router::<AdminTestState>()
+        .with_state(fixture.state())
         .oneshot(
             Request::builder()
                 .uri("/api/admin/system/update/events")
                 .header(header::COOKIE, "cpr_session=valid-session")
+                .header(header::ACCEPT_ENCODING, "gzip")
                 .header("x-request-id", "req_system_update_events")
                 .body(Body::empty())
                 .expect("update event request"),
-        )
+        );
+    let response = tokio::time::timeout(std::time::Duration::from_secs(1), response)
         .await
+        .expect("SSE response must not wait for stream completion")
         .expect("update event response");
-    let body = to_bytes(response.into_body(), 1024 * 1024)
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "text/event-stream"
+    );
+    assert!(!response.headers().contains_key(header::CONTENT_ENCODING));
+    let mut stream = response.into_body();
+    let frame = tokio::time::timeout(std::time::Duration::from_secs(1), stream.frame())
         .await
-        .expect("update event body");
-    let body = String::from_utf8(body.to_vec()).expect("UTF-8 event stream");
+        .expect("first SSE event must arrive before stream completion")
+        .expect("first event")
+        .expect("event body");
+    let body = String::from_utf8(frame.into_data().expect("event data").to_vec())
+        .expect("UTF-8 event stream");
 
     assert!(
         body.contains(r#""id":"update-progress-1""#),
@@ -72,7 +87,7 @@ async fn update_event_stream_should_preserve_event_id_and_download_progress_perc
 
 #[tokio::test]
 async fn update_should_return_accepted_and_report_restart_only_through_status() {
-    let fixture = AdminTestFixture::with_system(Arc::new(ProgressSystem)).await;
+    let fixture = AdminTestFixture::with_system(Arc::new(ProgressSystem::default())).await;
     fixture.auth.insert_session("valid-session");
     let router = app(fixture.state());
     let response = router
@@ -119,7 +134,55 @@ fn app(state: AdminTestState) -> Router {
     system::router::<AdminTestState>().with_state(state)
 }
 
-struct ProgressSystem;
+#[tokio::test]
+async fn update_detail_should_compress_json_starting_at_one_kib() {
+    async fn detail(notes: String, encoding: &str) -> axum::response::Response {
+        let fixture =
+            AdminTestFixture::with_system(Arc::new(ProgressSystem { notes: Some(notes) })).await;
+        fixture.auth.insert_session("valid-session");
+        crate::openai::api_router_with_admin(fixture.services)
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/system/update/detail")
+                    .header(header::COOKIE, "cpr_session=valid-session")
+                    .header(header::ACCEPT_ENCODING, encoding)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+    }
+
+    let response = detail(String::new(), "identity").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let base = to_bytes(response.into_body(), 4096).await.unwrap();
+    assert!(base.len() < 1023);
+    for size in [1023, 1024] {
+        let response = detail("x".repeat(size - base.len()), "gzip").await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let compressed = response.headers().get(header::CONTENT_ENCODING).cloned();
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        if size == 1023 {
+            assert!(compressed.is_none());
+            assert_eq!(bytes.len(), size);
+        } else {
+            use std::io::Read as _;
+            assert_eq!(compressed.unwrap(), "gzip");
+            let mut decoded = Vec::new();
+            flate2::read::GzDecoder::new(bytes.as_ref())
+                .read_to_end(&mut decoded)
+                .unwrap();
+            assert_eq!(decoded.len(), size);
+            let body: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+            assert_eq!(body["data"]["notes"], "x".repeat(size - base.len()));
+        }
+    }
+}
+
+#[derive(Default)]
+struct ProgressSystem {
+    notes: Option<String>,
+}
 
 #[async_trait]
 impl SystemOperations for ProgressSystem {
@@ -144,7 +207,7 @@ impl SystemOperations for ProgressSystem {
             deployment_mode: "docker".into(),
             build_type: "release".into(),
             release_url: None,
-            notes: None,
+            notes: self.notes.clone(),
             cached: false,
             update_supported: true,
             unsupported_reason: None,
@@ -153,18 +216,21 @@ impl SystemOperations for ProgressSystem {
     }
 
     fn update_events(&self) -> SystemUpdateEventStream {
-        Box::pin(stream::once(async {
-            SystemUpdateEvent {
-                id: "update-progress-1".to_owned(),
-                operation_id: Some("update-1".to_owned()),
-                level: SystemUpdateEventLevel::Info,
-                step: Some("download".to_owned()),
-                message: "已下载 4.0 MiB / 10.0 MiB (40%)".to_owned(),
-                terminal: true,
-                progress_percent: Some(40),
-                occurred_at: Utc::now(),
-            }
-        }))
+        Box::pin(
+            stream::once(async {
+                SystemUpdateEvent {
+                    id: "update-progress-1".to_owned(),
+                    operation_id: Some("update-1".to_owned()),
+                    level: SystemUpdateEventLevel::Info,
+                    step: Some("download".to_owned()),
+                    message: "已下载 4.0 MiB / 10.0 MiB (40%)".to_owned(),
+                    terminal: false,
+                    progress_percent: Some(40),
+                    occurred_at: Utc::now(),
+                }
+            })
+            .chain(stream::pending()),
+        )
     }
 
     async fn perform_update(
@@ -216,7 +282,7 @@ impl SystemOperations for ProgressSystem {
 
 #[tokio::test]
 async fn update_detail_should_validate_and_forward_the_temporary_channel() {
-    let fixture = AdminTestFixture::with_system(Arc::new(ProgressSystem)).await;
+    let fixture = AdminTestFixture::with_system(Arc::new(ProgressSystem::default())).await;
     fixture.auth.insert_session("valid-session");
     let router = app(fixture.state());
     for (authenticated, query, expected) in [

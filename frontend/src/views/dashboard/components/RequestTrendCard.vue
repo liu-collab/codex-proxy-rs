@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { dashboardTrendView, normalizeDashboardTrendKind } from '../presenter'
 
-import { BaseCard, BaseEmpty, BaseSegmented } from '@codex-proxy/ui'
+import { ZCard, ZEmpty, ZSegmented } from '@codex-proxy/ui'
 import { toRef } from 'vue'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { useRequestTrendChart } from '../composables/useRequestTrendChart'
@@ -42,11 +42,11 @@ const {
 </script>
 
 <template>
-  <BaseCard as="article" title="使用趋势" class="min-h-95 w-full">
+  <ZCard as="article" title="使用趋势" class="min-h-95 w-full">
     <template #actions>
-      <BaseSegmented
+      <ZSegmented
         v-model="activeKind"
-        label="趋势指标"
+        aria-label="趋势指标"
         :options="tabs"
         class="w-full max-w-61.5 sm:w-61.5"
         @update:model-value="handleTrendChange"
@@ -95,7 +95,7 @@ const {
 
         <div class="relative h-55 w-full overflow-hidden">
           <BaseChart v-if="hasSamples" :option="chartOption" :height="220" />
-          <BaseEmpty
+          <ZEmpty
             v-else-if="!loading"
             surface="none"
             :title="error || '暂无趋势数据'"
@@ -104,5 +104,5 @@ const {
         </div>
       </div>
     </template>
-  </BaseCard>
+  </ZCard>
 </template>

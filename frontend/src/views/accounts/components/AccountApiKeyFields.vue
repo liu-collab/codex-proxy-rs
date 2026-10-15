@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ApiKeyAccountForm } from '../utils/upstreamApiKey'
-import { BaseFormItem, BaseInput, BaseSegmented } from '@codex-proxy/ui'
+import { ZFormItem, ZInput, ZSegmented } from '@codex-proxy/ui'
 
 defineProps<{ disabled?: boolean, editing?: boolean }>()
 const form = defineModel<ApiKeyAccountForm>({ required: true })
@@ -12,20 +12,20 @@ const transportOptions = [
 
 <template>
   <div class="grid gap-4">
-    <BaseFormItem v-if="!editing" label="账号名称" required>
-      <BaseInput v-model="form.name" placeholder="输入上游名称" :disabled="disabled" />
-    </BaseFormItem>
-    <BaseFormItem label="Base URL" required>
+    <ZFormItem v-if="!editing" label="账号名称" required>
+      <ZInput v-model="form.name" placeholder="输入上游名称" :disabled="disabled" />
+    </ZFormItem>
+    <ZFormItem label="Base URL" required>
       <template #extra>
         <span class="text-cp-xs text-cp-text-quaternary" title="填写 API 前缀，接口路径会自动追加">API 前缀</span>
       </template>
-      <BaseInput v-model="form.base_url" type="url" placeholder="https://api.example.com/v1" :disabled="disabled" autocomplete="off" />
-    </BaseFormItem>
-    <BaseFormItem label="API Key" :required="!editing">
-      <BaseInput v-model="form.apiKey" type="password" :placeholder="editing ? '留空保留当前密钥' : '输入上游密钥'" :disabled="disabled" autocomplete="new-password" />
-    </BaseFormItem>
-    <BaseFormItem label="传输方式">
-      <BaseSegmented v-model="form.transport" label="传输方式" :options="transportOptions" :disabled="disabled" title="WS 优先需要上游支持 Responses WebSocket" />
-    </BaseFormItem>
+      <ZInput v-model="form.base_url" type="url" placeholder="https://api.example.com/v1" :disabled="disabled" autocomplete="off" />
+    </ZFormItem>
+    <ZFormItem label="API Key" :required="!editing">
+      <ZInput v-model="form.apiKey" type="password" :placeholder="editing ? '留空保留当前密钥' : '输入上游密钥'" :disabled="disabled" autocomplete="new-password" />
+    </ZFormItem>
+    <ZFormItem label="传输方式">
+      <ZSegmented v-model="form.transport" aria-label="传输方式" :options="transportOptions" :disabled="disabled" title="WS 优先需要上游支持 Responses WebSocket" />
+    </ZFormItem>
   </div>
 </template>

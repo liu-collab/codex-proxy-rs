@@ -2,7 +2,7 @@
 import type { EChartsOption } from 'echarts'
 import type { MetricCardView, MetricTone } from '../presenter'
 
-import { BaseCard, BaseMotionIcon } from '@codex-proxy/ui'
+import { ZCard, ZMotionIcon } from '@codex-proxy/ui'
 import { computed } from 'vue'
 
 import AnimatedMetricValue from '@/components/AnimatedMetricValue.vue'
@@ -71,14 +71,14 @@ const sparklineOption = computed<EChartsOption | null>(() => {
 </script>
 
 <template>
-  <BaseCard as="article" padding="compact" class="relative h-38.5 w-full">
+  <ZCard as="article" padding="compact" class="relative h-38.5 w-full">
     <div class="flex items-start gap-3">
-      <BaseMotionIcon
+      <ZMotionIcon
         class="inline-flex size-8.5 shrink-0 items-center justify-center rounded-cp-lg"
         :class="metricToneIconClasses[metric.tone]"
       >
         <component :is="metric.icon" :size="18" />
-      </BaseMotionIcon>
+      </ZMotionIcon>
       <span class="mt-1 text-cp leading-[1.15] font-emphasis text-cp-text-secondary">{{ metric.title }}</span>
     </div>
 
@@ -128,5 +128,5 @@ const sparklineOption = computed<EChartsOption | null>(() => {
         </b>
       </span>
     </div>
-  </BaseCard>
+  </ZCard>
 </template>

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { InstalledPlugin } from '../utils/catalog'
-import { BaseButton, BaseCard, BaseEmpty, BaseIconButton, BaseInput, BaseScrollbar, BaseSegmented, BaseSelect, BaseTable, BaseTablePagination, BaseTag, defineTableColumns } from '@codex-proxy/ui'
+import { defineTableColumns, ZButton, ZCard, ZEmpty, ZIconButton, ZInput, ZPagination, ZScrollbar, ZSegmented, ZSelect, ZTable, ZTag } from '@codex-proxy/ui'
 import { LayoutGrid, List, Puzzle, Search, Settings2 } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { PLUGIN_STATUS_LABELS } from '../constants'
@@ -53,41 +53,41 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
 <template>
   <div class="flex h-full min-h-0 flex-col gap-2">
     <div class="flex shrink-0 flex-wrap items-center gap-3 p-1">
-      <BaseInput v-model="search" aria-label="搜索已安装插件" placeholder="搜索插件、发布者" class="min-w-0 flex-1 basis-full sm:max-w-72 sm:basis-auto">
+      <ZInput v-model="search" aria-label="搜索已安装插件" placeholder="搜索插件、发布者" class="min-w-0 flex-1 basis-full sm:max-w-72 sm:basis-auto">
         <template #prefix>
           <Search class="size-4" />
         </template>
-      </BaseInput>
-      <BaseSelect v-model="status" :options="statusOptions" aria-label="插件状态" class="w-36" />
-      <BaseSegmented v-model="display" :options="displayOptions" label="插件显示方式" display="icon" class="ml-auto w-20 shrink-0" />
+      </ZInput>
+      <ZSelect v-model="status" :options="statusOptions" aria-label="插件状态" class="w-36" />
+      <ZSegmented v-model="display" :options="displayOptions" aria-label="插件显示方式" display="icon" class="ml-auto w-20 shrink-0" />
     </div>
     <div v-if="loading && !plugins.length" class="min-h-0 flex-1" aria-busy="true" />
-    <BaseEmpty v-else-if="!filtered.length" :icon="Puzzle" :title="plugins.length ? '没有匹配的插件' : '安装第一个插件'" :description="plugins.length ? '试试其他名称或状态' : '从上方安装插件，请先确认来源可信'" surface="none" class="flex-1 content-center">
+    <ZEmpty v-else-if="!filtered.length" :icon="Puzzle" :title="plugins.length ? '没有匹配的插件' : '安装第一个插件'" :description="plugins.length ? '试试其他名称或状态' : '从上方安装插件，请先确认来源可信'" surface="none" class="flex-1 content-center">
       <template v-if="plugins.length" #action>
-        <BaseButton variant="secondary" @click="search = ''; status = 'all'">
+        <ZButton @click="search = ''; status = 'all'">
           清除筛选
-        </BaseButton>
+        </ZButton>
       </template>
-    </BaseEmpty>
-    <BaseScrollbar v-else-if="display === 'cards'" class="min-h-0 flex-1" :aria-busy="loading">
+    </ZEmpty>
+    <ZScrollbar v-else-if="display === 'cards'" class="min-h-0 flex-1" :aria-busy="loading">
       <ul class="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,30rem),1fr))] items-start gap-4 p-1" aria-label="已安装插件">
         <li v-for="plugin in rows" :key="plugin.id">
-          <BaseCard padding="compact">
+          <ZCard padding="compact">
             <div class="flex min-w-0 items-start gap-3">
               <PluginIcon :artifact="plugin.artifact" class="size-10 shrink-0 rounded-cp" />
               <div class="grid min-w-0 flex-1 gap-1">
                 <div class="flex min-w-0 items-center gap-2">
                   <strong class="truncate text-cp-sm">{{ plugin.artifact.metadata.displayName }}</strong>
-                  <BaseTag size="sm" class="shrink-0" :title="plugin.versionTitle" :aria-label="plugin.versionTitle">
+                  <ZTag size="small" class="shrink-0" :title="plugin.versionTitle" :aria-label="plugin.versionTitle">
                     <span class="block max-w-28 truncate">{{ plugin.versionLabel }}</span>
-                  </BaseTag>
+                  </ZTag>
                 </div>
                 <span class="truncate text-cp-xs text-cp-text-secondary">{{ plugin.artifact.metadata.publisher }}</span>
               </div>
               <PluginStatusNotice v-if="currentPluginInstance(plugin)" :instance="currentPluginInstance(plugin)!" />
-              <BaseTag :type="pluginStatusType(pluginStatus(plugin))" size="sm">
+              <ZTag :type="pluginStatusType(pluginStatus(plugin))" size="small">
                 {{ PLUGIN_STATUS_LABELS[pluginStatus(plugin)] }}
-              </BaseTag>
+              </ZTag>
             </div>
             <p class="my-4 line-clamp-2 min-h-10 text-cp-sm leading-relaxed text-cp-text-secondary">
               {{ plugin.artifact.metadata.description || '发布者未提供说明' }}
@@ -95,24 +95,24 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
             <PluginCapabilityTags :metadata="plugin.artifact.metadata" />
             <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
               <span class="text-cp-xs text-cp-text-secondary">{{ plugin.artifacts.length }} 个版本</span>
-              <BaseIconButton class="ml-auto" :label="`管理 ${plugin.artifact.metadata.displayName}`" variant="secondary" size="sm" @click="$emit('manage', plugin)">
+              <ZIconButton class="ml-auto" :aria-label="`管理 ${plugin.artifact.metadata.displayName}`" variant="solid" size="small" @click="$emit('manage', plugin)">
                 <Settings2 class="size-4" />
-              </BaseIconButton>
+              </ZIconButton>
             </div>
-          </BaseCard>
+          </ZCard>
         </li>
       </ul>
-    </BaseScrollbar>
-    <BaseTable v-else class="min-h-0 flex-1" :columns="columns" :rows="rows" :row-key="row => row.id" :aria-busy="loading">
+    </ZScrollbar>
+    <ZTable v-else class="min-h-0 flex-1" :columns="columns" :data="rows" :row-key="row => row.id" :aria-busy="loading">
       <template #plugin="{ row }">
         <div class="flex min-w-0 items-center gap-3">
           <PluginIcon :artifact="row.artifact" class="size-9 rounded-cp" />
           <div class="grid min-w-0 gap-1">
             <div class="flex min-w-0 items-center gap-2">
               <strong class="truncate">{{ row.artifact.metadata.displayName }}</strong>
-              <BaseTag size="sm" class="shrink-0" :title="row.versionTitle" :aria-label="row.versionTitle">
+              <ZTag size="small" class="shrink-0" :title="row.versionTitle" :aria-label="row.versionTitle">
                 <span class="block max-w-28 truncate">{{ row.versionLabel }}</span>
-              </BaseTag>
+              </ZTag>
             </div>
             <span class="truncate text-cp-xs text-cp-text-secondary">{{ row.artifact.metadata.publisher }}</span>
           </div>
@@ -121,9 +121,9 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
       <template #status="{ row }">
         <div class="flex items-center gap-1.5">
           <PluginStatusNotice v-if="currentPluginInstance(row)" :instance="currentPluginInstance(row)!" />
-          <BaseTag :type="pluginStatusType(pluginStatus(row))">
+          <ZTag :type="pluginStatusType(pluginStatus(row))">
             {{ PLUGIN_STATUS_LABELS[pluginStatus(row)] }}
-          </BaseTag>
+          </ZTag>
         </div>
       </template>
       <template #capabilities="{ row }">
@@ -133,11 +133,11 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
         {{ row.artifacts.length }} 个版本
       </template>
       <template #actions="{ row }">
-        <BaseIconButton size="sm" variant="secondary" :label="`管理 ${row.artifact.metadata.displayName}`" @click="$emit('manage', row)">
+        <ZIconButton size="small" variant="solid" :aria-label="`管理 ${row.artifact.metadata.displayName}`" @click="$emit('manage', row)">
           <Settings2 class="size-4" />
-        </BaseIconButton>
+        </ZIconButton>
       </template>
-    </BaseTable>
-    <BaseTablePagination :pagination="pagination" :loading="loading" @page-change="page = $event" @page-size-change="pageSize = $event" />
+    </ZTable>
+    <ZPagination v-bind="pagination" :disabled="loading" @current-change="page = $event" @size-change="pageSize = $event" />
   </div>
 </template>

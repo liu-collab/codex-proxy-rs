@@ -24,8 +24,8 @@ const FILE_SEARCH_CALL_TICKS: u128 = 25_000_000;
 pub struct OpenAiBillingUsage {
     input_tokens: u64,
     output_tokens: u64,
-    cached_tokens: u64,
-    cache_write_tokens: u64,
+    cached_input_tokens: u64,
+    cache_write_input_tokens: u64,
     image_input_tokens: u64,
     image_output_tokens: u64,
     web_search_calls: u64,
@@ -39,14 +39,14 @@ impl OpenAiBillingUsage {
     pub const fn new(
         input_tokens: u64,
         output_tokens: u64,
-        cached_tokens: u64,
-        cache_write_tokens: u64,
+        cached_input_tokens: u64,
+        cache_write_input_tokens: u64,
     ) -> Self {
         Self {
             input_tokens,
             output_tokens,
-            cached_tokens,
-            cache_write_tokens,
+            cached_input_tokens,
+            cache_write_input_tokens,
             image_input_tokens: 0,
             image_output_tokens: 0,
             web_search_calls: 0,
@@ -76,8 +76,8 @@ impl From<TokenUsage> for OpenAiBillingUsage {
         Self {
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
-            cached_tokens: usage.cached_tokens,
-            cache_write_tokens: usage.cache_write_tokens,
+            cached_input_tokens: usage.cached_input_tokens,
+            cache_write_input_tokens: usage.cache_write_input_tokens,
             image_input_tokens: usage.image_input_tokens,
             image_output_tokens: usage.image_output_tokens,
             web_search_calls: 0,
@@ -138,9 +138,11 @@ struct ModelPricing {
     standard: TokenRates,
     flex: TokenRates,
     fast: TokenRates,
+    ultrafast: TokenRates,
     long_standard: TokenRates,
     long_flex: TokenRates,
     long_fast: TokenRates,
+    long_ultrafast: TokenRates,
     cache_write_percent: u32,
     unpriced_long_context: bool,
 }
@@ -151,9 +153,11 @@ impl ModelPricing {
             standard: TokenRates::new(input, output, cache_read),
             flex: TokenRates::ZERO,
             fast: TokenRates::ZERO,
+            ultrafast: TokenRates::ZERO,
             long_standard: TokenRates::ZERO,
             long_flex: TokenRates::ZERO,
             long_fast: TokenRates::ZERO,
+            long_ultrafast: TokenRates::ZERO,
             cache_write_percent: 0,
             unpriced_long_context: false,
         }
@@ -169,6 +173,11 @@ impl ModelPricing {
         self
     }
 
+    const fn with_ultrafast(mut self, input: u128, output: u128, cache_read: u128) -> Self {
+        self.ultrafast = TokenRates::new(input, output, cache_read);
+        self
+    }
+
     const fn with_long(mut self, input: u128, output: u128, cache_read: u128) -> Self {
         self.long_standard = TokenRates::new(input, output, cache_read);
         self
@@ -181,6 +190,11 @@ impl ModelPricing {
 
     const fn with_long_fast(mut self, input: u128, output: u128, cache_read: u128) -> Self {
         self.long_fast = TokenRates::new(input, output, cache_read);
+        self
+    }
+
+    const fn with_long_ultrafast(mut self, input: u128, output: u128, cache_read: u128) -> Self {
+        self.long_ultrafast = TokenRates::new(input, output, cache_read);
         self
     }
 
@@ -205,9 +219,11 @@ impl ModelPricing {
             (PricingTier::Standard, false) => self.standard,
             (PricingTier::Flex, false) => self.flex,
             (PricingTier::Fast, false) => self.fast,
+            (PricingTier::Ultrafast, false) => self.ultrafast,
             (PricingTier::Standard, true) => self.long_standard,
             (PricingTier::Flex, true) => self.long_flex,
             (PricingTier::Fast, true) => self.long_fast,
+            (PricingTier::Ultrafast, true) => self.long_ultrafast,
         };
         rates.is_configured().then_some(rates)
     }
@@ -218,6 +234,7 @@ enum PricingTier {
     Standard,
     Flex,
     Fast,
+    Ultrafast,
 }
 
 #[derive(Clone, Copy)]
@@ -229,6 +246,7 @@ struct PricingRule {
 // 价格来源：https://developers.openai.com/api/docs/pricing
 // 只登记已核验的常规价格及服务档位；临时优惠不写入内置价目
 // 原有规则于 2026-09-09 核验，GPT-6.1 Sol 于 2026-09-29 核验，其余新增型号见对应条目
+// Astra 与 GPT-6.1 Sol 的 Ultrafast 档位于 2026-10-12 对照官方价目表核验
 // 已按 https://developers.openai.com/api/docs/deprecations 核验至 2026-09-13，
 // 移除已关闭的型号；仅宣布弃用但尚未到关闭日期的型号继续保留
 const PRICING_RULES: &[PricingRule] = &[
@@ -240,9 +258,11 @@ const PRICING_RULES: &[PricingRule] = &[
             .with_cache_write(125)
             .with_flex(50_000, 250_000, 5_000)
             .with_fast(200_000, 1_000_000, 20_000)
+            .with_ultrafast(600_000, 3_000_000, 60_000)
             .with_long(200_000, 750_000, 20_000)
             .with_long_flex(100_000, 375_000, 10_000)
-            .with_long_fast(400_000, 1_500_000, 40_000),
+            .with_long_fast(400_000, 1_500_000, 40_000)
+            .with_long_ultrafast(1_200_000, 4_500_000, 120_000),
     },
     PricingRule {
         model: "gpt-6.1-sol",
@@ -250,9 +270,11 @@ const PRICING_RULES: &[PricingRule] = &[
             .with_cache_write(125)
             .with_flex(10_000, 50_000, 500)
             .with_fast(40_000, 200_000, 2_000)
+            .with_ultrafast(120_000, 600_000, 6_000)
             .with_long(40_000, 150_000, 2_000)
             .with_long_flex(20_000, 75_000, 1_000)
-            .with_long_fast(80_000, 300_000, 4_000),
+            .with_long_fast(80_000, 300_000, 4_000)
+            .with_long_ultrafast(240_000, 900_000, 12_000),
     },
     // https://developers.openai.com/api/docs/models/gpt-6-sol，核验日期 2026-09-24
     PricingRule {
@@ -534,7 +556,10 @@ fn openai_billing_breakdown_with_context(
     long_context: bool,
     custom: Option<&gateway_core::metering::ModelPriceOverride>,
 ) -> Option<CalculatedCostBreakdown> {
-    if usage.cached_tokens.checked_add(usage.cache_write_tokens)? > usage.input_tokens
+    if usage
+        .cached_input_tokens
+        .checked_add(usage.cache_write_input_tokens)?
+        > usage.input_tokens
         || usage.image_input_tokens > 0
         || usage.image_output_tokens > 0
     {
@@ -555,16 +580,16 @@ fn openai_billing_breakdown_with_context(
         cache_write_percent,
         usage.input_tokens,
         usage.output_tokens,
-        usage.cached_tokens,
-        usage.cache_write_tokens,
+        usage.cached_input_tokens,
+        usage.cache_write_input_tokens,
     )?;
     let mut selected = token_amounts(
         selected_rates,
         cache_write_percent,
         usage.input_tokens,
         usage.output_tokens,
-        usage.cached_tokens,
-        usage.cache_write_tokens,
+        usage.cached_input_tokens,
+        usage.cache_write_input_tokens,
     )?;
     standard.total_ticks = standard.total_ticks.checked_add(tool_ticks)?;
     selected.total_ticks = selected.total_ticks.checked_add(tool_ticks)?;
@@ -604,6 +629,7 @@ fn effective_rates(
         PricingTier::Standard => "long_standard",
         PricingTier::Fast => "long_fast",
         PricingTier::Flex => "long_flex",
+        PricingTier::Ultrafast => "long_ultrafast",
     };
     let uses_long = long_context
         && (default.is_some_and(|p| p.long_standard.is_configured() || p.unpriced_long_context)
@@ -612,9 +638,11 @@ fn effective_rates(
         (PricingTier::Standard, false) => "standard",
         (PricingTier::Fast, false) => "fast",
         (PricingTier::Flex, false) => "flex",
+        (PricingTier::Ultrafast, false) => "ultrafast",
         (PricingTier::Standard, true) => "long_standard",
         (PricingTier::Fast, true) => "long_fast",
         (PricingTier::Flex, true) => "long_flex",
+        (PricingTier::Ultrafast, true) => "long_ultrafast",
     };
     if let Some(rates) = custom.and_then(|p| p.bands.get(band)) {
         return Some((
@@ -652,9 +680,11 @@ pub(crate) fn pricing_catalog()
             let bands = [
                 ("standard", pricing.standard),
                 ("fast", pricing.fast),
+                ("ultrafast", pricing.ultrafast),
                 ("flex", pricing.flex),
                 ("long_standard", pricing.long_standard),
                 ("long_fast", pricing.long_fast),
+                ("long_ultrafast", pricing.long_ultrafast),
                 ("long_flex", pricing.long_flex),
             ]
             .into_iter()
@@ -818,7 +848,7 @@ pub(crate) fn image_calculated_cost(
     )
     .with_image(gateway_core::metering::ImageCostBreakdown {
         input_tokens: image_input,
-        cached_tokens: cached_image,
+        cached_input_tokens: cached_image,
         input_amount: usd_money(image.input_ticks)?,
         cache_read_amount: usd_money(image.cache_read_ticks)?,
         input_price_per_million: usd_price_per_million(image_rates.input_ticks)?,
@@ -887,6 +917,7 @@ fn pricing_tier(service_tier: Option<&str>) -> Option<PricingTier> {
         None | Some("default" | "standard") => Some(PricingTier::Standard),
         Some("flex") => Some(PricingTier::Flex),
         Some("fast" | "priority") => Some(PricingTier::Fast),
+        Some("ultrafast") => Some(PricingTier::Ultrafast),
         Some(_) => None,
     }
 }
@@ -903,20 +934,20 @@ fn token_amounts(
     cache_write_percent: u32,
     input_tokens: u64,
     output_tokens: u64,
-    cached_tokens: u64,
-    cache_write_tokens: u64,
+    cached_input_tokens: u64,
+    cache_write_input_tokens: u64,
 ) -> Option<TokenAmounts> {
-    if cached_tokens.checked_add(cache_write_tokens)? > input_tokens {
+    if cached_input_tokens.checked_add(cache_write_input_tokens)? > input_tokens {
         return None;
     }
     let billed_cache_read = if rates.explicit_cache || rates.cache_read_ticks > 0 {
-        cached_tokens
+        cached_input_tokens
     } else {
         0
     };
     let cache_write_rate = cache_write_rate(rates, cache_write_percent)?;
     let billed_cache_write = if rates.explicit_cache || cache_write_rate > 0 {
-        cache_write_tokens
+        cache_write_input_tokens
     } else {
         0
     };

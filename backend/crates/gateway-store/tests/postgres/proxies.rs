@@ -1,4 +1,4 @@
-//! 验证代理位置、账号绑定、分页查询与事务锁释放
+//! 验证代理启停、位置、账号绑定、自动解绑与事务锁释放
 
 use gateway_admin::{
     model::{
@@ -68,6 +68,7 @@ async fn proxy_location_is_shared_preserved_cleared_and_removed_with_binding() {
     saved = proxies
         .update(
             UpdateProxy {
+                enabled: None,
                 auto_location: None,
                 test: None,
                 id: saved.id.clone(),
@@ -87,6 +88,7 @@ async fn proxy_location_is_shared_preserved_cleared_and_removed_with_binding() {
     saved = proxies
         .update(
             UpdateProxy {
+                enabled: None,
                 auto_location: None,
                 test: None,
                 id: saved.id.clone(),
@@ -115,6 +117,7 @@ async fn proxy_location_is_shared_preserved_cleared_and_removed_with_binding() {
         proxies
             .update(
                 UpdateProxy {
+                    enabled: None,
                     auto_location: None,
                     test: None,
                     id: saved.id.clone(),
@@ -132,6 +135,7 @@ async fn proxy_location_is_shared_preserved_cleared_and_removed_with_binding() {
     proxies
         .update(
             UpdateProxy {
+                enabled: None,
                 auto_location: None,
                 test: None,
                 id: saved.id.clone(),
@@ -166,6 +170,201 @@ fn context() -> MutationContext {
         actor: MutationActor::System,
         request_id: "managed-proxy-test".to_owned(),
     }
+}
+
+#[tokio::test]
+async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credentials() {
+    use gateway_core::{
+        account::{ProviderAccountStore as _, ProviderRefreshQuery, RequestLocation},
+        routing::ProviderKind,
+    };
+    use std::{
+        num::NonZeroU32,
+        time::{Duration, SystemTime},
+    };
+
+    let Some(database) = TestDatabase::create("proxy_enabled").await else {
+        return;
+    };
+    let proxies = PgProxyRepository::new(database.pool.clone());
+    let accounts = PgProviderAccountRepository::new(database.pool.clone());
+    let admin = admin_account_store(&database.pool);
+    let location: RequestLocation = serde_json::from_value(serde_json::json!({
+        "country":"JP", "region":"Tokyo", "city":"Tokyo", "timezone":"Asia/Tokyo"
+    }))
+    .unwrap();
+    let mut saved = proxies
+        .create(
+            NewProxy {
+                auto_location: false,
+                test: None,
+                location: Some(location.clone()),
+                name: "启停测试".to_owned(),
+                proxy: OutboundProxy::parse("http://user:secret@127.0.0.1:18080").unwrap(),
+            },
+            &context(),
+        )
+        .await
+        .unwrap()
+        .record;
+    assert!(saved.enabled);
+    proxies
+        .record_test(&saved.id, saved.revision, success(), &context())
+        .await
+        .unwrap();
+    for (id, provider) in [
+        ("acct_enabled_openai", "openai"),
+        ("acct_enabled_xai", "xai"),
+    ] {
+        let mut seed = account(id, id);
+        seed.provider_kind = provider.into();
+        seed.outbound_proxy = Some(saved.proxy.clone());
+        seed.has_refresh_token = true;
+        seed.access_token_expires_at = Some(chrono::Utc::now());
+        accounts.insert_provider_account(seed).await.unwrap();
+    }
+    let original: Vec<serde_json::Value> =
+        sqlx::query_scalar("select to_jsonb(a) from provider_accounts a order by id")
+            .fetch_all(&database.pool)
+            .await
+            .unwrap();
+    let original_revision = accounts.list_accounts().await.unwrap()[0].revision();
+    for enabled in [false, true] {
+        let stale_revision = saved.revision;
+        saved = proxies
+            .update(
+                UpdateProxy {
+                    enabled: Some(enabled),
+                    auto_location: None,
+                    test: None,
+                    location: None,
+                    id: saved.id.clone(),
+                    revision: saved.revision,
+                    name: saved.name.clone(),
+                    proxy: None,
+                },
+                &context(),
+            )
+            .await
+            .unwrap()
+            .record;
+        assert_eq!(saved.enabled, enabled);
+        assert_eq!(saved.account_count, 2);
+        assert_eq!(saved.last_test, Some(success()));
+        assert_eq!(saved.location.as_ref(), Some(&location));
+        let current: Vec<serde_json::Value> =
+            sqlx::query_scalar("select to_jsonb(a) from provider_accounts a order by id")
+                .fetch_all(&database.pool)
+                .await
+                .unwrap();
+        assert_eq!(current, original);
+        let mut projected = accounts.list_accounts().await.unwrap();
+        for (id, provider) in [
+            ("acct_enabled_openai", "openai"),
+            ("acct_enabled_xai", "xai"),
+        ] {
+            let id = ProviderAccountId::new(id).unwrap();
+            projected.push(accounts.get_account(&id).await.unwrap().unwrap());
+            projected.push(accounts.load_current_credential(&id).await.unwrap().account);
+            let kind = ProviderKind::new(provider).unwrap();
+            projected.extend(accounts.list_for_provider(&kind).await.unwrap());
+            let now = SystemTime::now();
+            projected.extend(
+                accounts
+                    .list_refresh_candidates(ProviderRefreshQuery::new(
+                        kind,
+                        now + Duration::from_secs(300),
+                        now - Duration::from_secs(7200),
+                        now,
+                        vec![],
+                        NonZeroU32::new(10).unwrap(),
+                    ))
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|loaded| loaded.account),
+            );
+            let configured = admin
+                .credential_details(&ProviderKind::new(provider).unwrap(), &id)
+                .await
+                .unwrap()
+                .unwrap()
+                .credential;
+            assert_eq!(configured.outbound_proxy.as_ref(), Some(&saved.proxy));
+            assert_eq!(
+                configured.effective_outbound_proxy(),
+                enabled.then_some(&saved.proxy)
+            );
+        }
+        assert!(projected.iter().all(|account| account.outbound_proxy()
+            == enabled.then_some(&saved.proxy)
+            && account.request_location() == enabled.then_some(&location)
+            && account.revision() == original_revision
+            && account.enabled()));
+        assert_eq!(
+            proxies
+                .update(
+                    UpdateProxy {
+                        enabled: Some(!enabled),
+                        auto_location: None,
+                        test: None,
+                        location: None,
+                        id: saved.id.clone(),
+                        revision: stale_revision,
+                        name: saved.name.clone(),
+                        proxy: None,
+                    },
+                    &context()
+                )
+                .await
+                .unwrap_err()
+                .kind(),
+            AdminStoreErrorKind::Conflict
+        );
+        assert_eq!(proxies.get(&saved.id).await.unwrap().enabled, enabled);
+        let reservation = proxies.reserve_import(&saved.id).await;
+        assert_eq!(reservation.is_ok(), enabled);
+        drop(reservation);
+        if !enabled {
+            let error = admin
+                .update_account(
+                    update(
+                        "acct_enabled_openai",
+                        AccountProxySelection::Saved(saved.id.clone()),
+                    ),
+                    &context(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind(), AdminStoreErrorKind::Conflict);
+            let error = admin
+                .batch_update_accounts(
+                    BatchUpdateAccounts {
+                        account_ids: vec![
+                            "acct_enabled_openai".to_owned(),
+                            "acct_enabled_xai".to_owned(),
+                        ],
+                        enabled: Some(false),
+                        concurrency_limit: None,
+                        weight: None,
+                        model_access: None,
+                        group_ids: None,
+                        outbound_proxy: Some(AccountProxySelection::Saved(saved.id.clone())),
+                    },
+                    &context(),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error.kind(), AdminStoreErrorKind::Conflict);
+            let unchanged: Vec<serde_json::Value> =
+                sqlx::query_scalar("select to_jsonb(a) from provider_accounts a order by id")
+                    .fetch_all(&database.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(unchanged, original);
+        }
+    }
+    database.close().await;
 }
 
 fn success() -> ProxyTestResult {
@@ -575,6 +774,7 @@ async fn stale_proxy_test_releases_lock_before_next_update() {
     let update = store
         .update(
             UpdateProxy {
+                enabled: None,
                 id: saved.id.clone(),
                 revision: saved.revision,
                 name: saved.name.clone(),
@@ -634,6 +834,7 @@ async fn import_reservation_blocks_proxy_mutations_until_rotated_credentials_are
         .unwrap();
     let reservation = store.reserve_import(&saved.id).await.unwrap();
     let replacement = UpdateProxy {
+        enabled: None,
         auto_location: None,
         test: None,
         location: None,
@@ -798,14 +999,6 @@ async fn managed_proxies_persist_bind_update_all_accounts_and_protect_stale_test
             .unwrap();
     }
     assert_eq!(store.get(&created.id).await.unwrap().account_count, 2);
-    assert_eq!(
-        store
-            .delete(&created.id, created.revision, &context)
-            .await
-            .unwrap_err()
-            .kind(),
-        AdminStoreErrorKind::Conflict
-    );
     assert!(
         read()
             .await
@@ -822,6 +1015,7 @@ async fn managed_proxies_persist_bind_update_all_accounts_and_protect_stale_test
     let renamed = store
         .update(
             UpdateProxy {
+                enabled: None,
                 auto_location: None,
                 test: None,
                 id: created.id.clone(),
@@ -842,6 +1036,7 @@ async fn managed_proxies_persist_bind_update_all_accounts_and_protect_stale_test
     let edited = store
         .update(
             UpdateProxy {
+                enabled: None,
                 auto_location: None,
                 test: None,
                 id: created.id.clone(),
@@ -875,22 +1070,45 @@ async fn managed_proxies_persist_bind_update_all_accounts_and_protect_stale_test
         .await
         .unwrap();
 
-    for id in ["acct_one", "acct_two"] {
-        admin
-            .update_account(update(id, AccountProxySelection::Direct), &context)
+    assert_eq!(
+        store
+            .delete(&created.id, created.revision, &context)
             .await
-            .unwrap();
-    }
+            .unwrap_err()
+            .kind(),
+        AdminStoreErrorKind::Conflict
+    );
+    assert!(
+        read()
+            .await
+            .iter()
+            .all(|row| row.1.as_deref() == Some(created.id.as_str()))
+    );
+    let preserved: Vec<serde_json::Value> = sqlx::query_scalar("select to_jsonb(a) - 'updated_at' - 'outbound_proxy_id' - 'outbound_proxy_url' from provider_accounts a order by id")
+        .fetch_all(&database.pool).await.unwrap();
+    let deleted_revision = store
+        .delete(&created.id, edited.revision, &context)
+        .await
+        .unwrap();
+    let after_delete: Vec<serde_json::Value> = sqlx::query_scalar("select to_jsonb(a) - 'updated_at' - 'outbound_proxy_id' - 'outbound_proxy_url' from provider_accounts a order by id")
+        .fetch_all(&database.pool).await.unwrap();
+    assert_eq!(preserved, after_delete);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "select count(*) from admin_audit_events where config_revision = $1"
+        )
+        .bind(i64::try_from(deleted_revision.get()).unwrap())
+        .fetch_one(&database.pool)
+        .await
+        .unwrap(),
+        3
+    );
     assert!(
         read()
             .await
             .iter()
             .all(|row| row.1.is_none() && row.2.is_none() && row.3 == 1)
     );
-    store
-        .delete(&created.id, edited.revision, &context)
-        .await
-        .unwrap();
     assert!(store.get(&created.id).await.is_err());
     let audits: Vec<serde_json::Value> =
         sqlx::query_scalar("select to_jsonb(a) from admin_audit_events a")
@@ -984,6 +1202,12 @@ async fn migration_backfills_shared_proxies_without_changing_credentials() {
         .unwrap();
     }
     super::TEST_MIGRATOR.run(&database.pool).await.unwrap();
+    assert!(
+        sqlx::query_scalar::<_, bool>("select bool_and(enabled) from outbound_proxies")
+            .fetch_one(&database.pool)
+            .await
+            .unwrap()
+    );
     let accounts = PgProviderAccountRepository::new(database.pool.clone());
     let inherited = gateway_core::account::ProviderAccountStore::list_accounts(&accounts)
         .await
@@ -1134,6 +1358,7 @@ async fn automatic_proxy_location_projects_to_accounts_and_guards_refresh_result
     saved = proxies
         .update(
             UpdateProxy {
+                enabled: None,
                 id: saved.id.clone(),
                 revision: saved.revision,
                 name: saved.name.clone(),
@@ -1152,6 +1377,7 @@ async fn automatic_proxy_location_projects_to_accounts_and_guards_refresh_result
     saved = proxies
         .update(
             UpdateProxy {
+                enabled: None,
                 id: saved.id.clone(),
                 revision: saved.revision,
                 name: saved.name.clone(),
@@ -1178,6 +1404,7 @@ async fn automatic_proxy_location_projects_to_accounts_and_guards_refresh_result
     saved = proxies
         .update(
             UpdateProxy {
+                enabled: None,
                 id: saved.id.clone(),
                 revision: saved.revision,
                 name: saved.name.clone(),

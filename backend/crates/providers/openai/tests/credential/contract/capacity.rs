@@ -11,10 +11,10 @@ use gateway_core::routing::extensions::{ExtensionSetId, ExtensionSetLease, Exten
 
 use super::*;
 
-fn busy_signal(in_flight: u32, last_started_at: Option<SystemTime>) -> AccountRuntimeSignals {
+fn busy_signal(in_flight: u32) -> AccountRuntimeSignals {
     AccountRuntimeSignals {
         in_flight,
-        last_started_at,
+        last_started_at: None,
         quota_reset_at: None,
         quota_remaining_rank: None,
         cooldown: None,
@@ -59,51 +59,76 @@ fn capacity_attempt(
 
 #[test]
 fn saturated_snapshot_is_capacity_unavailable_even_with_exhausted_accounts() {
-    for interval in [false, true] {
-        let store = Arc::new(MemoryAccountStore::default());
-        create_account(&store, "acct_first", "test-first");
-        create_account(&store, "acct_second", "test-second");
-        let exhausted =
-            block_on(store.get_account(&ProviderAccountId::new("acct_second").unwrap()))
-                .unwrap()
-                .unwrap();
-        persist_quota_exhaustion(&store, &exhausted, None);
-        let leases = Arc::new(TestLeaseCoordinator::default());
-        leases.signals.lock().unwrap().insert(
-            ProviderAccountId::new("acct_first").unwrap(),
-            busy_signal(
-                if interval { 0 } else { u32::MAX },
-                interval.then(SystemTime::now),
-            ),
-        );
-        let selector = selector(&store, leases.clone());
-        let request_attempt = capacity_attempt(
-            AccountSelectionPolicy::new(
-                RotationStrategy::Smart,
-                NonZeroU32::new(2).unwrap(),
-                Duration::from_secs(2),
-            ),
-            None,
-        );
-        let url = Url::parse(OFFICIAL_CODEX_BASE_URL).unwrap();
-        let error = block_on(selector.select(&SelectCodexCredential {
-            upstream_model: "gpt-5.4",
-            request_url: &url,
-            attempt: &request_attempt,
-            session_affinity_key: None,
-        }))
-        .unwrap_err();
-        assert!(
-            matches!(error, CredentialSelectionError::CapacityUnavailable { .. }),
-            "{error:?}"
-        );
-        assert!(leases.requests.lock().unwrap().is_empty());
-    }
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_first", "test-first");
+    create_account(&store, "acct_second", "test-second");
+    let exhausted = block_on(store.get_account(&ProviderAccountId::new("acct_second").unwrap()))
+        .unwrap()
+        .unwrap();
+    persist_quota_exhaustion(&store, &exhausted, None);
+    let leases = Arc::new(TestLeaseCoordinator::default());
+    leases.signals.lock().unwrap().insert(
+        ProviderAccountId::new("acct_first").unwrap(),
+        busy_signal(u32::MAX),
+    );
+    let selector = selector(&store, leases.clone());
+    let request_attempt = capacity_attempt(
+        AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(2).unwrap()),
+        None,
+    );
+    let url = Url::parse(OFFICIAL_CODEX_BASE_URL).unwrap();
+    let error = block_on(selector.select(&SelectCodexCredential {
+        upstream_model: "gpt-5.4",
+        request_url: &url,
+        attempt: &request_attempt,
+        session_affinity_key: None,
+    }))
+    .unwrap_err();
+    assert!(
+        matches!(error, CredentialSelectionError::CapacityUnavailable { .. }),
+        "{error:?}"
+    );
+    assert!(leases.requests.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn recent_start_preserves_affinity_without_waiting() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_first", "test-first");
+    create_account(&store, "acct_second", "test-second");
+    let leases = Arc::new(TestLeaseCoordinator::default());
+    let first = ProviderAccountId::new("acct_first").unwrap();
+    let mut signals = busy_signal(1);
+    signals.last_started_at = Some(SystemTime::now() + Duration::from_secs(30));
+    leases
+        .signals
+        .lock()
+        .unwrap()
+        .insert(first.clone(), signals);
+    let affinity = Arc::new(MemorySessionAffinity::default());
+    let key = bind_first(&affinity).await;
+    let selector = selector_with_affinity(&store, leases, affinity);
+    let request_attempt = queued_attempt(Duration::from_secs(2));
+    let url = Url::parse(OFFICIAL_CODEX_BASE_URL).unwrap();
+    let request = SelectCodexCredential {
+        upstream_model: "gpt-5.4",
+        request_url: &url,
+        attempt: &request_attempt,
+        session_affinity_key: Some(&key),
+    };
+    let selected = selector
+        .select(&request)
+        .now_or_never()
+        .expect("no capacity wait")
+        .unwrap();
+    assert_eq!(selected.account_id(), &first);
+    assert!(selected.affinity_hit());
+    assert_eq!(selected.escape_reason(), None);
 }
 
 #[tokio::test]
 async fn affinity_queue_waits_for_the_original_account_for_local_capacity_blockers() {
-    for blocker in ["lease", "concurrency", "interval"] {
+    for blocker in ["lease", "concurrency"] {
         let store = Arc::new(MemoryAccountStore::default());
         create_account(&store, "acct_first", "test-first");
         create_account(&store, "acct_second", "test-second");
@@ -112,27 +137,21 @@ async fn affinity_queue_waits_for_the_original_account_for_local_capacity_blocke
         if blocker == "lease" {
             leases.busy_accounts.lock().unwrap().insert(first.clone());
         } else {
-            leases.signals.lock().unwrap().insert(
-                first.clone(),
-                busy_signal(
-                    if blocker == "concurrency" { 2 } else { 0 },
-                    (blocker == "interval").then(SystemTime::now),
-                ),
-            );
+            leases
+                .signals
+                .lock()
+                .unwrap()
+                .insert(first.clone(), busy_signal(2));
         }
         let affinity = Arc::new(MemorySessionAffinity::default());
         let key = bind_first(&affinity).await;
         let selector = selector_with_affinity(&store, leases.clone(), affinity.clone());
         let request_attempt = capacity_attempt(
-            AccountSelectionPolicy::new(
-                RotationStrategy::Smart,
-                NonZeroU32::new(2).unwrap(),
-                Duration::from_secs(2),
-            )
-            .with_queue(ConcurrencyQueuePolicy {
-                max_waiting: 1,
-                timeout: Duration::from_secs(2),
-            }),
+            AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(2).unwrap())
+                .with_queue(ConcurrencyQueuePolicy {
+                    max_waiting: 1,
+                    timeout: Duration::from_secs(2),
+                }),
             None,
         );
         let url = Url::parse(OFFICIAL_CODEX_BASE_URL).unwrap();
@@ -283,7 +302,7 @@ async fn queue_enabled_without_affinity_still_uses_a_free_account() {
     let leases = Arc::new(TestLeaseCoordinator::default());
     leases.signals.lock().unwrap().insert(
         ProviderAccountId::new("acct_first").unwrap(),
-        busy_signal(2, None),
+        busy_signal(2),
     );
     let selector = selector(&store, leases);
     let request_attempt = queued_attempt(Duration::from_secs(2));
@@ -343,7 +362,7 @@ async fn affinity_wait_respects_explicit_policy_choices_but_not_delegated_fallba
         let leases = Arc::new(TestLeaseCoordinator::default());
         leases.signals.lock().unwrap().insert(
             ProviderAccountId::new("acct_first").unwrap(),
-            busy_signal(2, None),
+            busy_signal(2),
         );
         let affinity = Arc::new(MemorySessionAffinity::default());
         let key = bind_first(&affinity).await;

@@ -141,6 +141,7 @@ pub(crate) async fn execute_prepared_responses(
     let cancellation = prepared.cancellation();
     let started_request_id = Arc::new(OnceLock::new());
     let terminal_request_id = Arc::clone(&started_request_id);
+    let (admitted, keepalive) = tokio::sync::oneshot::channel();
     let mut middleware_headers = headers.clone();
     // 中间件正文已经由入口按上限解压；传输编码和旧长度不能与改写后的正文混用
     middleware_headers.remove(CONTENT_ENCODING);
@@ -213,37 +214,45 @@ pub(crate) async fn execute_prepared_responses(
                     .session
                     .trace()
                     .capture("client.request.body", &request_body);
+                let _ = admitted.send(started.session.response_commit());
                 execution_middleware_response(started, connection_guard, terminal_validation).await
             })
         }),
     );
-    let middleware = if let Some(authorization) = authorization.as_ref() {
-        match await_with_authorization(middleware, authorization, &cancellation).await {
-            Ok(result) => result,
-            Err(error) => Err(MiddlewareError::Gateway(error)),
+    let response = async move {
+        let middleware = if let Some(authorization) = authorization.as_ref() {
+            match await_with_authorization(middleware, authorization, &cancellation).await {
+                Ok(result) => result,
+                Err(error) => Err(MiddlewareError::Gateway(error)),
+            }
+        } else {
+            middleware.await
+        };
+        let expected = if stream {
+            ExpectedBody::Sse
+        } else {
+            ExpectedBody::SingleJson
+        };
+        match middleware {
+            Ok(response) => {
+                let response = if let Some(authorization) = authorization {
+                    authorized_middleware_response(response, authorization, cancellation)
+                } else {
+                    response
+                };
+                into_http_response(
+                    validated_middleware_response(response, validation, stream),
+                    expected,
+                )
+                .await
+            }
+            Err(error) => error_response(error),
         }
-    } else {
-        middleware.await
     };
-    let expected = if stream {
-        ExpectedBody::Sse
+    let response = if stream {
+        super::keepalive::response(response, keepalive).await
     } else {
-        ExpectedBody::SingleJson
-    };
-    let response = match middleware {
-        Ok(response) => {
-            let response = if let Some(authorization) = authorization {
-                authorized_middleware_response(response, authorization, cancellation)
-            } else {
-                response
-            };
-            into_http_response(
-                validated_middleware_response(response, validation, stream),
-                expected,
-            )
-            .await
-        }
-        Err(error) => error_response(error),
+        response.await
     };
     super::super::with_model_request_id(response, started_request_id.get().unwrap_or(&request_id))
 }
@@ -519,16 +528,24 @@ pub async fn stream_execution_response(
     session: Box<dyn ExecutionSession>,
     connection_guard: Option<Box<dyn ConnectionGuard>>,
 ) -> Response {
-    match streaming_execution_middleware_response(
-        session,
-        connection_guard,
-        ResponseValidationFacts::default(),
+    let (admitted, keepalive) = tokio::sync::oneshot::channel();
+    let _ = admitted.send(session.response_commit());
+    super::keepalive::response(
+        async move {
+            match streaming_execution_middleware_response(
+                session,
+                connection_guard,
+                ResponseValidationFacts::default(),
+            )
+            .await
+            {
+                Ok(response) => into_http_response(response, ExpectedBody::Sse).await,
+                Err(error) => error_response(error),
+            }
+        },
+        keepalive,
     )
     .await
-    {
-        Ok(response) => into_http_response(response, ExpectedBody::Sse).await,
-        Err(error) => error_response(error),
-    }
 }
 
 fn validated_middleware_response(

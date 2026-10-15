@@ -412,12 +412,31 @@ async fn copying_builtin_prices_keeps_cache_read_and_write_fallback_costs() {
         "gpt-6-sol",
         "gpt-6-luna",
     ] {
-        let usage = OpenAiBillingUsage::new(100, 10, 20, 15);
-        let inherited = openai_billing_breakdown(model, usage, None).unwrap();
-        let copied =
-            openai_billing_breakdown_with_override(model, usage, None, Some(&prices[model]))
+        let ultrafast_supported = matches!(model, "gpt-6-astra" | "gpt-6.1-sol");
+        for band in ["ultrafast", "long_ultrafast"] {
+            assert_eq!(prices[model].bands.contains_key(band), ultrafast_supported);
+        }
+        for tier in [None, Some("ultrafast")] {
+            if tier.is_some() && !ultrafast_supported {
+                continue;
+            }
+            for input in [100, 272_001] {
+                let usage = OpenAiBillingUsage::new(input, 10, 20, 15);
+                let inherited = openai_billing_breakdown(model, usage, tier).unwrap();
+                let copied = openai_billing_breakdown_with_override(
+                    model,
+                    usage,
+                    tier,
+                    Some(&prices[model]),
+                )
                 .unwrap();
-        assert_eq!(inherited.total_amount(), copied.total_amount(), "{model}");
+                assert_eq!(
+                    inherited.total_amount(),
+                    copied.total_amount(),
+                    "{model} {tier:?} {input}"
+                );
+            }
+        }
     }
 }
 
@@ -464,8 +483,8 @@ async fn openai_admin_provider_exposes_live_wire_profile_and_validated_billing()
             service_tier: None,
             input_tokens: Some(1_000_000),
             output_tokens: Some(0),
-            cached_tokens: Some(0),
-            cache_write_tokens: Some(0),
+            cached_input_tokens: Some(0),
+            cache_write_input_tokens: Some(0),
             total: CurrencyCost {
                 currency: "USD".to_owned(),
                 amount: "2.5".parse().expect("amount"),
@@ -482,8 +501,8 @@ async fn openai_admin_provider_exposes_live_wire_profile_and_validated_billing()
             service_tier: Some("priority".to_owned()),
             input_tokens: Some(1_000_000),
             output_tokens: Some(0),
-            cached_tokens: Some(0),
-            cache_write_tokens: Some(0),
+            cached_input_tokens: Some(0),
+            cache_write_input_tokens: Some(0),
             total: CurrencyCost {
                 currency: "USD".to_owned(),
                 amount: "4.25".parse().expect("fast amount"),
@@ -510,8 +529,8 @@ async fn openai_legacy_billing_should_not_infer_long_context_flag() {
             service_tier: None,
             input_tokens: Some(300_000),
             output_tokens: Some(0),
-            cached_tokens: Some(0),
-            cache_write_tokens: Some(0),
+            cached_input_tokens: Some(0),
+            cache_write_input_tokens: Some(0),
             total: CurrencyCost {
                 currency: "USD".to_owned(),
                 amount: "1.5".parse().expect("stored total"),
@@ -1634,7 +1653,7 @@ fn initialized_provider_request(operation: Operation, account_id: &str) -> Provi
     let account_scope = initialized_account_scope(account_id);
     let snapshot = RuntimeSnapshot::new(
         ConfigRevision::new(1).expect("revision"),
-        gateway_core::settings::SettingsValues::new(2, 10, "smart", Default::default(), None, None),
+        gateway_core::settings::SettingsValues::new(2, "smart", Default::default(), None, None),
         vec![provider.clone()],
         vec![ProviderModel::new(
             provider,
@@ -1736,6 +1755,7 @@ fn provider_ports_with_catalog(
 fn account_record(account: &ProviderAccount) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        outbound_proxy_enabled: true,
         notes: None,
         model_access: Default::default(),
         outbound_proxy: None,
@@ -2600,30 +2620,34 @@ async fn api_key_admin_exposes_only_configuration_and_preserves_key_when_rotatin
         Some(&json!("https://first.example/v1"))
     );
     assert!(!configuration.contains_key("api_key"));
-    let prepared = admin
-        .prepare_rotation(PrepareCredentialRotation {
-            account: account_record(&account),
-            provider_material: ProviderDocument::new(OpaqueProviderData::new(
-                json!({"base_url":"https://second.example/root", "transport":"prefer_websocket"})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            )),
-        })
-        .await
-        .unwrap();
-    let material = prepared
-        .facts()
-        .provider_material
-        .expose_to_provider()
-        .expose_to_provider();
-    assert_eq!(material.get("api_key"), Some(&json!("sk-api-test-only")));
-    assert_eq!(
-        material.get("base_url"),
-        Some(&json!("https://second.example/root"))
-    );
-    assert!(!prepared.facts().has_refresh_token);
-    assert_eq!(prepared.facts().account_id, *account.id());
+    for base_url in [
+        "https://second.example/root",
+        "http://10.0.0.7:8080/v1",
+        "http://[fd00::7]:8080/v1",
+        "http://relay:8080/v1",
+    ] {
+        let prepared = admin
+            .prepare_rotation(PrepareCredentialRotation {
+                account: account_record(&account),
+                provider_material: ProviderDocument::new(OpaqueProviderData::new(
+                    json!({"base_url":base_url, "transport":"prefer_websocket"})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                )),
+            })
+            .await
+            .unwrap();
+        let material = prepared
+            .facts()
+            .provider_material
+            .expose_to_provider()
+            .expose_to_provider();
+        assert_eq!(material.get("api_key"), Some(&json!("sk-api-test-only")));
+        assert_eq!(material.get("base_url"), Some(&json!(base_url)));
+        assert!(!prepared.facts().has_refresh_token);
+        assert_eq!(prepared.facts().account_id, *account.id());
+    }
     assert_eq!(
         admin
             .prepare_refresh(PrepareCredentialRefresh {

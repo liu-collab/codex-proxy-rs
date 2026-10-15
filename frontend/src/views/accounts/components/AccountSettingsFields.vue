@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountGroupRef, AccountModelAccess } from '@/api'
-import { BaseFormItem, BaseInput, BaseSwitch } from '@codex-proxy/ui'
+import { ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
 import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
 import AccountModelAccessField from './AccountModelAccessField.vue'
 import AccountProxyField from './AccountProxyField.vue'
@@ -31,16 +31,16 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
     <AccountModelAccessField v-model="modelAccess" :account-id="accountId" :disabled="disabled" :allow-preserve="preserveModelAccess" />
     <div v-if="showScheduling" class="flex min-h-6 items-center justify-between gap-3">
       <span class="text-cp leading-none font-medium text-cp-text-secondary">调度</span>
-      <BaseSwitch
+      <ZSwitch
         v-model="enabled"
-        label="切换账号调度"
+        aria-label="切换账号调度"
         :disabled="disabled"
       />
     </div>
 
     <div class="grid gap-4 sm:grid-cols-2">
-      <BaseFormItem label="并发限制">
-        <BaseInput
+      <ZFormItem label="并发限制">
+        <ZInput
           v-model="concurrencyLimit"
           aria-label="账号并发限制"
           type="number"
@@ -49,9 +49,9 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
           placeholder="留空使用默认值"
           :disabled="disabled"
         />
-      </BaseFormItem>
-      <BaseFormItem label="权重">
-        <BaseInput
+      </ZFormItem>
+      <ZFormItem label="权重">
+        <ZInput
           v-model="weight"
           aria-label="账号调度权重"
           type="number"
@@ -60,17 +60,17 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
           placeholder="越高越优先，最大 100"
           :disabled="disabled"
         />
-      </BaseFormItem>
+      </ZFormItem>
     </div>
 
-    <BaseFormItem label="所属分组">
+    <ZFormItem label="所属分组">
       <AccountGroupCheckboxGrid
         v-model="selectedGroupIds"
         :groups="groups"
         :loading="groupsLoading"
         :disabled="disabled"
       />
-    </BaseFormItem>
+    </ZFormItem>
     <AccountProxyField v-model:mode="proxyMode" v-model:proxy-id="proxyId" :preserve="preserveProxy" :error="proxyError" :endpoint="endpoint" :account-id="accountId" :disabled="disabled" />
   </div>
 </template>

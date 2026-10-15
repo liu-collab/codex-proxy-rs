@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Github } from '@boxicons/vue'
-import { BaseModal } from '@codex-proxy/ui'
+import { ZDialog } from '@codex-proxy/ui'
 import { ExternalLink } from '@lucide/vue'
 
 import { computed } from 'vue'
@@ -49,7 +49,7 @@ const linkItems = [
 </script>
 
 <template>
-  <BaseModal v-model="open" title="关于" size="sm">
+  <ZDialog v-model="open" title="关于" width="28rem">
     <div class="grid gap-5">
       <section class="flex min-w-0 items-center gap-3">
         <span
@@ -108,5 +108,5 @@ const linkItems = [
         {{ versionLine }}
       </p>
     </div>
-  </BaseModal>
+  </ZDialog>
 </template>

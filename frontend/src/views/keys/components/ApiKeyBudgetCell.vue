@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ApiKey } from '@/api'
-import { BasePopover } from '@codex-proxy/ui'
+import { ZPopover } from '@codex-proxy/ui'
 import { computed } from 'vue'
 
 const props = defineProps<{ apiKey: ApiKey }>()
@@ -15,8 +15,8 @@ function amount(value: string) {
 </script>
 
 <template>
-  <BasePopover class="w-full min-w-0" trigger="hover-click" placement="right" :hover-delay="240">
-    <template #trigger="{ open }">
+  <ZPopover class="w-full min-w-0" trigger="hover-click" placement="right" :hover-delay="240">
+    <template #reference="{ open }">
       <button
         type="button"
         class="grid w-full min-w-0 cursor-pointer gap-1 rounded-sm border-0 bg-transparent p-0 text-left text-xs tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline"
@@ -49,5 +49,5 @@ function amount(value: string) {
         </div>
       </div>
     </section>
-  </BasePopover>
+  </ZPopover>
 </template>
