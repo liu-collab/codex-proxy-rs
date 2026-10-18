@@ -173,6 +173,7 @@ impl PgObservabilityRepository {
         let account_usage_query = ProviderAccountUsageQuery::recent(range, query.account_limit)?
             .with_hourly_request_buckets()?;
         let recent_query = UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: store_usage_filter(query.recent_request_filter),
             current_page: 1,
@@ -400,6 +401,17 @@ impl PgObservabilityRepository {
 
 #[async_trait]
 impl AdminObservabilityStore for PgAdminObservabilityStore {
+    async fn diagnostic_errors(
+        &self,
+        target: &gateway_admin::model::diagnostics::DiagnosticTarget,
+        limit: u16,
+    ) -> AdminStoreResult<Vec<admin_observability::OpsError>> {
+        let target = target.clone();
+        self.repository.query_budget.run(&self.repository.pool, "export diagnostic errors", |mut connection| async move {
+            diagnostic_errors(&mut connection, &target, limit).await
+        }).await.map_err(observability_error)
+    }
+
     fn query_timeout(&self) -> std::time::Duration {
         self.repository.query_budget.query_timeout()
     }

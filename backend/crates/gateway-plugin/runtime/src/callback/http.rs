@@ -34,7 +34,7 @@ impl HttpCallbacks<'_> {
             maximum_payload,
         } = *self;
         let timeout = call.timeout()?;
-        let attempt = scope.start_upstream(upstream_purpose);
+        let attempt = call.start_upstream(upstream_purpose)?;
         let response = client
             .open(request, scope.proxy.as_ref(), network, timeout)
             .await;

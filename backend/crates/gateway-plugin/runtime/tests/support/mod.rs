@@ -14,6 +14,7 @@ use gateway_plugin_sdk::{
 use sha2::{Digest as _, Sha256};
 pub mod environment;
 pub mod native;
+pub mod request_context;
 pub mod store;
 
 pub const DEFAULT_PLUGIN_ID: &str = "test.example";
@@ -57,11 +58,7 @@ pub fn contribution_for_id(
         capability,
         ContributionDeclaration {
             id: format!("{plugin_id}.{local_id}"),
-            version: match capability {
-                Capability::Middleware => 4,
-                Capability::UpstreamAdapter => 2,
-                _ => 1,
-            },
+            version: capability.contract_versions()[0],
             stages,
             input_formats,
             output_formats,

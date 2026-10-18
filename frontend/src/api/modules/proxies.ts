@@ -27,6 +27,7 @@ export interface OutboundProxyTest {
 }
 
 export interface OutboundProxyRecord {
+  maxWebsocketConnections: number
   enabled: boolean
   autoLocation: boolean
   detectedLocation: DetectedProxyLocation | null
@@ -100,6 +101,11 @@ export function removeProxyAccount(data: { proxyId: string, accountId: string })
   })
 }
 
+export type ProxyBatchResult<T>
+  = | { status: 'succeeded', data: T }
+    | { status: 'failed', httpStatus: number, code: number, message: string }
+    | { status: 'skipped' }
+
 interface ProxyMutation {
   record: OutboundProxyRecord
   configRevision: number
@@ -114,16 +120,17 @@ export function getProxies(data: { page: number, pageSize: number, search?: stri
   })
 }
 
-export function createProxy(data: { name: string, proxyUrl: string, proxyProtocol?: string, autoLocation?: boolean, location?: RequestLocation | null }) {
-  return request<ProxyMutation>({
+export function createProxy(data: { name: string, proxyUrl: string, proxyProtocol?: string, maxWebsocketConnections?: number, autoLocation?: boolean, location?: RequestLocation | null }[], options: RequestOptions = {}) {
+  return request<ProxyBatchResult<ProxyMutation>[]>({
     url: '/api/admin/proxies/create',
-    timeout: 25000,
+    timeout: 25000 * Math.max(1, data.length),
     method: 'POST',
     data,
+    ...options,
   })
 }
 
-export function updateProxy(data: { id: string, revision: number, name: string, enabled?: boolean, proxyUrl?: string, proxyProtocol?: string, autoLocation?: boolean, location?: RequestLocation | null }) {
+export function updateProxy(data: { id: string, revision: number, name: string, enabled?: boolean, maxWebsocketConnections?: number, proxyUrl?: string, proxyProtocol?: string, autoLocation?: boolean, location?: RequestLocation | null }) {
   return request<ProxyMutation>({
     url: '/api/admin/proxies/update',
     timeout: 25000,
@@ -140,12 +147,13 @@ export function deleteProxy(data: { id: string, revision: number }) {
   })
 }
 
-export function testProxy(data: { id: string, revision: number, detectLocation?: boolean }) {
-  return request<OutboundProxyRecord>({
+export function testProxy(data: { id: string, revision: number, detectLocation?: boolean }[], options: RequestOptions = {}) {
+  return request<ProxyBatchResult<OutboundProxyRecord>[]>({
     url: '/api/admin/proxies/test',
     method: 'POST',
     data,
-    timeout: 25000,
+    timeout: 25000 * Math.max(1, Math.ceil(data.length / 2)),
+    ...options,
   })
 }
 

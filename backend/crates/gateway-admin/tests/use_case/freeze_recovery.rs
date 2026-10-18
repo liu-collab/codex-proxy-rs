@@ -62,6 +62,8 @@ fn runtime_settings(enabled: bool, probe_enabled: bool, adaptive: bool) -> Runti
             account_warmup_enabled: false,
             account_warmup_schedule_time: "08:00".to_owned(),
             account_warmup_model: None,
+            reset_credit_lead_minutes: 10,
+            reset_credit_max_weekly_remaining_percent: None,
         },
     }
 }
@@ -158,6 +160,19 @@ impl FreezeRuntimeStore {
 
 #[async_trait]
 impl AccountRuntimeStore for FreezeRuntimeStore {
+    async fn account_concurrency(
+        &self,
+        _: &str,
+        _: u64,
+        _: u32,
+    ) -> AdminStoreResult<gateway_admin::model::accounts::AccountConcurrencyPage> {
+        Err(gateway_admin::ports::store::AdminStoreError::new(
+            gateway_admin::ports::store::AdminStoreErrorKind::Unavailable,
+            "account concurrency",
+            "not configured in this fixture",
+        ))
+    }
+
     async fn active_rate_limits(&self) -> AdminStoreResult<AccountRuntimeSnapshot> {
         Ok(AccountRuntimeSnapshot::default())
     }

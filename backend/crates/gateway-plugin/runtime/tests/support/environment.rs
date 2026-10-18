@@ -65,7 +65,7 @@ impl Environment {
         .await
         .unwrap();
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "insert into {}.client_key_budget_windows
+            "insert into {}.client_api_key_budget_windows
              (client_api_key_id, daily_start, daily_end, daily_used_usd, weekly_start, weekly_end, weekly_used_usd)
              values ($1, now(), now()+interval '1 day', 3, now(), now()+interval '7 days', 4)",
             self.schema
@@ -127,6 +127,7 @@ impl Environment {
             .account_groups()
             .create_account_group(
                 NewAccountGroup {
+                    allow_image_generation: true,
                     fast_mode: FastMode::Default,
                     id: id.clone(),
                     name: format!("fixture {}", id.as_str()),
@@ -300,6 +301,16 @@ impl Environment {
                 vec![],
             )]);
         }
+        let has_retry = configuration.get("retry_decision").is_some();
+        if has_retry {
+            contributes.extend([super::contribution_for_id(
+                &plugin_id,
+                Capability::RetryPolicy,
+                vec![Stage::Retry],
+                vec![],
+                vec![],
+            )]);
+        }
         let service_worker = (has_service || has_http)
             .then(|| std::fs::read(env!("CARGO_BIN_EXE_gateway-plugin-test-middleware")).unwrap());
         let worker = service_worker.as_deref().unwrap_or_else(|| super::worker());
@@ -337,6 +348,18 @@ impl Environment {
             secrets: BTreeMap::new(),
 
             bindings: [
+                has_retry.then(|| PluginCapabilityBinding {
+                    contribution: format!("{plugin_id}.retryPolicy"),
+                    stage: "retry".into(),
+                    order: 0,
+                    failure_policy: PluginFailurePolicy::Delegate,
+                    client_key_ids: vec![],
+                    account_group_ids: vec![],
+                    provider_ids: vec![],
+                    models: vec![],
+                    event: None,
+                    identity_bindings: vec![],
+                }),
                 has_upstream_adapter.then(|| PluginCapabilityBinding {
                     contribution: format!("{plugin_id}.upstreamAdapter"),
                     stage: "upstream".into(),
@@ -432,10 +455,19 @@ impl Environment {
         &self,
         limits: RpcLimits,
     ) -> (Arc<PluginRuntime>, gateway_core::CoreBundle) {
+        self.runtime_with_providers(limits, super::native::provider_registry())
+            .await
+    }
+
+    pub async fn runtime_with_providers(
+        &self,
+        limits: RpcLimits,
+        providers: gateway_core::engine::provider::ProviderRegistry,
+    ) -> (Arc<PluginRuntime>, gateway_core::CoreBundle) {
         let runtime = self.plugin_runtime_with_limits(limits);
         let core = gateway_core::prepare(
             self.store.core_ports(),
-            super::native::provider_registry(),
+            providers,
             Some(runtime.clone()),
             Some(runtime.observer_registry()),
             Some(runtime.policy_registry()),
@@ -720,6 +752,17 @@ impl Environment {
         self.admin.close().await;
     }
 
+    pub async fn audit_actor_refs(&self, action: &str) -> Vec<String> {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "select actor_ref from {}.admin_audit_events where action=$1 order by created_at",
+            self.schema
+        )))
+        .bind(action)
+        .fetch_all(&self.admin)
+        .await
+        .unwrap()
+    }
+
     pub async fn audit_requests(&self, action: &str) -> Vec<String> {
         sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "select admin_request_id from {}.admin_audit_events where action = $1 order by created_at",
@@ -812,7 +855,11 @@ impl PricingSource for UnusedAdminRuntime {
 
 #[async_trait]
 impl ProxyProbe for UnusedAdminRuntime {
-    async fn test(&self, _: &gateway_core::account::OutboundProxy, _: bool) -> ProxyTestResult {
+    async fn test(
+        &self,
+        _: Option<&gateway_core::account::OutboundProxy>,
+        _: bool,
+    ) -> ProxyTestResult {
         panic!("unexpected proxy probe")
     }
 }

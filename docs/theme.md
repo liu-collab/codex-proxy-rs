@@ -59,8 +59,8 @@
 
 | 场景 | 参考入口 | 关注点 |
 | --- | --- | --- |
-| 页面头部 | `@codex-proxy/ui` 的 `BasePageHeader`、[系统概览](../frontend/src/views/dashboard/components/DashboardContent.vue) | 简短标题、必要的统计范围或状态、就近操作 |
-| 内容与指标 | `@codex-proxy/ui` 的 `BaseCard`、[用量概览卡片](../frontend/src/views/usage/components/UsageSummaryCards.vue) | 可选说明、紧凑摘要、数值与辅助信息的主次 |
+| 页面头部 | `@codex-proxy/ui` 的 `ZPageHeader`、[系统概览](../frontend/src/views/dashboard/components/DashboardContent.vue) | 简短标题、必要的统计范围或状态、就近操作 |
+| 内容与指标 | `@codex-proxy/ui` 的 `ZCard`、[用量概览卡片](../frontend/src/views/usage/components/UsageSummaryCards.vue) | 可选说明、紧凑摘要、数值与辅助信息的主次 |
 | 表单帮助 | [API Key 账号字段](../frontend/src/views/accounts/components/AccountApiKeyFields.vue) | 直接命名字段，在对应位置提供短提示和示例 |
 | 账号与用量展示 | [账号额度窗口](../frontend/src/components/account/account-usage-window/index.vue)、[共用用量表格](../frontend/src/components/usage/UsageRecordsTable.vue) | 复用后端展示字段和共享 presenter，管理端与 Key 页保持同一展示口径 |
 
@@ -354,7 +354,7 @@ Store 在其他入口发生变化时更新保存基线；没有未保存修改�
 - **组件概览**展示基础组件、表格、空状态、骨架、浮层和菜单等关键状态
 - 画板固定为 `1600 × 1808`，使用 CSS `zoom` 重排，不使用 `transform: scale()` 长期缩放文字
 - 空白区域可拖拽，滚轮以指针为锚点缩放，并提供缩小、100%、放大和适应画板操作
-- 编辑面板和组件概览统一使用 `BaseScrollbar`，滚动条空闲时自动隐藏
+- 编辑面板和组件概览统一使用 `ZScrollbar`，滚动条空闲时自动隐藏
 
 ## 样式与命名约定
 

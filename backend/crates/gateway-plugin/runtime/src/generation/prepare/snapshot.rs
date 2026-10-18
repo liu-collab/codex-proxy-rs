@@ -7,7 +7,7 @@ use super::{
 };
 use crate::ValidatedPackage;
 use async_trait::async_trait;
-use futures::future::BoxFuture;
+use futures::{StreamExt as _, future::BoxFuture};
 use gateway_admin::{
     model::{
         AdminError, Revision,
@@ -96,6 +96,7 @@ impl PluginRuntime {
         let mut sessions = Vec::new();
         let mut failures = BTreeMap::new();
         let mut identities = BTreeSet::new();
+        let mut instances = Vec::new();
         for instance in snapshot
             .instances
             .iter()
@@ -105,24 +106,34 @@ impl PluginRuntime {
                 return Err(AdminError::invalid("插件实例 ID 重复"));
             }
             let identity = instance_fingerprint(instance)?;
-            let reusable = {
-                let instances = self.prepared_instances.lock().await;
-                instances
-                    .get(&identity)
-                    .and_then(Weak::upgrade)
-                    .filter(|instance| instance.session.is_ready())
-            };
-            let result = if let Some(instance) = reusable {
-                Ok(instance)
-            } else {
-                tokio::time::timeout(
-                    // 沿用准备阶段原有的 30 秒预算；打包校验与能力恢复也在预算内
-                    Duration::from_secs(30),
-                    self.prepare_instance(instance.clone(), snapshot.config_revision),
-                )
-                .await
-                .unwrap_or_else(|_| Err(AdminError::unavailable("插件启动超时")))
-            };
+            instances.push((instance.clone(), identity));
+        }
+        // 沿用包校验的并发容量；按快照顺序消费结果，能力组合顺序不随启动快慢变化
+        let mut preparing = futures::stream::iter(instances.into_iter().map(
+            |(instance, identity)| async move {
+                let reusable = {
+                    let instances = self.prepared_instances.lock().await;
+                    instances
+                        .get(&identity)
+                        .and_then(Weak::upgrade)
+                        .filter(|instance| instance.session.is_ready())
+                };
+                let result = if let Some(instance) = reusable {
+                    Ok(instance)
+                } else {
+                    tokio::time::timeout(
+                        // 沿用准备阶段原有的 30 秒预算；打包校验与能力恢复也在预算内
+                        Duration::from_secs(30),
+                        self.prepare_instance(instance.clone(), snapshot.config_revision),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err(AdminError::unavailable("插件启动超时")))
+                };
+                (instance, identity, result)
+            },
+        ))
+        .buffered(super::runtime::MAXIMUM_PARALLEL_PREPARATIONS);
+        while let Some((instance, identity, result)) = preparing.next().await {
             match result {
                 Ok(candidate) => {
                     self.prepared_instances
@@ -155,15 +166,15 @@ impl PluginRuntime {
                     // 恢复失败只隔离该实例；绑定的拒绝策略仍保留，不能绕过认证或必需处理
                     contributions
                         .policy_entries
-                        .extend(crate::adapter::policy::unavailable_entries(instance)?);
+                        .extend(crate::adapter::policy::unavailable_entries(&instance)?);
                     contributions
                         .middleware_entries
-                        .extend(crate::adapter::middleware::unavailable_entries(instance)?);
+                        .extend(crate::adapter::middleware::unavailable_entries(&instance)?);
                     contributions.upstream_entries.extend(
-                        crate::adapter::upstream_adapter::unavailable_entries(instance)?,
+                        crate::adapter::upstream_adapter::unavailable_entries(&instance)?,
                     );
                     if let Some(entry) =
-                        crate::adapter::frontend_authentication::unavailable_entry(instance)
+                        crate::adapter::frontend_authentication::unavailable_entry(&instance)
                     {
                         contributions.authentication_entries.push(entry);
                     }
@@ -181,15 +192,6 @@ impl PluginRuntime {
             authentication_entries,
             model_aliases,
         } = contributions;
-        let mut alias_owners = BTreeMap::new();
-        for alias in &model_aliases {
-            if let Some(previous) = alias_owners.insert(&alias.id, &alias.owner) {
-                return Err(AdminError::invalid(format!(
-                    "模型别名 {} 在插件实例 {} 与 {} 之间冲突",
-                    alias.id, previous, alias.owner
-                )));
-            }
-        }
         let id = ExtensionSetId::new(uuid::Uuid::new_v4().to_string())
             .map_err(|_| AdminError::internal("插件集合 ID 无效"))?;
         let observers = crate::adapter::observer::PluginObserverPlan::compile(
@@ -223,7 +225,7 @@ impl PluginRuntime {
         )
         .map(|plan| plan as Arc<dyn gateway_core::engine::middleware::MiddlewarePlan>);
         let upstream_adapters =
-            crate::adapter::upstream_adapter::PluginUpstreamAdapterPlan::compile(upstream_entries)?;
+            crate::adapter::upstream_adapter::PluginUpstreamAdapterPlan::compile(upstream_entries);
         let execution = if middleware.is_some() || upstream_adapters.is_some() {
             Some(
                 self.execution
@@ -292,11 +294,24 @@ impl PluginPreparation for PluginRuntime {
         if instance.artifact_sha256 != metadata.sha256 {
             return Err(AdminError::invalid("插件配置与制品不匹配"));
         }
-        // 安装时已验证声明；只读列表不重新解包，也不占用安装与启用的校验配额
+        // 安装时已验证声明；只读列表不重新解包，CPU 工作仍受统一校验容量约束
+        let slot = self
+            .validators
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| AdminError::unavailable("插件校验已停止"))?;
         let schema = metadata.configuration_schema.clone();
         let secret_fields = metadata.secret_fields.iter().cloned().collect();
+        let schemas = Arc::clone(&self.configuration_schemas);
         tokio::task::spawn_blocking(move || {
-            super::super::configuration::configuration_ready(&instance, &schema, &secret_fields)
+            let _slot = slot;
+            super::super::configuration::configuration_ready(
+                &instance,
+                &schema,
+                &secret_fields,
+                &schemas,
+            )
         })
         .await
         .map_err(|_| AdminError::internal("插件校验任务失败"))?
@@ -306,23 +321,26 @@ impl PluginPreparation for PluginRuntime {
         &self,
         instance: PluginInstance,
     ) -> Result<PluginStateConfiguration, AdminError> {
+        let slot = self
+            .validators
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| AdminError::unavailable("插件校验已停止"))?;
         let artifact = self
             .store
             .load_artifact(&instance.artifact_sha256)
             .await
             .map_err(|_| AdminError::not_found("插件制品不存在"))?;
         let limits = self.config.package_limits;
-        let slot = self
-            .validators
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| AdminError::unavailable("插件校验繁忙"))?;
+        let schemas = Arc::clone(&self.configuration_schemas);
         tokio::task::spawn_blocking(move || {
             let _slot = slot;
             let package =
                 ValidatedPackage::read(artifact.archive, Some(&instance.artifact_sha256), limits)
                     .map_err(|_| AdminError::invalid("插件制品校验失败"))?;
-            let (_, state) = super::super::configuration::validate(&instance, package.manifest())?;
+            let (_, state) =
+                super::super::configuration::validate(&instance, package.manifest(), &schemas)?;
             crate::adapter::observer::validate_bindings(package.manifest(), &instance.bindings)?;
             crate::adapter::policy::validate_bindings(package.manifest(), &instance.bindings)?;
             crate::adapter::middleware::validate_bindings(package.manifest(), &instance.bindings)?;

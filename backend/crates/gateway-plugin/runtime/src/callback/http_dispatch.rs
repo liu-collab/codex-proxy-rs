@@ -63,7 +63,7 @@ pub(super) async fn call(
     *http.headers_mut() = headers;
     *http.version_mut() = http_middleware::version(request.version);
     http.extensions_mut().insert(settings);
-    call.scope.observe_http_dispatch();
+    call.observe_dispatch()?;
     let response = dispatcher
         .dispatch(child, http)
         .await

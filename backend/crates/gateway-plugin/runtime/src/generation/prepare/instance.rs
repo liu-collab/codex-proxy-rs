@@ -36,6 +36,12 @@ impl PluginRuntime {
                 "插件实例连续异常退出，已暂停自动重启；请检查配置后重新启用",
             ));
         }
+        let validation_slot = self
+            .validators
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| AdminError::unavailable("插件校验已停止"))?;
         let artifact = self
             .store
             .load_artifact(&instance.artifact_sha256)
@@ -44,11 +50,7 @@ impl PluginRuntime {
         let limits = self.config.package_limits;
         let directory = self.config.cache_directory.clone();
         let host_version = self.config.host_version.clone();
-        let validation_slot = self
-            .validators
-            .clone()
-            .try_acquire_owned()
-            .map_err(|_| AdminError::unavailable("插件校验繁忙"))?;
+        let schemas = Arc::clone(&self.configuration_schemas);
         let (package, configuration, instance, state_configuration) =
             tokio::task::spawn_blocking(move || {
                 let _validation_slot = validation_slot;
@@ -61,7 +63,7 @@ impl PluginRuntime {
                     .map_err(|_| AdminError::invalid("插件恢复包校验失败"))?,
                 );
                 let (configuration, state_configuration) =
-                    super::super::configuration::validate(&instance, package.manifest())?;
+                    super::super::configuration::validate(&instance, package.manifest(), &schemas)?;
                 crate::adapter::observer::validate_bindings(
                     package.manifest(),
                     &instance.bindings,

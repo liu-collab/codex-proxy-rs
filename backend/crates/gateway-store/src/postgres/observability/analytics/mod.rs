@@ -3,6 +3,7 @@
 pub(crate) mod accounts;
 mod aggregate;
 mod buckets;
+mod contributions;
 mod counts;
 mod forecast;
 mod histogram;
@@ -17,6 +18,8 @@ pub use worker::{AnalyticsMaintenance, AnalyticsStatus, PgRequestAnalyticsReposi
 
 use super::*;
 pub(crate) use metrics::MetricState;
+
+pub(crate) const AGGREGATE_COLLECTION: &str = "usage_contribution";
 
 const SCHEMA_VERSION: i32 = 1;
 const HISTOGRAM_VERSION: i32 = histogram::HISTOGRAM_VERSION;

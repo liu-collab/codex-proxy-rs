@@ -172,6 +172,13 @@ async fn connect(
     )?);
 
     let plugins = Arc::new(postgres::PgPluginStore::new(pool.clone()));
+    if !read_only {
+        plugins.recover_abandoned_state_transitions().await?;
+    }
+    let usage_data = Arc::new(postgres::PgUsageDataStore::new(
+        pool.clone(),
+        observability_query_budget.clone(),
+    ));
     let admin_ports = AdminStorePorts::new(
         AdminAccountStorePorts::new(
             Arc::new(postgres::PgAdminAccountStore::new(
@@ -212,6 +219,7 @@ async fn connect(
         plugins.clone(),
         plugins.clone(),
         plugins,
+        usage_data,
     );
 
     let execution_repository = Arc::new(postgres::PgExecutionStore::new(pool.clone()));

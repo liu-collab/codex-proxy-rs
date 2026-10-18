@@ -1,6 +1,8 @@
 //! 验证 xAI 原生执行的协议转换、账号选择与交付状态隔离
 
 mod replay_tool_names;
+mod scheduling;
+mod selection_retry;
 mod timing;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -3250,7 +3252,7 @@ async fn selector_capacity_failure_occurs_before_visible_upstream_send() {
         Ok(_) => panic!("capacity must fail"),
         Err(error) => error,
     };
-    assert_eq!(error.kind(), ProviderErrorKind::Unavailable);
+    assert_eq!(error.kind(), ProviderErrorKind::AccountCapacityUnavailable);
     assert_eq!(error.send_state(), UpstreamSendState::NotSent);
     assert_eq!(transport.calls.load(Ordering::SeqCst), 0);
 }
@@ -3262,24 +3264,35 @@ async fn selection_failures_carry_a_distinguishable_client_error_code() {
             GrokSessionSelectorError::AccountCoolingDown {
                 retry_after: Some(Duration::from_secs(12)),
             },
+            ProviderErrorKind::NoEligibleAccount,
             "account_cooling_down",
         ),
         (
             GrokSessionSelectorError::CapacityUnavailable {
                 retry_after: Some(Duration::from_millis(20)),
             },
+            ProviderErrorKind::AccountCapacityUnavailable,
             "account_capacity_busy",
         ),
         (
             GrokSessionSelectorError::NoEligibleSession,
+            ProviderErrorKind::NoEligibleAccount,
             "no_eligible_account",
         ),
         (
             GrokSessionSelectorError::Unavailable(None),
+            ProviderErrorKind::ProviderInfrastructureUnavailable,
             "account_selector_unavailable",
         ),
+        (
+            GrokSessionSelectorError::ModelCoolingDown {
+                retry_after: Some(Duration::from_secs(12)),
+            },
+            ProviderErrorKind::NoEligibleAccount,
+            "model_cooling_down",
+        ),
     ];
-    for (failure, expected_code) in cases {
+    for (failure, expected_kind, expected_code) in cases {
         let transport = StubInferenceTransport::success();
         let provider = provider(StubSelector::failing(failure), transport.clone()).await;
         let error = match provider
@@ -3295,7 +3308,7 @@ async fn selection_failures_carry_a_distinguishable_client_error_code() {
         let detail = error
             .client_visible_upstream_error()
             .expect("client visible detail");
-        assert_eq!(error.kind(), ProviderErrorKind::Unavailable);
+        assert_eq!(error.kind(), expected_kind);
         assert_eq!(detail.code(), Some(expected_code));
         assert_eq!(detail.error_type(), Some("account_unavailable_error"));
         assert_eq!(transport.calls.load(Ordering::SeqCst), 0);
@@ -3334,7 +3347,10 @@ async fn selection_failure_preserves_native_cause_without_exposing_it_to_clients
         Ok(_) => panic!("selection must fail"),
         Err(error) => error,
     };
-    assert_eq!(error.kind(), ProviderErrorKind::Unavailable);
+    assert_eq!(
+        error.kind(),
+        ProviderErrorKind::ProviderInfrastructureUnavailable
+    );
     assert_eq!(error.send_state(), UpstreamSendState::NotSent);
     assert!(
         error

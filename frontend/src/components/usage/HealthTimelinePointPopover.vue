@@ -122,10 +122,6 @@ const metricItems = outcomeMeta
           </strong>
         </div>
       </div>
-
-      <p class="m-0 border-t border-cp-split pt-3 text-[10px] leading-[1.45] font-emphasis text-cp-text-quaternary">
-        取消与调用方错误不计入可用性
-      </p>
     </div>
   </section>
 </template>

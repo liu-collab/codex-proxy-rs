@@ -44,6 +44,14 @@ session.run(plugin).await?;
 例如 CLI 参数、账号凭据和状态迁移批次使用二进制 JSON，管理 HTTP 正文保持原始字节。
 错误地把敏感载荷放进控制参数会在业务处理器运行前被拒绝
 
+## 请求上下文
+
+关联入口请求的调用通过 `call.context().request` 读取同一个入口快照，覆盖认证、所有中间件挂载、路由、调度、重试、上游适配、观察事件和管理 HTTP／公开回调。注册、维护、命令行等没有入口请求的调用为 `None`
+
+`RequestContext` 包含 `method`、`uri`（路径与查询串）、`http_version`、`headers`、`peer_addr` 和 `client_ip`。`headers` 保留重复项和原始字节；`peer_addr` 是直接连接对端的 IP 与端口，`client_ip` 是宿主按入口规则解析的来源 IP。插件可使用解析结果，也可结合地址和原始 headers 自行判断代理来源
+
+快照在中间件修改请求前捕获，内部派生调用沿用原入口；WebSocket 回调使用握手上下文。当前处理阶段的正文、消息和变换后请求继续从各能力参数或正文资源读取，不复制到快照。上下文可能包含认证头等敏感信息，应避免直接记录或输出
+
 ## 能力与方法
 
 Provider 固定为宿主内置的 OpenAI 与 xAI。宿主开放以下 11 类扩展能力，版本与声明规则见[扩展项简写](manifest.md#扩展项简写)：
@@ -131,7 +139,7 @@ Provider 不支持刷新（如 OpenAI URL + Key 账号）返回 `invalid_input`�
 
 声明 `maintenance` 并注册 `methods::RECONCILE`，宿主会在实例启用发布、进程恢复及配置变更后调用
 `plugin.reconcile`，并每 30 秒补偿一次。处理器必须幂等；调用可能重复，配置通知会合并，不表示逐条账号事件。
-每个实例串行执行，不同实例相互独立；调用限时 30 秒，失败后等待 5 秒重试。维护失败不回滚已经提交的资源，
+每个实例串行执行，不同实例相互独立；调用限时 30 秒，返回值不消费，调用失败后等待 5 秒重试。维护失败不回滚已经提交的资源，
 下一次对账继续补齐。只读校验、准备候选与 CLI 帮助不会启动维护；停用、替换和宿主关闭时取消旧任务
 
 维护与其他处理器共用以下资源方法：
@@ -227,7 +235,7 @@ SDK 不自动重试。超时或断连不能证明写入未提交；重试上限�
 
 ### 洋葱中间件
 
-`middleware.version: 4` 的所有挂载使用同一个 `ctx + next` 组合器。清单显式选择处理边界，绑定决定顺序；
+`middleware.version: 5` 的所有挂载使用同一个 `ctx + next` 组合器。清单显式选择处理边界，绑定决定顺序；
 不按 URL、消息类型或每个内部步骤增加处理器。仅处理一个边界可直接声明其调用类型；跨边界插件使用 `MiddlewareCall`
 在一个处理器内匹配类型化视图，不感兴趣的调用交给 `call.forward().await`
 
@@ -246,8 +254,7 @@ SDK 不自动重试。超时或断连不能证明写入未提交；重试上限�
 宿主等待期间归还执行名额，返回后先重新取得名额再交付结果或错误，插件继续同一次调用。
 初次准入和恢复排队各有独立等待期限，默认 30 秒，不扣插件处理预算；恢复等待受总在途上限约束，不占初次准入队列。
 入站处理与返回处理合计使用同一预算，普通宿主回调不会暂停计时。
-请求总期限、下游操作超时和取消信号独立生效，客户端取消或插件退出仍会结束等待并回收资源。
-宿主与插件 SDK 必须同时支持此语义；仍使用固定绝对期限的 SDK 构建的插件需重新构建，单独升级宿主不能解除插件侧期限
+请求总期限、下游操作超时和取消信号独立生效，客户端取消或插件退出会结束等待并回收资源
 
 HTTP 总入口统一包裹原生路由，`dispatch_http` 复用同一路由与组合能力；无需为每个 HTTP 接口登记新的挂载点。
 `service` 用于不经过 HTTP 的类型化主动调用，具体公开范围见下节
@@ -260,7 +267,7 @@ HTTP 总入口统一包裹原生路由，`dispatch_http` 复用同一路由与�
 返回 `ServiceResponse::from_result::<O>(result)` 可以改写结果、短路或恢复业务错误；
 不感兴趣的操作调用 `forward()`。公开值完整传递，类型校验不承担字段权限控制
 
-当前登记 `settings` 的 11 个操作：`Load`、`Replace`、`ApiKeyExists`、`RegenerateApiKey`、`DeleteApiKey`、
+`settings` 提供 `Load`、`PreviewPrivacyPolicy`、`Replace`、`ApiKeyExists`、`RegenerateApiKey`、`DeleteApiKey`、
 `Pricing`、`PreviewPricingSync`、`Sync`、`Update`、`ClientProfileOptions`、`PreviewClientProfile`。
 插件回调和 CLI 经注册表主动调用时统一进入一次 `service` 组合；网关原生设置接口由 HTTP 总入口包裹。
 各入口共用同一业务实现，业务方法内部调用不重复进入 `service` 组合。
@@ -269,6 +276,19 @@ HTTP 总入口统一包裹原生路由，`dispatch_http` 复用同一路由与�
 `Load` 返回完整运行设置与 `config_revision`。`ReplaceRuntimeSettings::from(settings)` 保留该版本并构造更新命令；
 `Replace` 接收 `(MutationContext, ReplaceRuntimeSettings)`，通过已有校验、事务、审计和快照发布保存设置。
 版本过期返回 `ServiceError { kind: "conflict", message }`。读取结果的普通改写不会持久化，也不会回滚已经提交的事务
+
+`accounts::GetResetCreditAutomation` 接收账号 ID，返回 `ResetCreditAutomationStatus`：开关、全局提前分钟数、
+下次发现与使用时间、最近结果；时间为 RFC 3339 字符串，无计划时为 `None`。
+`accounts::SetResetCreditAutomation` 接收 `(account_id, enabled)`，返回保存后的同一状态；审计主体与调用标识由宿主提供。
+两者复用原生账号校验和自动重置用例，不立即查询或消费上游卡片。提前时间与剩余周额度上限通过 `settings::Load` / `Replace` 的
+`reset_credit_lead_minutes` 和可选的 `reset_credit_max_weekly_remaining_percent` 读取和设置，范围见[主动额度重置卡](../../../../../docs/api.md#主动额度重置卡)
+
+```rust,ignore
+use gateway_plugin_sdk::call::services::accounts::{GetResetCreditAutomation, SetResetCreditAutomation};
+
+let status = host.service::<GetResetCreditAutomation>(account_id.clone()).await?;
+let status = host.service::<SetResetCreditAutomation>((account_id, true)).await?;
+```
 
 服务错误保留分类与完整业务文案，子调用继承冻结发布计划及取消信号。
 插件显式再次调用服务时继承发起实例链并跳过相同实例，防止无限递归；无 service 绑定时直接分派业务实现，仍保留空计划快照、父子关联和取消信号。
@@ -347,7 +367,7 @@ request 与 attempt 阶段通过 `append_header` 添加的请求头会进入上�
 OpenAI 与 xAI 的上游 headers 先由账号和画像生成，插件同名字段覆盖基线，同名多值按插件顺序保留；不存在按认证、Cookie 或会话名称划分的保护列表。
 实际账号租约、凭据版本与计费归属仍记录真实选中事实，不随插件修改 header 名称而伪造
 
-middleware v4 的 request 阶段 `request.head.settings` 是本次调用的有效设置对象，包含 `runtime`、`fast_mode`、`client_limits` 和 `timeout_ms`。
+middleware v5 的 request 阶段 `request.head.settings` 是本次调用的有效设置对象，包含 `runtime`、`fast_mode`、`client_limits` 和 `timeout_ms`。
 `fast_mode` 使用 `default`、`enabled`、`disabled` 三态，具体档位语义见[账号分组](../../../../../docs/api.md#6-账号分组)。
 `runtime` 使用宿主快照的设置字段，画像已合并 Client Key 设置；可以修改映射、画像、调度、位置及计价等执行参数。
 SDK 仅在对象改变时提交完整替换，`false`、`0`、空映射和合同允许的 `null` 不表示跳过；不做隐式深合并。
@@ -403,6 +423,8 @@ restore_and_validate_response(response).await
 仅实现中间件时也可使用轻量的 `MiddlewarePlugin`；需要与管理或其他方法组合时使用
 `PluginBuilder`，两者复用相同的类型化调用与结果合同
 
+用量明细、聚合维护与费用试算使用 `call::services::usage`，输入输出和批量语义见 [用量维护与计价](usage-data.md)
+
 ### 扩展的组合边界
 
 请求处理沿 `request middleware → 原生选路与选号 → attempt middleware → 原生上游或 upstream_adapter` 推进，
@@ -416,14 +438,14 @@ restore_and_validate_response(response).await
 | 账号代理、默认凭据注入、网络发送状态 | 宿主网络外层，插件可覆盖默认请求头，普通 HTTP 与账号 HTTP 共用发送和正文资源实现 |
 | 路由、调度、重试决策 | 各自的决策端口，Core 保持最终裁决和预算 |
 | RPC Credit、取消、流关闭、WebSocket 续接 | 会话及资源生命周期，不作为可重排的中间件 |
-| 终态观察、管理与维护 | 原有观察／管理／维护入口，不嵌入请求 `next` 链 |
+| 终态观察、管理与维护 | 对应的观察／管理／维护入口，不嵌入请求 `next` 链 |
 
 ### 模型目录
 
 `model_catalog` v1 在 registration 阶段一次提交 `ModelCatalogRegistration { models: Vec<ModelAlias> }`，不需要请求级 binding。
-每条 `ModelAlias { id, provider, model }` 定义公开 ID、内置 Provider（`openai` 或 `xai`）及直接上游目标。
-上游目标须已存在于该 Provider 的当前目录；同名原生模型、静态映射、其他插件条目、别名链和循环均拒绝发布。
-每实例最多 256 条，整个二进制 JSON 最多 64 KiB；不允许覆盖原生元数据或自行宣称目标不支持的功能
+每条 `ModelAlias { id, provider, model }` 定义公开 ID、Provider 及直接上游目标，条目正确性由插件负责。
+每实例最多 256 条，整个二进制 JSON 最多 64 KiB；条目重复、目标不存在或 Provider 未注册不阻止宿主快照发布。
+请求按发布顺序取首个匹配条目，插件别名优先于静态映射，目标直接用于上游选路，不递归展开别名或目标上的静态映射
 
 ```rust,ignore
 use gateway_plugin_sdk::call::catalog::{ModelAlias, ModelCatalogRegistration};
@@ -435,16 +457,16 @@ let plugin = PluginBuilder::from_json(include_bytes!("../plugin.json"))?
 ```
 
 有效目录、路由和目标能力随同一个不可变快照发布，`/v1/models`、详情、原生目录和 `host.models.list` 共用该事实及现有 Key／账号模型范围。
-原生别名继承目标的完整可公开对象；更新失败保留旧快照，禁用后新请求不再使用该别名，在途请求持有旧代次。
+目标存在时，别名复用目标的可公开对象；禁用后新请求不再使用该别名，在途请求持有旧代次。
 v1 是直接别名，动态选择可组合 `model_router`；实际路由仍须通过宿主的权限和能力校验，不提供多目标虚拟模型注册合同
 
 ### 重试决策
 
-`retry_policy` v1 固定绑定 `retry` 阶段，故障策略只能为 `delegate`。使用 `methods::RETRY_DECISION` 处理 `RetryDecisionRequest`。
+`retry_policy` v2 固定绑定 `retry` 阶段，故障策略只能为 `delegate`。使用 `methods::RETRY_DECISION` 处理 `RetryDecisionRequest`。
 输入包含失败分类、必要状态码、发送状态、attempt 序号、Provider／上游模型、剩余路由次数和期限，以及 `allowed_actions`。
 不发送账号凭据、请求正文或上游错误转储。路由次数不等同于 Provider 自有传输恢复预算
 
-返回 `RetryDecision::Delegate`、`Stop` 或 `Retry`。`Retry` 必须出现在宿主允许动作中，并且仅继续宿主已经选定的恢复路径；
+返回 `RetryDecision::Delegate`、`Stop` 或 `Retry`。Core 仅在允许动作包含 `Retry` 时继续已经选定的恢复路径；
 不能指定账号、延迟、目标或提高预算。响应已交付、发送不明确、外部副作用及续接绑定等既有安全门不可绕过。
 Core 处理建立响应流前与流中的失败，并在策略返回后再次检查期限、取消和副作用
 
@@ -460,14 +482,32 @@ let plugin = PluginBuilder::from_json(include_bytes!("../plugin.json"))?
     .build()?;
 ```
 
-按 binding 顺序、插件 ID、实例 ID 确定委托链，首个合法非委托结果生效。整条链最多等待 2 秒，并受请求剩余期限约束。
-退出、超时、未知字段及不允许的动作委托后续处理，最终回到宿主决定；故障不改写原始上游错误。
+按 binding 顺序、插件 ID、实例 ID 确定委托链，首个非委托决定交给 Core 处理。整条链最多等待 2 秒，并受请求剩余期限约束。
+退出、超时或无法解码的决定委托后续处理，最终回到宿主决定；额外字段忽略，故障不改写原始上游错误。
 middleware 的 `next` 最多调用一次，重试与额外模型执行通过独立调用创建
 
 ### 路由、调度与观察
 
 `policy.route_model` 和 `policy.schedule_account` 只提出决定，宿主随后复核 Key 规则、模型能力、账号资格和租约。
-`observer` v1 通过 `methods::OBSERVE` 接收 `call::observation::Event`，固定绑定 `observation/observe`。
+`scheduler` 必须声明 `version: 3`。`candidates` 已按 Key 范围、模型权限、账号状态和原生续写绑定收窄，
+同时包含暂时繁忙但可以等待的账号；`available` 表示本次可以立即尝试租约，不保证租约一定成功
+
+- `Pick { account_id }` 显式选号，只能指定 `available: true` 的候选
+- `Delegate` 将完整候选交给宿主现有调度
+- `DelegateFiltered { exclude_account_ids }` 排除列出的候选，再委托内置权重、Smart 评分和亲和选择；仅接受本次候选 ID，重复 ID 合并，空列表等同于 `Delegate`
+- `Reject` 明确拒绝请求
+
+过滤结果约束本次评估后的亲和重选、容量判断和等待队列。全部候选被排除，或严格跟随的会话账号被排除时，
+请求以 `account_policy_filtered` 结束，不回退到被排除账号或伪装成额度耗尽。租约争用、排队唤醒和后续请求重新评估策略，
+过滤结果不写入账号状态。插件决定自身阈值、恢复条件和配置含义；宿主只检查合同、候选边界并执行决定。
+插件设置使用自己的 `configurationSchema` 或管理页面，不向宿主智能调度弹窗注入字段。
+调用失败或响应无法解码时按绑定的失败策略处理。Core 拒绝候选越界等无效调度决定，不自动修正插件业务规则
+
+```json
+{"decision":"delegate_filtered","exclude_account_ids":["acct_example"]}
+```
+
+`observer` v2 通过 `methods::OBSERVE` 接收 `call::observation::Event`，固定绑定 `observation/observe`。
 每条绑定以 `event` 选择 `request_completed` 或 `websocket_response`，可分别配置请求范围；同一实例每种事件至多一条绑定，两类绑定使用相同 `order`。
 事件选择只决定是否投递，不裁剪字段
 
@@ -580,5 +620,5 @@ observer 也按常规计划执行；它不是插件执行期间的嵌套 `host.m
 ## 数据面入口认证
 
 `frontend_auth.identifier` 返回稳定认证器标识；`frontend_auth.authenticate` 接收敏感的 Authorization 载荷并返回
-外部 principal。插件不能指定 Client Key，宿主根据当前入口配置完成映射，并继续检查 Key 的启用状态、模型规则、
+外部 principal。宿主忽略结果中的额外字段，包括附带的 `client_key_id`，只根据当前入口配置完成映射，并继续检查 Key 的启用状态、模型规则、
 账号组、并发和预算。该能力只处理数据面身份，不接管管理端登录

@@ -6,9 +6,13 @@ export function useDownload() {
   const objectUrl = useObjectUrl(object)
 
   async function downloadJson(payload: unknown, fileName: string) {
-    object.value = new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
+    return downloadBlob(new Blob([`${JSON.stringify(payload, null, 2)}\n`], {
       type: 'application/json;charset=utf-8',
-    })
+    }), fileName)
+  }
+
+  async function downloadBlob(blob: Blob, fileName: string) {
+    object.value = blob
     await nextTick()
 
     if (!objectUrl.value)
@@ -24,5 +28,6 @@ export function useDownload() {
 
   return {
     downloadJson,
+    downloadBlob,
   }
 }

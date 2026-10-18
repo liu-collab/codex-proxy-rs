@@ -75,7 +75,7 @@ async fn model_catalog_is_frozen_without_entering_the_request_chain() {
 }
 
 #[tokio::test]
-async fn model_catalog_rejects_invalid_registrations_and_cross_instance_conflicts() {
+async fn model_catalog_prepares_plugin_aliases_without_semantic_validation() {
     for models in [
         serde_json::json!([{"id":"alias","provider":"custom","model":"target"}]),
         serde_json::json!([{"id":"alias","provider":"openai","model":"alias"}]),
@@ -98,11 +98,12 @@ async fn model_catalog_rejects_invalid_registrations_and_cross_instance_conflict
         let mut snapshot = store.snapshot.lock().unwrap().clone();
         snapshot.instances[0].configuration =
             serde_json::json!({"model_catalog":{"models":models}});
-        assert!(
-            PluginPreparation::prepare(&runtime, snapshot)
-                .await
-                .is_err()
-        );
+        let expected = models.as_array().unwrap().len();
+        let prepared = PluginPreparation::prepare(&runtime, snapshot)
+            .await
+            .unwrap();
+        assert_eq!(prepared.model_aliases().len(), expected);
+        drop(prepared);
         runtime.shutdown().await;
         super::super::wait_until_empty(cache.path()).await;
     }
@@ -123,11 +124,13 @@ async fn model_catalog_rejects_invalid_registrations_and_cross_instance_conflict
     let mut other = snapshot.instances[0].clone();
     other.id = "instance-two".into();
     snapshot.instances.push(other);
-    let error = PluginPreparation::prepare(&runtime, snapshot)
+    let prepared = PluginPreparation::prepare(&runtime, snapshot)
         .await
-        .unwrap_err();
-    assert!(error.to_string().contains("instance-one"));
-    assert!(error.to_string().contains("instance-two"));
+        .unwrap();
+    assert_eq!(prepared.model_aliases().len(), 2);
+    assert_eq!(prepared.model_aliases()[0].owner, "instance-one");
+    assert_eq!(prepared.model_aliases()[1].owner, "instance-two");
+    drop(prepared);
     runtime.shutdown().await;
     super::super::wait_until_empty(cache.path()).await;
 }

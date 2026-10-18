@@ -69,6 +69,7 @@ pub(super) async fn invoke(
         },
         maximum_timeout,
     );
+    call_context.request = crate::adapter::request_context(context.extension_scope().request());
     call_context.request_id = Some(context.request_id().as_str().to_owned());
     call_context.attempt_id = context
         .attempt_index()
@@ -128,7 +129,7 @@ pub(super) async fn invoke(
         headers,
     };
     let stage = call_context.stage;
-    let stream = tokio::select! {
+    let mut stream = tokio::select! {
         biased;
         () = context.cancellation().cancelled() => return Err(MiddlewareError::Fault),
         () = context.deadline().wait() => return Err(gateway_core::error::GatewayError::new(
@@ -145,12 +146,9 @@ pub(super) async fn invoke(
             Err(error) => return recover_rpc(&entry, &invocation, error).await,
         }
     };
-    if !stream.initial.payload.is_empty() {
-        drop(stream);
-        return recover_invalid(&entry, &invocation, stage).await;
-    }
+    stream.initial.payload = Vec::new();
     let response: MiddlewareResponseHead =
-        match serde_json::from_value(stream.initial.result.clone()) {
+        match serde_json::from_value(std::mem::take(&mut stream.initial.result)) {
             Ok(response) => response,
             Err(_) => {
                 drop(stream);

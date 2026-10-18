@@ -190,6 +190,7 @@ impl AdminTestFixture {
             plugin_ports.clone(),
             plugin_ports.clone(),
             plugin_ports.clone(),
+            plugin_ports.clone(),
         );
         let providers: Vec<Arc<dyn ProviderAdmin>> = vec![
             Arc::new(UnusedProvider::new("openai", Arc::clone(&provider_error))),
@@ -651,6 +652,8 @@ impl SettingsStore for MemorySettingsStore {
                 account_warmup_enabled: false,
                 account_warmup_schedule_time: "08:00".to_owned(),
                 account_warmup_model: None,
+                reset_credit_lead_minutes: 10,
+                reset_credit_max_weekly_remaining_percent: None,
             },
         };
         *settings = updated.clone();
@@ -716,6 +719,7 @@ impl MemoryAccountGroupStore {
             (
                 primary_id.clone(),
                 AccountGroupRecord {
+                    allow_image_generation: true,
                     fast_mode: FastMode::Default,
                     id: primary_id,
                     name: "Alpha routing".to_owned(),
@@ -738,6 +742,7 @@ impl MemoryAccountGroupStore {
             (
                 secondary_id.clone(),
                 AccountGroupRecord {
+                    allow_image_generation: true,
                     fast_mode: FastMode::Default,
                     id: secondary_id,
                     name: "Beta routing".to_owned(),
@@ -896,6 +901,7 @@ impl AccountGroupStore for MemoryAccountGroupStore {
         let mut state = self.state.lock().expect("account groups");
         let now = Utc::now();
         let record = AccountGroupRecord {
+            allow_image_generation: command.allow_image_generation,
             fast_mode: command.fast_mode,
             id: command.id.clone(),
             name: command.name,
@@ -930,6 +936,9 @@ impl AccountGroupStore for MemoryAccountGroupStore {
         record.color = command.color;
         if let Some(fast_mode) = command.fast_mode {
             record.fast_mode = fast_mode;
+        }
+        if let Some(allowed) = command.allow_image_generation {
+            record.allow_image_generation = allowed;
         }
         record.updated_at = Utc::now();
         mutation(&mut state, command.id, true)
@@ -1129,6 +1138,15 @@ impl ClientKeyVerifier for UnusedClientKeyVerifier {
 
 #[async_trait]
 impl AccountStore for UnusedStore {
+    async fn account_exists(&self, id: &str) -> AdminStoreResult<bool> {
+        Ok(self
+            .account
+            .lock()
+            .expect("account")
+            .as_ref()
+            .is_some_and(|account| account.account.id == id))
+    }
+
     async fn list_plugin_accounts(
         &self,
         _: gateway_admin::model::provider_credentials::PluginAccountListQuery,
@@ -1347,6 +1365,32 @@ impl AccountStore for UnusedStore {
 
 #[async_trait]
 impl AccountRuntimeStore for UnusedStore {
+    async fn account_concurrency(
+        &self,
+        account_id: &str,
+        offset: u64,
+        limit: u32,
+    ) -> AdminStoreResult<gateway_admin::model::accounts::AccountConcurrencyPage> {
+        use gateway_admin::model::accounts::{AccountConcurrencyEntry, AccountConcurrencyPage};
+        assert_eq!(account_id, "acct_cooldown");
+        assert_eq!((offset, limit), (20, 20));
+        let now = "2026-10-17T00:00:00Z".parse::<DateTime<Utc>>().unwrap();
+        Ok(AccountConcurrencyPage {
+            total: 21,
+            observed_at: now,
+            entries: vec![AccountConcurrencyEntry {
+                lease_id: "lease_current".into(),
+                request_id: Some("req_current".into()),
+                client_key_id: Some("key_fixture".into()),
+                client_key_name: Some("测试 Key".into()),
+                model: Some("gpt-5.4".into()),
+                client_ip: Some("2001:db8::376".into()),
+                started_at: Some(now - chrono::Duration::seconds(15)),
+                acquired_at: Some(now - chrono::Duration::seconds(5)),
+            }],
+        })
+    }
+
     async fn active_rate_limits(&self) -> AdminStoreResult<AccountRuntimeSnapshot> {
         Ok(AccountRuntimeSnapshot {
             cooldown: BTreeMap::new(),
@@ -1386,6 +1430,27 @@ impl AccountRuntimeStore for UnusedStore {
 
 #[async_trait]
 impl ObservabilityStore for UnusedStore {
+    async fn diagnostic_errors(
+        &self,
+        target: &gateway_admin::model::diagnostics::DiagnosticTarget,
+        limit: u16,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::observability::OpsError>> {
+        let errors = self.ops_errors.lock().expect("ops errors");
+        Ok(errors
+            .iter()
+            .filter(|error| match target {
+                gateway_admin::model::diagnostics::DiagnosticTarget::Request(id) => {
+                    error.request_id.as_ref() == Some(id)
+                }
+                gateway_admin::model::diagnostics::DiagnosticTarget::Operation(id) => {
+                    &error.event_id == id && error.source == "ops_event"
+                }
+            })
+            .take(usize::from(limit))
+            .cloned()
+            .collect())
+    }
+
     fn query_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(10)
     }
@@ -1475,11 +1540,12 @@ impl ObservabilityStore for UnusedStore {
         })
     }
 
-    async fn usage_record_detail(&self, _: &str) -> AdminStoreResult<UsageDetail> {
+    async fn usage_record_detail(&self, request_id: &str) -> AdminStoreResult<UsageDetail> {
         self.usage_detail
             .lock()
             .expect("usage detail")
             .clone()
+            .filter(|detail| detail.request.id == request_id)
             .ok_or_else(|| unavailable("usage detail"))
     }
 
@@ -1766,6 +1832,8 @@ fn test_runtime_settings() -> RuntimeSettings {
             account_warmup_enabled: false,
             account_warmup_schedule_time: "08:00".to_owned(),
             account_warmup_model: None,
+            reset_credit_lead_minutes: 10,
+            reset_credit_max_weekly_remaining_percent: None,
         },
     }
 }
@@ -1821,4 +1889,30 @@ fn unsupported_provider() -> ProviderAdminError {
 
 fn unavailable_system() -> SystemOperationError {
     SystemOperationError::new(SystemOperationErrorKind::Internal, "unused test operation")
+}
+
+#[async_trait]
+impl gateway_admin::ports::reset_credit_automation::ResetCreditAutomationStore for UnusedStore {
+    async fn reset_credit_automation(
+        &self,
+        _: &str,
+    ) -> AdminStoreResult<
+        Option<gateway_admin::model::reset_credit_automation::ResetCreditAutomation>,
+    > {
+        Ok(None)
+    }
+    async fn due_reset_credit_automations(
+        &self,
+        _: chrono::DateTime<chrono::Utc>,
+        _: u32,
+    ) -> AdminStoreResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+    async fn save_reset_credit_automation(
+        &self,
+        _: &gateway_admin::model::reset_credit_automation::ResetCreditAutomation,
+        _: Option<&gateway_admin::model::MutationContext>,
+    ) -> AdminStoreResult<u64> {
+        Err(unavailable("reset-credit automation"))
+    }
 }

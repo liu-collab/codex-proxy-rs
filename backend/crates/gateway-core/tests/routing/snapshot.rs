@@ -202,12 +202,16 @@ fn contributed_alias_uses_the_same_target_for_listing_profiles_and_routing() {
 }
 
 #[test]
-fn contributed_alias_rejects_collisions_chains_and_missing_targets_before_publication() {
+fn contributed_alias_business_data_does_not_block_publication_or_native_routing() {
+    let mut unknown_provider = alias("plugin-model", "upstream-model");
+    unknown_provider.provider = ProviderKind::new("unregistered").unwrap();
     for aliases in [
         vec![alias("upstream-model", "upstream-model")],
         vec![alias("configured", "upstream-model")],
         vec![alias("plugin-model", "configured")],
         vec![alias("plugin-model", "missing")],
+        vec![alias("plugin-model", "plugin-model")],
+        vec![unknown_provider],
         vec![
             alias("plugin-model", "other"),
             alias("other", "plugin-model"),
@@ -217,11 +221,69 @@ fn contributed_alias_rejects_collisions_chains_and_missing_targets_before_public
             alias("plugin-model", "upstream-model"),
         ],
     ] {
+        let count = aliases.len();
+        let handle =
+            gateway_core::runtime::RuntimeSnapshotHandle::new(compile_aliases(vec![]).unwrap());
+        handle.publish(
+            compile_aliases(aliases).expect("plugin business data must not prevent publication"),
+        );
+        let snapshot = handle.acquire().unwrap();
+        assert_eq!(snapshot.extensions().unwrap().model_aliases().len(), count);
+        let native = PublicModelId::new("upstream-model").unwrap();
+        assert!(snapshot.contains_public_model_for_scope(&native, &snapshot.all_account_scope()));
+        let plan = snapshot
+            .plan(
+                &native,
+                &super::operation(),
+                snapshot.all_account_scope(),
+                &Default::default(),
+            )
+            .unwrap();
+        assert_eq!(plan.candidates()[0].provider().as_str(), "alpha");
         assert_eq!(
-            compile_aliases(aliases).unwrap_err(),
-            RuntimeSnapshotCompileError::InvalidExtensionModels
+            plan.candidates()[0].upstream_model().unwrap().as_str(),
+            "upstream-model"
         );
     }
+}
+
+#[test]
+fn contributed_alias_is_resolved_once_and_preserves_the_first_matching_entry() {
+    let snapshot = compile_aliases(vec![
+        alias("duplicate", "first-target"),
+        alias("duplicate", "upstream-model"),
+        alias("self", "self"),
+        alias("left", "right"),
+        alias("right", "left"),
+        alias("configured", "plugin-target"),
+        alias("to-configured", "configured"),
+    ])
+    .unwrap();
+    assert_eq!(snapshot.mapped_model("duplicate"), "first-target");
+    assert_eq!(snapshot.mapped_model("self"), "self");
+    assert_eq!(snapshot.mapped_model("left"), "right");
+    assert_eq!(snapshot.mapped_model("right"), "left");
+    assert_eq!(snapshot.mapped_model("configured"), "plugin-target");
+    assert_eq!(snapshot.mapped_model("to-configured"), "configured");
+}
+
+#[test]
+fn contributed_alias_unknown_provider_is_a_request_routing_error() {
+    let mut unknown_provider = alias("plugin-model", "upstream-model");
+    unknown_provider.provider = ProviderKind::new("unregistered").unwrap();
+    let snapshot = compile_aliases(vec![unknown_provider]).unwrap();
+    let model = PublicModelId::new("plugin-model").unwrap();
+    assert!(!snapshot.contains_public_model_for_scope(&model, &snapshot.all_account_scope()));
+    assert!(
+        snapshot
+            .plan(
+                &model,
+                &super::operation(),
+                snapshot.all_account_scope(),
+                &Default::default(),
+            )
+            .is_err()
+    );
 }
 
 impl ExtensionPreparationPort for CountingExtensionPreparation {
@@ -443,7 +505,7 @@ fn compiled_plans_keep_their_scheduling_config_after_a_new_snapshot_is_built() {
     use gateway_core::account::SmartSchedulingConfig;
     let configs = [
         SmartSchedulingConfig::default(),
-        SmartSchedulingConfig::new([0.0, 2.0, 1.0, 0.5, 1.2, 2.3], true).unwrap(),
+        SmartSchedulingConfig::new([0.0, 2.0, 1.0, 0.5, 1.2, 2.3]).unwrap(),
     ];
     let mut plans = Vec::new();
     for (index, config) in configs.into_iter().enumerate() {
@@ -1299,6 +1361,79 @@ fn fast_mode_merges_only_bound_groups_without_changing_account_scope() {
                     plan.fast_mode(),
                     if bound { expected } else { FastMode::Default },
                     "mode={mode:?}, other={other_mode:?}, enabled={group_enabled}, bound={bound}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn image_generation_merges_bound_groups_with_deny_precedence() {
+    use gateway_core::account::ProviderAccountId;
+    use gateway_core::routing::AccountGroupId;
+    for (allowed, other_allowed) in [(true, true), (true, false), (false, true), (false, false)] {
+        for group_enabled in [false, true] {
+            for bound in [false, true] {
+                let group_id = AccountGroupId::new("grp_00000000000000000000000000000001").unwrap();
+                let open_group_id =
+                    AccountGroupId::new("grp_00000000000000000000000000000002").unwrap();
+                let account_id = ProviderAccountId::new("acct_fast_policy").unwrap();
+                let facts = SnapshotFacts::new(
+                    revision(1),
+                    revision(1),
+                    SettingsValues::new(3, "smart", BTreeMap::new(), None, None),
+                    vec![SnapshotClientPolicyFacts::new(
+                        ClientApiKeyId::new("key_fast_policy").unwrap(),
+                        PlaintextClientApiKey::new("sk_fast_policy").unwrap(),
+                        if bound {
+                            vec![group_id.clone(), open_group_id.clone()]
+                        } else {
+                            Vec::new()
+                        },
+                        RateLimits::unlimited(),
+                    )],
+                    vec![
+                        SnapshotAccountGroupFacts::new(
+                            group_id.clone(),
+                            "Restricted".to_owned(),
+                            group_enabled,
+                        )
+                        .with_image_generation(allowed),
+                        SnapshotAccountGroupFacts::new(
+                            open_group_id.clone(),
+                            "Open".to_owned(),
+                            true,
+                        )
+                        .with_image_generation(other_allowed),
+                    ],
+                    vec![SnapshotProviderAccountFacts::new(
+                        account_id.clone(),
+                        "alpha",
+                    )],
+                    vec![
+                        SnapshotAccountGroupMemberFacts::new(group_id, account_id.clone()),
+                        SnapshotAccountGroupMemberFacts::new(open_group_id, account_id.clone()),
+                    ],
+                );
+                let snapshot = block_on(
+                    RuntimeSnapshotCompiler::new(
+                        Arc::new(TestSnapshotStore::new(Ok(facts))),
+                        Arc::new(TestCatalog::Unavailable),
+                    )
+                    .compile(),
+                )
+                .unwrap();
+                let scope = snapshot
+                    .client_policies()
+                    .next()
+                    .unwrap()
+                    .account_scope()
+                    .clone();
+                assert!(scope.allows(&account_id));
+                assert_eq!(
+                    scope.allows_image_generation(),
+                    !bound || (allowed && other_allowed),
+                    "allowed={allowed}, other={other_allowed}, enabled={group_enabled}, bound={bound}"
                 );
             }
         }

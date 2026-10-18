@@ -86,6 +86,7 @@ pub struct ImageBillingView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageListRecordView {
+    pub logical_outcome: String,
     pub client_api_key_name: Option<String>,
     pub id: String,
     pub provider: Option<String>,
@@ -275,8 +276,6 @@ pub struct UsageAttemptView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageRecordDetailView {
-    pub trace: Option<serde_json::Value>,
-    pub related_requests: Vec<serde_json::Value>,
     #[serde(flatten)]
     pub request: UsageRecordView,
     pub attempts: Vec<UsageAttemptView>,

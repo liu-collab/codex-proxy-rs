@@ -74,6 +74,7 @@ impl SnapshotClientPolicyFacts {
 /// Store 读取到的账号分组事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotAccountGroupFacts {
+    allow_image_generation: bool,
     fast_mode: FastMode,
     id: AccountGroupId,
     name: String,
@@ -81,6 +82,12 @@ pub struct SnapshotAccountGroupFacts {
 }
 
 impl SnapshotAccountGroupFacts {
+    #[must_use]
+    pub const fn with_image_generation(mut self, allowed: bool) -> Self {
+        self.allow_image_generation = allowed;
+        self
+    }
+
     #[must_use]
     pub const fn with_fast_mode(mut self, fast_mode: FastMode) -> Self {
         self.fast_mode = fast_mode;
@@ -93,6 +100,7 @@ impl SnapshotAccountGroupFacts {
             id,
             name,
             enabled,
+            allow_image_generation: true,
             fast_mode: FastMode::Default,
         }
     }
@@ -217,8 +225,6 @@ pub enum RuntimeSnapshotCompileError {
     RevisionChanged,
     #[error("runtime snapshot contains invalid frozen data")]
     InvalidData,
-    #[error("extension model aliases conflict with the provider catalog or model mappings")]
-    InvalidExtensionModels,
     #[error("provider model catalog changed while the snapshot was compiling")]
     CatalogChanged,
 }
@@ -370,7 +376,6 @@ impl RuntimeSnapshotCompiler {
                         observed_generations
                     })
                     .with_extensions(extensions);
-                snapshot.validate_extension_models()?;
                 return Ok(snapshot);
             }
         }
@@ -499,6 +504,7 @@ async fn compile_runtime_snapshot(
     let mut client_policies = Vec::with_capacity(facts.client_policies.len());
     for policy in facts.client_policies {
         let mut fast_mode = FastMode::Default;
+        let mut allow_image_generation = true;
         let account_scope = if policy.group_ids.is_empty() {
             FrozenAccountScope::new(
                 Arc::clone(&account_directory),
@@ -515,8 +521,9 @@ async fn compile_runtime_snapshot(
                 let group = groups
                     .get(&group_id)
                     .ok_or(RuntimeSnapshotCompileError::InvalidData)?;
-                // 禁用分组仅影响选号；Key 仍绑定其 Fast 策略
+                // 停用只影响选号，仍绑定的分组继续贡献请求策略
                 fast_mode = fast_mode.merge(group.fast_mode);
+                allow_image_generation &= group.allow_image_generation;
                 bound_groups.push(RoutingGroupSnapshot::new(
                     group.id.clone(),
                     group.name.clone(),
@@ -539,6 +546,7 @@ async fn compile_runtime_snapshot(
                 policy.plaintext_key,
                 Arc::new(
                     account_scope
+                        .with_image_generation(allow_image_generation)
                         .with_fast_mode(fast_mode)
                         .with_request_profiles(policy.request_profiles),
                 ),
@@ -642,45 +650,6 @@ impl RuntimeSnapshot {
         self.model_aliases()
             .iter()
             .find(|alias| alias.id.as_str() == model)
-    }
-
-    fn validate_extension_models(&self) -> Result<(), RuntimeSnapshotCompileError> {
-        let mut ids = BTreeSet::new();
-        for alias in self.model_aliases() {
-            let valid = ids.insert(&alias.id)
-                && self.providers.contains(&alias.provider)
-                && !self
-                    .settings
-                    .values
-                    .model_mappings
-                    .contains_key(alias.id.as_str())
-                && !self
-                    .settings
-                    .values
-                    .model_mappings
-                    .contains_key(alias.target.as_str())
-                && !self
-                    .settings
-                    .values
-                    .model_mappings
-                    .values()
-                    .any(|target| target == alias.id.as_str())
-                && self.model_alias(alias.target.as_str()).is_none()
-                && !self.provider_models.values().any(|models| {
-                    models
-                        .keys()
-                        .any(|model| model.as_str() == alias.id.as_str())
-                })
-                && self
-                    .provider_models
-                    .get(&alias.provider)
-                    .is_some_and(|models| models.contains_key(&alias.target));
-            if !valid {
-                tracing::warn!(owner = %alias.owner, model = %alias.id, "插件模型别名与宿主目录或映射冲突，拒绝发布候选快照");
-                return Err(RuntimeSnapshotCompileError::InvalidExtensionModels);
-            }
-        }
-        Ok(())
     }
 
     #[must_use]

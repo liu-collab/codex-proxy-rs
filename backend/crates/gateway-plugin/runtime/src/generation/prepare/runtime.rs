@@ -41,6 +41,7 @@ use std::{
 use tokio::sync::{Mutex, Semaphore};
 
 const RUNTIME_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+pub(super) const MAXIMUM_PARALLEL_PREPARATIONS: usize = 2;
 pub struct PluginRuntimeConfig {
     pub cache_directory: PathBuf,
     pub host_version: semver::Version,
@@ -64,6 +65,7 @@ pub struct PluginRuntime {
     shutdown_lock: Mutex<()>,
     pub(super) processes: Arc<gateway_host::process::ProcessSupervisor>,
     pub(super) validators: Arc<Semaphore>,
+    pub(super) configuration_schemas: Arc<super::super::configuration::ConfigurationSchemas>,
     pub(super) log_slots: Arc<Semaphore>,
     pub(super) account_ports: Arc<PluginAccountPortSlot>,
     pub(super) client_key_ports: Arc<PluginClientKeyPortSlot>,
@@ -105,7 +107,8 @@ impl PluginRuntime {
             shutting_down: Arc::new(AtomicBool::new(false)),
             shutdown_lock: Mutex::new(()),
             processes,
-            validators: Arc::new(Semaphore::new(2)),
+            validators: Arc::new(Semaphore::new(MAXIMUM_PARALLEL_PREPARATIONS)),
+            configuration_schemas: Arc::default(),
             service_ports: Arc::new(crate::callback::services::ServicePorts::default()),
             account_ports: Arc::new(PluginAccountPortSlot::new()),
             client_key_ports: Arc::new(PluginClientKeyPortSlot::new()),

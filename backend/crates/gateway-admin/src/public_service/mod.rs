@@ -1,7 +1,11 @@
 //! 主动服务调用的统一组合入口；普通业务方法由所属 HTTP 或执行边界包裹
 
+mod accounts;
+mod actor;
 mod registry;
 mod settings;
+mod usage_data;
+pub use actor::scope_actor;
 pub use registry::Registry;
 
 use std::{future::Future, sync::Arc};
@@ -98,8 +102,10 @@ pub(crate) async fn invoke(
         plan: plan.clone(),
     };
     let inner = context.clone();
+    // next 可在另一回调任务中执行，终端必须保留发起主体及其缺席状态
+    let actor = actor::current_actor().ok();
     let next = compose(Vec::new(), move |input| {
-        Box::pin(scope(inner, terminal(input)))
+        Box::pin(actor::scope_captured(actor, scope(inner, terminal(input))))
     });
     tokio::select! {
         biased;

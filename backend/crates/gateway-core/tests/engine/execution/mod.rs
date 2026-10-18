@@ -780,6 +780,8 @@ struct FixedRoutingPolicy {
 struct RetryTestPolicy {
     decision: gateway_core::engine::policy::RetryDecision,
     facts: Arc<Mutex<Vec<gateway_core::engine::policy::RetryFacts>>>,
+    observe_effect: bool,
+    fail: bool,
 }
 
 impl RequestPolicyPlan for RetryTestPolicy {
@@ -800,9 +802,19 @@ impl RequestPolicyPlan for RetryTestPolicy {
         input: gateway_core::engine::policy::RetryInput,
     ) -> BoxFuture<'static, Result<gateway_core::engine::policy::RetryDecision, RequestPolicyFault>>
     {
+        if self.observe_effect {
+            input.execution_effects().observe();
+        }
         self.facts.lock().unwrap().push(input.facts);
         let decision = self.decision;
-        Box::pin(async move { Ok(decision) })
+        let fail = self.fail;
+        Box::pin(async move {
+            if fail {
+                Err(RequestPolicyFault)
+            } else {
+                Ok(decision)
+            }
+        })
     }
 }
 
@@ -853,11 +865,21 @@ impl Provider for RetryTestProvider {
 #[test]
 fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
     use gateway_core::engine::policy::RetryDecision;
-    for (decision, send_state, replay_safe, expected_allowed, expected_calls) in [
+    for (
+        decision,
+        send_state,
+        replay_safe,
+        observe_effect,
+        fail,
+        expected_allowed,
+        expected_calls,
+    ) in [
         (
             RetryDecision::Stop,
             UpstreamSendState::NotSent,
             true,
+            false,
+            false,
             true,
             1,
         ),
@@ -865,6 +887,8 @@ fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
             RetryDecision::Retry,
             UpstreamSendState::NotSent,
             true,
+            false,
+            false,
             true,
             2,
         ),
@@ -873,6 +897,8 @@ fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
             UpstreamSendState::Ambiguous,
             true,
             false,
+            false,
+            false,
             1,
         ),
         (
@@ -880,6 +906,26 @@ fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
             UpstreamSendState::Sent,
             false,
             false,
+            false,
+            false,
+            1,
+        ),
+        (
+            RetryDecision::Retry,
+            UpstreamSendState::NotSent,
+            true,
+            true,
+            false,
+            true,
+            1,
+        ),
+        (
+            RetryDecision::Delegate,
+            UpstreamSendState::NotSent,
+            true,
+            true,
+            true,
+            true,
             1,
         ),
     ] {
@@ -903,6 +949,8 @@ fn retry_policy_can_stop_but_cannot_bypass_replay_safety() {
                     Arc::new(RetryTestPolicy {
                         decision,
                         facts: facts.clone(),
+                        observe_effect,
+                        fail,
                     }),
                 )
                 .unwrap();
@@ -1966,10 +2014,11 @@ impl Provider for PolicySelectingProvider {
                 first_output_latency_ms: None,
             },
         }];
-        let selection = AccountSelectionContext {
+        let mut selection = AccountSelectionContext {
             policy: attempt.account_selection_policy(),
             now: SystemTime::now(),
             excluded_accounts: attempt.excluded_accounts().clone(),
+            busy_accounts: Default::default(),
             preferred_account: attempt.required_account().cloned(),
             preferred_account_overrides_weight: true,
             round_robin_cursor: 0,
@@ -1985,14 +2034,16 @@ impl Provider for PolicySelectingProvider {
                     .upstream_model()
                     .map(UpstreamModelId::as_str),
                 &candidates,
-                &selection,
+                &mut selection,
             )
             .await
         {
-            Err(AccountPolicyError::Rejected) => Err(ProviderError::new(
-                ProviderErrorKind::RequestPolicyDenied,
-                UpstreamSendState::NotSent,
-            )),
+            Err(AccountPolicyError::Rejected | AccountPolicyError::Filtered) => {
+                Err(ProviderError::new(
+                    ProviderErrorKind::RequestPolicyDenied,
+                    UpstreamSendState::NotSent,
+                ))
+            }
             Err(AccountPolicyError::Fault | AccountPolicyError::StaleCandidate) => Err(
                 ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent),
             ),
@@ -3952,6 +4003,16 @@ fn start_snapshot_with_policy(
     limits: RateLimits,
     fast_mode: FastMode,
 ) -> RuntimeSnapshot {
+    start_snapshot_with_image_policy(revision, enabled, limits, fast_mode, true)
+}
+
+fn start_snapshot_with_image_policy(
+    revision: u64,
+    enabled: bool,
+    limits: RateLimits,
+    fast_mode: FastMode,
+    allow_image_generation: bool,
+) -> RuntimeSnapshot {
     let provider = ProviderKind::new("openai").expect("provider kind");
     let capabilities =
         ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), Some(16_000));
@@ -3971,7 +4032,8 @@ fn start_snapshot_with_policy(
                 account_scope(&provider, "acct_start")
                     .as_ref()
                     .clone()
-                    .with_fast_mode(fast_mode),
+                    .with_fast_mode(fast_mode)
+                    .with_image_generation(allow_image_generation),
             ),
             enabled,
             limits,
@@ -4893,5 +4955,78 @@ fn child_settings_recompute_key_scope_without_inheriting_parent_defaults() {
                 .unwrap()
                 .is_empty()
         );
+    });
+}
+
+#[test]
+fn image_policy_stays_frozen_for_prepared_requests_and_refreshes_for_the_next_turn() {
+    block_on(async {
+        let snapshot = |revision, allowed| {
+            start_snapshot_with_image_policy(
+                revision,
+                true,
+                RateLimits::unlimited(),
+                FastMode::Default,
+                allowed,
+            )
+        };
+        let snapshots = RuntimeSnapshotHandle::new(snapshot(1, false));
+        let admissions = Arc::new(Admissions::default());
+        let service = DefaultExecutionService::new(
+            snapshots.clone(),
+            Arc::new(TrackingExecutionStore::default()),
+            ProviderRegistry::default(),
+            admissions.clone(),
+            Arc::new(UnusedContinuation),
+            Arc::new(RecordingClientApiKeyUsage::default()),
+            Arc::new(crate::RecordingDiagnostics::default()),
+        );
+        let client = service.authenticate("sk_start_test").unwrap();
+        let prepared = service.prepare_execution(client.clone()).await.unwrap();
+        // 关闭生图不影响文本请求的正常准入
+        let text = service
+            .start(request(&service, ClientTransport::HttpJson))
+            .await
+            .unwrap();
+        text.session.detach_finalize().await;
+        assert_eq!(admissions.limits.lock().unwrap().len(), 1);
+        snapshots.publish(snapshot(2, true));
+        assert!(
+            !prepared
+                .client()
+                .policy()
+                .account_scope()
+                .allows_image_generation()
+        );
+        let next = service.prepare_execution(client).await.unwrap();
+        assert!(
+            next.client()
+                .policy()
+                .account_scope()
+                .allows_image_generation()
+        );
+        let input = request(&service, ClientTransport::WebSocket);
+        let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+            ProtocolPayload::json_object(
+                "openai",
+                json!({"model":"gpt-start","tools":[{"type":"image_generation"}]})
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+            )
+            .unwrap(),
+        ));
+        let result = service
+            .start_prepared(
+                prepared,
+                gateway_core::engine::execution::PreparedExecutionRequest {
+                    public_model: input.public_model,
+                    operation,
+                    metadata: input.metadata,
+                },
+            )
+            .await;
+        assert!(matches!(result, Err(error) if error.kind() == GatewayErrorKind::PolicyDenied));
+        assert_eq!(admissions.limits.lock().unwrap().len(), 1);
     });
 }

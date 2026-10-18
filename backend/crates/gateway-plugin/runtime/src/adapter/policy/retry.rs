@@ -80,8 +80,19 @@ async fn call(
         allowed_actions,
     };
     let mut context = invocation.session.context(Stage::Retry, timeout);
+    context.request = crate::adapter::request_context(input.extension_scope.request());
     context.request_id = Some(request.request_id.clone());
     context.attempt_id = Some(format!("{}:{}", request.request_id, request.attempt_index));
+    let _scope = invocation
+        .callbacks
+        .prepare_data_plane(
+            &context,
+            Some(input.execution_effects()),
+            input.extension_scope.clone(),
+            None,
+            gateway_core::lifecycle::CancellationToken::new(),
+        )
+        .map_err(|_| ())?;
     let reply = invocation
         .session
         .call(
@@ -92,15 +103,7 @@ async fn call(
         )
         .await
         .map_err(|_| ())?;
-    if !reply.payload.is_empty()
-        || reply
-            .result
-            .as_object()
-            .is_none_or(|fields| fields.len() != 1)
-    {
-        invocation.session.invalid_response(Stage::Retry);
-        return Err(());
-    }
+    // 重试资格由 Core 在策略返回后裁决，适配器只搬运插件决定
     match invocation
         .session
         .decode_response::<WireDecision>(Stage::Retry, reply.result)
@@ -108,7 +111,6 @@ async fn call(
     {
         WireDecision::Delegate => Ok(RetryDecision::Delegate),
         WireDecision::Stop => Ok(RetryDecision::Stop),
-        WireDecision::Retry if input.facts.retry_allowed => Ok(RetryDecision::Retry),
-        WireDecision::Retry => Err(()),
+        WireDecision::Retry => Ok(RetryDecision::Retry),
     }
 }

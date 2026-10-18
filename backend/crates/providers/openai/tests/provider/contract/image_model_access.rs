@@ -339,36 +339,6 @@ async fn final_image_model_after_middleware_must_be_allowed_by_the_selected_acco
     assert_eq!(server.received_requests().await.unwrap().len(), 2);
 }
 
-#[tokio::test]
-async fn standalone_search_does_not_inherit_image_model_restrictions() {
-    let server = MockServer::start().await;
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, CPA_ACCOUNT).await;
-    let search = Operation::Search(StandaloneSearchRequest::from_raw_json(
-        RawJsonPayload::new(
-            "openai",
-            Bytes::from_static(br#"{"id":"search","commands":{}}"#),
-        )
-        .unwrap(),
-    ));
-    let stream = provider_with_base_url(&store, server.uri())
-        .execute(
-            planned_provider_endpoint_request("openai", search),
-            attempt(
-                AccountAttemptContext::new(BTreeSet::new(), None, None).with_account_scope(scope(
-                    policy(AccountModelAccessMode::Allowlist, "kimi-k3"),
-                    AccountModelAccess::all(),
-                )),
-            ),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        stream.metadata().provider_account_id().as_str(),
-        CPA_ACCOUNT
-    );
-}
-
 fn image_operation(kind: ImageRequestKind, body: &[u8]) -> Operation {
     Operation::GenerateImage(ImageRequest::from_raw_json(
         kind,

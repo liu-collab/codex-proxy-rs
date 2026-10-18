@@ -19,7 +19,7 @@ async fn version_reset_persists_primary_keys_atomically_and_resumes_after_table_
     }
     drain_analytics(&database.pool).await;
     // 旧格式内容只能被清理，复合主键在同一时间桶内也需要持续前进
-    for table in ["request_analytics_15m", "request_analytics_hourly"] {
+    for table in ["request_analytics_15m", "request_analytics_1h"] {
         sqlx::query(sqlx::AssertSqlSafe(format!("insert into {table}(bucket_start,collection,dimensions,outcome,schema_version,histogram_version,counts,costs,distributions) select $1,'obsolete',array['key_'||i],outcome,0,0,'{{}}','{{}}','{{}}' from generate_series(1,3)i cross join unnest(array['failed','succeeded'])outcome")))
             .bind(start).execute(&database.pool).await.unwrap();
     }
@@ -72,7 +72,7 @@ async fn version_reset_persists_primary_keys_atomically_and_resumes_after_table_
         let table = match before.0 {
             1 => "request_analytics_facts",
             2 => "request_analytics_15m",
-            3 => "request_analytics_hourly",
+            3 => "request_analytics_1h",
             4 => "request_analytics_pending_buckets",
             _ => panic!("reset ended before final verification"),
         };

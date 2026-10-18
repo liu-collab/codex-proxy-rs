@@ -154,6 +154,21 @@ runs:
         "${compose[@]}" exec -T codex-proxy-rs sh -c \
           'touch /app/.runtime/data/.ci-write /app/.runtime/logs/.ci-write && rm /app/.runtime/data/.ci-write /app/.runtime/logs/.ci-write'
 
+    - name: Verify application restart after installer permissions
+      shell: bash
+      run: |
+        set -euo pipefail
+        compose=(docker compose --project-name "$COMPOSE_PROJECT_NAME" \
+          -f deploy/compose.yaml)
+        "${compose[@]}" stop --timeout 30 codex-proxy-rs
+        # 使用安装器原函数，验证已有备份暂存目录与日志不会因所有权变更而阻止启动
+        (
+          export INSTALL_DIR="$PWD"
+          source deploy/install.sh
+          fix_runtime_permissions
+        )
+        "${compose[@]}" up -d --no-build --wait codex-proxy-rs
+
     - name: Verify clean logs and graceful shutdown
       shell: bash
       run: |

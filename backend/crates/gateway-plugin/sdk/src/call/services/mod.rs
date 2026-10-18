@@ -1,6 +1,8 @@
 //! 公开服务的类型化操作合同；名称用于分派，不承担授权
 
+pub mod accounts;
 pub mod settings;
+pub mod usage;
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -20,7 +22,6 @@ pub struct Request {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ServiceError {
     pub kind: String,
     pub message: String,

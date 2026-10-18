@@ -10,7 +10,7 @@ use tokio::sync::oneshot;
 
 use crate::{Frame, Message, call::middleware::NEXT_METHOD};
 
-use super::super::frame::validate_frame;
+use super::super::frame::EncodedFrame;
 use super::{
     CallCancellation, CallDeadline, CallDeadlinePause, SessionError, credit::CreditWindow,
     output::Output,
@@ -77,10 +77,10 @@ impl HostClient {
             },
             payload,
         };
-        if validate_frame(&frame).is_err() {
+        let frame = EncodedFrame::new(frame).map_err(|_| {
             self.callbacks.retire(id);
-            return Err(SessionError::Protocol);
-        }
+            SessionError::Protocol
+        })?;
         let sent = tokio::select! {
             biased;
             () = self.cancellation.cancelled() => Err(SessionError::Cancelled),

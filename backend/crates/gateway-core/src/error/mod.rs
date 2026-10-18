@@ -46,6 +46,8 @@ pub enum ProviderErrorKind {
     ConcurrencyQueueTimeout,
     /// Provider 已确认当前请求无法选出可用账号
     NoEligibleAccount,
+    /// 会话已有的策略限制排除了可用账号，本地选号终止且不允许重放
+    SessionPolicyRestricted,
     /// Provider 的账号存储、租约协调或本地凭据数据不可用
     ProviderInfrastructureUnavailable,
     /// 请求超时
@@ -84,6 +86,7 @@ impl ProviderErrorKind {
             Self::ConcurrencyQueueFull => "concurrency_queue_full",
             Self::ConcurrencyQueueTimeout => "concurrency_queue_timeout",
             Self::NoEligibleAccount => "no_eligible_account",
+            Self::SessionPolicyRestricted => "session_policy_restricted",
             Self::ProviderInfrastructureUnavailable => "provider_infrastructure_unavailable",
             Self::Timeout => "timeout",
             Self::Transport => "transport",
@@ -1187,6 +1190,10 @@ impl GatewayError {
             ProviderErrorKind::InvalidRequest => {
                 Self::new(GatewayErrorKind::InvalidRequest, "invalid upstream request")
             }
+            ProviderErrorKind::SessionPolicyRestricted => Self::new(
+                GatewayErrorKind::InvalidRequest,
+                "session policy excludes all eligible accounts",
+            ),
             ProviderErrorKind::ContinuationRecoveryRequired => Self::new(
                 GatewayErrorKind::InvalidRequest,
                 "conversation continuation must be rebuilt",

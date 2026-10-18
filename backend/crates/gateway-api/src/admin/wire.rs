@@ -262,6 +262,10 @@ const SERVICE_UNAVAILABLE: AdminErrorSpec = AdminErrorSpec::new(
 );
 
 impl AdminError {
+    pub(super) fn into_batch_error(self) -> (u16, AdminErrorBody) {
+        (self.status.as_u16(), self.body)
+    }
+
     fn new(status: StatusCode, code: AdminErrorCode, message: impl Into<String>) -> Self {
         Self {
             status,

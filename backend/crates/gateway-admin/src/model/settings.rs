@@ -75,6 +75,8 @@ pub struct RuntimeSettingsValues {
     pub account_warmup_enabled: bool,
     pub account_warmup_schedule_time: String,
     pub account_warmup_model: Option<String>,
+    pub reset_credit_lead_minutes: u32,
+    pub reset_credit_max_weekly_remaining_percent: Option<u32>,
 }
 
 /// 完整运行设置事实
@@ -189,6 +191,15 @@ impl From<RuntimeSettings> for ReplaceRuntimeSettings {
 impl RuntimeSettingsValues {
     /// 校验共同事实，返回字段名供边界转换错误；SQL 类型转换仍由 Store 处理
     pub fn validate(&self) -> Result<(), &'static str> {
+        if !(1..=1440).contains(&self.reset_credit_lead_minutes) {
+            return Err("reset_credit_lead_minutes");
+        }
+        if self
+            .reset_credit_max_weekly_remaining_percent
+            .is_some_and(|percent| percent > 100)
+        {
+            return Err("reset_credit_max_weekly_remaining_percent");
+        }
         self.request_location
             .validate()
             .map_err(|_| "request_location")?;

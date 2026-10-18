@@ -133,6 +133,11 @@ fn response_body_modes_distinguish_transfer_empty_and_plugin_stream() {
         header_mutations: Vec::new(),
         body: MiddlewareResponseBody::PassThrough { body: handle },
     };
+    let mut extra = serde_json::to_value(&pass_through).unwrap();
+    extra["plugin_extra"] = json!(true);
+    extra["body"]["plugin_extra"] = json!(true);
+    extra["body"]["body"]["plugin_extra"] = json!(true);
+    assert!(serde_json::from_value::<MiddlewareResponseHead>(extra).unwrap() == pass_through);
     assert_eq!(
         serde_json::to_value(pass_through).unwrap()["body"]["kind"],
         "pass_through"

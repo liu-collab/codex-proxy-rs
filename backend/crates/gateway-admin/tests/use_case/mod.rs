@@ -15,6 +15,7 @@ mod plugins;
 mod proxies;
 mod settings;
 mod system;
+mod usage_data;
 
 use std::{
     str::FromStr,
@@ -95,6 +96,7 @@ pub(super) struct AdminHarness {
     client_session_ttl_minutes: u64,
     accounts: Arc<dyn AccountStore>,
     proxies: Arc<dyn gateway_admin::ports::proxy::ProxyStore>,
+    proxy_probe: Arc<dyn gateway_admin::ports::proxy::ProxyProbe>,
     account_runtime: Arc<dyn AccountRuntimeStore>,
     account_groups: Arc<dyn AccountGroupStore>,
     auth: Arc<dyn AuthStore>,
@@ -120,6 +122,7 @@ impl AdminHarness {
             client_session_ttl_minutes: 1_440,
             accounts: unavailable.clone(),
             proxies: Arc::new(proxies::TestProxies::default()),
+            proxy_probe: Arc::new(proxies::TestProxies::default()),
             account_runtime: unavailable.clone(),
             account_groups: Arc::new(UnavailableAccountGroupStore),
             auth: Arc::new(BootstrapAuthStore::default()),
@@ -273,6 +276,7 @@ impl AdminHarness {
                 self.plugin_store,
                 Arc::new(plugins::TestPluginPorts),
                 Arc::new(plugins::TestPluginPorts),
+                Arc::new(plugins::TestPluginPorts),
             ),
             gateway_admin::AdminRuntimePorts {
                 timezone: Default::default(),
@@ -289,7 +293,7 @@ impl AdminHarness {
                 .unwrap(),
                 snapshot: Arc::new(NoopSnapshot),
                 account_probe: self.probe,
-                proxy_probe: Arc::new(proxies::TestProxies::default()),
+                proxy_probe: self.proxy_probe,
                 client_distribution: Arc::new(NoopClientDistribution),
                 system: self.system,
                 client_key_verifier: self.client_key_verifier,
@@ -474,6 +478,10 @@ impl AccountGroupStore for UnavailableAccountGroupStore {
 
 #[async_trait]
 impl AccountStore for UnavailableStore {
+    async fn account_exists(&self, _: &str) -> AdminStoreResult<bool> {
+        Err(unavailable("account"))
+    }
+
     async fn list_plugin_accounts(
         &self,
         _: gateway_admin::model::provider_credentials::PluginAccountListQuery,
@@ -643,6 +651,19 @@ impl AccountStore for UnavailableStore {
 
 #[async_trait]
 impl AccountRuntimeStore for UnavailableStore {
+    async fn account_concurrency(
+        &self,
+        _: &str,
+        _: u64,
+        _: u32,
+    ) -> AdminStoreResult<gateway_admin::model::accounts::AccountConcurrencyPage> {
+        Err(gateway_admin::ports::store::AdminStoreError::new(
+            gateway_admin::ports::store::AdminStoreErrorKind::Unavailable,
+            "account concurrency",
+            "not configured in this fixture",
+        ))
+    }
+
     async fn active_rate_limits(&self) -> AdminStoreResult<AccountRuntimeSnapshot> {
         Ok(AccountRuntimeSnapshot::default())
     }
@@ -747,6 +768,14 @@ impl ClientKeyStore for UnavailableStore {
 
 #[async_trait]
 impl ObservabilityStore for UnavailableStore {
+    async fn diagnostic_errors(
+        &self,
+        _target: &gateway_admin::model::diagnostics::DiagnosticTarget,
+        _limit: u16,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::observability::OpsError>> {
+        Err(unavailable("diagnostic errors"))
+    }
+
     fn query_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(10)
     }
@@ -1150,3 +1179,31 @@ fn unavailable_system() -> SystemOperationError {
     )
 }
 mod service_contract;
+
+#[async_trait]
+impl gateway_admin::ports::reset_credit_automation::ResetCreditAutomationStore
+    for UnavailableStore
+{
+    async fn reset_credit_automation(
+        &self,
+        _: &str,
+    ) -> AdminStoreResult<
+        Option<gateway_admin::model::reset_credit_automation::ResetCreditAutomation>,
+    > {
+        Ok(None)
+    }
+    async fn due_reset_credit_automations(
+        &self,
+        _: chrono::DateTime<chrono::Utc>,
+        _: u32,
+    ) -> AdminStoreResult<Vec<String>> {
+        Ok(Vec::new())
+    }
+    async fn save_reset_credit_automation(
+        &self,
+        _: &gateway_admin::model::reset_credit_automation::ResetCreditAutomation,
+        _: Option<&gateway_admin::model::MutationContext>,
+    ) -> AdminStoreResult<u64> {
+        Err(unavailable("reset-credit automation"))
+    }
+}

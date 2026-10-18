@@ -252,6 +252,22 @@ async fn bundled_release_update_should_change_core_and_desktop_identity_atomical
     assert_eq!(status.latest, Some(release("26.810.41047", "6570")));
     assert!(status.checked_at.is_some());
     assert!(status.last_error.is_none());
+
+    // 设置页反复读取预设与预览时，只展示当前生效版本及最近检查时间
+    let selection =
+        provider_openai::transport::profile::selection::ClientProfileSelection::default();
+    let configuration = selection.document().unwrap();
+    let first = state.preview_selection(&configuration).unwrap();
+    assert_eq!(
+        first.expose_to_provider()["userAgent"],
+        selection.resolve(&state).unwrap().user_agent()
+    );
+    assert!(first.expose_to_provider()["checkedAt"].is_string());
+    for _ in 0..3 {
+        state.selection_options().unwrap();
+        assert_eq!(state.preview_selection(&configuration).unwrap(), first);
+    }
+    assert_eq!(transport.core_probes(), 1);
 }
 
 #[tokio::test]

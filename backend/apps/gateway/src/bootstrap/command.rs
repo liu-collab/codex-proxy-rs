@@ -67,6 +67,7 @@ async fn execute(
     let Environment {
         host,
         mut store,
+        timezone,
         plugin_cache,
         version,
         plugin_http,
@@ -107,7 +108,7 @@ async fn execute(
     let settings = gateway_admin::initialize_settings(
         store.admin_ports().settings(),
         core.snapshot_control(),
-        providers.admin,
+        providers.admin.clone(),
         std::sync::Arc::new(gateway_host::pricing::ModelsDevPricing),
     );
     let mut services = gateway_admin::public_service::Registry::new(service_middleware(
@@ -115,6 +116,22 @@ async fn execute(
         &plugin_runtime,
     ));
     or_shutdown!(plugin_runtime, services.register_settings(&settings));
+    let accounts = gateway_admin::initialize_accounts(
+        store.admin_ports().accounts(),
+        store.admin_ports().account_runtime(),
+        store.admin_ports().settings(),
+        timezone,
+        providers.admin.clone(),
+        core.snapshot_control(),
+        core.account_probe(),
+    );
+    or_shutdown!(plugin_runtime, services.register_accounts(&accounts));
+    let usage_data = gateway_admin::initialize_usage_data(
+        store.admin_ports().usage_data(),
+        store.admin_ports().settings(),
+        providers.admin,
+    );
+    or_shutdown!(plugin_runtime, services.register_usage_data(&usage_data));
     let services = std::sync::Arc::new(services);
     or_shutdown!(plugin_runtime, plugin_runtime.bind_services(&services));
     let commands = or_shutdown!(plugin_runtime, plugin_runtime.prepare_command_line().await);

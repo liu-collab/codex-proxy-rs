@@ -648,6 +648,32 @@ async fn upstream_message_too_big_returns_actionable_http_error() {
 }
 
 #[tokio::test]
+async fn session_policy_rejection_returns_bad_request_with_the_policy_code() {
+    let error = EngineError::Provider(
+        ProviderError::new(
+            ProviderErrorKind::SessionPolicyRestricted,
+            UpstreamSendState::NotSent,
+        )
+        .with_retry_prohibited()
+        .with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
+            "No account is available for this session after a policy rejection.",
+            Some("cyber_policy".to_owned()),
+            Some("invalid_request_error".to_owned()),
+        )),
+    );
+    let response = engine_error_response(&error);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), 4096).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body["error"]["code"], "cyber_policy");
+    assert_eq!(body["error"]["type"], "invalid_request_error");
+    assert_eq!(
+        body["error"]["message"],
+        "No account is available for this session after a policy rejection."
+    );
+}
+
+#[tokio::test]
 async fn continuation_recovery_should_preserve_the_official_retry_signal() {
     let error = GatewayError::from_provider(
         &ProviderError::new(

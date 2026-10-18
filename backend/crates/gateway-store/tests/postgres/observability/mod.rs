@@ -1,6 +1,5 @@
 //! 观测存储测试入口，以及查询范围、过滤与端口合同测试
 
-mod analytics;
 mod projection;
 
 use std::{
@@ -125,6 +124,7 @@ async fn output_throughput_uses_official_response_duration_without_local_fallbac
         super::drain_analytics(&database.pool).await;
         let records = repository
             .list_usage_records(UsageRecordQuery {
+                status: Default::default(),
                 range,
                 filter: UsageRecordFilter::default(),
                 current_page: 1,
@@ -235,6 +235,7 @@ async fn observability_preserves_and_filters_opaque_response_ids() {
     super::drain_analytics(&database.pool).await;
     let records = repository
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter {
                 response_id: Some(response_id.clone()),
@@ -279,6 +280,7 @@ async fn usage_page_should_always_return_total() {
     super::drain_analytics(&database.pool).await;
     let page = observability_repository(&database.pool)
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter::default(),
             current_page: 1,
@@ -351,6 +353,7 @@ async fn usage_list_and_diagnostics_preserve_account_snapshots_by_id() {
         super::drain_analytics(&database.pool).await;
         let page = store
             .list_usage_records(admin_observability::UsageQuery {
+                status: Default::default(),
                 range,
                 filter: admin_observability::UsageFilter::default(),
                 current_page: 1,
@@ -440,6 +443,7 @@ async fn usage_list_and_diagnostics_preserve_account_snapshots_by_id() {
     super::drain_analytics(&database.pool).await;
     let page = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter {
                 provider_account_ref: Some("acct_team".to_owned()),
@@ -502,6 +506,7 @@ async fn usage_search_should_match_literal_prefix_instead_of_substring() {
     super::drain_analytics(&database.pool).await;
     let page = observability_repository(&database.pool)
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter {
                 search: Some("rimary".to_owned()),
@@ -549,6 +554,7 @@ async fn usage_search_should_ignore_request_ids_and_preserve_exact_filters() {
     ] {
         let page = observability_repository(&database.pool)
             .list_usage_records(UsageRecordQuery {
+                status: Default::default(),
                 range,
                 filter,
                 current_page: 1,
@@ -686,6 +692,7 @@ async fn assert_usage_search_ids(
 ) {
     let page = observability_repository(pool)
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter {
                 search: Some(search.to_owned()),
@@ -754,6 +761,7 @@ async fn usage_and_error_search_match_key_names_instead_of_credentials() {
             super::drain_analytics(&database.pool).await;
             let page = repository
                 .list_usage_records(UsageRecordQuery {
+                    status: Default::default(),
                     range,
                     filter: UsageRecordFilter {
                         search: Some(search.to_owned()),
@@ -813,6 +821,7 @@ async fn usage_and_error_search_match_key_names_instead_of_credentials() {
         super::drain_analytics(&database.pool).await;
         let page = repository
             .list_usage_records(UsageRecordQuery {
+                status: Default::default(),
                 range,
                 filter: UsageRecordFilter::default(),
                 current_page: 1,
@@ -1696,6 +1705,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     super::drain_analytics(&database.pool).await;
     let first_page = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter::default(),
             current_page: 1,
@@ -1715,6 +1725,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     super::drain_analytics(&database.pool).await;
     let deep_page = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter::default(),
             current_page: 129,
@@ -1730,6 +1741,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     super::drain_analytics(&database.pool).await;
     let filtered = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter {
                 client_api_key_ref: Some("key_observe".to_owned()),
@@ -1758,6 +1770,7 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
     super::drain_analytics(&database.pool).await;
     let other_outcome = store
         .list_usage_records(admin_observability::UsageQuery {
+            status: Default::default(),
             range,
             filter: admin_observability::UsageFilter {
                 outcome: Some(
@@ -2182,6 +2195,7 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
     super::drain_analytics(&database.pool).await;
     let usage_page = repository
         .list_usage_records(UsageRecordQuery {
+            status: Default::default(),
             range,
             filter: UsageRecordFilter {
                 provider_account_ref: Some("acct_observe".to_owned()),
@@ -2949,4 +2963,48 @@ fn assert_percentile(actual: Option<f64>, expected: Option<f64>) {
         ),
         values => assert_eq!(values.0, values.1),
     }
+}
+
+#[tokio::test]
+async fn diagnostic_export_reads_exact_targets_and_prioritizes_final_error() {
+    use gateway_admin::model::diagnostics::DiagnosticTarget;
+    let Some(database) = TestDatabase::create("diagnostic_export").await else {
+        return;
+    };
+    seed_observability_facts(&database.pool, Utc::now())
+        .await
+        .unwrap();
+    let store = admin_observability_store(&database.pool);
+    let target = DiagnosticTarget::Request("req_observe_failed".into());
+    let errors = store.diagnostic_errors(&target, 129).await.unwrap();
+    assert_eq!(errors.len(), 2);
+    assert!(
+        errors
+            .iter()
+            .all(|error| error.request_id.as_deref() == Some("req_observe_failed"))
+    );
+    assert_eq!(errors[0].source, "model_request");
+    assert_eq!(
+        store.diagnostic_errors(&target, 1).await.unwrap()[0].source,
+        "model_request"
+    );
+    assert!(
+        store
+            .diagnostic_errors(&DiagnosticTarget::Request("unrelated".into()), 129)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    sqlx::query("update ops_events set model_request_id = null, attempt_index = null where id = 'ops_observe_retry'")
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    let errors = store
+        .diagnostic_errors(&DiagnosticTarget::Operation("ops_observe_retry".into()), 1)
+        .await
+        .unwrap();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].event_id, "ops_observe_retry");
+    assert!(errors[0].request_id.is_none());
+    database.close().await;
 }

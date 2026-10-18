@@ -138,6 +138,6 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
         </ZIconButton>
       </template>
     </ZTable>
-    <ZPagination v-bind="pagination" :disabled="loading" @current-change="page = $event" @size-change="pageSize = $event" />
+    <ZPagination v-if="pagination.total > 0" v-bind="pagination" :disabled="loading" @current-change="page = $event" @size-change="pageSize = $event" />
   </div>
 </template>

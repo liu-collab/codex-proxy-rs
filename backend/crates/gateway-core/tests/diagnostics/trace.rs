@@ -66,6 +66,8 @@ fn provider_failure_trace_keeps_classification_when_diagnostic_is_truncated() {
     assert_eq!(data["diagnostic"]["stage"], "prepare");
     assert_eq!(data["diagnostic"]["code"], "account_proxy_invalid");
     assert_eq!(data["diagnostic"]["truncated"], true);
+    assert_eq!(data["recovery"]["replaySafe"], false);
+    assert_eq!(data["recovery"]["retryProhibited"], false);
     assert!(!snapshot.to_string().contains("PRIVATE_RAW"));
 }
 

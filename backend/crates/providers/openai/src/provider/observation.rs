@@ -819,6 +819,7 @@ fn selection_failure(error: &CredentialSelectionError) -> ProviderError {
         CredentialSelectionError::Coordinator(_) => Some("account_coordinator_unavailable"),
         CredentialSelectionError::CookiePolicy(_) => Some("account_cookie_policy_rejected"),
         CredentialSelectionError::PolicyUnavailable => Some("account_policy_unavailable"),
+        CredentialSelectionError::PolicyFiltered => Some("account_policy_filtered"),
         _ => None,
     };
     // 这些变体只含固定文案，不格式化可能承载外部正文的其他错误
@@ -842,6 +843,16 @@ fn selection_failure(error: &CredentialSelectionError) -> ProviderError {
                 None => error,
             }
         }
+        CredentialSelectionError::SessionPolicyRestricted => provider_error(
+            ProviderErrorKind::SessionPolicyRestricted,
+            UpstreamSendState::NotSent,
+        )
+        .with_retry_prohibited()
+        .with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
+            "No account is available for this session because of an earlier upstream cyber_policy rejection. Do not repeatedly retry this session. This does not indicate an account ban or a service-wide outage.",
+            Some("cyber_policy".to_owned()),
+            Some("invalid_request_error".to_owned()),
+        )),
         CredentialSelectionError::NoEligibleCredential => provider_error(
             ProviderErrorKind::NoEligibleAccount,
             UpstreamSendState::NotSent,
@@ -871,7 +882,7 @@ fn selection_failure(error: &CredentialSelectionError) -> ProviderError {
             ProviderErrorKind::ProviderInfrastructureUnavailable,
             UpstreamSendState::NotSent,
         ),
-        CredentialSelectionError::PolicyRejected => provider_error(
+        CredentialSelectionError::PolicyRejected | CredentialSelectionError::PolicyFiltered => provider_error(
             ProviderErrorKind::RequestPolicyDenied,
             UpstreamSendState::NotSent,
         ),

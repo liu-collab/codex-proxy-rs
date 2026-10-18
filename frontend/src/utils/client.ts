@@ -51,7 +51,7 @@ interface CodexCcSwitchImportInput {
 }
 
 function buildUsageScript(apiKey: string, baseUrl: string) {
-  // CC Switch 的占位符直接替换 JS 源码，不能安全承载含引号的自定义 Key。
+  // 导入端的占位符直接替换 JS 源码，不能安全承载含引号的自定义 Key
   // 按本次导入值生成字符串字面量，并转义左花括号，避免值中的占位符被二次替换。
   const url = JSON.stringify(`${baseUrl}/usage`).replaceAll('{', '\\u007b')
   const authorization = JSON.stringify(`Bearer ${apiKey}`).replaceAll('{', '\\u007b')
@@ -85,7 +85,7 @@ function buildUsageScript(apiKey: string, baseUrl: string) {
 
 export function buildCodexCcSwitchImportDeeplink(input: CodexCcSwitchImportInput): string {
   const baseUrl = input.baseUrl.replace(/\/+$/, '')
-  // CC Switch 4.0.4 会重建 Codex 配置，只传连接信息和用量查询，不传无法保留的完整模板
+  // 导入端会重建 Codex 配置，只传连接信息和用量查询，不传无法保留的完整模板
   const entries: [string, string][] = [
     ['resource', 'provider'],
     ['app', 'codex'],

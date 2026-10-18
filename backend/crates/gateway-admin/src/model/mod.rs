@@ -10,6 +10,7 @@ pub mod auth;
 pub mod backup;
 pub mod client_distribution;
 pub mod client_keys;
+pub mod diagnostics;
 pub mod import_tasks;
 pub mod key_usage;
 pub mod observability;
@@ -21,9 +22,11 @@ pub mod provider_credentials;
 pub mod proxies;
 pub mod quota_forecast;
 pub mod quota_forecast_sampling;
+pub mod reset_credit_automation;
 pub mod retention;
 pub mod settings;
 pub mod system;
+pub mod usage_data;
 
 /// 管理用例对外返回的稳定错误分类
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

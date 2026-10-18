@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 
 /// 插件在注册阶段返回的稳定认证器标识
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct FrontendAuthenticationIdentifier {
     pub identifier: String,
 }
@@ -29,7 +28,7 @@ impl fmt::Debug for FrontendAuthenticationRequest {
 
 /// 插件只声明外部 principal，不得选择宿主 Client Key
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "outcome", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
 pub enum FrontendAuthenticationResult {
     Authenticated { principal: String },
     NotMatched {},

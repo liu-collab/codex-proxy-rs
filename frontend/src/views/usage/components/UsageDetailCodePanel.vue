@@ -19,7 +19,7 @@ const codeBlockClass
   </h3>
   <ZScrollbar :max-height="maxHeight">
     <div class="rounded-cp bg-cp-bg-container px-3 py-2.5">
-      <pre :class="codeBlockClass">{{ content }}</pre>
+      <pre :class="codeBlockClass"><code>{{ content }}</code></pre>
     </div>
   </ZScrollbar>
 </template>

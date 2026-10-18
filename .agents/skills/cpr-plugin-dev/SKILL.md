@@ -14,7 +14,7 @@ description: 开发、排查或打包 Codex Proxy RS 独立网关插件；仅改
 - 确认用途、工程位置、目标宿主版本与平台，沿用已有工程；位置无法推断时只补齐该信息，不把插件源码塞进宿主 workspace
 - 核对运行宿主、[SDK 版本](../../../backend/crates/gateway-plugin/sdk/Cargo.toml)、[宿主支持清单](../../../backend/crates/gateway-plugin/runtime/plugin-host-compatibility.json)及所用 CLI，清单、进程和能力版本分别判断
 - `contributes` 声明处理器，`bindings` 选择挂载与匹配范围；安装成功不等于功能生效。当前清单拒绝 `permissions`，安装者完整信任插件，`trustedProcess` 不提供操作系统沙箱或访问域隔离，见[完整信任](../../../backend/crates/gateway-plugin/sdk/docs/manifest.md#完整信任)
-- 涉及 Codex 时按[参考仓库优先级](../cpr-dev-guide/SKILL.md#参考仓库的优先级)先查官方 Codex 源码，三方仓库仅作参考；宿主能力以目标版本的 SDK 为准
+- 涉及 Codex 兼容性适配时执行[官方行为优先约束](../cpr-dev-guide/SKILL.md#参考仓库的优先级)，不因实现位于插件中扩大请求改写或补偿范围；用户明确要求的业务改写限定在授权范围，宿主能力以目标版本的 SDK 为准
 
 ## 按当前步骤读取
 

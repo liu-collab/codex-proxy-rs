@@ -9,7 +9,6 @@ use crate::call::model::{
 };
 
 #[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Metadata {
     service_tier: Option<String>,
     continuation: Option<UpstreamContinuation>,

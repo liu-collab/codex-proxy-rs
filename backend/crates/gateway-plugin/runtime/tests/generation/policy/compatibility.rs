@@ -124,7 +124,7 @@ async fn middleware_preserves_three_state_fast_and_sources() {
 }
 
 #[tokio::test]
-async fn unsupported_contract_starts_and_runtime_faults_only_stop_the_failed_instance() {
+async fn unsupported_contract_starts_and_response_errors_do_not_stop_the_instance() {
     use gateway_admin::{
         model::plugins::instances::PluginInstanceRuntimeStatus,
         ports::plugins::PluginRuntimeDiagnostics as _,
@@ -201,17 +201,11 @@ async fn unsupported_contract_starts_and_runtime_faults_only_stop_the_failed_ins
             PluginInstanceRuntimeStatus::Running
         );
         let failed = &diagnostics["instance-one"];
-        if failure == "business_error" {
+        if failure != "crash" {
             assert_eq!(failed.status, PluginInstanceRuntimeStatus::Running);
             assert!(generation.is_ready());
         } else {
             assert_eq!(failed.status, PluginInstanceRuntimeStatus::Faulted);
-            let reason = failed.failure.as_ref().unwrap();
-            if failure == "invalid_head" {
-                assert_eq!(reason.code, "invalid_response");
-                assert!(reason.message.contains("请求中间件"));
-                assert!(!reason.message.contains("sensitive"));
-            }
         }
         drop(plan);
         drop(generation);

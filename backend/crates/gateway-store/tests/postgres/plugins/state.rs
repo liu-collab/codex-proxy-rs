@@ -1,6 +1,6 @@
 //! 验证插件私有状态迁移的顺序、配额与代次资源回收
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 use gateway_admin::{
     model::{
@@ -138,6 +138,243 @@ async fn migrate_all(
             return keys;
         }
     }
+}
+
+async fn transition_fixture(
+    store: &PgPluginStore,
+) -> (PluginInstance, String, PluginStateConfiguration) {
+    let installed = install_version(store, 'a', "1.0.0").await;
+    let saved = store
+        .save_instance_with_state(
+            instance(installed.artifact.metadata.sha256),
+            installed.config_revision,
+            PluginStateCommit {
+                configuration: configuration(schema(1, vec![], 10)),
+                transition_id: None,
+            },
+            &context(),
+        )
+        .await
+        .unwrap();
+    let target = install_version(store, 'b', "2.0.0").await;
+    (
+        saved.instance,
+        target.artifact.metadata.sha256,
+        configuration(schema(2, vec![1], 10)),
+    )
+}
+
+#[tokio::test]
+async fn cancelled_migration_releases_ownership_and_can_be_retried() {
+    let Some(database) = TestDatabase::create("plugin_state_cancel").await else {
+        return;
+    };
+    initialize_revision(&database).await;
+    let store = Arc::new(PgPluginStore::new(database.pool.clone()));
+    let (instance, digest, target) = transition_fixture(&store).await;
+    let (started, migration) = tokio::sync::oneshot::channel();
+    let task = {
+        let store = store.clone();
+        let instance = instance.clone();
+        let digest = digest.clone();
+        let target = target.clone();
+        tokio::spawn(async move {
+            let transition = store
+                .begin_transition(&instance.id, instance.revision, &digest, target)
+                .await
+                .unwrap();
+            started.send(transition.id.clone()).unwrap();
+            std::future::pending::<()>().await;
+            drop(transition);
+        })
+    };
+    let abandoned_id = migration.await.unwrap();
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    // 关闭会话由 PostgreSQL 异步处理，重试只等待所有权释放，不调用清理接口补偿
+    let retried = tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            match store
+                .begin_transition(&instance.id, instance.revision, &digest, target.clone())
+                .await
+            {
+                Ok(transition) => break transition,
+                Err(error) if error.kind() == PluginStateStoreErrorKind::Conflict => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("unexpected retry failure: {error:?}"),
+            }
+        }
+    })
+    .await
+    .expect("cancelled migration must release its session lock");
+    assert_ne!(retried.id, abandoned_id);
+    let retained: bool = sqlx::query_scalar(
+        "select exists(select 1 from plugin_state_generations where transition_id=$1)",
+    )
+    .bind(uuid::Uuid::parse_str(&abandoned_id).unwrap())
+    .fetch_one(&database.pool)
+    .await
+    .unwrap();
+    assert!(!retained);
+    let current = store.load_instances().await.unwrap();
+    assert_eq!(current.instances[0].revision, instance.revision);
+    assert!(!current.instances[0].enabled);
+    drop(retried);
+    database.close().await;
+}
+
+#[tokio::test]
+async fn startup_recovery_preserves_live_owners_and_does_not_starve_a_single_connection_pool() {
+    let Some(database) = TestDatabase::create("plugin_state_recovery").await else {
+        return;
+    };
+    initialize_revision(&database).await;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(database.pool.connect_options().as_ref().clone())
+        .await
+        .unwrap();
+    let store = PgPluginStore::new(pool.clone());
+    let (instance, digest, target) = transition_fixture(&store).await;
+    let transition = tokio::time::timeout(
+        Duration::from_secs(3),
+        store.begin_transition(&instance.id, instance.revision, &digest, target.clone()),
+    )
+    .await
+    .expect("migration must not retain a pooled connection")
+    .unwrap();
+    let reopened = PgPluginStore::new(pool.clone());
+    assert_eq!(
+        reopened
+            .recover_abandoned_state_transitions()
+            .await
+            .unwrap(),
+        0
+    );
+    let error = reopened
+        .begin_transition(&instance.id, instance.revision, &digest, target)
+        .await
+        .err()
+        .unwrap();
+    assert_eq!(error.kind(), PluginStateStoreErrorKind::Conflict);
+    let retained = transition.clone();
+    drop(transition);
+    assert_eq!(
+        reopened
+            .recover_abandoned_state_transitions()
+            .await
+            .unwrap(),
+        0
+    );
+    drop(retained);
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while reopened
+            .recover_abandoned_state_transitions()
+            .await
+            .unwrap()
+            == 0
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("startup recovery must discard ownerless staging");
+    let current = reopened.load_instances().await.unwrap();
+    assert_eq!(current.instances[0].revision, instance.revision);
+    assert!(!current.instances[0].enabled);
+    pool.close().await;
+    database.close().await;
+}
+
+#[tokio::test]
+async fn lost_migration_session_cannot_promote_after_another_owner_recovers() {
+    let Some(database) = TestDatabase::create("plugin_state_crash").await else {
+        return;
+    };
+    initialize_revision(&database).await;
+    let store = PgPluginStore::new(database.pool.clone());
+    let (instance, digest, target) = transition_fixture(&store).await;
+    let transition = store
+        .begin_transition(&instance.id, instance.revision, &digest, target.clone())
+        .await
+        .unwrap();
+    migrate_all(&store, &transition.id, "cache", 100).await;
+    // 直接中断持锁数据库会话，覆盖宿主崩溃后的服务端锁释放，无需执行 Rust 清理逻辑
+    let terminated: Vec<bool> = sqlx::query_scalar(
+        "select pg_terminate_backend(pid) from pg_locks where locktype='advisory' and granted \
+         and classid::bigint=((hashtextextended($1,739220)>>32)&4294967295) \
+         and objid::bigint=(hashtextextended($1,739220)&4294967295) and objsubid=1",
+    )
+    .bind(&instance.id)
+    .fetch_all(&database.pool)
+    .await
+    .unwrap();
+    assert_eq!(terminated, vec![true]);
+    let reopened = PgPluginStore::new(database.pool.clone());
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while reopened
+            .recover_abandoned_state_transitions()
+            .await
+            .unwrap()
+            == 0
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("recovery must reclaim the terminated session's staging");
+    assert!(
+        store
+            .migration_batch(&transition.id, "cache", 100)
+            .await
+            .is_err()
+    );
+    let retried = reopened
+        .begin_transition(&instance.id, instance.revision, &digest, target.clone())
+        .await
+        .unwrap();
+    assert_ne!(retried.id, transition.id);
+    let current = store.load_instances().await.unwrap();
+    let mut upgraded = instance.clone();
+    upgraded.artifact_sha256 = digest;
+    // 旧任务即使已完成全部批次，接管后也不能晋升或覆盖新迁移
+    assert_eq!(
+        store
+            .save_instance_with_state(
+                upgraded,
+                current.config_revision,
+                PluginStateCommit {
+                    configuration: target,
+                    transition_id: Some(transition.id.clone()),
+                },
+                &context(),
+            )
+            .await
+            .err()
+            .unwrap()
+            .kind(),
+        AdminStoreErrorKind::Conflict
+    );
+    let unchanged = store.load_instances().await.unwrap();
+    assert_eq!(unchanged.config_revision, current.config_revision);
+    assert_eq!(unchanged.instances[0].revision, instance.revision);
+    assert_eq!(
+        unchanged.instances[0].artifact_sha256,
+        instance.artifact_sha256
+    );
+    assert!(!unchanged.instances[0].enabled);
+    // 迟到的旧迁移清理不能删除新所有者的暂存代次
+    store.abort_transition(&transition.id).await.unwrap();
+    assert!(
+        reopened
+            .migration_batch(&retried.id, "cache", 100)
+            .await
+            .is_ok()
+    );
+    drop(retried);
+    drop(transition);
+    database.close().await;
 }
 
 #[tokio::test]
@@ -790,7 +1027,7 @@ async fn migration_promotes_atomically_and_incomplete_staging_cannot_replace_act
             saved.config_revision,
             PluginStateCommit {
                 configuration: second_state.clone(),
-                transition_id: Some(transition.id),
+                transition_id: Some(transition.id.clone()),
             },
             &context(),
         )
@@ -810,6 +1047,7 @@ async fn migration_promotes_atomically_and_incomplete_staging_cannot_replace_act
         .unwrap();
     assert_eq!(migrated.schema_version, 2);
     assert_eq!(migrated.value, json!({"value": 20}));
+    drop(transition);
 
     let third_state = configuration(schema(3, vec![2], 4));
     let incomplete = store

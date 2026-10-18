@@ -1,6 +1,6 @@
 import type { RequestOptions } from '../request'
 import type { AnalyticsMetadata } from './analytics'
-import request from '../request'
+import request, { requestRaw } from '../request'
 
 export interface UsageTokenDetails {
   inputTokens: number | null
@@ -81,7 +81,10 @@ export interface UsageRecordMetadata {
   [key: string]: unknown
 }
 
+export type UsageRecordStatus = 'success' | 'error' | 'all'
+
 export interface UsageListRecord {
+  logicalOutcome: string
   clientApiKeyName: string | null
   id: string
   provider: string | null
@@ -205,50 +208,7 @@ export interface UsageAttempt {
   completedAt: string | null
 }
 
-export interface RequestTraceEvent {
-  sequence: number
-  lastSequence: number
-  elapsedMs: number
-  lastElapsedMs: number
-  attemptIndex: number
-  exchangeId: number | null
-  stage: string
-  count: number
-  data: Record<string, unknown> & {
-    /** attempt.failed 由 Core 从 ProviderError 生成，分类与诊断只有这一份来源 */
-    kind?: string
-    sendState?: 'not_sent' | 'sent' | 'ambiguous'
-    upstreamStatus?: number | null
-    diagnostic?: {
-      stage: string | null
-      code: string | null
-      message: string
-      truncated?: boolean
-    } | null
-  }
-}
-
-export interface RequestTrace {
-  schemaVersion: number
-  requestId: string
-  startedAtUnixMs: number
-  totalEvents: number
-  droppedEvents: number
-  maxEvents: number
-  captureMode: string
-  events: RequestTraceEvent[]
-}
-
-export interface RelatedRequest {
-  requestId: string
-  relation: 'recovered_by' | 'recovers'
-  outcome: string
-  completedAt: string | null
-}
-
 export type UsageRecordDetail = UsageRecord & {
-  trace: RequestTrace | null
-  relatedRequests: RelatedRequest[]
   attempts: UsageAttempt[]
   /** 尝试列表是否完整；best-effort 下恒为 false。 */
   attemptsComplete: boolean
@@ -256,77 +216,6 @@ export type UsageRecordDetail = UsageRecord & {
 
 export interface UsageRecordsResponse {
   items: UsageListRecord[]
-  currentPage: number
-  pageSize: number
-  total: number
-}
-
-export interface OpsErrorMetadata {
-  source: string
-  component: string
-  attemptId: string | null
-  accountLabel: string | null
-  continuationAffinityHash: string | null
-  continuationPreviousResponseIdHash: string | null
-  continuationUnavailableReason: string | null
-  upstreamConnectionId: string | null
-  upstreamConnectionExitReason: string | null
-  upstreamConnectionAgeMs: number | null
-  upstreamConnectionIdleMs: number | null
-  recoveryRequestId: string | null
-  recoveredAt: string | null
-  recoveryAttemptCount: number
-  recoveryRetryDelayMs: number | null
-  recoveryTotalLatencyMs: number | null
-}
-
-export interface OpsError {
-  clientApiKeyName: string | null
-  id: string
-  requestId: string | null
-  clientApiKeyId: string | null
-  kind: string
-  operation: string
-  protocol: string | null
-  clientTransport: string | null
-  provider: string | null
-  authenticationKind: string | null
-  accountId: string | null
-  accountName: string | null
-  accountEmail: string | null
-  accountPlanType: string | null
-  accountPlanTypeDisplay: string | null
-  route: string
-  model: string | null
-  requestedModel: string | null
-  upstreamModel: string | null
-  serviceTier: string | null
-  clientStatusCode: number | null
-  upstreamStatusCode: number | null
-  transport: string | null
-  attemptIndex: number | null
-  failureClass: string
-  upstreamSendState: string | null
-  providerErrorCode: string | null
-  responseId: string | null
-  upstreamRequestId: string | null
-  latencyMs: number | null
-  clientIp: string | null
-  userAgent: string | null
-  reasoningEffort: string | null
-  reasoningPreset: string | null
-  requestKind: string | null
-  subagentKind: string | null
-  compact: boolean | null
-  message: string
-  errorDetails: string | null
-  metadata: OpsErrorMetadata
-  createdAt: string
-  createdAtDisplay: string
-}
-
-export interface OpsErrorsResponse {
-  items: OpsError[]
   currentPage: number
   pageSize: number
   total: number
@@ -485,8 +374,8 @@ export interface UsageDiagnosticsResponse {
 
 // 请求参数类型：仅定义 API 边界的形状，调用方不依赖显式声明。
 interface UsageRangeQuery {
-  period: 'today' | '7d' | '30d'
-  asOf: number
+  startTime: string
+  endTime: string
   provider?: string
   model?: string
   statusCode?: number
@@ -497,9 +386,7 @@ interface PageQuery {
   pageSize: number
 }
 
-type UsagePageQuery = UsageRangeQuery & PageQuery & { search?: string }
-
-type OpsErrorPageQuery = UsagePageQuery
+type UsagePageQuery = UsageRangeQuery & PageQuery & { search?: string, status?: UsageRecordStatus }
 
 interface UsageDetailQuery {
   id: string
@@ -510,15 +397,6 @@ type UsageDiagnosticsQuery = UsageRangeQuery & { dimension: string }
 export function getUsageRecords(data: UsagePageQuery, options: RequestOptions = {}) {
   return request<UsageRecordsResponse>({
     url: '/api/admin/usage/records',
-    method: 'GET',
-    params: data,
-    ...options,
-  })
-}
-
-export function getOpsErrors(data: OpsErrorPageQuery, options: RequestOptions = {}) {
-  return request<OpsErrorsResponse>({
-    url: '/api/admin/operations/errors',
     method: 'GET',
     params: data,
     ...options,
@@ -558,5 +436,18 @@ export function getUsageRecordInsightsDiagnostics(data: UsageDiagnosticsQuery, o
     method: 'GET',
     params: data,
     ...options,
+  })
+}
+
+export function downloadDiagnostics(data: { requestId: string } | { errorId: string }, options: RequestOptions = {}) {
+  return requestRaw({
+    url: '/api/admin/diagnostics/export',
+    method: 'GET',
+    params: data,
+    timeout: 25_000,
+    ...options,
+  }, {
+    maximumBytes: 16 * 1024 * 1024,
+    accept: response => response.status === 200 && !!response.header('content-type')?.startsWith('application/json'),
   })
 }

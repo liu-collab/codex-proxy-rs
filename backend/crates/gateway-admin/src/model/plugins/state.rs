@@ -1,6 +1,6 @@
 //! 插件私有状态的归属、代次隔离与迁移数据合同
 
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 
@@ -173,6 +173,8 @@ pub struct PluginStateTransition {
     pub instance_id: String,
     pub artifact_sha256: String,
     pub namespaces: Vec<PluginStateMigrationNamespace>,
+    /// Store 持有的迁移所有权；最后一个调用持有者释放后允许回收遗留 staging
+    pub guard: Arc<dyn Send + Sync>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

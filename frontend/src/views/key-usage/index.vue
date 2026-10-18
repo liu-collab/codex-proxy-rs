@@ -44,7 +44,7 @@ async function openAbout() {
 <template>
   <main class="h-dvh overflow-hidden bg-cp-bg-layout text-cp-text">
     <ZScrollbar>
-      <div class="mx-auto flex min-h-full w-full max-w-480 flex-col gap-5 p-4 min-[961px]:p-6">
+      <div class="flex min-h-full w-full flex-col gap-5 p-4 min-[961px]:p-6">
         <div class="flex flex-col gap-2">
           <KeyUsageHeader v-model:period="period" v-model:refresh-interval="refreshInterval" :name="overview?.key.name" :prefix="overview?.key.prefix" :refreshing="refreshing || overviewLoading" :configuring="configuring" @refresh="refresh" @configure="openConfig" @open-about="openAbout" />
           <div class="flex flex-wrap items-center justify-between gap-3">

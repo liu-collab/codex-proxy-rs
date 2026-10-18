@@ -109,7 +109,9 @@ pub type AdminStoreResult<T> = Result<T, AdminStoreError>;
 
 /// 账号目录与公共账号写操作
 #[async_trait]
-pub trait AccountStore: Send + Sync {
+pub trait AccountStore:
+    super::reset_credit_automation::ResetCreditAutomationStore + Send + Sync
+{
     /// 插件回调按授权 Provider/账号在数据库过滤后做稳定 cursor 分页
     async fn list_plugin_accounts(
         &self,
@@ -127,6 +129,8 @@ pub trait AccountStore: Send + Sync {
         account_id: &str,
         runtime: AccountRuntimeSnapshot,
     ) -> AdminStoreResult<Option<AccountPageItem>>;
+
+    async fn account_exists(&self, account_id: &str) -> AdminStoreResult<bool>;
 
     async fn load_account_usage(
         &self,
@@ -241,6 +245,13 @@ pub trait AccountStore: Send + Sync {
 /// 可丢失账号运行态的管理读端口；跨存储编排由 Admin application service 拥有
 #[async_trait]
 pub trait AccountRuntimeStore: Send + Sync {
+    async fn account_concurrency(
+        &self,
+        account_id: &str,
+        offset: u64,
+        limit: u32,
+    ) -> AdminStoreResult<crate::model::accounts::AccountConcurrencyPage>;
+
     async fn active_rate_limits(&self) -> AdminStoreResult<AccountRuntimeSnapshot>;
 
     async fn account_runtime(
@@ -485,6 +496,13 @@ pub trait ObservabilityStore: Send + Sync {
     ) -> AdminStoreResult<DiagnosticsObservation>;
 
     async fn list_ops_errors(&self, query: OpsErrorQuery) -> AdminStoreResult<OpsErrorPage>;
+
+    /// 按精确目标读取受控错误，不受列表时间窗口与当前页面影响
+    async fn diagnostic_errors(
+        &self,
+        target: &crate::model::diagnostics::DiagnosticTarget,
+        limit: u16,
+    ) -> AdminStoreResult<Vec<crate::model::observability::OpsError>>;
 }
 
 /// Runtime settings 与管理员 API Key 写入
@@ -565,9 +583,15 @@ pub struct AdminStorePorts {
     plugins: Arc<dyn super::plugins::PluginStore>,
     plugin_state: Arc<dyn super::plugins::PluginStateStore>,
     plugin_resources: Arc<dyn super::plugin_resources::PluginResourceStore>,
+    usage_data: Arc<dyn super::usage_data::UsageDataStore>,
 }
 
 impl AdminStorePorts {
+    #[must_use]
+    pub fn usage_data(&self) -> Arc<dyn super::usage_data::UsageDataStore> {
+        self.usage_data.clone()
+    }
+
     #[must_use]
     pub fn plugin_resources(&self) -> Arc<dyn super::plugin_resources::PluginResourceStore> {
         self.plugin_resources.clone()
@@ -598,6 +622,7 @@ impl AdminStorePorts {
         plugins: Arc<dyn super::plugins::PluginStore>,
         plugin_state: Arc<dyn super::plugins::PluginStateStore>,
         plugin_resources: Arc<dyn super::plugin_resources::PluginResourceStore>,
+        usage_data: Arc<dyn super::usage_data::UsageDataStore>,
     ) -> Self {
         Self {
             accounts,
@@ -609,6 +634,7 @@ impl AdminStorePorts {
             plugins,
             plugin_state,
             plugin_resources,
+            usage_data,
         }
     }
 

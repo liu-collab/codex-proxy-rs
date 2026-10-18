@@ -153,12 +153,13 @@ impl CodexProvider {
     ) -> Result<ProviderStream, ProviderError> {
         let requested_model = match &request.operation {
             Operation::GenerateImage(image) => endpoint_requested_model(image.payload()),
+            Operation::Search(search) => endpoint_requested_model(search.payload()),
             _ => None,
         };
         let model = if matches!(&request.operation, Operation::GenerateImage(_)) {
             CodexSelectionModel::Image(requested_model.as_ref().map(|model| model.as_str()))
         } else {
-            CodexSelectionModel::NotApplicable
+            CodexSelectionModel::Search(requested_model.as_ref().map(|model| model.as_str()))
         };
         let selection_started_at = Instant::now();
         let lease = self

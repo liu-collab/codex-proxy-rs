@@ -273,6 +273,19 @@ struct FakeRuntimeStore {
 
 #[async_trait]
 impl AccountRuntimeStore for FakeRuntimeStore {
+    async fn account_concurrency(
+        &self,
+        _: &str,
+        _: u64,
+        _: u32,
+    ) -> AdminStoreResult<gateway_admin::model::accounts::AccountConcurrencyPage> {
+        Err(gateway_admin::ports::store::AdminStoreError::new(
+            gateway_admin::ports::store::AdminStoreErrorKind::Unavailable,
+            "account concurrency",
+            "not configured in this fixture",
+        ))
+    }
+
     async fn active_rate_limits(&self) -> AdminStoreResult<AccountRuntimeSnapshot> {
         Ok(AccountRuntimeSnapshot::default())
     }
@@ -317,6 +330,7 @@ impl AccountRuntimeStore for FakeRuntimeStore {
 fn group_record() -> AccountGroupRecord {
     let now = Utc::now();
     AccountGroupRecord {
+        allow_image_generation: true,
         fast_mode: FastMode::Default,
         id: group_id(),
         name: "Primary".to_owned(),
@@ -390,6 +404,7 @@ async fn invalid_group_fields_are_rejected_before_store_mutations() {
         .create(
             &context,
             CreateAccountGroup {
+                allow_image_generation: true,
                 fast_mode: FastMode::Default,
                 name: " invalid".to_owned(),
                 description: None,
@@ -403,6 +418,7 @@ async fn invalid_group_fields_are_rejected_before_store_mutations() {
         .update(
             &context,
             UpdateAccountGroup {
+                allow_image_generation: None,
                 fast_mode: None,
                 id: record.id,
                 name: "valid".to_owned(),

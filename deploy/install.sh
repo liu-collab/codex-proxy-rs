@@ -226,8 +226,8 @@ fix_runtime_permissions() {
   run_root chown -R "$redis_ids" -- "${RUNTIME_DIR}/redis"
   run_root chmod 0750 -- "${RUNTIME_DIR}/redis"
 
-  # 保留安装用户对应用目录的所有权，并向容器实际运行组授予读写权限。
-  run_root chown -R "$(id -u):${app_gid}" -- "${RUNTIME_DIR}/data" "${RUNTIME_DIR}/logs"
+  # 只设置顶层目录，保留应用创建的私有目录与文件的所有权，确保重复安装后仍可读写
+  run_root chown "$(id -u):${app_gid}" -- "${RUNTIME_DIR}/data" "${RUNTIME_DIR}/logs"
   run_root chmod 0770 -- "${RUNTIME_DIR}/data" "${RUNTIME_DIR}/logs"
   run_root chown "$(id -u):${app_gid}" -- "$CONFIG_FILE"
   run_root chmod 0640 -- "$CONFIG_FILE"

@@ -29,6 +29,10 @@ where
             get(usage_insights_diagnostics::<S>),
         )
         .route("/api/admin/operations/errors", get(ops_errors::<S>))
+        .route(
+            "/api/admin/diagnostics/export",
+            get(super::export::download::<S>),
+        )
 }
 
 pub(crate) async fn dashboard_summary<S>(

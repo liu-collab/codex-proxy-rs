@@ -127,6 +127,7 @@ async fn route_with_entry(
         headers,
     };
     let mut context = invocation.session.context(Stage::Routing, timeout);
+    context.request = crate::adapter::request_context(input.extension_scope().request());
     context.request_id = Some(input.request_id().as_str().to_owned());
     let _network_scope = invocation
         .callbacks
@@ -148,10 +149,6 @@ async fn route_with_entry(
         )
         .await
         .map_err(|_| ())?;
-    if !reply.payload.is_empty() {
-        invocation.session.invalid_response(Stage::Routing);
-        return Err(());
-    }
     let decision: WireModelRouteDecision = invocation
         .session
         .decode_response(Stage::Routing, reply.result)
@@ -160,18 +157,9 @@ async fn route_with_entry(
         WireModelRouteDecision::Unhandled => Ok(ModelRouteDecision::Unhandled),
         WireModelRouteDecision::Reject => Ok(ModelRouteDecision::Reject),
         WireModelRouteDecision::Route { provider, model } => {
-            if provider.is_none() && model.is_none() {
-                return Err(());
-            }
             let provider = provider
                 .map(|provider| ProviderKind::new(provider).map_err(|_| ()))
                 .transpose()?;
-            if provider
-                .as_ref()
-                .is_some_and(|provider| !input.available_providers().contains(provider))
-            {
-                return Err(());
-            }
             let model = model
                 .map(|model| PublicModelId::new(model).map_err(|_| ()))
                 .transpose()?;
@@ -196,6 +184,7 @@ async fn schedule_with_entry(
             .iter()
             .map(|candidate| WireAccountScheduleCandidate {
                 account_id: candidate.account_id().as_str().to_owned(),
+                available: candidate.available(),
                 weight: candidate.weight(),
                 in_flight: candidate.in_flight(),
                 maximum_concurrency: candidate.maximum_concurrency(),
@@ -208,6 +197,7 @@ async fn schedule_with_entry(
             .collect(),
     };
     let mut context = invocation.session.context(Stage::Scheduling, timeout);
+    context.request = crate::adapter::request_context(input.extension_scope().request());
     context.request_id = Some(input.request_id().as_str().to_owned());
     context.attempt_id = Some(format!(
         "{}:{}",
@@ -234,10 +224,6 @@ async fn schedule_with_entry(
         )
         .await
         .map_err(|_| ())?;
-    if !reply.payload.is_empty() {
-        invocation.session.invalid_response(Stage::Scheduling);
-        return Err(());
-    }
     let decision: WireAccountScheduleDecision = invocation
         .session
         .decode_response(Stage::Scheduling, reply.result)
@@ -245,14 +231,18 @@ async fn schedule_with_entry(
     match decision {
         WireAccountScheduleDecision::Delegate => Ok(AccountScheduleDecision::Delegate),
         WireAccountScheduleDecision::Reject => Ok(AccountScheduleDecision::Reject),
+        WireAccountScheduleDecision::DelegateFiltered {
+            exclude_account_ids,
+        } => {
+            let excluded = exclude_account_ids
+                .into_iter()
+                .map(ProviderAccountId::new)
+                .collect::<Result<_, _>>()
+                .map_err(|_| ())?;
+            Ok(AccountScheduleDecision::DelegateFiltered(excluded))
+        }
         WireAccountScheduleDecision::Pick { account_id } => {
             let account_id = ProviderAccountId::new(account_id).map_err(|_| ())?;
-            if !candidates
-                .iter()
-                .any(|candidate| candidate.account_id() == &account_id)
-            {
-                return Err(());
-            }
             Ok(AccountScheduleDecision::Pick(account_id))
         }
     }
@@ -374,12 +364,7 @@ fn project_headers(
         let pair = entry.as_array().filter(|pair| pair.len() == 2).ok_or(())?;
         let name = normalized_header_name(pair[0].as_str().ok_or(())?)?;
         let value_base64 = pair[1].as_str().ok_or(())?;
-        if value_base64.len() > MAX_HEADER_VALUE_BYTES
-            || value_base64.len() % 4 != 0
-            || !value_base64
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
-        {
+        if value_base64.len() > MAX_HEADER_VALUE_BYTES {
             return Err(());
         }
         total_bytes = total_bytes
@@ -399,12 +384,7 @@ fn project_headers(
 
 fn normalized_header_name(name: &str) -> Result<String, ()> {
     let name = name.to_ascii_lowercase();
-    if name.is_empty()
-        || name.len() > MAX_HEADER_NAME_BYTES
-        || !name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&byte))
-    {
+    if name.len() > MAX_HEADER_NAME_BYTES {
         return Err(());
     }
     Ok(name)

@@ -503,8 +503,38 @@ async fn adapter_does_not_publish_completed_when_rpc_fails_after_terminal_frame(
 }
 
 #[tokio::test]
-async fn adapter_registration_rejects_target_escape_and_custom_providers() {
-    for invalid in [
+async fn overlapping_adapter_declarations_keep_first_match_without_blocking_preparation() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/adapter/responses"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut config = configuration(&server.uri(), false);
+    let mut duplicate = config["upstream_registration"]["adapters"][0].clone();
+    duplicate["base_url"] = json!("https://unused.invalid/adapter/");
+    config["upstream_registration"]["adapters"]
+        .as_array_mut()
+        .unwrap()
+        .push(duplicate);
+    let (cache, _, runtime) = setup(config).await;
+    let generation = ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(1).unwrap())
+        .await
+        .unwrap();
+    let mut stream = execute(&runtime, &generation, Account::new(), "key-one", None);
+    while let Some(event) = stream.next().await {
+        event.unwrap();
+    }
+    drop(stream);
+    drop(generation);
+    runtime.shutdown().await;
+    super::wait_until_empty(cache.path()).await;
+}
+
+#[tokio::test]
+async fn adapter_registration_preserves_plugin_targets_with_typed_provider_decoding() {
+    for target in [
         "../responses",
         "https://elsewhere.invalid/responses",
         "responses?other=1",
@@ -512,13 +542,13 @@ async fn adapter_registration_rejects_target_escape_and_custom_providers() {
         "/responses",
     ] {
         let mut config = configuration("https://example.invalid", false);
-        config["upstream_registration"]["adapters"][0]["paths"][0]["path"] = json!(invalid);
+        config["upstream_registration"]["adapters"][0]["paths"][0]["path"] = json!(target);
         let (_, store, runtime) = setup(config).await;
         let snapshot = store.snapshot.lock().unwrap().clone();
         assert!(
             gateway_admin::ports::plugins::PluginPreparation::prepare(&runtime, snapshot)
                 .await
-                .is_err()
+                .is_ok()
         );
         runtime.shutdown().await;
     }
@@ -1006,7 +1036,7 @@ async fn upstream_adapter_can_dispatch_http_after_its_instance_entered_the_scope
 }
 
 #[tokio::test]
-async fn malformed_adapter_events_stop_only_the_plugin_session() {
+async fn malformed_adapter_events_fail_only_the_current_stream() {
     use gateway_admin::ports::plugins::PluginRuntimeDiagnostics as _;
     use std::error::Error as _;
     for (fact, has_sequence_error) in [
@@ -1043,7 +1073,7 @@ async fn malformed_adapter_events_stop_only_the_plugin_session() {
             );
         }
         assert_eq!(error.diagnostic().unwrap().code(), Some("invalid_event"));
-        assert!(!generation.is_ready());
+        assert!(generation.is_ready());
         assert!(generation.can_serve());
         let snapshot = store.snapshot.lock().unwrap().clone();
         assert!(snapshot.instances[0].enabled);
@@ -1051,10 +1081,7 @@ async fn malformed_adapter_events_stop_only_the_plugin_session() {
             .runtime_diagnostics(&snapshot, Some(1), Some(&generation))
             .await
             .unwrap();
-        assert_eq!(
-            diagnostics["instance-one"].failure.as_ref().unwrap().code,
-            "invalid_response"
-        );
+        assert!(diagnostics["instance-one"].failure.is_none());
         drop(stream);
         drop(generation);
         runtime.shutdown().await;

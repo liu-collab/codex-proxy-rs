@@ -234,7 +234,7 @@ export function usageLatencyDetails(record: UsageLatencyRecord) {
 function latencySeverity(ms: number | null, thresholds: readonly [number, number, number]): 'good' | 'warn' | 'slow' | 'critical' | null {
   if (ms === null)
     return null
-  // 沿用 sub2api 的固定分档，边界值进入下一档，不改变请求状态
+  // 耗时按固定阈值分档，边界值进入下一档，不改变请求状态
   if (ms >= thresholds[2])
     return 'critical'
   if (ms >= thresholds[1])

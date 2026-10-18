@@ -132,6 +132,15 @@ impl TraceContext {
         }
         let data = json!({
             "kind": error.kind().as_str(), "sendState": error.send_state().as_str(),
+            "recovery": {
+                "replaySafe": error.replay_is_safe(),
+                "retryProhibited": error.retry_is_prohibited(),
+                "sameAccountCredentialRetry": error.retries_same_account(),
+                "intent": error.pre_delivery_retry().map(|intent| format!("{intent:?}")),
+                "continuationFailure": error.continuation_failure().map(|failure| format!("{failure:?}")),
+                "continuationDisposition": error.continuation_recovery_disposition().map(|disposition| format!("{disposition:?}")),
+                "retryAfterMs": error.retry_after().map(|delay| delay.as_millis()),
+            },
             "diagnostic": error.diagnostic().map(|diagnostic| json!({
                 "stage": diagnostic.stage(), "code": diagnostic.code(), "message": diagnostic.as_str(),
             })),
@@ -291,6 +300,27 @@ impl TraceContext {
                 }
                 summary["upstreamStatus"] =
                     json!(data.get("upstreamStatus").and_then(Value::as_u64));
+                if let Some(recovery) = data.get("recovery") {
+                    let mut kept = json!({});
+                    for key in [
+                        "replaySafe",
+                        "retryProhibited",
+                        "sameAccountCredentialRetry",
+                    ] {
+                        kept[key] = json!(recovery.get(key).and_then(Value::as_bool));
+                    }
+                    for key in ["intent", "continuationFailure", "continuationDisposition"] {
+                        kept[key] = json!(
+                            recovery
+                                .get(key)
+                                .and_then(Value::as_str)
+                                .map(|value| bounded(value, 256))
+                        );
+                    }
+                    kept["retryAfterMs"] =
+                        json!(recovery.get("retryAfterMs").and_then(Value::as_u64));
+                    summary["recovery"] = kept;
+                }
                 if let Some(diagnostic) = data.get("diagnostic").and_then(Value::as_object) {
                     let mut kept = json!({});
                     for (key, limit) in [("stage", 96), ("code", 96), ("message", 256)] {
@@ -359,6 +389,7 @@ impl TraceContext {
                             | "account.selected"
                             | "attempt.failed"
                             | "retry.decided"
+                            | "retry.policy"
                             | "upstream.close"
                             | "upstream.read.failed"
                             | "capture.gap"

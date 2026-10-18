@@ -476,18 +476,13 @@ async fn untouched_middleware_response_transfers_opaque_body_without_reading_it(
 }
 
 #[tokio::test]
-async fn oversized_handler_faults_are_replaced_without_closing_the_session() {
+async fn large_handler_results_succeed_and_oversized_faults_keep_the_session_available() {
     let (mut host, task) = start_session(TestHandler::default()).await;
-    send_call(&mut host, 1, "oversized_result", json!({}), Vec::new()).await;
+    send_call(&mut host, 1, "large_result", json!({}), Vec::new()).await;
     assert!(matches!(
         receive(&mut host).await.message,
-        Message::Error {
-            id: 1,
-            error: PluginFault {
-                code: ErrorCode::InvalidInput,
-                ..
-            },
-        }
+        Message::Result { id: 1, result }
+            if result == json!("x".repeat(MAXIMUM_STREAM_CHUNK_BYTES))
     ));
 
     send_call(&mut host, 3, "oversized_fault", json!({}), Vec::new()).await;

@@ -294,6 +294,20 @@ where
                 "admissionMs": request.admission_decision_ms,
                 "continuation": format!("{continuation_attempt:?}"),
                 "candidateCount": plan.candidates().len(),
+                "accountPolicy": {
+                    "strategy": plan.account_selection_policy().strategy().as_str(),
+                    "affinity": plan.account_selection_policy().openai_account_affinity().as_str(),
+                    "maxAccountRotations": plan.account_selection_policy().max_account_rotations(),
+                    "maxRoutingAttempts": plan.max_attempts().get(),
+                    "maxConcurrentPerAccount": plan.account_selection_policy().max_concurrent_per_account().get(),
+                    "queueMaxWaiting": plan.account_selection_policy().queue_policy().max_waiting,
+                    "queueTimeoutMs": plan.account_selection_policy().queue_policy().timeout.as_millis(),
+                    "sessionAffinityTtlMs": plan.account_selection_policy().openai_session_affinity_ttl().as_millis(),
+                    "smartWeights": plan.account_selection_policy().smart_scheduling().weights(),
+                },
+                "requiredAccount": account_selection.required_account().map(|account| account.as_str()),
+                "hasMiddleware": middleware.is_some(),
+                "hasRetryPolicy": request_policy.is_some(),
             }),
         );
         let image_generation_requested = operation.image_generation_requested();
@@ -314,6 +328,17 @@ where
             deadline_timer: deadline.wait().fuse(),
             lease: Some(self.engine.store.maintain_request(&request.id, deadline)),
             requested_model: request.requested_model.clone(),
+            lease_metadata: Arc::new(crate::provider_ports::ProviderLeaseMetadata {
+                request_id: request.id.as_str().to_owned(),
+                client_key_id: request.client_api_key_ref.clone(),
+                client_key_name: request.client_api_key_name_snapshot.clone(),
+                model: request
+                    .requested_model
+                    .as_ref()
+                    .map(|model| model.as_str().to_owned()),
+                client_ip: request.client_ip,
+                started_at: request.started_at,
+            }),
             pending_request: Some(request),
             request_persisted: false,
             response_control,
@@ -455,6 +480,7 @@ pub struct ResponseExecutionSession<S: ?Sized> {
     lease: Option<Box<dyn LeaseGuard>>,
     /// 会话级 deadline 计时器；deadline 固定，帧循环内复用而非逐事件新建
     deadline_timer: Fuse<BoxFuture<'static, ()>>,
+    lease_metadata: Arc<crate::provider_ports::ProviderLeaseMetadata>,
     pending_request: Option<NewModelRequest>,
     requested_model: Option<crate::routing::PublicModelId>,
     request_persisted: bool,
@@ -1089,6 +1115,7 @@ where
         }
         let context = AttemptContext::new(
             RequestAttemptContext::new(self.request_id.clone(), self.client_api_key_ref.clone())
+                .with_lease_metadata(Arc::clone(&self.lease_metadata))
                 .with_response_control(self.response_control.clone())
                 .with_request_profile(self.request_profiles.get(candidate.provider()).cloned())
                 .with_fast_mode(self.plan.fast_mode())
@@ -1200,6 +1227,17 @@ where
                             retry_allowed: continuation_retry || candidate_retry,
                         })
                         .await?;
+                    attempt_trace.record("retry.decided", json!({
+                        "phase": "prepare", "retryable": retryable,
+                        "continuationRetry": continuation_retry, "candidateRetry": candidate_retry,
+                        "retryProhibited": error.retry_is_prohibited(),
+                        "sendState": error.send_state().as_str(),
+                        "requestSendState": self.current_send_state().as_str(),
+                        "continuation": format!("{:?}", self.continuation_attempt),
+                        "accountRotations": self.account_rotations,
+                        "maxAccountRotations": self.plan.account_selection_policy().max_account_rotations(),
+                        "remainingRoutingAttempts": self.plan.max_attempts().get().saturating_sub(self.routing_attempts),
+                    }));
                     if retryable {
                         return Ok(Some(PullOutcome::AttemptDiscarded));
                     }
@@ -1207,6 +1245,7 @@ where
                         error.kind(),
                         ProviderErrorKind::AccountCapacityUnavailable
                             | ProviderErrorKind::NoEligibleAccount
+                            | ProviderErrorKind::SessionPolicyRestricted
                             | ProviderErrorKind::QuotaExhausted
                             | ProviderErrorKind::ConcurrencyQueueFull
                             | ProviderErrorKind::ConcurrencyQueueTimeout
@@ -1230,6 +1269,7 @@ where
                         error.kind(),
                         ProviderErrorKind::AccountCapacityUnavailable
                             | ProviderErrorKind::NoEligibleAccount
+                            | ProviderErrorKind::SessionPolicyRestricted
                             | ProviderErrorKind::QuotaExhausted
                             | ProviderErrorKind::ProviderInfrastructureUnavailable
                             | ProviderErrorKind::ConcurrencyQueueFull
@@ -1706,6 +1746,7 @@ where
         };
 
         self.trace.attempt(current.index.get()).record("retry.decided", json!({
+            "phase": "execute",
             "retryable": retryable, "continuationRetry": continuation_retry,
             "sameAccountRetry": same_account_retry, "accountRotationRetry": account_rotation_retry,
             "ordinaryRetry": ordinary_retry, "transportRecovery": transport_recovery.is_some(),
@@ -1719,6 +1760,17 @@ where
             "delayMs": transient_retry.or(transport_recovery.map(|(_, delay)| delay)).map(duration_ms),
             "downstreamCommitted": self.response_commit.committed_at().is_some(),
             "replayBarrierReached": self.replay_barrier_reached,
+            "deliveryPending": self.delivery_pending,
+            "providerProvedReplaySafe": provider_proved_replay_safe,
+            "retryProhibited": error.retry_is_prohibited(),
+            "requiredAccount": self.account_selection.required_account().map(|account| account.as_str()),
+            "continuation": format!("{:?}", self.continuation_attempt),
+            "connectionBudgetExhausted": self.connection_budget.exhausted(),
+            "remainingRoutingAttempts": self.plan.max_attempts().get().saturating_sub(self.routing_attempts),
+            "maxAccountRotations": self.plan.account_selection_policy().max_account_rotations(),
+            "transientRetriesUsed": self.transient_retry_counts.get(current.metadata.provider_account_id()).copied().unwrap_or_default(),
+            "credentialRecoveryAttempted": self.credential_recovery_attempted_accounts.contains(current.metadata.provider_account_id()),
+            "hasRetryPolicy": self.request_policy.is_some(),
             "sendState": format!("{attempt_send_state:?}"),
         }));
         if retryable {
@@ -1818,6 +1870,7 @@ where
             && !self.cancellation.is_cancelled()
             && !self.execution_effect_observed();
         let allowed = facts.retry_allowed;
+        let attempt_index = facts.attempt_index;
         let decision = {
             let cancellation = self.cancellation.clone();
             let cancelled = cancellation.cancelled().fuse();
@@ -1830,6 +1883,16 @@ where
                 decision = decision => Ok(decision),
             }
         }?;
+        self.trace.attempt(attempt_index.get()).record(
+            "retry.policy",
+            json!({
+                "hostAllowed": allowed,
+                "policyStopped": decision == super::policy::RetryDecision::Stop,
+                "executionEffectObserved": self.execution_effect_observed(),
+                "cancelled": self.cancellation.is_cancelled(),
+                "deadlineElapsed": self.deadline.is_elapsed(),
+            }),
+        );
         // 策略只收窄宿主已允许的恢复，返回后仍复核期限和外部副作用
         Ok(allowed
             && decision != super::policy::RetryDecision::Stop

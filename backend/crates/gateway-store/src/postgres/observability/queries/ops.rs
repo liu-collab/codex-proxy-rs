@@ -104,6 +104,45 @@ pub(crate) async fn list_ops_errors(
     })
 }
 
+/// 精确故障导出复用错误投影，不经过列表时间窗口或聚合缓存
+pub(crate) async fn diagnostic_errors(
+    connection: &mut PgConnection,
+    target: &gateway_admin::model::diagnostics::DiagnosticTarget,
+    limit: u16,
+) -> StoreResult<Vec<OpsErrorRecord>> {
+    use gateway_admin::model::diagnostics::DiagnosticTarget;
+    require_nonempty("diagnostic target", "id", target.id())?;
+    validate_text(target.id(), MAX_FILTER_BYTES, "diagnostic target ID")?;
+    let mut statement = QueryBuilder::<Postgres>::new("select * from (");
+    match target {
+        DiagnosticTarget::Request(id) => {
+            statement
+                .push(REQUEST_ERROR_SELECT)
+                .push(" and mr.id = ")
+                .push_bind(id)
+                .push(" and mr.error_kind is not null union all ")
+                .push(OPS_EVENT_SELECT)
+                .push(" and oe.model_request_id = ")
+                .push_bind(id);
+        }
+        DiagnosticTarget::Operation(id) => {
+            statement
+                .push(OPS_EVENT_SELECT)
+                .push(" and oe.id = ")
+                .push_bind(id);
+        }
+    }
+    statement
+        .push(") errors order by (source = 'model_request') desc, occurred_at desc, stable_sort_id desc limit ")
+        .push_bind(i64::from(limit));
+    let rows = statement
+        .build()
+        .fetch_all(connection)
+        .await
+        .map_err(|source| postgres_unavailable("export diagnostic errors", source))?;
+    rows.iter().map(ops_error_from_row).collect()
+}
+
 async fn list_ops_error_items_at(
     connection: &mut PgConnection,
     query: &OpsErrorQuery,

@@ -96,9 +96,7 @@ impl PluginCommand {
             )
             .await
             .map_err(rpc_failure)?;
-        if reply.result != serde_json::json!({})
-            || reply.payload.len() > limits.maximum_buffered_body_bytes
-        {
+        if reply.payload.len() > limits.maximum_buffered_body_bytes {
             self.session.invalid_response(Stage::CommandLine);
             return Err("结果信封无效");
         }

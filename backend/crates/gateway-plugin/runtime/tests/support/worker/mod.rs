@@ -376,12 +376,33 @@ impl Peer {
         }
     }
 
-    async fn send(&self, message: Message, payload: Vec<u8>) {
+    async fn send(&self, mut message: Message, payload: Vec<u8>) {
+        if self.configuration["extra_result_fields"] == true
+            && let Message::Result {
+                result: Value::Object(result),
+                ..
+            } = &mut message
+        {
+            result.insert("plugin_extra".into(), json!(true));
+        }
         self.output.send(Frame { message, payload }).await.unwrap();
     }
 
     async fn respond(&self, id: u64, method: String, params: Value, payload: Vec<u8>) {
+        if self.configuration["dispatch_on_method"].as_str() == Some(method.as_str()) {
+            self.callback(
+                id,
+                "host.http.dispatch",
+                json!({
+                    "settings":null,"method":"GET","uri":"/derived","version":"HTTP/1.1",
+                    "headers":[],"timeout_ms":1000,"body":{"kind":"empty"}
+                }),
+            )
+            .await
+            .unwrap();
+        }
         if self.configuration["invalid_response_method"].as_str() == Some(method.as_str()) {
+            self.append_observation_marker("invalid_response_marker", &json!({"method":method}));
             self.send(
                 Message::Result {
                     id,
@@ -464,6 +485,51 @@ impl Peer {
 
             "policy.retry_decision" => {
                 self.append_observation_marker("retry_marker", &params);
+                if let Some(url) = self.configuration["retry_http_url"].as_str() {
+                    let callback =
+                        self.callback(id, "host.http.do", json!({"method":"POST", "url":url}));
+                    if let Some(marker) = self.configuration["retry_http_return_marker"].as_str() {
+                        tokio::select! {
+                            _ = callback => {},
+                            () = async {
+                                while !std::path::Path::new(marker).exists() {
+                                    tokio::time::sleep(Duration::from_millis(1)).await;
+                                }
+                            } => {},
+                        }
+                    } else {
+                        let _ = callback.await;
+                    }
+                }
+                if let Some(request) = self
+                    .configuration
+                    .get("retry_service_request")
+                    .filter(|value| !value.is_null())
+                {
+                    let result = match self
+                        .callback(
+                            id,
+                            gateway_plugin_sdk::call::services::CALL_METHOD,
+                            request.clone(),
+                        )
+                        .await
+                    {
+                        Ok((result, _)) => result,
+                        Err(error) => json!({"callback_error":error.code}),
+                    };
+                    self.append_observation_marker("retry_service_marker", &result);
+                }
+                if self.configuration["retry_fault"] == true {
+                    self.send(
+                        Message::Error {
+                            id,
+                            error: PluginFault::new(ErrorCode::Fault, "fixture retry failure"),
+                        },
+                        vec![],
+                    )
+                    .await;
+                    return;
+                }
                 if let Some(delay) = self.configuration["retry_delay_ms"].as_u64() {
                     tokio::time::sleep(Duration::from_millis(delay)).await;
                 }
@@ -1282,6 +1348,11 @@ async fn main() {
         handshake.configuration["execution_events"] = events;
     }
     let startup = record_startup(&handshake.configuration);
+    if let Some(gate) = handshake.configuration["startup_gate"].as_str() {
+        while !std::path::Path::new(gate).exists() {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
     if handshake
         .configuration
         .get("startup")
@@ -1404,6 +1475,12 @@ async fn main() {
                         .lock()
                         .await
                         .insert(id, Arc::new(Credits::default()));
+                }
+                if method == "observer.observe" {
+                    peer.append_observation_marker(
+                        "request_context_marker",
+                        &json!({"request":context.request.as_deref()}),
+                    );
                 }
                 let peer = Arc::clone(&peer);
                 tasks.insert(

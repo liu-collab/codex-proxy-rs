@@ -12,6 +12,8 @@ mod precommit;
 mod privacy;
 mod recovery;
 mod response_interrupt;
+mod search_model_access;
+mod selection_retry;
 mod session_binding;
 mod timing;
 mod upstream_adapter;
@@ -11311,6 +11313,7 @@ async fn connection_limit_rejection_requests_one_provider_retry_and_reconnects_i
                     json!({"type":"codex.response.metadata","model":"gpt-5.4"}),
                     json!({"type":"response.created","response":{"id":"resp_expired","output":[]}}),
                     json!({"type":"response.in_progress","response":{"id":"resp_expired","output":[]}}),
+                    json!({"type":"response.metadata","response_id":"resp_expired","headers":{"x-codex-turn-state":"turn-expired"}}),
                 ] {
                     ws.send(Message::Text(event.to_string().into()))
                         .await

@@ -17,18 +17,25 @@ use gateway_admin::{
     },
 };
 use sqlx::{PgPool, Row as _};
+use std::sync::Arc;
+use tokio::sync::Semaphore;
 
 use super::super::{append_admin_audit_event_in_transaction, bump_config_revision_in_transaction};
 use crate::{admin_revision, admin_store_error, mutation_audit};
 
 pub struct PgPluginStore {
     pub(super) pool: PgPool,
+    pub(super) transition_slot: Arc<Semaphore>,
 }
 
 impl PgPluginStore {
     #[must_use]
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            // 实例发布共享全局 revision；每个宿主只保留一个迁移会话，避免无效竞争占满连接
+            transition_slot: Arc::new(Semaphore::new(1)),
+        }
     }
 }
 

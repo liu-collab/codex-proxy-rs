@@ -1,10 +1,15 @@
 <script setup lang="ts">
+import type { ProxyTestExecutor } from '../composables/useProxyBatchTest'
 import type { OutboundProxyRecord, OutboundProxyTest, RequestLocation } from '@/api'
-import { ZButton, ZDialog, ZForm, ZFormItem, ZIconButton, ZInput, ZSelect, ZSwitch } from '@codex-proxy/ui'
-import { LocateFixed, Save, Wifi } from '@lucide/vue'
-import { computed } from 'vue'
+import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput, ZSegmented, ZSelect, ZSwitch } from '@codex-proxy/ui'
+import { Save, Square, Wifi } from '@lucide/vue'
+import { computed, shallowRef, watch } from 'vue'
 import { PROXY_PROTOCOL_OPTIONS } from '@/api'
+import RequestLocationDetectButton from '@/components/RequestLocationDetectButton.vue'
 import RequestLocationFields from '@/components/RequestLocationFields.vue'
+import { useProxyBatchCreate } from '../composables/useProxyBatchCreate'
+import ProxyBatchCreateFields from './ProxyBatchCreateFields.vue'
+import ProxyBatchResults from './ProxyBatchResults.vue'
 
 const props = defineProps<{
   proxy: OutboundProxyRecord | null
@@ -12,18 +17,42 @@ const props = defineProps<{
   testingConnection: boolean
   detectingLocation: boolean
   testResult: OutboundProxyTest | null
+  testSavedProxies: ProxyTestExecutor
+  reloadAfterCreate: () => Promise<unknown>
 }>()
 const emit = defineEmits<{
   save: []
   test: []
   detectLocation: []
+  afterLeave: []
 }>()
 const open = defineModel<boolean>({ required: true })
 const name = defineModel<string>('name', { required: true })
 const proxyUrl = defineModel<string>('proxyUrl', { required: true })
 const proxyProtocol = defineModel<string>('proxyProtocol', { required: true })
+const maxWebsocketConnections = defineModel<string>('maxWebsocketConnections', { required: true })
 const customLocation = defineModel<boolean>('customLocation', { required: true })
 const location = defineModel<RequestLocation>('location', { required: true })
+const mode = shallowRef('single')
+const testAfterCreate = shallowRef(true)
+const modeOptions = [{ label: '单条', value: 'single' }, { label: '批量', value: 'batch' }]
+const batch = useProxyBatchCreate({ test: (proxy, options, detectLocation) => props.testSavedProxies(proxy, options, detectLocation), reload: () => props.reloadAfterCreate() })
+const {
+  text: batchText,
+  prefix: batchPrefix,
+  protocol: batchProtocol,
+  items: batchItems,
+  busy: batchBusy,
+  stopping: batchStopping,
+  testingRequested,
+  parsed,
+  inputError,
+  created,
+  canEditFailures,
+} = batch
+const { items: batchTestItems, running: batchTesting } = batch.tests
+const addableCount = computed(() => parsed.value.filter(row => !row.error).length)
+const single = computed(() => Boolean(props.proxy) || mode.value === 'single')
 const manualLocationWarning = computed(() => {
   const location = props.testResult?.location
   if (location?.status === 'conflict')
@@ -32,16 +61,30 @@ const manualLocationWarning = computed(() => {
     return location.message
   return ''
 })
-const busy = computed(() => props.saving || props.testingConnection || props.detectingLocation)
+const busy = computed(() => props.saving || props.testingConnection || props.detectingLocation || batchBusy.value)
 const title = computed(() => props.proxy ? '编辑代理' : '新增代理')
 const connectionDescription = computed(() => props.proxy
   ? '留空保留当前连接和认证信息；也可以直接粘贴「主机:端口:用户名:密码」并选择协议'
   : '可直接粘贴代理商的「主机:端口:用户名:密码」，选择协议即可；也可填完整 URL')
+
+watch(open, (value) => {
+  if (value) {
+    mode.value = 'single'
+    testAfterCreate.value = true
+    batch.clear()
+  }
+})
+
+function clearForm() {
+  batch.clear()
+  emit('afterLeave')
+}
 </script>
 
 <template>
-  <ZDialog v-model="open" :title="title" width="36rem" :show-close="!busy" :close-on-click-modal="!busy" :close-on-press-escape="!busy">
-    <ZForm class="grid gap-5">
+  <ZDialog v-model="open" :title="title" :description="proxy ? undefined : '添加代理，为账号配置网络出口'" width="42rem" :show-close="!busy" :close-on-click-modal="!busy" :close-on-press-escape="!busy" @closed="clearForm">
+    <ZSegmented v-if="!proxy" v-model="mode" :options="modeOptions" :disabled="busy" aria-label="代理添加方式" class="mb-5 w-full" />
+    <ZForm v-if="single" class="grid gap-5">
       <ZFormItem label="代理名称" required>
         <ZInput v-model="name" maxlength="100" :disabled="busy" aria-label="代理名称" placeholder="请输入代理名称" />
       </ZFormItem>
@@ -58,22 +101,12 @@ const connectionDescription = computed(() => props.proxy
           placeholder="主机:端口:用户名:密码 或 socks5://用户名:密码@主机:端口"
         />
       </ZFormItem>
+      <ZFormItem label="上游 WS 连接上限" description="使用此代理的账号共享连接额度">
+        <ZInput v-model="maxWebsocketConnections" aria-label="上游 WS 连接上限" placeholder="默认不限制" type="number" min="0" max="4294967295" step="1" :disabled="busy" />
+      </ZFormItem>
       <div class="flex items-center justify-between gap-3">
         <ZSwitch v-model="customLocation" label="自定义时区位置" :disabled="busy" />
-        <ZIconButton
-          size="default"
-          :aria-label="detectingLocation ? '正在解析出口位置' : '解析出口位置并填入表单'"
-          :title="detectingLocation ? '正在解析出口位置' : '解析出口位置并填入表单'"
-          :aria-busy="detectingLocation"
-          :disabled="busy"
-          @click="emit('detectLocation')"
-        >
-          <span class="relative grid size-7 place-items-center text-cp-link">
-            <span v-if="detectingLocation" class="location-ripple" aria-hidden="true" />
-            <span v-if="detectingLocation" class="location-ripple location-ripple-delayed" aria-hidden="true" />
-            <LocateFixed class="relative z-10 size-4" aria-hidden="true" />
-          </span>
-        </ZIconButton>
+        <RequestLocationDetectButton :loading="detectingLocation" :disabled="busy" @detect="emit('detectLocation')" />
       </div>
       <p class="m-0 text-cp-sm text-cp-text-secondary">
         {{ customLocation ? '保存后按手填位置发送请求' : '关闭时跟随出口 IP 的时区，保存时解析一次' }}
@@ -89,63 +122,59 @@ const connectionDescription = computed(() => props.proxy
         将更新 {{ proxy.accountCount }} 个关联账号的出口
       </p>
     </ZForm>
+    <ProxyBatchCreateFields v-else-if="!batchItems.length" v-model="batchText" v-model:prefix="batchPrefix" v-model:protocol="batchProtocol" :rows="parsed" :error="inputError" :disabled="busy" />
+    <div v-else class="grid min-w-0 gap-5">
+      <ProxyBatchResults :items="batchItems" :tests="batchTestItems" />
+      <p v-if="batchItems.some(item => item.status === 'unknown')" class="m-0 text-cp-xs text-cp-warning-text" role="alert">
+        结果待确认的条目可能已保存，请刷新列表核对后再添加
+      </p>
+    </div>
     <template #footer>
-      <ZButton :disabled="busy" @click="open = false">
-        取消
-      </ZButton>
-      <ZButton :loading="testingConnection" :disabled="saving || detectingLocation" @click="emit('test')">
-        <template #icon>
-          <Wifi class="size-4" />
-        </template>
-        测试连接
-      </ZButton>
-      <ZButton type="primary" :loading="saving" :disabled="testingConnection || detectingLocation" @click="emit('save')">
-        <template #icon>
-          <Save class="size-4" />
-        </template>
-        保存代理
-      </ZButton>
+      <template v-if="single">
+        <ZButton :disabled="busy" @click="open = false">
+          取消
+        </ZButton>
+        <ZButton :loading="testingConnection" :disabled="saving || detectingLocation" @click="emit('test')">
+          <template #icon>
+            <Wifi class="size-4" />
+          </template>
+          测试连接
+        </ZButton>
+        <ZButton type="primary" :loading="saving" :disabled="testingConnection || detectingLocation" @click="emit('save')">
+          <template #icon>
+            <Save class="size-4" />
+          </template>
+          保存代理
+        </ZButton>
+      </template>
+      <template v-else-if="batchBusy">
+        <ZButton :disabled="batchStopping" @click="batch.stop()">
+          <Square class="size-3.5" />{{ batchStopping ? '等待当前操作结束' : '停止后续操作' }}
+        </ZButton>
+        <ZButton type="primary" loading>
+          {{ batchTesting ? '正在测试' : '正在添加' }}
+        </ZButton>
+      </template>
+      <template v-else-if="batchItems.length">
+        <ZButton @click="open = false">
+          关闭
+        </ZButton>
+        <ZButton v-if="canEditFailures" @click="batch.editFailures()">
+          修改未添加项
+        </ZButton>
+        <ZButton v-if="created.length && !testingRequested" type="primary" @click="batch.testCreated()">
+          测试已添加的 {{ created.length }} 条
+        </ZButton>
+      </template>
+      <template v-else>
+        <ZCheckbox v-model="testAfterCreate" class="mr-auto self-center" label="添加后测试" />
+        <ZButton @click="open = false">
+          取消
+        </ZButton>
+        <ZButton type="primary" :disabled="!addableCount || Boolean(inputError)" @click="batch.submit(testAfterCreate)">
+          {{ addableCount ? `添加 ${addableCount} 条` : '添加代理' }}
+        </ZButton>
+      </template>
     </template>
   </ZDialog>
 </template>
-
-<style scoped>
-.location-ripple {
-  position: absolute;
-  width: 1.25rem;
-  height: 1.25rem;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  opacity: 0;
-  pointer-events: none;
-  animation: location-ripple 1.8s ease-out infinite forwards;
-}
-
-.location-ripple-delayed {
-  animation-delay: 0.9s;
-}
-
-@keyframes location-ripple {
-  from {
-    opacity: 0.3;
-    transform: scale(0.6);
-  }
-
-  to {
-    opacity: 0;
-    transform: scale(1.55);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .location-ripple {
-    animation: none;
-    opacity: 0.4;
-    transform: scale(1.1);
-  }
-
-  .location-ripple-delayed {
-    display: none;
-  }
-}
-</style>

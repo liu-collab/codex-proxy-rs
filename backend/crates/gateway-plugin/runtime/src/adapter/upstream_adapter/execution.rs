@@ -177,6 +177,8 @@ impl Execution {
             ));
         }
         let mut context = self.adapter.session.context(Stage::Upstream, timeout);
+        context.request =
+            crate::adapter::request_context(invocation.context.extension_scope().request());
         context.request_id = Some(invocation.context.request_id().as_str().to_owned());
         context.attempt_id = Some(format!(
             "{}:{}",
@@ -245,15 +247,14 @@ impl Execution {
             )
             .map_err(|source| invalid().with_source(source))?;
         invocation.context.trace().record("plugin.upstream", serde_json::json!({ "instanceId": self.adapter.instance_id, "adapterId": declaration.id, "generation": context.generation, "transport": declaration.transport.as_str() }));
-        let stream = tokio::select! {
+        let mut stream = tokio::select! {
             biased;
             () = invocation.context.cancellation().cancelled() => return Err(ProviderError::new(ProviderErrorKind::Cancelled, managed.send_state.get())),
             result = self.adapter.session.call_stream(EXECUTE_METHOD, context.clone(), serde_json::json!({}), payload) => result.map_err(|error| rpc_error(error, managed.send_state.get()))?,
         };
-        if stream.initial.result != serde_json::json!({}) || !stream.initial.payload.is_empty() {
-            self.adapter.session.invalid_response(Stage::Upstream);
-            return Err(super::failure::invalid(managed.send_state.get()));
-        }
+        // 后续只消费事件流，初始附带数据不应随长连接保留
+        stream.initial.result = serde_json::Value::Null;
+        stream.initial.payload = Vec::new();
         Ok(ActiveCall {
             context,
             stream,

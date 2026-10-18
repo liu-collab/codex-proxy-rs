@@ -14,7 +14,7 @@ use crate::{
     CallContext, ErrorCode, Frame, FrameError, Handshake, Message, PROTOCOL_VERSION, PluginFault,
 };
 
-use super::super::frame::{read_frame, validate_frame, write_frame};
+use super::super::frame::{EncodedFrame, read_frame, write_frame};
 use super::{
     CallCancellation, CallDeadline, HostClient, PluginCall, PluginHandler, SessionConfig,
     SessionError,
@@ -480,7 +480,7 @@ async fn run_call(
         Err(error) => {
             let _ = send_initial(
                 &output,
-                bounded_fault_frame(id, error),
+                bounded_fault_frame(id, error)?,
                 &context,
                 &lifecycle,
                 &deadline,
@@ -497,16 +497,16 @@ async fn run_call(
         },
         payload: reply.payload,
     };
-    if validate_frame(&initial).is_err() {
-        output.send_control(fault_frame(
-            id,
-            PluginFault::new(
-                ErrorCode::InvalidInput,
-                "plugin response metadata exceeds its limit",
-            ),
-        ))?;
-        return Ok(());
-    }
+    let initial = match EncodedFrame::new(initial) {
+        Ok(initial) => initial,
+        Err(_) => {
+            output.send_control(fault_frame(
+                id,
+                PluginFault::new(ErrorCode::InvalidInput, "plugin response cannot be encoded"),
+            ))?;
+            return Ok(());
+        }
+    };
     let Some(mut stream) = reply.stream.take() else {
         let _ = send_initial(
             &output,
@@ -575,7 +575,7 @@ async fn run_call(
         let payload = match item {
             Ok(payload) => payload,
             Err(fault) => {
-                output.send_control(bounded_end_frame(id, fault))?;
+                output.send_encoded_control(bounded_end_frame(id, fault)?)?;
                 return Ok(());
             }
         };
@@ -627,7 +627,7 @@ async fn run_call(
 
 async fn send_initial(
     output: &Output,
-    frame: Frame,
+    frame: EncodedFrame,
     context: &CallContext,
     lifecycle: &LifecycleHooks,
     deadline: &CallDeadline,
@@ -657,7 +657,10 @@ async fn send_stream_data(
     deadline: &CallDeadline,
     cancellation: &CallCancellation,
 ) -> Result<bool, SessionError> {
-    match output.send_data_until(frame, deadline, cancellation).await {
+    match output
+        .send_data_until(EncodedFrame::new(frame)?, deadline, cancellation)
+        .await
+    {
         Ok(()) => Ok(true),
         Err(SessionError::Cancelled) => Ok(false),
         Err(SessionError::Timeout) => {
@@ -683,29 +686,27 @@ fn end_frame(id: u64, error: Option<PluginFault>) -> Frame {
     Frame::control(Message::End { id, error })
 }
 
-fn bounded_fault_frame(id: u64, error: PluginFault) -> Frame {
-    let frame = fault_frame(id, error);
-    if validate_frame(&frame).is_ok() {
-        frame
-    } else {
-        fault_frame(
-            id,
-            PluginFault::new(ErrorCode::Fault, "plugin error metadata exceeds its limit"),
-        )
-    }
+fn bounded_fault_frame(id: u64, error: PluginFault) -> Result<EncodedFrame, SessionError> {
+    EncodedFrame::new(fault_frame(id, error))
+        .or_else(|_| {
+            EncodedFrame::new(fault_frame(
+                id,
+                PluginFault::new(ErrorCode::Fault, "plugin error metadata exceeds its limit"),
+            ))
+        })
+        .map_err(SessionError::from)
 }
 
-fn bounded_end_frame(id: u64, error: PluginFault) -> Frame {
-    let frame = end_frame(id, Some(error));
-    if validate_frame(&frame).is_ok() {
-        frame
-    } else {
-        end_frame(
-            id,
-            Some(PluginFault::new(
-                ErrorCode::Fault,
-                "plugin stream error metadata exceeds its limit",
-            )),
-        )
-    }
+fn bounded_end_frame(id: u64, error: PluginFault) -> Result<EncodedFrame, SessionError> {
+    EncodedFrame::new(end_frame(id, Some(error)))
+        .or_else(|_| {
+            EncodedFrame::new(end_frame(
+                id,
+                Some(PluginFault::new(
+                    ErrorCode::Fault,
+                    "plugin stream error metadata exceeds its limit",
+                )),
+            ))
+        })
+        .map_err(SessionError::from)
 }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CallContext, Handshake, PluginFault};
 
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 /// 元数据与二进制载荷分开，流分块不经过 JSON/base64
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -21,10 +21,13 @@ pub enum Message {
         id: u64,
         method: String,
         context: CallContext,
+        // 业务 JSON 由帧编码器放入载荷前缀，不占用控制元数据预算
+        #[serde(skip)]
         params: serde_json::Value,
     },
     Result {
         id: u64,
+        #[serde(skip)]
         result: serde_json::Value,
     },
     Error {
@@ -35,6 +38,7 @@ pub enum Message {
         id: u64,
         parent_id: u64,
         method: String,
+        #[serde(skip)]
         params: serde_json::Value,
     },
     Cancel {
@@ -58,6 +62,27 @@ pub enum Message {
     },
     Quiesce,
     Shutdown,
+}
+
+#[cfg(feature = "io")]
+impl Message {
+    pub(crate) const fn data(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::Hello { handshake } => Some(&handshake.configuration),
+            Self::Call { params, .. } | Self::Callback { params, .. } => Some(params),
+            Self::Result { result, .. } => Some(result),
+            _ => None,
+        }
+    }
+
+    pub(crate) const fn data_mut(&mut self) -> Option<&mut serde_json::Value> {
+        match self {
+            Self::Hello { handshake } => Some(&mut handshake.configuration),
+            Self::Call { params, .. } | Self::Callback { params, .. } => Some(params),
+            Self::Result { result, .. } => Some(result),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]

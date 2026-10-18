@@ -25,6 +25,7 @@ gateway-admin = { path = "../gateway-admin" }
 gateway-core = { path = "../gateway-core" }
 gateway-protocol = { path = "../gateway-protocol" }
 headers = "0.4.1"
+regex = "1.13.1"
 secrecy = "0.10"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.150", features = ["arbitrary_precision", "preserve_order"] }

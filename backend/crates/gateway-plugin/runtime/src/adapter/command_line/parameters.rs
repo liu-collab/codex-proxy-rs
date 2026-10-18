@@ -1,6 +1,6 @@
-//! 插件命令行参数定义校验、输入解析与帮助文本生成
+//! 按插件声明解析命令行输入并生成帮助文本
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use gateway_admin::model::AdminError;
 use gateway_plugin_sdk::call::management::{
@@ -8,35 +8,6 @@ use gateway_plugin_sdk::call::management::{
 };
 
 const MAXIMUM_ARGUMENT_BYTES: usize = 64 * 1024;
-
-pub(super) fn validate(command: &CommandDescriptor) -> Result<(), AdminError> {
-    let mut names = BTreeSet::new();
-    if !identifier(&command.name)
-        || matches!(
-            command.name.as_str(),
-            "help" | "version" | "serve" | "plugin"
-        )
-        || !description(&command.description)
-        || command.parameters.len() > 64
-    {
-        return Err(AdminError::invalid("插件命令描述不合法"));
-    }
-    for parameter in &command.parameters {
-        if !identifier(&parameter.name)
-            || matches!(parameter.name.as_str(), "help" | "version")
-            || !description(&parameter.description)
-            || !names.insert(&parameter.name)
-            || parameter.default.as_ref().is_some_and(|value| {
-                !matches_type(value, parameter.value_type)
-                    || parameter.required
-                    || matches!(value, CommandValue::String(value) if value.len() > MAXIMUM_ARGUMENT_BYTES)
-            })
-        {
-            return Err(AdminError::invalid("插件命令参数、默认值或名称冲突"));
-        }
-    }
-    Ok(())
-}
 
 pub(super) fn parse(
     command: &CommandDescriptor,
@@ -148,30 +119,6 @@ fn parse_value(value: &str, kind: CommandParameterType) -> Option<CommandValue> 
         }
         CommandParameterType::Duration => CommandValue::Duration(super::duration::parse(value)?),
     })
-}
-
-fn matches_type(value: &CommandValue, kind: CommandParameterType) -> bool {
-    match (value, kind) {
-        (CommandValue::Bool(_), CommandParameterType::Bool)
-        | (CommandValue::String(_), CommandParameterType::String)
-        | (CommandValue::Int(_), CommandParameterType::Int)
-        | (CommandValue::Int64(_), CommandParameterType::Int64)
-        | (CommandValue::Duration(_), CommandParameterType::Duration) => true,
-        (CommandValue::Float64(value), CommandParameterType::Float64) => value.is_finite(),
-        _ => false,
-    }
-}
-
-fn identifier(value: &str) -> bool {
-    (1..=64).contains(&value.len())
-        && value.as_bytes()[0].is_ascii_lowercase()
-        && value.bytes().all(|byte| {
-            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'-' | b'_')
-        })
-}
-
-fn description(value: &str) -> bool {
-    !value.trim().is_empty() && value.len() <= 1024 && !value.chars().any(char::is_control)
 }
 
 fn invalid_argument() -> AdminError {

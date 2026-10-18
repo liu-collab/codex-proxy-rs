@@ -19,7 +19,7 @@ import {
 import { useChartPalette } from '@/composables/useChartPalette'
 import { formatDuration, formatInteger } from '@/utils/format'
 import { displayValue, fieldLabelClass, fieldValueBaseClass, fieldValueClass, visibleRequestText, visibleResponseText } from '../utils/detail'
-import RequestDiagnosticsPanel from './RequestDiagnosticsPanel.vue'
+import DiagnosticsDownloadButton from './DiagnosticsDownloadButton.vue'
 import UsageDetailCodePanel from './UsageDetailCodePanel.vue'
 import UsageDetailFieldGrid from './UsageDetailFieldGrid.vue'
 import UsageStatusCodeBadge from './UsageStatusCodeBadge.vue'
@@ -510,9 +510,8 @@ const tokenDonutOption = computed<EChartsOption>(() => {
       </section>
     </div>
 
-    <RequestDiagnosticsPanel v-if="record" :request-id="record.requestId" :active="open" />
-
     <template #footer>
+      <DiagnosticsDownloadButton v-if="record" :request-id="record.requestId" :active="open" />
       <ZButton type="primary" @click="open = false">
         关闭
       </ZButton>

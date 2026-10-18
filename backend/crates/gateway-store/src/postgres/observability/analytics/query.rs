@@ -9,12 +9,13 @@ pub(crate) struct AnalyticsSnapshot<'a> {
     approximate: bool,
 }
 
-struct ReadSelection<'a> {
-    distributions: bool,
-    costs: bool,
-    keys: Option<&'a [String]>,
-    counters: Option<&'a [&'a str]>,
-    distribution_names: Option<&'a [&'a str]>,
+#[derive(Clone, Copy)]
+pub(super) struct ReadSelection<'a> {
+    pub(super) distributions: bool,
+    pub(super) costs: bool,
+    pub(super) keys: Option<&'a [String]>,
+    pub(super) counters: Option<&'a [&'a str]>,
+    pub(super) distribution_names: Option<&'a [&'a str]>,
 }
 
 impl<'a> AnalyticsSnapshot<'a> {
@@ -55,7 +56,7 @@ impl<'a> AnalyticsSnapshot<'a> {
         })
     }
 
-    pub async fn require_visible(&mut self, range: Option<ObservabilityRange>) -> StoreResult<()> {
+    pub fn require_visible(&self, range: Option<ObservabilityRange>) -> StoreResult<()> {
         if self.status.building
             && !range.is_some_and(|range| {
                 self.status
@@ -68,34 +69,7 @@ impl<'a> AnalyticsSnapshot<'a> {
                 "request analytics has not backfilled the complete requested range",
             ));
         }
-        // 未知旧桶与已知范围分开查，避免通用计划为 OR 选择扫描全部删除积压
-        // 时间移动和未 ACK 的投影会使队列旧桶偏离当前事实，删除可见性必须同时检查事实所在范围
-        let deletion_pending: bool = if let Some(range) = range {
-            let lower = range
-                .start
-                .checked_sub_signed(TimeDelta::minutes(15))
-                .ok_or_else(|| invalid("analytics deletion boundary overflow"))?;
-            let (intersects, any): (bool, bool) = sqlx::query_as("select exists(select 1 from request_analytics_pending_requests where deletion_pending and previous_bucket is null) or exists(select 1 from request_analytics_pending_requests where deletion_pending and previous_bucket > $1 and previous_bucket < $2), exists(select 1 from request_analytics_pending_requests where deletion_pending)")
-                .bind(lower).bind(range.end).fetch_one(&mut *self.tx).await
-                .map_err(|error|postgres_unavailable("check analytics deletion visibility",error))?;
-            if intersects || !any {
-                intersects
-            } else {
-                // 没有待删版本时不引用 facts，使完整干净桶保持只读汇总的路径
-                sqlx::query_scalar("select exists(select 1 from request_analytics_pending_requests p join request_analytics_facts f on f.id=p.request_id where p.deletion_pending and f.started_at >= $1 and f.started_at < $2)")
-                    .bind(range.start).bind(range.end).fetch_one(&mut *self.tx).await
-                    .map_err(|error|postgres_unavailable("check projected analytics deletion visibility",error))?
-            }
-        } else {
-            sqlx::query_scalar("select exists(select 1 from request_analytics_pending_requests where deletion_pending)")
-                .fetch_one(&mut *self.tx).await
-                .map_err(|error|postgres_unavailable("check analytics deletion visibility",error))?
-        };
-        if deletion_pending {
-            return Err(unavailable(
-                "request analytics is removing deleted source contributions in this range; retry after projection",
-            ));
-        }
+        // 源清理尚未投影时继续读取已发布事实，Worker 在同一事务撤销事实与汇总贡献
         Ok(())
     }
 
@@ -133,8 +107,8 @@ impl<'a> AnalyticsSnapshot<'a> {
     }
 
     pub async fn totals(&mut self) -> StoreResult<DashboardTotals> {
-        self.require_visible(None).await?;
-        let bounds=sqlx::query("select (select started_at from request_analytics_facts order by started_at,id limit 1) as first_started_at,(select started_at from request_analytics_facts order by started_at desc,id desc limit 1) as last_started_at")
+        self.require_visible(None)?;
+        let bounds=sqlx::query("select least((select started_at from request_analytics_facts order by started_at,id limit 1),(select bucket_start from request_analytics_1h where collection='usage_contribution' order by bucket_start limit 1)) as first_started_at,greatest((select started_at from request_analytics_facts order by started_at desc,id desc limit 1),(select bucket_start from request_analytics_1h where collection='usage_contribution' order by bucket_start desc limit 1)) as last_started_at")
             .fetch_one(&mut *self.tx).await.map_err(|error|postgres_unavailable("read retained analytics bounds",error))?;
         let start =
             get::<Option<DateTime<Utc>>>(&bounds, "first_started_at")?.unwrap_or_else(Utc::now);
@@ -390,7 +364,10 @@ impl<'a> AnalyticsSnapshot<'a> {
                 first_token_p95_ms: state
                     .percentile("first_token_ms", 0.95)
                     .map(|value| value.round() as u64),
-                non_completion_count: metrics.cancelled_count + metrics.incomplete_count,
+                non_completion_count: metrics
+                    .cancelled_count
+                    .checked_add(metrics.incomplete_count)
+                    .ok_or_else(|| invalid("non-completion count overflow"))?,
                 retry_count: state.count("retry_count"),
                 retried_request_count: state.count("retried_request_count"),
                 cost_coverage: state.coverage(),
@@ -440,7 +417,7 @@ impl<'a> AnalyticsSnapshot<'a> {
         limit: u16,
     ) -> StoreResult<(u64, Vec<String>)> {
         filter.validate()?;
-        self.require_visible(Some(range)).await?;
+        self.require_visible(Some(range))?;
         let (collection, column, reference) = if dimension == DiagnosticDimension::Account {
             (
                 "account",
@@ -484,8 +461,8 @@ impl<'a> AnalyticsSnapshot<'a> {
         }
         query.push("), contributions as (select key,request_count from edge_facts");
         for (table, column, seconds, buckets) in [
-            ("request_analytics_daily_counts", "dimension", 86400, days),
-            ("request_analytics_hourly", "dimensions[1]", 3600, hours),
+            ("request_analytics_1d_counts", "dimension", 86400, days),
+            ("request_analytics_1h", "dimensions[1]", 3600, hours),
             ("request_analytics_15m", "dimensions[1]", 900, quarters),
         ] {
             if buckets.is_empty() {
@@ -503,6 +480,21 @@ impl<'a> AnalyticsSnapshot<'a> {
                 query.push(format!(" and {column}=")).push_bind(reference);
             }
             query.push(format!(" group by {column}"));
+        }
+        if filter.outcome.is_none() {
+            // 贡献也在数据库内参与 TopN，避免有补录时退回加载全部账号或 Key
+            let index = if dimension == DiagnosticDimension::Account {
+                3
+            } else {
+                4
+            };
+            query.push(format!(" union all select dimensions[{index}] as key,coalesce((counts->>'request_count')::bigint,0) as request_count from request_analytics_1h where collection='usage_contribution' and dimensions[{index}]<>'' and bucket_start >= "))
+                .push_bind(range.start).push(" and bucket_start < ").push_bind(range.end);
+            if let Some(reference) = reference {
+                query
+                    .push(format!(" and dimensions[{index}]="))
+                    .push_bind(reference);
+            }
         }
         query.push("), grouped as (select key,sum(request_count)::bigint as request_count from contributions group by key) select key,request_count,sum(request_count) over()::bigint as total_request_count from grouped order by request_count desc,");
         if dimension == DiagnosticDimension::Account {
@@ -628,6 +620,34 @@ impl<'a> AnalyticsSnapshot<'a> {
         timezone: gateway_core::time::DeploymentTimeZone,
         selection: ReadSelection<'_>,
     ) -> StoreResult<BTreeMap<(DateTime<Utc>, String), MetricState>> {
+        let mut states = self
+            .load_native_selected(range, filter, dimension, granularity, timezone, selection)
+            .await?;
+        self.merge_contributions(
+            super::contributions::ContributionQuery {
+                range,
+                filter,
+                dimension,
+                granularity,
+                timezone,
+                account_models: None,
+                selection,
+            },
+            &mut states,
+        )
+        .await?;
+        Ok(states)
+    }
+
+    async fn load_native_selected(
+        &mut self,
+        range: ObservabilityRange,
+        filter: &UsageRecordFilter,
+        dimension: Option<DiagnosticDimension>,
+        granularity: Option<ObservationGranularity>,
+        timezone: gateway_core::time::DeploymentTimeZone,
+        selection: ReadSelection<'_>,
+    ) -> StoreResult<BTreeMap<(DateTime<Utc>, String), MetricState>> {
         let ReadSelection {
             distributions: read_distributions,
             costs: read_costs,
@@ -636,7 +656,7 @@ impl<'a> AnalyticsSnapshot<'a> {
             distribution_names,
         } = selection;
         filter.validate()?;
-        self.require_visible(Some(range)).await?;
+        self.require_visible(Some(range))?;
         let selected = collection_for(filter, dimension);
         let boundaries = if granularity == Some(ObservationGranularity::Day) {
             Some(calendar_buckets(range, timezone)?)
@@ -664,7 +684,7 @@ impl<'a> AnalyticsSnapshot<'a> {
                 });
             let (hours, quarters) = self.summary_buckets(range, use_hourly).await?;
             for (table, seconds, buckets) in [
-                ("request_analytics_hourly", 3600, hours),
+                ("request_analytics_1h", 3600, hours),
                 ("request_analytics_15m", 900, quarters),
             ] {
                 if buckets.is_empty() {

@@ -359,10 +359,7 @@ impl CoreControlPlaneStartup {
         match self.publisher.refresh().await {
             Ok(_) => {}
             // 故障插件不能封锁管理修复入口；没有可用快照时数据面仍拒绝新请求
-            Err(
-                routing::snapshot::RuntimeSnapshotCompileError::ExtensionsUnavailable
-                | routing::snapshot::RuntimeSnapshotCompileError::InvalidExtensionModels,
-            ) => {}
+            Err(routing::snapshot::RuntimeSnapshotCompileError::ExtensionsUnavailable) => {}
             Err(_) => return Err(CoreError::SnapshotUnavailable),
         }
         Ok(CoreControlPlaneBundle {
@@ -397,6 +394,7 @@ pub struct CoreCommandPlaneStartup {
 
 pub struct CoreCommandPlaneBundle {
     control: CoreControlPlaneBundle,
+    account_probe: Arc<dyn AccountProbe>,
     nested_model_execution: Arc<dyn NestedModelExecutionPort>,
     affinity_lookup: Arc<dyn AffinityLookupPort>,
 }
@@ -426,10 +424,12 @@ impl CoreCommandPlaneStartup {
             )
             .with_snapshot_refresh(Arc::clone(&control.publisher)),
         );
+        let account_probe: Arc<dyn AccountProbe> = service.clone();
         let nested_model_execution: Arc<dyn NestedModelExecutionPort> = service.clone();
         let affinity_lookup: Arc<dyn AffinityLookupPort> = service;
         Ok(CoreCommandPlaneBundle {
             control,
+            account_probe,
             nested_model_execution,
             affinity_lookup,
         })
@@ -437,6 +437,11 @@ impl CoreCommandPlaneStartup {
 }
 
 impl CoreCommandPlaneBundle {
+    #[must_use]
+    pub fn account_probe(&self) -> Arc<dyn AccountProbe> {
+        Arc::clone(&self.account_probe)
+    }
+
     #[must_use]
     pub fn snapshots(&self) -> RuntimeSnapshotHandle {
         self.control.snapshots()

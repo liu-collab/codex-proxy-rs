@@ -45,6 +45,7 @@ pub(super) async fn invoke(
             .map_err(|_| MiddlewareError::Fault)?,
     };
     let mut call = ports.session.context(Stage::WebSocket, timeout);
+    call.request = crate::adapter::request_context(context.extensions.request());
     call.request_id = Some(context.connection_id.clone());
     let _binding = ports
         .callbacks
@@ -56,7 +57,7 @@ pub(super) async fn invoke(
                 cancellation: context.cancellation.clone(),
                 plan,
             }),
-            Default::default(),
+            context.extensions,
             invocation.clone(),
         )
         .map_err(|_| MiddlewareError::Fault)?;
@@ -78,7 +79,6 @@ pub(super) async fn invoke(
             .decode(message, reply.payload)
             .map(Some)
             .map_err(|_| invalid()),
-        None if reply.payload.is_empty() => Ok(None),
-        None => Err(invalid()),
+        None => Ok(None),
     }
 }

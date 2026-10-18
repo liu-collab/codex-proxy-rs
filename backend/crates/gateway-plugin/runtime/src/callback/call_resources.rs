@@ -6,7 +6,7 @@ use gateway_host::outbound::HttpBody;
 use gateway_plugin_sdk::{CallContext, ErrorCode, PluginFault, client::CallDeadline};
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::Duration,
 };
 
@@ -53,6 +53,14 @@ impl CallResources {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.closed = true;
+        // abort 只安排回调 future 稍后析构；返回 Core 前同步封存仍在发送的请求
+        for attempt in state
+            .http_attempts
+            .drain(..)
+            .filter_map(|attempt| attempt.upgrade())
+        {
+            attempt.finish(gateway_core::upstream::UpstreamSendState::Ambiguous);
+        }
         // RPC End 可以先于消费者取完已入队正文到达，这里只撤销新 callback
         // 正文包装器持有 invocation，最后一个 owner 释放时再关闭，保留计量和终态信封
         state.middleware.take();
@@ -64,6 +72,37 @@ impl CallResources {
             stream.close();
         }
         state.model_streams.clear();
+    }
+
+    pub(super) fn start_upstream(
+        &self,
+        purpose: Option<gateway_plugin_sdk::call::upstream_adapter::UpstreamPathPurpose>,
+    ) -> Result<super::scope::HttpAttempt, PluginFault> {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.closed {
+            return Err(denied());
+        }
+        let attempt = self.scope.start_upstream(purpose);
+        state
+            .http_attempts
+            .retain(|attempt| attempt.strong_count() != 0);
+        state.http_attempts.push(attempt.pending());
+        Ok(attempt)
+    }
+
+    pub(super) fn observe_dispatch(&self) -> Result<(), PluginFault> {
+        let state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if state.closed {
+            return Err(denied());
+        }
+        self.scope.observe_dispatch();
+        Ok(())
     }
 
     pub(super) fn request_settings(
@@ -104,6 +143,7 @@ pub(super) struct CallState {
     pub(super) middleware: Option<Arc<dyn MiddlewareCallback>>,
     pub(super) streams: BTreeMap<String, Arc<HttpStream>>,
     pub(super) model_streams: BTreeMap<String, Arc<model::ModelStream>>,
+    http_attempts: Vec<Weak<super::scope::HttpAttemptObservation>>,
 }
 
 pub(super) struct HttpStream {

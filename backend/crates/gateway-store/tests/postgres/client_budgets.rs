@@ -89,7 +89,7 @@ async fn open_budget_windows_only_write_for_new_charges() {
             return new;
         end $$;
         create trigger record_budget_window_write after insert or update
-            on client_key_budget_windows for each row
+            on client_api_key_budget_windows for each row
             execute function record_budget_window_write();",
     )
     .execute(&database.pool)
@@ -144,14 +144,14 @@ async fn indexed_charge_cleanup_keeps_other_keys_and_rolls_back_with_key_deletio
         .await
         .unwrap();
     let remaining: Vec<String> = sqlx::query_scalar(
-        "select client_api_key_id from client_key_charge_events order by client_api_key_id",
+        "select client_api_key_id from client_api_key_charge_events order by client_api_key_id",
     )
     .fetch_all(&mut *tx)
     .await
     .unwrap();
     assert_eq!(remaining, ["retained"]);
     tx.rollback().await.unwrap();
-    let restored: i64 = sqlx::query_scalar("select count(*) from client_key_charge_events")
+    let restored: i64 = sqlx::query_scalar("select count(*) from client_api_key_charge_events")
         .fetch_one(&database.pool)
         .await
         .unwrap();
@@ -168,7 +168,7 @@ async fn indexed_charge_cleanup_keeps_other_keys_and_rolls_back_with_key_deletio
         "1.25"
     );
     let remaining: Vec<String> = sqlx::query_scalar(
-        "select client_api_key_id from client_key_charge_events order by client_api_key_id",
+        "select client_api_key_id from client_api_key_charge_events order by client_api_key_id",
     )
     .fetch_all(&database.pool)
     .await
@@ -189,7 +189,7 @@ async fn unopened_future_budget_windows_do_not_report_usage_or_reset_times() {
         .unwrap();
     // 起止相等表示窗口未开启；未来边界确定性覆盖应用时钟领先数据库的场景
     sqlx::query(
-        "update client_key_budget_windows set
+        "update client_api_key_budget_windows set
         daily_start = now() + interval '1 hour', daily_end = now() + interval '1 hour',
         weekly_start = now() + interval '1 hour', weekly_end = now() + interval '1 hour'
         where client_api_key_id = $1",
@@ -271,7 +271,7 @@ async fn manual_reset_clears_selected_windows_and_preserves_policy_and_history()
         );
     }
     let counts: (i64, i64, i64) = sqlx::query_as(
-        "select (select count(*) from client_key_charge_events),
+        "select (select count(*) from client_api_key_charge_events),
         (select count(*) from admin_audit_events where action = 'reset_budget' and config_revision is null and actor_kind = 'system'),
         (select config_revision from runtime_settings where id = 1)"
     ).fetch_one(&database.pool).await.unwrap();
@@ -294,7 +294,7 @@ async fn manual_reset_restarts_selected_windows_only_after_new_usage() {
         seed(&database, key, "10", "20").await;
         store.admit(key_id(key)).await.unwrap();
         store.settle(charge(key, key, "1")).await.unwrap();
-        sqlx::query("update client_key_budget_windows set weekly_start = weekly_start - interval '3 days', weekly_end = weekly_end - interval '3 days' where client_api_key_id = $1")
+        sqlx::query("update client_api_key_budget_windows set weekly_start = weekly_start - interval '3 days', weekly_end = weekly_end - interval '3 days' where client_api_key_id = $1")
             .bind(key).execute(&database.pool).await.unwrap();
         let before = status(&database, key).await;
         let delayed = charge(key, &format!("{key}-delayed"), "0.5");
@@ -445,7 +445,7 @@ async fn manual_reset_leaves_unused_and_expired_windows_inactive_and_reports_mis
     }
     store.admit(key_id("expired")).await.unwrap();
     store.settle(charge("expired", "old", "2")).await.unwrap();
-    sqlx::query("update client_key_budget_windows set daily_end = now() - interval '1 second', weekly_end = now() - interval '1 second'")
+    sqlx::query("update client_api_key_budget_windows set daily_end = now() - interval '1 second', weekly_end = now() - interval '1 second'")
         .execute(&database.pool).await.unwrap();
     for key in ["unused", "expired"] {
         admin
@@ -464,7 +464,7 @@ async fn manual_reset_leaves_unused_and_expired_windows_inactive_and_reports_mis
         assert!(after.weekly_resets_at.is_none());
         assert_eq!(after.daily_used_usd.canonical(), "0");
     }
-    let windows: i64 = sqlx::query_scalar("select count(*) from client_key_budget_windows")
+    let windows: i64 = sqlx::query_scalar("select count(*) from client_api_key_budget_windows")
         .fetch_one(&database.pool)
         .await
         .unwrap();
@@ -544,12 +544,12 @@ async fn key_usage_profile_reuses_current_budget_without_revealing_or_advancing_
     assert_eq!(current.budget, status(&database, "profile").await);
     assert_eq!(current.budget.daily_used_usd.canonical(), "0.640001");
     assert!(!format!("{current:?}").contains(&format!("sk_{:a<43}", "profile")));
-    sqlx::query("update client_key_budget_windows set daily_end = now() - interval '1 second' where client_api_key_id = 'profile'")
+    sqlx::query("update client_api_key_budget_windows set daily_end = now() - interval '1 second' where client_api_key_id = 'profile'")
         .execute(&database.pool).await.unwrap();
     let after_reset = keys.get_client_key(&id).await.unwrap().unwrap();
     assert_eq!(after_reset.budget.daily_used_usd.canonical(), "0");
     assert_eq!(after_reset.budget.weekly_used_usd.canonical(), "0.640001");
-    let persisted: String = sqlx::query_scalar("select daily_used_usd::text from client_key_budget_windows where client_api_key_id = 'profile'")
+    let persisted: String = sqlx::query_scalar("select daily_used_usd::text from client_api_key_budget_windows where client_api_key_id = 'profile'")
         .fetch_one(&database.pool).await.unwrap();
     assert_eq!(
         persisted
@@ -600,7 +600,7 @@ async fn budgets_settle_exactly_once_and_enforce_each_threshold_across_store_ins
         week_error.client_error_code(),
         Some("key_weekly_budget_exceeded")
     );
-    let event_count: i64 = sqlx::query_scalar("select count(*) from client_key_charge_events")
+    let event_count: i64 = sqlx::query_scalar("select count(*) from client_api_key_charge_events")
         .fetch_one(&database.pool)
         .await
         .unwrap();
@@ -617,13 +617,13 @@ async fn window_rollover_is_shanghai_midnight_and_seven_days_with_late_settlemen
     let store = PgClientBudgetStore::new(database.pool.clone());
     store.admit(key_id("key")).await.unwrap();
     let (day_start, day_end, week_end): (DateTime<Utc>, DateTime<Utc>, DateTime<Utc>) =
-        sqlx::query_as("select daily_start, daily_end, weekly_end from client_key_budget_windows where client_api_key_id = 'key'")
+        sqlx::query_as("select daily_start, daily_end, weekly_end from client_api_key_budget_windows where client_api_key_id = 'key'")
             .fetch_one(&database.pool).await.unwrap();
     assert_eq!(day_start.timestamp().rem_euclid(86400), 16 * 3600);
     assert_eq!((day_end - day_start).num_hours(), 24);
     assert_eq!((week_end - day_start).num_hours(), 168);
     store.settle(charge("key", "first", "1")).await.unwrap();
-    sqlx::query("update client_key_budget_windows set daily_start = daily_start - interval '1 day', daily_end = daily_start")
+    sqlx::query("update client_api_key_budget_windows set daily_start = daily_start - interval '1 day', daily_end = daily_start")
         .execute(&database.pool).await.unwrap();
     store.admit(key_id("key")).await.unwrap();
     assert_eq!(
@@ -635,7 +635,7 @@ async fn window_rollover_is_shanghai_midnight_and_seven_days_with_late_settlemen
         "1"
     );
     store.settle(charge("key", "second", "1")).await.unwrap();
-    sqlx::query("update client_key_budget_windows set daily_end = now() - interval '1 second', weekly_end = now() - interval '1 second'")
+    sqlx::query("update client_api_key_budget_windows set daily_end = now() - interval '1 second', weekly_end = now() - interval '1 second'")
         .execute(&database.pool).await.unwrap();
     let virtual_reset = status(&database, "key").await;
     assert_eq!(virtual_reset.daily_used_usd.canonical(), "0");
@@ -666,7 +666,7 @@ async fn zero_cost_and_interrupted_requests_never_block_limited_keys() {
     store.admit(key_id("key")).await.unwrap();
     let restarted = PgClientBudgetStore::new(database.pool.clone());
     restarted.admit(key_id("key")).await.unwrap();
-    let events: i64 = sqlx::query_scalar("select count(*) from client_key_charge_events")
+    let events: i64 = sqlx::query_scalar("select count(*) from client_api_key_charge_events")
         .fetch_one(&database.pool)
         .await
         .unwrap();
@@ -701,14 +701,14 @@ async fn transient_settlement_failure_rolls_back_and_retries_exact_cost_before_a
             if new.daily_used_usd > 0 then raise exception 'temporary test failure'; end if;
             return new;
         end $$;
-        create trigger reject_budget_update before update on client_key_budget_windows
+        create trigger reject_budget_update before update on client_api_key_budget_windows
         for each row execute function reject_budget_update();",
     )
     .execute(&database.pool)
     .await
     .unwrap();
     assert!(store.settle(charge("key", "retry", "1.25")).await.is_err());
-    let events: i64 = sqlx::query_scalar("select count(*) from client_key_charge_events")
+    let events: i64 = sqlx::query_scalar("select count(*) from client_api_key_charge_events")
         .fetch_one(&database.pool)
         .await
         .unwrap();
@@ -717,7 +717,7 @@ async fn transient_settlement_failure_rolls_back_and_retries_exact_cost_before_a
         status(&database, "key").await.daily_used_usd.canonical(),
         "0"
     );
-    sqlx::query("drop trigger reject_budget_update on client_key_budget_windows")
+    sqlx::query("drop trigger reject_budget_update on client_api_key_budget_windows")
         .execute(&database.pool)
         .await
         .unwrap();
@@ -930,7 +930,7 @@ async fn plugin_resets_share_the_native_ledger_and_each_call_resets_again() {
     assert!(after.weekly_resets_at.is_none());
     let (audits, charges, current_revision): (i64, i64, i64) = sqlx::query_as(
         "select (select count(*) from admin_audit_events where action='reset_budget' and config_revision is null),
-                (select count(*) from client_key_charge_events),
+                (select count(*) from client_api_key_charge_events),
                 (select config_revision from runtime_settings where id=1)"
     ).fetch_one(&database.pool).await.unwrap();
     assert_eq!((audits, charges, current_revision), (2, 2, revision));
@@ -1298,13 +1298,13 @@ async fn timezone_cutover_preserves_open_windows_and_resumes_without_overlap() {
         .await
         .unwrap();
     let before: (DateTime<Utc>, DateTime<Utc>, DateTime<Utc>, DateTime<Utc>) = sqlx::query_as(
-        "select daily_start, daily_end, weekly_start, weekly_end from client_key_budget_windows where client_api_key_id = 'key'"
+        "select daily_start, daily_end, weekly_start, weekly_end from client_api_key_budget_windows where client_api_key_id = 'key'"
     ).fetch_one(&database.pool).await.unwrap();
     let timezone: DeploymentTimeZone = "UTC".parse().unwrap();
     let changed = PgClientBudgetStore::new(database.pool.clone()).with_timezone(timezone);
     changed.admit(key_id("key")).await.unwrap();
     let after: (DateTime<Utc>, DateTime<Utc>, DateTime<Utc>, DateTime<Utc>) = sqlx::query_as(
-        "select daily_start, daily_end, weekly_start, weekly_end from client_key_budget_windows where client_api_key_id = 'key'"
+        "select daily_start, daily_end, weekly_start, weekly_end from client_api_key_budget_windows where client_api_key_id = 'key'"
     ).fetch_one(&database.pool).await.unwrap();
     assert_eq!(before, after);
     assert_eq!(
@@ -1314,11 +1314,11 @@ async fn timezone_cutover_preserves_open_windows_and_resumes_without_overlap() {
     let now = Utc::now();
     let old_end = chrono::DateTime::from_timestamp_micros(now.timestamp_micros()).unwrap()
         - chrono::Duration::seconds(1);
-    sqlx::query("update client_key_budget_windows set daily_start = $1, daily_end = $2, weekly_start = $1, weekly_end = $2")
+    sqlx::query("update client_api_key_budget_windows set daily_start = $1, daily_end = $2, weekly_start = $1, weekly_end = $2")
         .bind(old_end - chrono::Duration::hours(1)).bind(old_end).execute(&database.pool).await.unwrap();
     changed.admit(key_id("key")).await.unwrap();
     let resumed: (DateTime<Utc>, DateTime<Utc>, DateTime<Utc>, DateTime<Utc>) = sqlx::query_as(
-        "select daily_start, daily_end, weekly_start, weekly_end from client_key_budget_windows where client_api_key_id = 'key'"
+        "select daily_start, daily_end, weekly_start, weekly_end from client_api_key_budget_windows where client_api_key_id = 'key'"
     ).fetch_one(&database.pool).await.unwrap();
     assert_eq!(resumed.0, old_end);
     assert_eq!(resumed.2, old_end);

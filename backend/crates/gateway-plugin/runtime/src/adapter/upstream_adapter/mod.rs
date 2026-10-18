@@ -8,7 +8,6 @@ pub(crate) mod target;
 
 use std::{fmt, sync::Arc};
 
-use gateway_admin::model::AdminError;
 use gateway_core::{
     engine::{
         AttemptContext,
@@ -71,22 +70,8 @@ pub(crate) struct PluginUpstreamAdapterPlan {
 }
 
 impl PluginUpstreamAdapterPlan {
-    pub(crate) fn compile(
-        entries: Vec<AdapterEntry>,
-    ) -> Result<Option<Arc<dyn UpstreamAdapterPlan>>, AdminError> {
-        for (index, left) in entries.iter().enumerate() {
-            for right in &entries[index + 1..] {
-                if left.scope.overlaps(&right.scope)
-                    && adapters_overlap(left.adapter.as_deref(), right.adapter.as_deref())
-                {
-                    return Err(AdminError::invalid(
-                        "上游适配器的 Provider 与模型绑定范围重叠",
-                    ));
-                }
-            }
-        }
-        Ok((!entries.is_empty())
-            .then(|| Arc::new(Self { entries }) as Arc<dyn UpstreamAdapterPlan>))
+    pub(crate) fn compile(entries: Vec<AdapterEntry>) -> Option<Arc<dyn UpstreamAdapterPlan>> {
+        (!entries.is_empty()).then(|| Arc::new(Self { entries }) as Arc<dyn UpstreamAdapterPlan>)
     }
 }
 
@@ -137,23 +122,6 @@ impl UpstreamAdapterPlan for PluginUpstreamAdapterPlan {
         }
         Ok(None)
     }
-}
-
-fn adapters_overlap(
-    left: Option<&PluginUpstreamAdapter>,
-    right: Option<&PluginUpstreamAdapter>,
-) -> bool {
-    let (Some(left), Some(right)) = (left, right) else {
-        return true;
-    };
-    left.declaration.provider == right.declaration.provider
-        && (left.declaration.models.is_empty()
-            || right.declaration.models.is_empty()
-            || left
-                .declaration
-                .models
-                .iter()
-                .any(|model| right.declaration.models.contains(model)))
 }
 
 fn unavailable() -> ProviderError {

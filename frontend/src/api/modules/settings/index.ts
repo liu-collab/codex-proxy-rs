@@ -1,4 +1,5 @@
 import type { RequestOptions } from '../../request'
+import type { ProxyLocationDetection } from '../proxies'
 import type { CodexPrivacyPolicy } from './privacy'
 import type { ClientProfileSelection, ProviderRequestProfiles, ProviderRequestProfileUpdates, XaiClientProfileSelection } from './profiles'
 import request from '../../request'
@@ -15,6 +16,14 @@ export interface RequestLocation {
   timezone: string
 }
 
+export function detectRequestLocation() {
+  return request<ProxyLocationDetection>({
+    url: '/api/admin/settings/location/detect',
+    method: 'POST',
+    timeout: 25000,
+  })
+}
+
 export type AccountAffinity = 'relaxed' | 'preferred' | 'strict'
 
 export type RotationStrategy = 'smart' | 'quota_reset_priority' | 'round_robin' | 'sticky'
@@ -26,7 +35,6 @@ export interface SmartSchedulingConfig {
   latencyWeight: number
   resetWeight: number
   queueWeight: number
-  preferHigherWeight: boolean
 }
 
 export interface RuntimeSettings {
@@ -68,6 +76,8 @@ export interface RuntimeSettings {
   accountWarmupEnabled: boolean
   accountWarmupScheduleTime: string
   accountWarmupModel: string | null
+  resetCreditLeadMinutes: number
+  resetCreditMaxWeeklyRemainingPercent: number | null
   updatedAt: string
   updatedAtDisplay: string
 }

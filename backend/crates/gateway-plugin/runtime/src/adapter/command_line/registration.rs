@@ -1,6 +1,6 @@
 //! 校验插件命令行注册声明并准备可执行命令
 
-use super::{PluginCommand, parameters};
+use super::PluginCommand;
 use crate::{RpcSession, callback::PluginCallbacks};
 use gateway_admin::model::{AdminError, plugins::instances::PluginInstance};
 use gateway_plugin_sdk::{Capability, Manifest, Stage, call::management::CommandRegistration};
@@ -29,22 +29,20 @@ pub(crate) async fn prepare(
         )
         .await
         .map_err(|_| AdminError::invalid("插件命令注册失败"))?;
-    if reply.result != serde_json::json!({}) || reply.payload.len() > MAXIMUM_REGISTRATION_BYTES {
+    if reply.payload.len() > MAXIMUM_REGISTRATION_BYTES {
         return Err(AdminError::invalid("插件命令注册信封无效或过大"));
     }
     let registration: CommandRegistration = serde_json::from_slice(&reply.payload)
         .map_err(|_| AdminError::invalid("插件命令注册数据无效"))?;
-    if registration.commands.is_empty() || registration.commands.len() > 32 {
-        return Err(AdminError::invalid("每个插件须注册 1 至 32 个命令"));
+    if registration.commands.len() > 32 {
+        return Err(AdminError::invalid("每个插件最多注册 32 个命令"));
     }
-    let mut names = std::collections::BTreeSet::new();
     registration
         .commands
         .into_iter()
         .map(|descriptor| {
-            parameters::validate(&descriptor)?;
-            if !names.insert(descriptor.name.clone()) {
-                return Err(AdminError::invalid("插件命令名重复"));
+            if descriptor.parameters.len() > 64 {
+                return Err(AdminError::invalid("插件命令参数超过容量限制"));
             }
             Ok(Arc::new(PluginCommand {
                 instance_id: instance.id.clone(),

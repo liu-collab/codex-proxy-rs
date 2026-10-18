@@ -32,7 +32,9 @@
 
 `capabilities` 使用扩展能力标识；Provider、模型和账号 ID 不属于这个集合
 
-清单、进程协议和宿主兼容声明的格式版本均为 `2`；清单不接受 `permissions` 字段
+清单与宿主兼容声明的格式版本为 `2`，进程协议版本为 `4`；清单不接受 `permissions` 字段
+
+RPC v4 的帧布局、编码与会话生命周期见[通信边界](../README.md#通信边界)。插件使用 SDK 构建，并由 CLI 生成包含协议版本的安装包
 
 安装包清单校验与已安装元数据读取是两个边界：清单拒绝未知字段，并检查必需字段、类型和版本；
 数据库元数据的读取规则见[制品与发布](../../../../../docs/architecture.md#制品配置与发布)，不改变清单或 RPC 合同。
@@ -42,23 +44,20 @@
 
 当前支持范围由[宿主兼容声明](../../runtime/plugin-host-compatibility.json)给出，弃用状态、剩余兼容窗口及作者说明以[弃用清单](../../runtime/plugin-api-deprecations.json)为准，管理端和加载日志展示同一提示
 
-执行设置与来源使用 `fast_mode` 的 `default`、`enabled`、`disabled` 三态，宿主不转换旧 `disable_fast` 字段。
-使用 `middleware v3` 或 `upstream_adapter v1` 的插件需按当前 SDK 更新字段处理、升级能力版本并重新构建，仅修改版本声明不能替代迁移
-
 兼容窗口自替代合同首次正式发布起至少覆盖 7 个后续正式版本；主版本、次版本和补丁版本各计一次，预发行与同标签重试不计。
 窗口内提供适配，窗口外不保证兼容；是否使用过特定字段不改变判断，版本号差值也不能代替清单中的计数
 
 ## 扩展项简写
 
-作者声明可以省略 `id` 和固定阶段；普通能力的版本默认为 `1`，`middleware` 显式声明版本 `4`，`upstream_adapter` 显式声明版本 `2`：
+作者声明可以省略 `id` 和固定阶段。版本字段省略时为 `1`，适用于 `model_catalog`、`command_line` 和 `maintenance`；其余能力显式声明当前版本：`middleware` 为 `5`，`scheduler` 和 `upstream_adapter` 为 `3`，认证、路由、重试、观察和管理能力为 `2`：
 
 ```json
 {
   "contributes": {
-    "management": {},
+    "management": { "version": 2 },
     "command_line": {},
     "middleware": {
-      "version": 4,
+      "version": 5,
       "stages": ["request"],
       "inputFormats": ["openai"],
       "outputFormats": ["openai"]

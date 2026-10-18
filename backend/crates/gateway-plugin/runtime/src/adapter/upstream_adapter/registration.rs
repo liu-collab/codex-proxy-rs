@@ -1,6 +1,6 @@
 //! 校验并准备插件上游适配声明与能力绑定
 
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use gateway_admin::model::{
     AdminError,
@@ -62,51 +62,20 @@ pub(crate) async fn prepare(
         )
         .await
         .map_err(|_| AdminError::invalid("上游适配器注册失败"))?;
-    if reply.result != serde_json::json!({}) || reply.payload.len() > 64 * 1024 {
+    if reply.payload.len() > 64 * 1024 {
         return Err(AdminError::invalid("上游适配器注册信封无效或过大"));
     }
     let registration: UpstreamAdapterRegistration = serde_json::from_slice(&reply.payload)
         .map_err(|_| AdminError::invalid("上游适配器声明无效"))?;
-    if registration.adapters.is_empty() || registration.adapters.len() > 16 {
-        return Err(AdminError::invalid("单个插件须声明 1 至 16 个上游适配器"));
+    if registration.adapters.len() > 16 {
+        return Err(AdminError::invalid("单个插件最多声明 16 个上游适配器"));
     }
-    let mut ids = BTreeSet::new();
     let binding = instance
         .bindings
         .iter()
         .find(|binding| binding.contribution == contribution.id);
     let mut entries = Vec::new();
     for declaration in registration.adapters {
-        if declaration.id.is_empty()
-            || declaration.id.len() > 64
-            || !declaration
-                .id
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
-            || !ids.insert(declaration.id.clone())
-            || declaration.authentication_kinds.is_empty()
-            || declaration.authentication_kinds.len() > 8
-            || declaration.authentication_kinds.iter().any(|kind| {
-                kind.is_empty()
-                    || kind.len() > 64
-                    || !kind
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-            })
-            || !contribution.input_formats.contains(&declaration.protocol)
-            || !contribution.output_formats.contains(&declaration.protocol)
-            || declaration.models.len() > 256
-        {
-            return Err(AdminError::invalid("上游适配器身份、认证或协议范围无效"));
-        }
-        let mut models = BTreeSet::new();
-        for model in &declaration.models {
-            gateway_core::routing::PublicModelId::new(model.clone())
-                .map_err(|_| AdminError::invalid("上游适配器模型无效"))?;
-            if !models.insert(model) {
-                return Err(AdminError::invalid("上游适配器模型重复"));
-            }
-        }
         let target = Arc::new(UpstreamTarget::compile(&declaration)?);
         if let Some(binding) = binding {
             entries.push(AdapterEntry {

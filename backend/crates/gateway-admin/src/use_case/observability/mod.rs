@@ -38,6 +38,7 @@ const HEALTH_TIMELINE_SLOT_MINUTES: i64 = 15;
 const HEALTH_TIMELINE_MIN_SAMPLE_SIZE: u64 = 10;
 const HEALTH_TIMELINE_UNAVAILABLE_FAILURE_THRESHOLD: u64 = 3;
 const HEALTH_TIMELINE_STABLE_RELIABILITY: f64 = 95.0;
+mod export;
 mod store_cache;
 pub(crate) use store_cache::CachedObservabilityStore;
 
@@ -70,6 +71,10 @@ pub trait ObservabilityService: Send + Sync {
         dimension: DiagnosticDimension,
     ) -> Result<DiagnosticsResult, AdminError>;
     async fn ops_errors(&self, query: OpsErrorQuery) -> Result<OpsErrorPage, AdminError>;
+    async fn export_diagnostics(
+        &self,
+        target: crate::model::diagnostics::DiagnosticTarget,
+    ) -> Result<crate::model::diagnostics::DiagnosticBundle, AdminError>;
 }
 
 pub(crate) struct DefaultObservabilityService {
@@ -78,6 +83,7 @@ pub(crate) struct DefaultObservabilityService {
     accounts: Arc<dyn AccountStore>,
     settings: Arc<dyn SettingsStore>,
     providers: ProviderAdminRegistry,
+    system: Arc<dyn super::system::SystemService>,
 }
 
 impl DefaultObservabilityService {
@@ -88,6 +94,7 @@ impl DefaultObservabilityService {
         settings: Arc<dyn SettingsStore>,
         providers: ProviderAdminRegistry,
         timezone: gateway_core::time::DeploymentTimeZone,
+        system: Arc<dyn super::system::SystemService>,
     ) -> Self {
         Self {
             timezone,
@@ -95,6 +102,7 @@ impl DefaultObservabilityService {
             accounts,
             settings,
             providers,
+            system,
         }
     }
 
@@ -192,6 +200,13 @@ impl DefaultObservabilityService {
 
 #[async_trait]
 impl ObservabilityService for DefaultObservabilityService {
+    async fn export_diagnostics(
+        &self,
+        target: crate::model::diagnostics::DiagnosticTarget,
+    ) -> Result<crate::model::diagnostics::DiagnosticBundle, AdminError> {
+        self.collect_diagnostics(target).await
+    }
+
     async fn dashboard_summary(
         &self,
         range: TimeRange,

@@ -165,7 +165,7 @@ async fn apply_changes(
         return Ok(());
     }
     let table = if hourly {
-        "request_analytics_hourly"
+        "request_analytics_1h"
     } else {
         "request_analytics_15m"
     };

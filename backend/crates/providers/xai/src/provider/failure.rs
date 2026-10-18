@@ -415,31 +415,36 @@ pub(super) fn map_selection_error(error: GrokSessionSelectorError) -> ProviderEr
 }
 
 fn selection_failure(error: &GrokSessionSelectorError) -> ProviderError {
-    let (retry_after, message, code) = match error {
+    let (kind, retry_after, message, code) = match error {
         GrokSessionSelectorError::QueueRejected(error) => {
             return provider_error(error.provider_kind(), UpstreamSendState::NotSent);
         }
         GrokSessionSelectorError::AccountCoolingDown { retry_after } => (
+            ProviderErrorKind::NoEligibleAccount,
             *retry_after,
             cooling_down_message(*retry_after),
             "account_cooling_down",
         ),
         GrokSessionSelectorError::ModelCoolingDown { retry_after } => (
+            ProviderErrorKind::NoEligibleAccount,
             *retry_after,
             model_cooling_down_message(*retry_after),
             "model_cooling_down",
         ),
         GrokSessionSelectorError::CapacityUnavailable { retry_after } => (
+            ProviderErrorKind::AccountCapacityUnavailable,
             *retry_after,
             "account is at its concurrency limit".to_owned(),
             "account_capacity_busy",
         ),
         GrokSessionSelectorError::NoEligibleSession => (
+            ProviderErrorKind::NoEligibleAccount,
             None,
             "no account is eligible for the requested model".to_owned(),
             "no_eligible_account",
         ),
         GrokSessionSelectorError::Unavailable(_) => (
+            ProviderErrorKind::ProviderInfrastructureUnavailable,
             None,
             "account scheduling state is temporarily unreadable".to_owned(),
             "account_selector_unavailable",
@@ -450,6 +455,18 @@ fn selection_failure(error: &GrokSessionSelectorError) -> ProviderError {
                 UpstreamSendState::NotSent,
             );
         }
+        GrokSessionSelectorError::PolicyFiltered => {
+            return provider_error(
+                ProviderErrorKind::RequestPolicyDenied,
+                UpstreamSendState::NotSent,
+            )
+            .with_diagnostic(
+                gateway_core::error::ProviderDiagnostic::new(
+                    "account scheduling policy left no selectable account",
+                )
+                .with_classification("account_selection", "account_policy_filtered"),
+            );
+        }
         GrokSessionSelectorError::PolicyUnavailable => {
             return provider_error(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent);
         }
@@ -457,7 +474,7 @@ fn selection_failure(error: &GrokSessionSelectorError) -> ProviderError {
             return provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent);
         }
     };
-    let error = provider_error(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent);
+    let error = provider_error(kind, UpstreamSendState::NotSent);
     let error = match retry_after {
         Some(retry_after) => error.with_retry_after(retry_after),
         None => error,

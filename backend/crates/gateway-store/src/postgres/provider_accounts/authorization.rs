@@ -142,13 +142,13 @@ async fn commit_authorization_in_transaction(
         account_id: result.account_id.to_string(),
         credential_revision: result.credential_revision.map(|revision| revision.get()),
     }];
-    sqlx::query("insert into authorization_receipts(provider_kind, flow_digest, owner_digest, config_revision, accounts_json) values ($1,$2,$3,$4,$5)")
+    sqlx::query("insert into provider_authorization_receipts(provider_kind, flow_digest, owner_digest, config_revision, accounts_json) values ($1,$2,$3,$4,$5)")
             .bind(key.provider_kind().as_str()).bind(key.flow_digest()).bind(key.owner_digest())
             .bind(i64::try_from(result.config_revision.get()).map_err(|source| invalid_receipt().with_source(source))?)
             .bind(serde_json::to_value(accounts).map_err(|source| invalid_receipt().with_source(source))?)
             .execute(&mut **transaction).await.map_err(|source| unavailable_receipt().with_source(source))?;
     // 保留期长于 OAuth pending 上限；每次提交有界回收，避免引入第二套维护任务
-    sqlx::query("delete from authorization_receipts where ctid in (select ctid from authorization_receipts where expires_at <= now() order by expires_at limit 128 for update skip locked)")
+    sqlx::query("delete from provider_authorization_receipts where ctid in (select ctid from provider_authorization_receipts where expires_at <= now() order by expires_at limit 128 for update skip locked)")
             .execute(&mut **transaction).await.map_err(|source| unavailable_receipt().with_source(source))?;
     Ok(AuthorizationCommitResult {
         result,
@@ -160,7 +160,7 @@ async fn load_receipt<'a>(
     executor: impl sqlx::PgExecutor<'a>,
     key: &AuthorizationReceiptKey,
 ) -> AdminStoreResult<Option<CredentialMutationResult>> {
-    let row: Option<(String, i64, serde_json::Value)> = sqlx::query_as("select owner_digest, config_revision, accounts_json from authorization_receipts where provider_kind=$1 and flow_digest=$2 and expires_at>now()")
+    let row: Option<(String, i64, serde_json::Value)> = sqlx::query_as("select owner_digest, config_revision, accounts_json from provider_authorization_receipts where provider_kind=$1 and flow_digest=$2 and expires_at>now()")
         .bind(key.provider_kind().as_str()).bind(key.flow_digest()).fetch_optional(executor).await.map_err(|source| unavailable_receipt().with_source(source))?;
     let Some((owner, revision, accounts)) = row else {
         return Ok(None);

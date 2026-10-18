@@ -29,6 +29,7 @@ export default defineConfig(({ mode }) => {
     build: {
       outDir: sourceUi ? 'node_modules/.vite/source-dist' : 'dist',
       assetsDir: 'assets',
+      license: { fileName: 'THIRD_PARTY_LICENSES.md' },
       chunkSizeWarningLimit: 600,
       rolldownOptions: {
         checks: {

@@ -434,6 +434,7 @@ impl PluginStateStore for LifecycleFixture {
                 from_schema_version: 1,
                 to_schema_version: 2,
             }],
+            guard: Arc::new(()),
         })
     }
 

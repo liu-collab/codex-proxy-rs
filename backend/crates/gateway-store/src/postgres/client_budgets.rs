@@ -81,7 +81,7 @@ async fn reset_client_key_budget_in_transaction(
     let reset_at = Utc::now();
     // 起止时间收拢到重置边界，窗口保持未开启，同时排除重置前完成的迟到费用
     sqlx::query(
-        "update client_key_budget_windows set
+        "update client_api_key_budget_windows set
         daily_used_usd = case when $2 then 0 else daily_used_usd end,
         daily_start = case when $2 then $4 else daily_start end,
         daily_end = case when $2 then $4 else daily_end end,
@@ -205,7 +205,7 @@ impl PgClientBudgetStore {
         if limits.is_limited() {
             let window = sqlx::query(
                 "select daily_used_usd::text, weekly_used_usd::text, daily_end, weekly_end
-                from client_key_budget_windows where client_api_key_id = $1",
+                from client_api_key_budget_windows where client_api_key_id = $1",
             )
             .bind(key_id.as_str())
             .fetch_one(&mut *tx)
@@ -280,7 +280,7 @@ async fn settle_in_transaction(
     let completed_at = DateTime::<Utc>::from(charge.completed_at);
     // 仅在请求结束时写入费用；请求 ID 冲突时不重复累计
     let changed = sqlx::query(
-        "insert into client_key_charge_events (request_id, client_api_key_id, amount_usd, completed_at)
+        "insert into client_api_key_charge_events (request_id, client_api_key_id, amount_usd, completed_at)
             values ($1, $2, $3::text::numeric, $4)
             on conflict (request_id) do nothing",
     )
@@ -293,7 +293,7 @@ async fn settle_in_transaction(
     .rows_affected();
     if changed == 1 {
         advance_windows(tx, key, Utc::now(), completed_at, timezone).await?;
-        sqlx::query("update client_key_budget_windows set
+        sqlx::query("update client_api_key_budget_windows set
                 daily_used_usd = daily_used_usd + case when $3 >= daily_start and $3 < daily_end then $2::text::numeric else 0 end,
                 weekly_used_usd = weekly_used_usd + case when $3 >= weekly_start and $3 < weekly_end then $2::text::numeric else 0 end
                 where client_api_key_id = $1")
@@ -347,18 +347,18 @@ async fn advance_windows(
         .days_after(now, 7)
         .ok_or_else(|| sqlx::Error::Protocol("invalid budget week end".to_owned()))?;
     // Key 行锁仍串行化准入和结算；未滚动的窗口无需产生新元组与 WAL
-    sqlx::query("insert into client_key_budget_windows
+    sqlx::query("insert into client_api_key_budget_windows
         (client_api_key_id, daily_start, daily_end, weekly_start, weekly_end)
         select $1, $4, $5, $4, $6
         on conflict (client_api_key_id) do update set
-            daily_start = case when client_key_budget_windows.daily_end <= $2 and client_key_budget_windows.daily_start <= $3 then greatest(excluded.daily_start, client_key_budget_windows.daily_end, client_key_budget_windows.daily_start) else client_key_budget_windows.daily_start end,
-            daily_end = case when client_key_budget_windows.daily_end <= $2 and client_key_budget_windows.daily_start <= $3 then excluded.daily_end else client_key_budget_windows.daily_end end,
-            daily_used_usd = case when client_key_budget_windows.daily_end <= $2 and client_key_budget_windows.daily_start <= $3 then 0 else client_key_budget_windows.daily_used_usd end,
-            weekly_start = case when client_key_budget_windows.weekly_end <= $2 and client_key_budget_windows.weekly_start <= $3 then greatest(excluded.weekly_start, client_key_budget_windows.weekly_end, client_key_budget_windows.weekly_start) else client_key_budget_windows.weekly_start end,
-            weekly_end = case when client_key_budget_windows.weekly_end <= $2 and client_key_budget_windows.weekly_start <= $3 then excluded.weekly_end else client_key_budget_windows.weekly_end end,
-            weekly_used_usd = case when client_key_budget_windows.weekly_end <= $2 and client_key_budget_windows.weekly_start <= $3 then 0 else client_key_budget_windows.weekly_used_usd end
-        where (client_key_budget_windows.daily_end <= $2 and client_key_budget_windows.daily_start <= $3)
-            or (client_key_budget_windows.weekly_end <= $2 and client_key_budget_windows.weekly_start <= $3)")
+            daily_start = case when client_api_key_budget_windows.daily_end <= $2 and client_api_key_budget_windows.daily_start <= $3 then greatest(excluded.daily_start, client_api_key_budget_windows.daily_end, client_api_key_budget_windows.daily_start) else client_api_key_budget_windows.daily_start end,
+            daily_end = case when client_api_key_budget_windows.daily_end <= $2 and client_api_key_budget_windows.daily_start <= $3 then excluded.daily_end else client_api_key_budget_windows.daily_end end,
+            daily_used_usd = case when client_api_key_budget_windows.daily_end <= $2 and client_api_key_budget_windows.daily_start <= $3 then 0 else client_api_key_budget_windows.daily_used_usd end,
+            weekly_start = case when client_api_key_budget_windows.weekly_end <= $2 and client_api_key_budget_windows.weekly_start <= $3 then greatest(excluded.weekly_start, client_api_key_budget_windows.weekly_end, client_api_key_budget_windows.weekly_start) else client_api_key_budget_windows.weekly_start end,
+            weekly_end = case when client_api_key_budget_windows.weekly_end <= $2 and client_api_key_budget_windows.weekly_start <= $3 then excluded.weekly_end else client_api_key_budget_windows.weekly_end end,
+            weekly_used_usd = case when client_api_key_budget_windows.weekly_end <= $2 and client_api_key_budget_windows.weekly_start <= $3 then 0 else client_api_key_budget_windows.weekly_used_usd end
+        where (client_api_key_budget_windows.daily_end <= $2 and client_api_key_budget_windows.daily_start <= $3)
+            or (client_api_key_budget_windows.weekly_end <= $2 and client_api_key_budget_windows.weekly_start <= $3)")
         .bind(key).bind(now).bind(used_at).bind(day).bind(daily_end).bind(weekly_end).execute(&mut **tx).await?;
     Ok(())
 }
@@ -381,7 +381,7 @@ pub(super) async fn load_client_key_budgets(
         (case when w.weekly_end > w.weekly_start and w.weekly_end > now() then w.weekly_used_usd else 0 end)::text as weekly_used,
         case when w.daily_end > w.daily_start and w.daily_end > now() then w.daily_end end as daily_end,
         case when w.weekly_end > w.weekly_start and w.weekly_end > now() then w.weekly_end end as weekly_end
-        from client_api_keys k left join client_key_budget_windows w on w.client_api_key_id = k.id
+        from client_api_keys k left join client_api_key_budget_windows w on w.client_api_key_id = k.id
         where k.id = any($1)",
     )
     .bind(ids)

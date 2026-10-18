@@ -945,6 +945,14 @@ impl FixtureObservabilityStore {
 
 #[async_trait]
 impl ObservabilityStore for FixtureObservabilityStore {
+    async fn diagnostic_errors(
+        &self,
+        _target: &gateway_admin::model::diagnostics::DiagnosticTarget,
+        _limit: u16,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::observability::OpsError>> {
+        Err(super::unavailable("diagnostic errors"))
+    }
+
     fn query_timeout(&self) -> std::time::Duration {
         std::time::Duration::from_secs(10)
     }
@@ -1132,6 +1140,8 @@ impl SettingsStore for FixtureSettingsStore {
                 account_warmup_enabled: false,
                 account_warmup_schedule_time: "08:00".to_owned(),
                 account_warmup_model: None,
+                reset_credit_lead_minutes: 10,
+                reset_credit_max_weekly_remaining_percent: None,
             },
         })
     }
@@ -1194,6 +1204,7 @@ fn observation_range(end: DateTime<Utc>) -> TimeRange {
 
 fn usage_query(now: DateTime<Utc>) -> UsageQuery {
     UsageQuery {
+        status: Default::default(),
         range: observation_range(now),
         filter: UsageFilter::default(),
         current_page: 1,
@@ -1208,6 +1219,7 @@ fn total_record(
     now: DateTime<Utc>,
 ) -> UsageListRecord {
     UsageListRecord {
+        outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
         client_api_key_name: Some("Production".to_owned()),
         id: id.to_owned(),
         endpoint: "/v1/responses".to_owned(),

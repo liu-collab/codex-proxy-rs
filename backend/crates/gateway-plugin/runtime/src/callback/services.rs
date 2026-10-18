@@ -1,6 +1,6 @@
 //! 通用公开服务回调；操作目录与类型校验由业务服务登记
 
-use super::{CallbackScope, MiddlewareCallback, invalid};
+use super::{CallResources, MiddlewareCallback, invalid};
 use crate::RpcReply;
 use futures::future::BoxFuture;
 use gateway_admin::{model::AdminError, public_service::Registry};
@@ -47,8 +47,8 @@ impl ServicePorts {
     pub(super) async fn call(
         &self,
         context: &CallContext,
-        scope: &CallbackScope,
-        cancellation: gateway_core::lifecycle::CancellationToken,
+        resources: &CallResources,
+        actor: gateway_admin::model::usage_data::UsageActor,
         params: serde_json::Value,
         payload: &[u8],
     ) -> Result<RpcReply, PluginFault> {
@@ -63,6 +63,7 @@ impl ServicePorts {
             )
         })?;
         let call = registry.call(&request.operation, request.input);
+        let scope = &resources.scope;
         let origin = scope.origin.as_ref();
         let parent = gateway_admin::public_service::Origin {
             request_id: origin.map_or_else(
@@ -78,13 +79,24 @@ impl ServicePorts {
                 || format!("{}:{}", context.resource_scope_id, context.call_id),
                 |origin| origin.call_id.clone(),
             ),
-            cancellation,
+            cancellation: resources.cancellation.clone(),
             extensions: scope.child_extensions(&context.instance_id)?,
             plan: origin.map_or(gateway_admin::public_service::Plan::Current, |origin| {
                 gateway_admin::public_service::Plan::Frozen(Some(origin.plan.clone()))
             }),
         };
-        let result = gateway_admin::public_service::scope(parent, call).await;
+        // 即使终端只读，服务中间件也可提交写入；不存在的操作不会进入调用链
+        if registry
+            .operations()
+            .any(|operation| operation == request.operation)
+        {
+            resources.observe_dispatch()?;
+        }
+        let result = gateway_admin::public_service::scope_actor(
+            actor,
+            gateway_admin::public_service::scope(parent, call),
+        )
+        .await;
         encode(result)
     }
 }

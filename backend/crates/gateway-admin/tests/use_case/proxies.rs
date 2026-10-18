@@ -15,6 +15,7 @@ pub(super) struct TestProxies {
     pub events: Option<super::accounts::EventLog>,
     pub accounts: Option<Vec<ProxyAccountRef>>,
     pub record: Option<ProxyRecord>,
+    pub records: Vec<ProxyRecord>,
 }
 
 struct ImportGuard(super::accounts::EventLog);
@@ -77,9 +78,13 @@ impl ProxyStore for TestProxies {
         self.record
             .clone()
             .filter(|record| record.id == id)
+            .or_else(|| self.records.iter().find(|record| record.id == id).cloned())
             .ok_or_else(|| super::unavailable("proxy"))
     }
     async fn create(&self, _: NewProxy, _: &MutationContext) -> AdminStoreResult<ProxyMutation> {
+        if let Some(events) = &self.events {
+            events.lock().unwrap().push("proxy.create");
+        }
         Err(super::unavailable("proxy"))
     }
     async fn update(&self, _: UpdateProxy, _: &MutationContext) -> AdminStoreResult<ProxyMutation> {
@@ -95,18 +100,23 @@ impl ProxyStore for TestProxies {
     }
     async fn record_test(
         &self,
-        _: &str,
+        id: &str,
         _: Revision,
-        _: ProxyTestResult,
+        result: ProxyTestResult,
         _: &MutationContext,
     ) -> AdminStoreResult<ProxyMutation> {
-        Err(super::unavailable("proxy"))
+        let mut record = self.get(id).await?;
+        record.last_test = Some(result);
+        Ok(ProxyMutation {
+            config_revision: record.revision,
+            record,
+        })
     }
 }
 
 #[async_trait]
 impl ProxyProbe for TestProxies {
-    async fn test(&self, _: &OutboundProxy, _: bool) -> ProxyTestResult {
+    async fn test(&self, _: Option<&OutboundProxy>, _: bool) -> ProxyTestResult {
         panic!("unexpected proxy probe")
     }
 }
@@ -309,4 +319,164 @@ async fn credential_import_keeps_proxy_reserved_until_commit_and_releases_on_err
             assert_eq!(&events[..expected.len()], expected);
         }
     }
+}
+
+#[tokio::test]
+async fn batch_create_stops_after_uncertain_store_failure_without_replaying() {
+    use super::accounts::{context, events, recorded};
+    use gateway_admin::model::AdminErrorKind;
+    let events = events();
+    let services = super::AdminHarness::new()
+        .proxies(std::sync::Arc::new(TestProxies {
+            events: Some(events.clone()),
+            ..Default::default()
+        }))
+        .build()
+        .await;
+    let commands = [" ", "First", "Skipped"]
+        .into_iter()
+        .map(|name| {
+            Ok(NewProxy {
+                name: name.to_owned(),
+                proxy: OutboundProxy::parse("http://proxy.example:8080").unwrap(),
+                auto_location: false,
+                location: None,
+                test: None,
+            })
+        })
+        .collect();
+    let results = services
+        .proxies()
+        .create_batch(commands, &context("batch-create"))
+        .await
+        .unwrap();
+    assert!(
+        matches!(&results[0], ProxyBatchResult::Completed(Err(error)) if error.kind() == AdminErrorKind::Invalid)
+    );
+    assert!(
+        matches!(&results[1], ProxyBatchResult::Completed(Err(error)) if error.kind() == AdminErrorKind::Unavailable)
+    );
+    assert!(matches!(&results[2], ProxyBatchResult::Skipped));
+    assert_eq!(recorded(&events), vec!["proxy.create"]);
+}
+
+struct GatedProxyProbe {
+    started: tokio::sync::mpsc::UnboundedSender<()>,
+    release: tokio::sync::Semaphore,
+    active: std::sync::atomic::AtomicUsize,
+}
+
+struct ActiveProbe<'a>(&'a std::sync::atomic::AtomicUsize);
+impl Drop for ActiveProbe<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[async_trait]
+impl ProxyProbe for GatedProxyProbe {
+    async fn test(&self, _: Option<&OutboundProxy>, _: bool) -> ProxyTestResult {
+        self.active
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let _active = ActiveProbe(&self.active);
+        self.started.send(()).unwrap();
+        self.release.acquire().await.unwrap().forget();
+        ProxyTestResult {
+            location: Default::default(),
+            success: true,
+            latency_ms: 1,
+            exit_ip: None,
+            exit_ipv4: None,
+            exit_ipv6: None,
+            message: "ok".to_owned(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn batch_tests_share_capacity_preserve_order_and_release_slots_on_cancellation() {
+    use super::accounts::context;
+    use std::sync::{Arc, atomic::Ordering};
+    let (started, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let probe = Arc::new(GatedProxyProbe {
+        started,
+        release: tokio::sync::Semaphore::new(0),
+        active: Default::default(),
+    });
+    let now = chrono::Utc::now();
+    let records = (0..4)
+        .map(|i| ProxyRecord {
+            id: format!("proxy_{i}"),
+            name: format!("Proxy {i}"),
+            proxy: OutboundProxy::parse("http://proxy.example:8080").unwrap(),
+            revision: Revision::new(1).unwrap(),
+            enabled: true,
+            auto_location: false,
+            location: None,
+            detected_location: None,
+            account_count: 0,
+            last_test_at: None,
+            last_test: None,
+            created_at: now,
+            updated_at: now,
+        })
+        .collect();
+    let mut harness = super::AdminHarness::new().proxies(Arc::new(TestProxies {
+        records,
+        ..Default::default()
+    }));
+    harness.proxy_probe = probe.clone();
+    let services = harness.build().await;
+    let commands = || {
+        (0..4)
+            .map(|i| {
+                Ok(TestProxy {
+                    id: format!("proxy_{i}"),
+                    revision: Revision::new(1).unwrap(),
+                    detect_location: true,
+                })
+            })
+            .collect()
+    };
+    let context = context("batch-test");
+    let mut batch = Box::pin(services.proxies().test_batch(commands(), &context));
+    tokio::select! {
+        _ = &mut batch => panic!("batch finished before probes were released"),
+        _ = async { receiver.recv().await.unwrap(); receiver.recv().await.unwrap(); } => {}
+    }
+    assert_eq!(probe.active.load(Ordering::Relaxed), 2);
+    let mut single_a = Box::pin(services.proxies().probe(None, false));
+    let mut single_b = Box::pin(services.proxies().probe(None, false));
+    tokio::select! {
+        _ = &mut batch => panic!("batch unexpectedly finished"),
+        _ = &mut single_a => panic!("single probe unexpectedly finished"),
+        _ = &mut single_b => panic!("single probe unexpectedly finished"),
+        _ = async { receiver.recv().await.unwrap(); receiver.recv().await.unwrap(); } => {}
+    }
+    assert_eq!(probe.active.load(Ordering::Relaxed), 4);
+    assert_eq!(
+        services
+            .proxies()
+            .probe(None, false)
+            .await
+            .unwrap_err()
+            .kind(),
+        gateway_admin::model::AdminErrorKind::RateLimited
+    );
+    drop((batch, single_a, single_b));
+    assert_eq!(probe.active.load(Ordering::Relaxed), 0);
+    probe.release.add_permits(4);
+    let results = services
+        .proxies()
+        .test_batch(commands(), &context)
+        .await
+        .unwrap();
+    for (index, result) in results.into_iter().enumerate() {
+        let ProxyBatchResult::Completed(Ok(record)) = result else {
+            panic!("probe failed after cancellation")
+        };
+        assert_eq!(record.id, format!("proxy_{index}"));
+        assert!(record.last_test.unwrap().success);
+    }
+    assert_eq!(probe.active.load(Ordering::Relaxed), 0);
 }

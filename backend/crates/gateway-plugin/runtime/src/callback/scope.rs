@@ -1,6 +1,6 @@
 //! 插件调用的权限作用域、子调用上下文与出站副作用观测
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, Weak};
 
 use gateway_core::{
     account::OutboundProxy, engine::nested::ExecutionEffects, upstream::UpstreamSendState,
@@ -29,8 +29,8 @@ pub(crate) struct CallbackScope {
 }
 
 impl CallbackScope {
-    pub(super) fn observe_http_dispatch(&self) {
-        // 子路由及其插件可能执行模型或提交事务，父执行不能再按 Provider 的 not_sent 透明重放
+    pub(super) fn observe_dispatch(&self) {
+        // 子路由、公开服务及其插件都可能提交副作用，父执行不能再按 Provider 的 not_sent 透明重放
         if let Some(effects) = &self.execution_effects {
             effects.observe();
         }
@@ -104,7 +104,7 @@ impl CallbackScope {
         &self,
         purpose: Option<gateway_plugin_sdk::call::upstream_adapter::UpstreamPathPurpose>,
     ) -> HttpAttempt {
-        HttpAttempt {
+        HttpAttempt(Arc::new(HttpAttemptObservation {
             effects: if purpose
                 == Some(gateway_plugin_sdk::call::upstream_adapter::UpstreamPathPurpose::Inference)
             {
@@ -116,24 +116,38 @@ impl CallbackScope {
                 .upstream
                 .as_ref()
                 .map(|managed| Arc::clone(&managed.send_state)),
-            completed: false,
-        }
+            completed: Mutex::new(false),
+        }))
     }
 }
 
-pub(super) struct HttpAttempt {
+pub(super) struct HttpAttempt(Arc<HttpAttemptObservation>);
+
+pub(super) struct HttpAttemptObservation {
     effects: Option<Arc<ExecutionEffects>>,
-    completed: bool,
+    completed: Mutex<bool>,
     upstream: Option<Arc<super::upstream::SendWatermark>>,
 }
 
 impl HttpAttempt {
-    pub(super) fn finish(mut self, observed: UpstreamSendState) {
-        self.observe(observed);
-        self.completed = true;
+    pub(super) fn pending(&self) -> Weak<HttpAttemptObservation> {
+        Arc::downgrade(&self.0)
     }
 
-    fn observe(&self, observed: UpstreamSendState) {
+    pub(super) fn finish(self, observed: UpstreamSendState) {
+        self.0.finish(observed);
+    }
+}
+
+impl HttpAttemptObservation {
+    pub(super) fn finish(&self, observed: UpstreamSendState) {
+        let mut completed = self
+            .completed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if *completed {
+            return;
+        }
         if let Some(upstream) = &self.upstream {
             upstream.observe(observed);
         }
@@ -142,14 +156,13 @@ impl HttpAttempt {
         {
             effects.observe();
         }
+        *completed = true;
     }
 }
 
 impl Drop for HttpAttempt {
     fn drop(&mut self) {
         // HTTP future 被取消时无法证明上游未接收；通知 Core 收紧重放判断
-        if !self.completed {
-            self.observe(UpstreamSendState::Ambiguous);
-        }
+        self.0.finish(UpstreamSendState::Ambiguous);
     }
 }

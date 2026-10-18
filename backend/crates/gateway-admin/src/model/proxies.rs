@@ -113,6 +113,8 @@ pub struct NewProxy {
 
 #[derive(Debug, Clone)]
 pub struct UpdateProxy {
+    /// 省略保留配置，零值取消限制
+    pub max_websocket_connections: Option<u32>,
     pub enabled: Option<bool>,
     pub auto_location: Option<bool>,
     pub test: Option<ProxyTestResult>,
@@ -128,6 +130,21 @@ pub struct UpdateProxy {
 pub struct ProxyMutation {
     pub config_revision: Revision,
     pub record: ProxyRecord,
+}
+
+pub const MAX_PROXY_BATCH_SIZE: usize = 100;
+
+#[derive(Debug)]
+pub struct TestProxy {
+    pub id: String,
+    pub revision: Revision,
+    pub detect_location: bool,
+}
+
+#[derive(Debug)]
+pub enum ProxyBatchResult<T> {
+    Completed(Result<T, super::AdminError>),
+    Skipped,
 }
 
 /// 检测失败与连通性分开，双栈冲突不得继续应用旧位置

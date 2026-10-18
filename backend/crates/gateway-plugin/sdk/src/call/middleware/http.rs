@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 /// 正文句柄消费一次；Bytes 使用当前 RPC 的 binary payload，Stream 使用响应流
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Body {
     Empty,
     Handle { handle: String },
@@ -28,7 +28,6 @@ pub struct Request {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Response {
     pub status: u16,
     pub version: Version,

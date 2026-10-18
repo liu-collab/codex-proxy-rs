@@ -398,7 +398,7 @@ async fn usage_detail_should_keep_attempt_snapshot_contract() {
 }
 
 #[tokio::test]
-async fn zero_attempt_failure_detail_keeps_missing_upstream_facts_and_preparation_trace() {
+async fn zero_attempt_failure_detail_omits_trace_and_keeps_missing_upstream_facts() {
     use axum::{
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
@@ -470,7 +470,8 @@ async fn zero_attempt_failure_detail_keeps_missing_upstream_facts_and_preparatio
     assert_eq!(data["attempts"], json!([]));
     // 明细仍沿用全局 best-effort 合同，不从预备 trace 推断完整尝试列表
     assert_eq!(data["attemptsComplete"], false);
-    assert_eq!(data["trace"], trace);
+    assert!(data.get("trace").is_none());
+    assert!(data.get("relatedRequests").is_none());
     assert_eq!(data["logicalOutcome"], "failed");
     assert_eq!(data["clientStatusCode"], 503);
     assert_eq!(data["message"], "no upstream account is available");
@@ -495,8 +496,6 @@ async fn ops_errors_should_keep_account_label_and_authentication_contract() {
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
     };
-    use chrono::Utc;
-    use gateway_admin::model::observability::OpsError;
     use gateway_api::admin::observability;
     use tower::ServiceExt as _;
 
@@ -508,63 +507,7 @@ async fn ops_errors_should_keep_account_label_and_authentication_contract() {
         .ops_errors
         .lock()
         .expect("ops errors")
-        .push(OpsError {
-            client_api_key_name: Some("Production".to_owned()),
-            source: "model_request".to_owned(),
-            event_id: "err_snapshot".to_owned(),
-            request_id: Some("req_err".to_owned()),
-            attempt_index: Some(1),
-            client_api_key_ref: Some("key_err".to_owned()),
-            component: "model_request".to_owned(),
-            operation: "responses".to_owned(),
-            protocol: Some("openai".to_owned()),
-            client_transport: Some("http_sse".to_owned()),
-            requested_model_id: Some("gpt-5.4".to_owned()),
-            service_tier: Some("priority".to_owned()),
-            endpoint: Some("/v1/responses".to_owned()),
-            provider_kind: Some("openai".to_owned()),
-            provider_account_ref: Some("acct_err".to_owned()),
-            provider_account_name: None,
-            provider_account_email: Some("err@example.invalid".to_owned()),
-            provider_account_plan_type: Some("pro".to_owned()),
-            provider_account_plan_type_display: Some("Pro".to_owned()),
-            provider_account_authentication_kind: Some("api_key".to_owned()),
-            upstream_model_id: Some("upstream-err".to_owned()),
-            upstream_transport: Some("http_sse".to_owned()),
-            failure_kind: "upstream_error".to_owned(),
-            upstream_send_state: Some("sent".to_owned()),
-            client_status_code: Some(502),
-            upstream_status_code: Some(502),
-            provider_error_code: Some("upstream".to_owned()),
-            client_response_id: None,
-            upstream_request_id: None,
-            latency_ms: Some(90),
-            message: "snapshot error".to_owned(),
-            error_details: Some(
-                r#"{"error":{"code":"upstream","message":"raw upstream marker"}}"#.to_owned(),
-            ),
-            client_ip: Some("203.0.113.8".to_owned()),
-            user_agent: Some("codex-cli/0.144.0".to_owned()),
-            reasoning_effort: Some("medium".to_owned()),
-            reasoning_preset: None,
-            request_kind: Some("root".to_owned()),
-            subagent_kind: None,
-            compact: Some(false),
-            continuation_affinity_hash: Some("affinity-hash".to_owned()),
-            continuation_previous_response_id_hash: Some("response-hash".to_owned()),
-            continuation_unavailable_reason: Some("reused_connection_lost".to_owned()),
-            upstream_connection_id: Some("connection-id".to_owned()),
-            upstream_connection_exit_reason: Some("tcp_reset".to_owned()),
-            upstream_connection_age_ms: Some(12_000),
-            upstream_connection_idle_ms: Some(4_000),
-            recovery_request_id: None,
-            recovered_at: None,
-            recovery_attempt_count: 0,
-            recovery_retry_delay_ms: None,
-            recovery_total_latency_ms: None,
-            occurred_at: Utc::now(),
-            stable_sort_id: "model_request:req_err".to_owned(),
-        });
+        .push(ops_error_record());
     let response = observability::router::<AdminTestState>()
         .with_state(fixture.state())
         .oneshot(
@@ -621,7 +564,7 @@ async fn ops_errors_should_keep_account_label_and_authentication_contract() {
             "userAgent": "codex-cli/0.144.0",
             "providerErrorCode": "upstream",
             "upstreamSendState": "sent",
-            "errorDetails": "{\"error\":{\"code\":\"upstream\",\"message\":\"raw upstream marker\"}}",
+            "errorDetails": serde_json::to_string_pretty(&json!({"error": {"code": "upstream", "message": "raw upstream marker"}})).unwrap(),
             "continuationUnavailableReason": "reused_connection_lost",
             "upstreamConnectionExitReason": "tcp_reset",
             "upstreamConnectionAgeMs": 12000,
@@ -707,7 +650,7 @@ async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
     );
 }
 
-fn usage_record_with_account(
+pub(super) fn usage_record_with_account(
     id: &str,
     account_id: &str,
     name: &str,
@@ -858,6 +801,7 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .lock()
         .expect("usage records")
         .push(UsageListRecord {
+            outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
             client_api_key_name: Some("Production".to_owned()),
             id: "request_endpoint".to_owned(),
             endpoint: "/v1/responses".to_owned(),
@@ -1302,4 +1246,124 @@ async fn observability_queries_reject_group_filters_and_analytics_search() {
     let observations = fixture.observations.lock().unwrap();
     assert!(observations.records.is_empty());
     assert!(observations.errors.is_empty());
+}
+
+pub(super) fn ops_error_record() -> gateway_admin::model::observability::OpsError {
+    use gateway_admin::model::observability::OpsError;
+    OpsError {
+        client_api_key_name: Some("Production".to_owned()),
+        source: "model_request".to_owned(),
+        event_id: "err_snapshot".to_owned(),
+        request_id: Some("req_err".to_owned()),
+        attempt_index: Some(1),
+        client_api_key_ref: Some("key_err".to_owned()),
+        component: "model_request".to_owned(),
+        operation: "responses".to_owned(),
+        protocol: Some("openai".to_owned()),
+        client_transport: Some("http_sse".to_owned()),
+        requested_model_id: Some("gpt-5.4".to_owned()),
+        service_tier: Some("priority".to_owned()),
+        endpoint: Some("/v1/responses".to_owned()),
+        provider_kind: Some("openai".to_owned()),
+        provider_account_ref: Some("acct_err".to_owned()),
+        provider_account_name: None,
+        provider_account_email: Some("err@example.invalid".to_owned()),
+        provider_account_plan_type: Some("pro".to_owned()),
+        provider_account_plan_type_display: Some("Pro".to_owned()),
+        provider_account_authentication_kind: Some("api_key".to_owned()),
+        upstream_model_id: Some("upstream-err".to_owned()),
+        upstream_transport: Some("http_sse".to_owned()),
+        failure_kind: "upstream_error".to_owned(),
+        upstream_send_state: Some("sent".to_owned()),
+        client_status_code: Some(502),
+        upstream_status_code: Some(502),
+        provider_error_code: Some("upstream".to_owned()),
+        client_response_id: None,
+        upstream_request_id: None,
+        latency_ms: Some(90),
+        message: "snapshot error".to_owned(),
+        error_details: Some(
+            r#"{"error":{"code":"upstream","message":"raw upstream marker"}}"#.to_owned(),
+        ),
+        client_ip: Some("203.0.113.8".to_owned()),
+        user_agent: Some("codex-cli/0.144.0".to_owned()),
+        reasoning_effort: Some("medium".to_owned()),
+        reasoning_preset: None,
+        request_kind: Some("root".to_owned()),
+        subagent_kind: None,
+        compact: Some(false),
+        continuation_affinity_hash: Some("affinity-hash".to_owned()),
+        continuation_previous_response_id_hash: Some("response-hash".to_owned()),
+        continuation_unavailable_reason: Some("reused_connection_lost".to_owned()),
+        upstream_connection_id: Some("connection-id".to_owned()),
+        upstream_connection_exit_reason: Some("tcp_reset".to_owned()),
+        upstream_connection_age_ms: Some(12_000),
+        upstream_connection_idle_ms: Some(4_000),
+        recovery_request_id: None,
+        recovered_at: None,
+        recovery_attempt_count: 0,
+        recovery_retry_delay_ms: None,
+        recovery_total_latency_ms: None,
+        occurred_at: Utc::now(),
+        stable_sort_id: "model_request:req_err".to_owned(),
+    }
+}
+
+#[tokio::test]
+async fn usage_status_query_accepts_three_modes_and_rejects_unknown_values() {
+    use crate::admin::{AdminTestFixture, AdminTestState};
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, StatusCode, header},
+    };
+    use gateway_api::admin::observability;
+    use tower::ServiceExt as _;
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    for (status, expected) in [
+        ("success", StatusCode::OK),
+        ("error", StatusCode::OK),
+        ("all", StatusCode::OK),
+        ("failed", StatusCode::BAD_REQUEST),
+    ] {
+        let response = observability::router::<AdminTestState>()
+            .with_state(fixture.state())
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/admin/usage/records?status={status}"))
+                    .header(header::COOKIE, "cpr_session=valid-session")
+                    .header("x-request-id", "usage_status_fixture")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let actual = response.status();
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        assert_eq!(
+            actual,
+            expected,
+            "{status}: {}",
+            String::from_utf8_lossy(&body)
+        );
+        if expected == StatusCode::OK {
+            use gateway_admin::model::observability::UsageRecordStatus;
+            let status_value = match status {
+                "success" => UsageRecordStatus::Success,
+                "error" => UsageRecordStatus::Error,
+                _ => UsageRecordStatus::All,
+            };
+            assert_eq!(
+                fixture
+                    .observations
+                    .lock()
+                    .unwrap()
+                    .records
+                    .last()
+                    .unwrap()
+                    .status,
+                status_value
+            );
+        }
+    }
 }

@@ -64,5 +64,6 @@ pub struct ProxyImportReservation {
 
 #[async_trait]
 pub trait ProxyProbe: Send + Sync {
-    async fn test(&self, proxy: &OutboundProxy, detect_location: bool) -> ProxyTestResult;
+    /// 未指定代理时探测服务器直连出口，不继承进程代理环境变量
+    async fn test(&self, proxy: Option<&OutboundProxy>, detect_location: bool) -> ProxyTestResult;
 }

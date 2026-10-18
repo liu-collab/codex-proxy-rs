@@ -708,3 +708,59 @@ export function getAccountDetail(data: AccountIdParam, options: RequestOptions =
     ...options,
   })
 }
+
+export interface AccountResetCreditAutomation {
+  enabled: boolean
+  leadMinutes: number
+  nextDiscoveryAtDisplay: string | null
+  nextConsumeAtDisplay: string | null
+  lastResult: string | null
+}
+
+export function getAccountResetCreditAutomation(data: AccountIdParam, options: RequestOptions = {}) {
+  return request<AccountResetCreditAutomation>({
+    url: '/api/admin/accounts/reset-credits/automation',
+    method: 'GET',
+    params: data,
+    ...options,
+  })
+}
+
+export function setAccountResetCreditAutomation(data: AccountIdParam & { enabled: boolean }, options: RequestOptions = {}) {
+  return request<AccountResetCreditAutomation>({
+    url: '/api/admin/accounts/reset-credits/automation',
+    method: 'POST',
+    data,
+    ...options,
+  })
+}
+
+export interface AccountConcurrencyEntry {
+  leaseId: string
+  requestId: string | null
+  clientKeyId: string | null
+  clientKeyName: string | null
+  model: string | null
+  clientIp: string | null
+  startedAt: string | null
+  startedAtDisplay: string | null
+  occupiedMs: number | null
+}
+
+export interface AccountConcurrencyPage {
+  accountId: string
+  entries: AccountConcurrencyEntry[]
+  total: number
+  page: number
+  pageSize: number
+  observedAt: string
+}
+
+export function getAccountConcurrency(data: { accountId: string, page: number, pageSize: number }, options: RequestOptions = {}) {
+  return request<AccountConcurrencyPage>({
+    url: '/api/admin/accounts/concurrency',
+    method: 'GET',
+    params: data,
+    ...options,
+  })
+}

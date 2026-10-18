@@ -1,4 +1,4 @@
-//! 使用与 Provider 请求一致的显式代理协议，执行有超时和响应大小限制的出口测试
+//! 使用与 Provider 请求一致的显式代理或直连路径，执行有超时和响应大小限制的出口测试
 
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -77,22 +77,24 @@ impl HttpProxyProbe {
 
     async fn exit_ip_at(
         &self,
-        proxy: &OutboundProxy,
+        proxy: Option<&OutboundProxy>,
         endpoint: &str,
     ) -> Result<IpAddr, &'static str> {
-        let proxy = reqwest::Proxy::all(proxy.expose_url()).map_err(|_| "代理地址不合法")?;
-        let builder = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .no_proxy()
-            .proxy(proxy)
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(12))
             .redirect(reqwest::redirect::Policy::none());
+        if let Some(proxy) = proxy {
+            builder = builder
+                .proxy(reqwest::Proxy::all(proxy.expose_url()).map_err(|_| "代理地址不合法")?);
+        }
         let client = (self.build_client)(builder)?;
         let mut response = client.get(endpoint).send().await.map_err(|error| {
             if error.is_timeout() {
-                "代理连接超时"
+                "出口连接超时"
             } else {
-                "代理连接失败，请检查地址、认证和网络"
+                "出口连接失败，请检查网络或代理配置"
             }
         })?;
         if !response.status().is_success() {
@@ -123,7 +125,7 @@ impl HttpProxyProbe {
 }
 
 impl HttpProxyProbe {
-    async fn test_connection(&self, proxy: &OutboundProxy) -> ProxyTestResult {
+    async fn test_connection(&self, proxy: Option<&OutboundProxy>) -> ProxyTestResult {
         let started = Instant::now();
         let timeout_limit = Duration::from_secs(15);
 
@@ -131,7 +133,7 @@ impl HttpProxyProbe {
             ProbeStrategy::Single(endpoint) => {
                 let result =
                     tokio::time::timeout(timeout_limit, self.exit_ip_at(proxy, endpoint)).await;
-                let result = result.unwrap_or(Err("代理连接超时"));
+                let result = result.unwrap_or(Err("出口连接超时"));
                 let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
                 match result {
@@ -219,7 +221,7 @@ impl HttpProxyProbe {
                             let message = res_v4
                                 .err()
                                 .or(res_v6.err())
-                                .unwrap_or("代理连接失败")
+                                .unwrap_or("出口连接失败")
                                 .to_owned();
                             ProxyTestResult {
                                 location: ProxyLocationDetection::NotRequested,
@@ -239,7 +241,7 @@ impl HttpProxyProbe {
                         exit_ip: None,
                         exit_ipv4: None,
                         exit_ipv6: None,
-                        message: "代理连接超时".to_owned(),
+                        message: "出口连接超时".to_owned(),
                     },
                 }
             }
@@ -257,17 +259,17 @@ impl HttpProxyProbe {
 
     async fn location_for_ip(
         &self,
-        proxy: &OutboundProxy,
+        proxy: Option<&OutboundProxy>,
         ip: IpAddr,
     ) -> Result<RequestLocation, &'static str> {
-        // 出口 IP 已由代理探测确认；按这个固定 IP 从服务端查询位置，避免代理出口屏蔽位置服务
+        // 出口 IP 已由探测确认；按这个固定 IP 从服务端查询位置，避免代理出口屏蔽位置服务
         // 部署环境无法直连位置服务时仍尝试原代理路径
         match self.lookup_location(ip, None).await {
             Ok(location) => Ok(location),
-            Err(direct_error) => self
-                .lookup_location(ip, Some(proxy))
-                .await
-                .or(Err(direct_error)),
+            Err(direct_error) if proxy.is_some() => {
+                self.lookup_location(ip, proxy).await.or(Err(direct_error))
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -348,7 +350,7 @@ impl HttpProxyProbe {
 
     async fn detect_location(
         &self,
-        proxy: &OutboundProxy,
+        proxy: Option<&OutboundProxy>,
         result: &ProxyTestResult,
     ) -> ProxyLocationDetection {
         let lookup = async |ip: Option<IpAddr>| match ip {
@@ -378,7 +380,7 @@ impl HttpProxyProbe {
 
 #[async_trait]
 impl ProxyProbe for HttpProxyProbe {
-    async fn test(&self, proxy: &OutboundProxy, detect_location: bool) -> ProxyTestResult {
+    async fn test(&self, proxy: Option<&OutboundProxy>, detect_location: bool) -> ProxyTestResult {
         let mut result = self.test_connection(proxy).await;
         if detect_location {
             result.location = if result.success {

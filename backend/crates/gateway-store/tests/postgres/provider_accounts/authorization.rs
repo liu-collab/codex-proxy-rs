@@ -25,7 +25,7 @@ async fn concurrent_authorization_retries_share_one_account_write_and_one_receip
     assert_eq!(first.result, second.result);
     assert_ne!(first.newly_committed, second.newly_committed);
     assert_eq!(first.result.credential_revision.unwrap().get(), 1);
-    let counts: (i64, i64, i64) = sqlx::query_as("select (select count(*) from provider_accounts), (select count(*) from admin_audit_events where action='authorize'), (select count(*) from authorization_receipts)")
+    let counts: (i64, i64, i64) = sqlx::query_as("select (select count(*) from provider_accounts), (select count(*) from admin_audit_events where action='authorize'), (select count(*) from provider_authorization_receipts)")
         .fetch_one(&database.pool).await.unwrap();
     assert_eq!(counts, (1, 1, 1));
     let restarted = admin_account_store(&database.pool);
@@ -47,7 +47,7 @@ async fn concurrent_authorization_retries_share_one_account_write_and_one_receip
             .is_err()
     );
     let stored: String =
-        sqlx::query_scalar("select to_jsonb(r)::text from authorization_receipts r")
+        sqlx::query_scalar("select to_jsonb(r)::text from provider_authorization_receipts r")
             .fetch_one(&database.pool)
             .await
             .unwrap();
@@ -62,10 +62,12 @@ async fn a_receipt_failure_rolls_back_accounts_audit_and_config_revision() {
     };
     let store = admin_account_store(&database.pool);
     let before = current_revision(&database.pool).await;
-    sqlx::query("alter table authorization_receipts add constraint fail_receipt check (false)")
-        .execute(&database.pool)
-        .await
-        .unwrap();
+    sqlx::query(
+        "alter table provider_authorization_receipts add constraint fail_receipt check (false)",
+    )
+    .execute(&database.pool)
+    .await
+    .unwrap();
     let (command, context) = command(credential("acct_rollback", "rollback-user"));
     assert!(
         store
@@ -74,7 +76,7 @@ async fn a_receipt_failure_rolls_back_accounts_audit_and_config_revision() {
             .is_err()
     );
     assert_eq!(current_revision(&database.pool).await, before);
-    let counts: (i64, i64, i64) = sqlx::query_as("select (select count(*) from provider_accounts), (select count(*) from admin_audit_events), (select count(*) from authorization_receipts)").fetch_one(&database.pool).await.unwrap();
+    let counts: (i64, i64, i64) = sqlx::query_as("select (select count(*) from provider_accounts), (select count(*) from admin_audit_events), (select count(*) from provider_authorization_receipts)").fetch_one(&database.pool).await.unwrap();
     assert_eq!(counts, (0, 0, 0));
     assert!(
         store
@@ -83,7 +85,7 @@ async fn a_receipt_failure_rolls_back_accounts_audit_and_config_revision() {
             .unwrap()
             .is_none()
     );
-    sqlx::query("alter table authorization_receipts drop constraint fail_receipt")
+    sqlx::query("alter table provider_authorization_receipts drop constraint fail_receipt")
         .execute(&database.pool)
         .await
         .unwrap();
@@ -109,7 +111,7 @@ async fn expired_receipts_are_unreadable_and_reclaimed_without_removing_accounts
         .commit_authorization(authorization, &context)
         .await
         .unwrap();
-    sqlx::query("update authorization_receipts set created_at=now()-interval '25 hours', expires_at=now()-interval '1 hour'")
+    sqlx::query("update provider_authorization_receipts set created_at=now()-interval '25 hours', expires_at=now()-interval '1 hour'")
         .execute(&database.pool).await.unwrap();
     assert!(store.authorization_receipt(&key).await.unwrap().is_none());
     let (next, context) = command(credential("acct_next", "next-user"));
@@ -119,7 +121,7 @@ async fn expired_receipts_are_unreadable_and_reclaimed_without_removing_accounts
         store.authorization_receipt(&current).await.unwrap(),
         Some(committed.result)
     );
-    let counts: (i64, i64) = sqlx::query_as("select (select count(*) from provider_accounts), (select count(*) from authorization_receipts)")
+    let counts: (i64, i64) = sqlx::query_as("select (select count(*) from provider_accounts), (select count(*) from provider_authorization_receipts)")
         .fetch_one(&database.pool).await.unwrap();
     assert_eq!(counts, (2, 1));
     database.close().await;

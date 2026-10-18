@@ -20,6 +20,7 @@ use std::{sync::Arc, time::Duration};
 
 fn group(name: &str) -> CreateAccountGroup {
     CreateAccountGroup {
+        allow_image_generation: true,
         name: name.into(),
         description: None,
         fast_mode: FastMode::Default,
@@ -197,30 +198,32 @@ async fn wait_done(path: &std::path::Path, after: usize, phase: &str) -> Value {
 }
 
 #[tokio::test]
-async fn malformed_maintenance_response_does_not_stop_the_host_worker() {
+async fn unused_maintenance_response_does_not_stop_the_host_worker() {
     let Some(environment) = Environment::create().await else {
         return;
     };
+    let marker = environment.directory.path().join("invalid-response.jsonl");
     environment
         .install_plugin(
-            json!({"maintenance_fixture":true,"invalid_response_method":"plugin.reconcile"}),
+            json!({"maintenance_fixture":true,"invalid_response_method":"plugin.reconcile","invalid_response_marker":marker}),
         )
         .await;
     let (runtime, core, resources, stop, task) = start(&environment, "malformed response").await;
     tokio::time::timeout(Duration::from_secs(5), async {
-        while core
-            .snapshots()
-            .acquire()
-            .unwrap()
-            .extensions()
-            .unwrap()
-            .is_ready()
-        {
+        while !marker.exists() {
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
     .unwrap();
+    assert!(
+        core.snapshots()
+            .acquire()
+            .unwrap()
+            .extensions()
+            .unwrap()
+            .is_ready()
+    );
     assert!(!task.is_finished(), "单个插件失败不能终止宿主维护任务");
     for probe in core.health_probes() {
         assert!(matches!(

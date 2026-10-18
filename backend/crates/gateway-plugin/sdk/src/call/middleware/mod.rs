@@ -45,7 +45,6 @@ pub enum MiddlewareBodyFraming {
 ///
 /// Header 值可能包含不适合日志的客户端数据，因此故意不实现 `Debug`
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MiddlewareHeader {
     pub name: String,
     pub value: Vec<u8>,
@@ -55,7 +54,7 @@ pub struct MiddlewareHeader {
 ///
 /// Header 值可能包含不适合日志的客户端数据，因此故意不实现 `Debug`
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "operation", rename_all = "snake_case")]
 pub enum MiddlewareHeaderMutation {
     Remove { name: String },
     Append { name: String, value: Vec<u8> },
@@ -135,7 +134,6 @@ pub struct MiddlewareNextRequest {
 
 /// 受父调用约束的不透明响应正文句柄
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MiddlewareBodyHandle {
     pub handle: String,
     pub framing: MiddlewareBodyFraming,
@@ -160,7 +158,7 @@ pub struct MiddlewareNextResponse {
 
 /// 最终正文来源；`PassThrough` 直接转交下游正文，不触发读取
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MiddlewareResponseBody {
     Empty,
     PassThrough { body: MiddlewareBodyHandle },
@@ -169,7 +167,6 @@ pub enum MiddlewareResponseBody {
 
 /// `middleware.handle` 的最终响应头；插件输出流仍使用既有 RPC Stream/Credit/End
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MiddlewareResponseHead {
     /// `Some` 表示基于本层 next 返回的原响应；`None` 表示中间件短路响应
     #[serde(default, skip_serializing_if = "Option::is_none")]

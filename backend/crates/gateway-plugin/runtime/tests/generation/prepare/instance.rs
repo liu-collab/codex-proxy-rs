@@ -20,6 +20,50 @@ fn startup_count(marker: &Path) -> usize {
 }
 
 #[tokio::test]
+async fn cold_preparation_overlaps_startup_with_bounded_concurrency() {
+    let (cache, store, runtime) = super::super::setup().await;
+    let mut snapshot = store.snapshot.lock().unwrap().clone();
+    let template = snapshot.instances[0].clone();
+    let gate = cache.path().join("startup-gate");
+    let markers: Vec<_> = (0..3)
+        .map(|index| cache.path().join(format!("startup-{index}")))
+        .collect();
+    snapshot.instances = markers
+        .iter()
+        .enumerate()
+        .map(|(index, marker)| {
+            let mut instance = template.clone();
+            instance.id = format!("instance-{index}");
+            instance.configuration = serde_json::json!({
+                "startup_marker": marker,
+                "startup_gate": gate,
+            });
+            instance
+        })
+        .collect();
+    let release = async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while startup_count(&markers[0]) == 0 || startup_count(&markers[1]) == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("both startup handshakes must progress before either is ready");
+        assert_eq!(
+            startup_count(&markers[2]),
+            0,
+            "preparation keeps its concurrency budget"
+        );
+        std::fs::write(&gate, []).unwrap();
+    };
+    let (prepared, ()) = tokio::join!(PluginPreparation::prepare(&runtime, snapshot), release);
+    let prepared = prepared.unwrap();
+    assert!(markers.iter().all(|marker| startup_count(marker) == 1));
+    drop(prepared);
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
 async fn registration_with_a_changed_contribution_id_is_rejected() {
     let (cache, store, runtime) = super::super::setup_with_contributions(Contributions::from([
         crate::support::contribution(

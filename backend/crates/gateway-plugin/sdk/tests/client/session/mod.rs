@@ -193,7 +193,7 @@ impl PluginHandler for TestHandler {
                     ErrorCode::Upstream,
                     "x".repeat(MAXIMUM_STREAM_CHUNK_BYTES),
                 )),
-                "oversized_result" => Ok(CallReply::unary(
+                "large_result" => Ok(CallReply::unary(
                     Value::String("x".repeat(MAXIMUM_STREAM_CHUNK_BYTES)),
                     Vec::new(),
                 )),
@@ -308,7 +308,7 @@ fn middleware_contributions() -> Contributions {
         Capability::Middleware,
         ContributionDeclaration {
             id: "test.example.middleware".into(),
-            version: 4,
+            version: 5,
             stages: vec![Stage::Request],
             input_formats: vec!["openai".into()],
             output_formats: vec!["openai".into()],
@@ -365,6 +365,7 @@ fn handshake() -> Handshake {
 
 pub(super) fn context(id: u64, timeout: Duration) -> CallContext {
     CallContext {
+        request: None,
         call_id: id,
         instance_id: "test-instance".into(),
         generation: 7,

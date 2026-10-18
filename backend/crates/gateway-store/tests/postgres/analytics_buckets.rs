@@ -39,7 +39,7 @@ async fn dirty_quarters_share_one_hour_rebuild_and_acknowledge_each_bucket() {
     let Some(database) = TestDatabase::create("analytics_coalesced_hour").await else {
         return;
     };
-    sqlx::raw_sql("create table hourly_build_audit (bucket_start timestamptz); create function audit_hourly_build() returns trigger language plpgsql as $$begin if new.collection='global' then insert into hourly_build_audit values(new.bucket_start); end if; return new; end$$; create trigger audit_hourly_build after insert on request_analytics_hourly for each row execute function audit_hourly_build()")
+    sqlx::raw_sql("create table hourly_build_audit (bucket_start timestamptz); create function audit_hourly_build() returns trigger language plpgsql as $$begin if new.collection='global' then insert into hourly_build_audit values(new.bucket_start); end if; return new; end$$; create trigger audit_hourly_build after insert on request_analytics_1h for each row execute function audit_hourly_build()")
         .execute(&database.pool).await.unwrap();
     seed_hour(&database.pool, hour(), "coalesced").await;
     drain_analytics(&database.pool).await;
@@ -142,7 +142,7 @@ async fn changed_quarter_invalidates_a_partial_hour_before_its_inputs_are_rebuil
         }
     }
     assert_eq!(worker.status().await.unwrap().pending_buckets, 0);
-    let hour_total: i64 = sqlx::query_scalar("select (counts->>'total_tokens')::bigint from request_analytics_hourly where collection='global'")
+    let hour_total: i64 = sqlx::query_scalar("select (counts->>'total_tokens')::bigint from request_analytics_1h where collection='global'")
         .fetch_one(&database.pool).await.unwrap();
     assert_eq!(hour_total, 7 * 130 + 9999);
     database.close().await;
@@ -271,7 +271,7 @@ async fn incremental_deletions_repair_extrema_last_usage_and_zero_currency_prese
         .await
         .unwrap();
     drain_analytics(&database.pool).await;
-    let row: (i64,f64,f64,DateTime<Utc>,serde_json::Value) = sqlx::query_as("select (counts->>'request_count')::bigint,(distributions->'latency_ms'->>'minimum')::double precision,(distributions->'latency_ms'->>'maximum')::double precision,last_used_at,costs from request_analytics_hourly where collection='global'")
+    let row: (i64,f64,f64,DateTime<Utc>,serde_json::Value) = sqlx::query_as("select (counts->>'request_count')::bigint,(distributions->'latency_ms'->>'minimum')::double precision,(distributions->'latency_ms'->>'maximum')::double precision,last_used_at,costs from request_analytics_1h where collection='global'")
         .fetch_one(&database.pool).await.unwrap();
     assert_eq!(
         (row.0, row.1, row.2, row.3),
@@ -290,13 +290,12 @@ async fn incremental_deletions_repair_extrema_last_usage_and_zero_currency_prese
         .execute(&database.pool).await.unwrap();
     drain_analytics(&database.pool).await;
     let costs: serde_json::Value =
-        sqlx::query_scalar("select costs from request_analytics_hourly where collection='global'")
+        sqlx::query_scalar("select costs from request_analytics_1h where collection='global'")
             .fetch_one(&database.pool)
             .await
             .unwrap();
     assert_eq!(costs, serde_json::json!({}));
-    sqlx::query("select enqueue_request_analytics('extrema_3',$1)")
-        .bind(hour() + TimeDelta::minutes(3))
+    sqlx::query("select enqueue_request_analytics('extrema_3')")
         .execute(&database.pool)
         .await
         .unwrap();

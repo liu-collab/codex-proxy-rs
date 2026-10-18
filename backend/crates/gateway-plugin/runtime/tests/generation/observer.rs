@@ -232,16 +232,17 @@ async fn wait_for_lines(path: &std::path::Path, count: usize) -> Vec<serde_json:
 async fn frozen_plan_applies_scope_order_and_instance_deduplication() {
     let marker_directory = tempfile::tempdir().unwrap();
     let marker = marker_directory.path().join("observations.jsonl");
+    let context_marker = marker_directory.path().join("context.jsonl");
     let (cache, _store, runtime) = setup(
         vec![
             (
                 "late",
-                serde_json::json!({"observation_label":"late","observation_marker":marker}),
+                serde_json::json!({"observation_label":"late","observation_marker":marker,"request_context_marker":context_marker}),
                 vec![binding(EventKind::RequestCompleted, 20)],
             ),
             (
                 "early",
-                serde_json::json!({"observation_label":"early","observation_marker":marker}),
+                serde_json::json!({"observation_label":"early","observation_marker":marker,"request_context_marker":context_marker}),
                 vec![
                     binding(EventKind::RequestCompleted, 10),
                     binding(EventKind::WebSocketResponse, 10),
@@ -261,6 +262,21 @@ async fn frozen_plan_applies_scope_order_and_instance_deduplication() {
     plan.dispatch(
         generation.clone(),
         observation("req_observed", RequestObservationOutcome::Succeeded)
+            .with_extension_scope(
+                gateway_core::engine::extensions::ExtensionCallScope::default().with_request(
+                    Arc::new(gateway_core::engine::extensions::RequestContext {
+                        method: "POST".into(),
+                        uri: "/v1/responses?observer=1".into(),
+                        http_version: "HTTP/1.1".into(),
+                        headers: vec![gateway_core::engine::middleware::MiddlewareHeader::new(
+                            "x-binary",
+                            vec![128, 255].into(),
+                        )],
+                        peer_addr: Some("[2001:db8::1]:42000".parse().unwrap()),
+                        client_ip: Some("203.0.113.7".parse().unwrap()),
+                    }),
+                ),
+            )
             .with_provider(ProviderKind::new("openai").unwrap()),
     );
     let lines = wait_for_lines(&marker, 2).await;
@@ -269,6 +285,16 @@ async fn frozen_plan_applies_scope_order_and_instance_deduplication() {
         2,
         "one completed event carries both terminal and usage facts"
     );
+    let contexts = wait_for_lines(&context_marker, 2).await;
+    for captured in &contexts {
+        assert_eq!(captured["request"]["uri"], "/v1/responses?observer=1");
+        assert_eq!(captured["request"]["peer_addr"], "[2001:db8::1]:42000");
+        assert_eq!(captured["request"]["client_ip"], "203.0.113.7");
+        let request: gateway_plugin_sdk::RequestContext =
+            serde_json::from_value(captured["request"].clone()).unwrap();
+        assert_eq!(request.headers[0].name, "x-binary");
+        assert_eq!(request.headers[0].value, [128, 255]);
+    }
     assert_eq!(lines[0]["label"], "early");
     assert!(lines[0]["observation"]["terminal"].is_object());
     assert_eq!(lines[0]["observation"]["usage"]["total_tokens"], 18);
@@ -528,7 +554,7 @@ async fn websocket_observer_bounds_event_count_and_payload_bytes_without_blockin
 }
 
 #[tokio::test]
-async fn malformed_observer_response_stops_only_the_observer() {
+async fn unused_observer_response_does_not_stop_the_shared_session() {
     let marker_directory = tempfile::tempdir().unwrap();
     let completed = marker_directory.path().join("healthy.jsonl");
     let (cache, _store, runtime) = setup(
@@ -560,7 +586,7 @@ async fn malformed_observer_response_stops_only_the_observer() {
             .with_provider(ProviderKind::new("openai").unwrap()),
     );
     wait_for_lines(&completed, 1).await;
-    assert!(!generation.is_ready());
+    assert!(generation.is_ready());
     assert!(generation.can_serve());
     drop(plan);
     drop(generation);

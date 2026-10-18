@@ -139,7 +139,7 @@ function moveWithKeyboard(index: number, offset: -1 | 1) {
               <ZIconButton
                 size="small" :disabled="sortingDisabled"
                 :aria-label="`拖动步骤 ${index + 1}：${item.field}`" :aria-describedby="reorderHelpId"
-                data-step-handle class="absolute top-1 left-1 touch-none cursor-grab active:cursor-grabbing disabled:cursor-not-allowed"
+                data-step-handle class="absolute top-1.5 left-1.5 size-6! touch-none cursor-grab p-0 active:cursor-grabbing disabled:cursor-not-allowed"
                 @keydown.up.stop.prevent="moveWithKeyboard(index, -1)"
                 @keydown.down.stop.prevent="moveWithKeyboard(index, 1)"
               >
@@ -156,7 +156,7 @@ function moveWithKeyboard(index: number, offset: -1 | 1) {
                 <span class="truncate text-cp-xs leading-4" :class="selected === index ? 'text-cp-primary-on-container' : 'text-cp-text-secondary'" :title="`${item.scope} · ${item.action}`">{{ item.scope }} · {{ item.action }}</span>
                 <span class="truncate font-mono text-cp-xs leading-4" :class="selected === index ? 'text-cp-primary-on-container' : 'text-cp-text-tertiary'" :title="item.effect">{{ item.effect }}</span>
               </button>
-              <ZIconButton size="small" class="absolute top-1 right-1" :disabled="steps.length === 1" :aria-label="`删除步骤 ${index + 1}：${item.field}`" @click="emit('remove', index)">
+              <ZIconButton size="small" class="absolute top-1.5 right-1.5 size-6! p-0" :disabled="steps.length === 1" :aria-label="`删除步骤 ${index + 1}：${item.field}`" @click="emit('remove', index)">
                 <Trash2 class="size-3.5" />
               </ZIconButton>
             </li>
