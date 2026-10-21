@@ -113,6 +113,8 @@ function previewUsageRecord(options: PreviewUsageRecordOptions): UsageListRecord
   return {
     id: options.id,
     logicalOutcome: 'succeeded',
+    errorCode: null,
+    errorMessage: null,
     clientApiKeyName: '演示 Key',
     provider: options.provider,
     authenticationKind: options.authenticationKind,
@@ -272,26 +274,26 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
   wireProfiles: [
     {
       provider: 'openai',
-      product: 'Codex CLI',
-      version: '0.34.0',
-      build: '20260820',
+      product: 'Codex Desktop',
+      version: '0.163.0-alpha.10.2',
       target: {
         osType: 'Mac OS',
-        osVersion: '15.6',
+        osVersion: '27.0.1',
         arch: 'arm64',
-        terminal: 'iTerm.app',
+        terminal: '—',
       },
-      userAgent: 'codex_cli_rs/0.34.0',
+      userAgent: 'codex_cli_rs/0.163.0-alpha.10.2 (Mac OS 27.0.1; arm64) Codex Desktop; 26.1013.40934',
       attributes: [
-        { label: '客户端标识', value: 'codex_cli_rs' },
+        { label: '客户端标识', value: 'Codex Desktop; 26.1013.40934' },
         { label: 'Token 认证', value: 'bearer' },
       ],
-      verifiedAt: '2026-08-23T10:28:00+08:00',
+      verifiedAt: '2026-10-17T20:15:28+08:00',
+      verifiedAtDisplay: '2026-10-17 20:15:28',
       release: {
         status: 'aligned',
-        checkedAt: '2026-08-23T10:30:00+08:00',
-        latestVersion: '0.34.0',
-        latestBuild: '20260820',
+        checkedAt: '2026-10-17T22:27:13+08:00',
+        checkedAtDisplay: '2026-10-17 22:27:13',
+        latestVersion: '0.163.0-alpha.10.2',
       },
     },
     {
@@ -310,9 +312,11 @@ export const themeDashboardSummary: DashboardSummaryResponse = {
         { label: 'Token 认证', value: 'bearer' },
       ],
       verifiedAt: '2026-08-23T10:25:00+08:00',
+      verifiedAtDisplay: '2026-08-23 10:25:00',
       release: {
         status: 'review_required',
         checkedAt: '2026-08-23T10:30:00+08:00',
+        checkedAtDisplay: '2026-08-23 10:30:00',
         latestVersion: '0.7.4',
       },
     },

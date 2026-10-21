@@ -20,7 +20,7 @@ version = "0.0.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
-rust-version = "1.97"
+rust-version = "1.99.1"
 
 [workspace.lints.rust]
 warnings = "deny"
@@ -43,7 +43,7 @@ opt-level = 2
 [profile.dev.package.blake2]
 opt-level = 2
 
-[profile.dev.package."sha2@0.11.0"]
+[profile.dev.package."sha2@0.11.1"]
 opt-level = 2
 
 [profile.dev.package."miniz_oxide@0.9.1"]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { UsageListRecord } from '@/api'
+import type { UsageModelRecord } from './shared/presenter'
 
 import { CornerDownRight } from '@lucide/vue'
 
@@ -7,7 +7,7 @@ import { computed } from 'vue'
 import { usageModelDisplay } from './shared/presenter'
 
 const props = defineProps<{
-  record: UsageListRecord
+  record: UsageModelRecord
 }>()
 
 const modelDisplay = computed(() => usageModelDisplay(props.record))

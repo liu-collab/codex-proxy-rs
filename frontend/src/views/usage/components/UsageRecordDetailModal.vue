@@ -18,7 +18,7 @@ import {
 } from '@/components/usage/shared/presenter'
 import { useChartPalette } from '@/composables/useChartPalette'
 import { formatDuration, formatInteger } from '@/utils/format'
-import { displayValue, fieldLabelClass, fieldValueBaseClass, fieldValueClass, visibleRequestText, visibleResponseText } from '../utils/detail'
+import { attemptOutcomeClass, attemptOutcomeText, displayValue, fieldLabelClass, fieldValueBaseClass, visibleRequestText, visibleResponseText } from '../utils/detail'
 import DiagnosticsDownloadButton from './DiagnosticsDownloadButton.vue'
 import UsageDetailCodePanel from './UsageDetailCodePanel.vue'
 import UsageDetailFieldGrid from './UsageDetailFieldGrid.vue'
@@ -50,8 +50,14 @@ const finalAttemptIndex = computed(() => {
   const last = attempts[attempts.length - 1]
   return last?.attemptIndex ?? props.record?.attemptCount
 })
-const overviewItems = computed(() => [
+const requestItems = computed(() => [
+  { label: '账号', value: accountDisplay.value, mono: true, fullWidth: true },
+  { label: '状态码', value: props.record?.statusCode, mono: true },
+  { label: '消息', value: props.record?.message },
+  { label: '时间', value: props.record?.createdAtDisplay, mono: true },
   { label: '端点', value: props.record?.route, mono: true },
+])
+const overviewItems = computed(() => [
   { label: '客户端传输', value: usageTransportType(props.record?.clientTransport), mono: true },
   { label: '上游传输', value: usageTransportType(props.record?.upstreamTransport), mono: true },
   { label: '总耗时', value: props.record?.latencyMsDisplay, mono: true },
@@ -86,7 +92,6 @@ const clientUpstreamItems = computed(() => [
     label: 'User-Agent',
     value: props.record ? usageUserAgent(props.record) : '',
     mono: true,
-    wrap: true,
     fullWidth: true,
   },
 ])
@@ -137,25 +142,6 @@ const attemptRows = computed<AttemptRow[]>(() =>
     latencyMs: attempt.latencyMs,
   })),
 )
-
-function attemptOutcomeText(outcome: string) {
-  const labels: Record<string, string> = {
-    succeeded: '成功',
-    failed: '失败',
-    cancelled: '取消',
-    incomplete: '未完成',
-    running: '进行中',
-  }
-  return labels[outcome] ?? outcome
-}
-
-function attemptOutcomeClass(outcome: string) {
-  if (outcome === 'succeeded')
-    return 'text-cp-success-text'
-  if (outcome === 'failed')
-    return 'text-cp-error-text'
-  return 'text-cp-text-secondary'
-}
 
 const billingItems = computed(() => {
   const value = billing.value
@@ -314,62 +300,19 @@ const tokenDonutOption = computed<EChartsOption>(() => {
     width="64rem"
   >
     <div v-if="record" class="grid min-w-0 gap-3">
-      <section :class="panelClass">
-        <dl
-          class="grid min-w-0 grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4 lg:grid-cols-[minmax(0,2fr)_100px_minmax(0,1fr)_180px]"
-        >
-          <div class="col-span-2 min-w-0 lg:col-span-1">
-            <dt :class="fieldLabelClass">
-              账号
-            </dt>
-            <dd
-              class="mt-1.5 mb-0 min-w-0 break-all font-mono text-cp-sm leading-snug font-heavy text-cp-text"
-              :title="displayValue(accountDisplay)"
-            >
-              {{ displayValue(accountDisplay) }}
-            </dd>
-          </div>
-
-          <div class="min-w-0">
-            <dt :class="fieldLabelClass">
-              状态码
-            </dt>
-            <dd :class="fieldValueClass(true)" :title="displayValue(record.statusCode)">
-              {{ displayValue(record.statusCode) }}
-            </dd>
-          </div>
-
-          <div class="min-w-0">
-            <dt :class="fieldLabelClass">
-              消息
-            </dt>
-            <dd :class="fieldValueClass()" :title="displayValue(record.message)">
-              {{ displayValue(record.message) }}
-            </dd>
-          </div>
-
-          <div class="col-span-2 min-w-0 lg:col-span-1">
-            <dt :class="fieldLabelClass">
-              时间
-            </dt>
-            <dd :class="fieldValueClass(true)" :title="displayValue(record.createdAtDisplay)">
-              {{ displayValue(record.createdAtDisplay) }}
-            </dd>
-          </div>
-        </dl>
-
-        <dl
-          class="mt-4 grid min-w-0 grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3 lg:grid-cols-[minmax(160px,1.4fr)_repeat(5,minmax(0,1fr))]"
-        >
-          <div v-for="item in overviewItems" :key="item.label" class="min-w-0">
-            <dt :class="fieldLabelClass">
-              {{ item.label }}
-            </dt>
-            <dd :class="fieldValueClass(item.mono)" :title="displayValue(item.value)">
-              {{ displayValue(item.value) }}
-            </dd>
-          </div>
-        </dl>
+      <section class="grid min-w-0 gap-3 lg:grid-cols-2">
+        <section :class="panelClass">
+          <h3 :class="panelTitleClass">
+            请求信息
+          </h3>
+          <UsageDetailFieldGrid :items="requestItems" />
+        </section>
+        <section :class="panelClass">
+          <h3 :class="panelTitleClass">
+            传输与用量
+          </h3>
+          <UsageDetailFieldGrid :items="overviewItems" />
+        </section>
       </section>
 
       <section class="grid min-w-0 gap-3 lg:grid-cols-2">

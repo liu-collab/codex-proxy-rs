@@ -5,9 +5,8 @@ use chrono::{Duration, Utc};
 use gateway_admin::model::{
     client_keys::ClientKeyRecord,
     observability::{
-        AttemptMetrics, CostCoverage, CurrencyCost, DecimalAmount, Granularity, OpsError,
-        RequestMetricPoint, RequestMetrics, TimeRange, UsageBilling, UsageListRecord,
-        UsageOverview,
+        AttemptMetrics, CostCoverage, CurrencyCost, DecimalAmount, Granularity, RequestMetricPoint,
+        RequestMetrics, TimeRange, UsageBilling, UsageListRecord, UsageOverview,
     },
 };
 use gateway_core::{
@@ -87,12 +86,14 @@ pub(super) async fn fixture() -> AdminTestFixture {
         }]);
     }
     fixture.usage_records.lock().unwrap().push(usage_record());
-    fixture.ops_errors.lock().unwrap().push(error_record());
     fixture
 }
 
 fn usage_record() -> UsageListRecord {
     UsageListRecord {
+        error_code: None,
+        error_message: None,
+        client_status_code: None,
         outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
         client_api_key_name: Some("Production".to_owned()),
         id: "req-visible".to_owned(),
@@ -139,11 +140,7 @@ fn usage_record() -> UsageListRecord {
         provider_processing_ms: None,
         upstream_response_ms: Some(1_000),
         upstream_api_overhead_ms: None,
-        upstream_engine_ms: None,
-        upstream_engine_iapi_ttft_ms: None,
-        upstream_engine_service_ttft_ms: None,
-        upstream_engine_iapi_tbt_ms: Some(2.450638),
-        upstream_engine_service_tbt_ms: None,
+        upstream_engine_ms: Some(2.450638),
         latency_ms: Some(1250),
         admission_decision_ms: None,
         account_selection_wait_ms: None,
@@ -156,63 +153,5 @@ fn usage_record() -> UsageListRecord {
         subagent_kind: Some("private-sentinel".to_owned()),
         compact: false,
         started_at: Utc::now(),
-    }
-}
-
-fn error_record() -> OpsError {
-    OpsError {
-        client_api_key_name: Some("Production".to_owned()),
-        source: "private-sentinel".to_owned(),
-        event_id: "error-visible".to_owned(),
-        request_id: Some("private-sentinel".to_owned()),
-        attempt_index: None,
-        client_api_key_ref: Some("private-sentinel".to_owned()),
-        component: "private-sentinel".to_owned(),
-        operation: "private-sentinel".to_owned(),
-        protocol: Some("private-sentinel".to_owned()),
-        client_transport: Some("http_sse".to_owned()),
-        requested_model_id: Some("coding".to_owned()),
-        service_tier: Some("private-sentinel".to_owned()),
-        endpoint: Some("/v1/responses".to_owned()),
-        provider_kind: Some("private-sentinel".to_owned()),
-        provider_account_ref: Some("private-sentinel".to_owned()),
-        provider_account_name: Some("private-sentinel".to_owned()),
-        provider_account_email: Some("private-sentinel".to_owned()),
-        provider_account_authentication_kind: Some("private-sentinel".to_owned()),
-        provider_account_plan_type: Some("private-sentinel".to_owned()),
-        provider_account_plan_type_display: Some("private-sentinel".to_owned()),
-        upstream_model_id: Some("private-sentinel".to_owned()),
-        upstream_transport: Some("websocket".to_owned()),
-        failure_kind: "private-sentinel".to_owned(),
-        upstream_send_state: Some("private-sentinel".to_owned()),
-        client_status_code: Some(502),
-        upstream_status_code: Some(503),
-        provider_error_code: Some("private-sentinel".to_owned()),
-        client_response_id: Some("private-sentinel".to_owned()),
-        upstream_request_id: Some("private-sentinel".to_owned()),
-        latency_ms: Some(420),
-        message: "private-sentinel".to_owned(),
-        error_details: Some("private-sentinel".to_owned()),
-        client_ip: Some("192.0.2.42".to_owned()),
-        user_agent: Some("key-usage-test/1.0".to_owned()),
-        reasoning_effort: Some("xhigh".to_owned()),
-        reasoning_preset: Some("private-sentinel".to_owned()),
-        request_kind: Some("private-sentinel".to_owned()),
-        subagent_kind: Some("private-sentinel".to_owned()),
-        compact: None,
-        continuation_affinity_hash: Some("private-sentinel".to_owned()),
-        continuation_previous_response_id_hash: Some("private-sentinel".to_owned()),
-        continuation_unavailable_reason: Some("private-sentinel".to_owned()),
-        upstream_connection_id: Some("private-sentinel".to_owned()),
-        upstream_connection_exit_reason: Some("private-sentinel".to_owned()),
-        upstream_connection_age_ms: None,
-        upstream_connection_idle_ms: None,
-        recovery_request_id: Some("private-sentinel".to_owned()),
-        recovered_at: None,
-        recovery_attempt_count: 0,
-        recovery_retry_delay_ms: None,
-        recovery_total_latency_ms: None,
-        occurred_at: Utc::now(),
-        stable_sort_id: "private-sentinel".to_owned(),
     }
 }

@@ -62,6 +62,11 @@ export interface PluginManagementCallbackTicket {
   expiresAtMs: number
 }
 
+interface PluginManagementCallbackTicketParam {
+  path: string
+  ttlSeconds: number
+}
+
 export function getPluginManagementViews(options: RequestOptions = {}) {
   return request<PluginManagementView[]>({
     url: '/api/admin/plugins/extensions',
@@ -122,7 +127,7 @@ export function callPluginModelResponses(
 
 export function createPluginManagementCallbackTicket(
   target: PluginManagementTarget,
-  data: { path: string, ttlSeconds: number },
+  data: PluginManagementCallbackTicketParam,
   options: RequestOptions = {},
 ) {
   return request<PluginManagementCallbackTicket>({

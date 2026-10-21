@@ -7,7 +7,6 @@ NOTES_FILE="release/notes.md"
 PLUGIN_DEPRECATIONS_FILE="backend/crates/gateway-plugin/runtime/plugin-api-deprecations.json"
 PLUGIN_COMPATIBILITY_FILE="backend/crates/gateway-plugin/runtime/plugin-host-compatibility.json"
 TAG_PREFIX="v"
-SEMVER='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(alpha|beta|rc|exp)\.[1-9][0-9]*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
 SIGNATURE="Co-authored-by: Codex <noreply@openai.com>"
 
 usage() {
@@ -79,11 +78,11 @@ require_command ruby
 
 gh auth status >/dev/null 2>&1 || die "gh authentication is required; run gh auth login first"
 
-version="${1#v}"
-[[ "$version" =~ $SEMVER ]] || die "version must be X.Y.Z or X.Y.Z-{alpha,beta,rc,exp}.N (N >= 1), optionally with +build metadata"
+version="$1"
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" || die "not inside a git repository"
 cd "$repo_root"
+version="$(ruby .github/scripts/release-metadata.rb validate "$version")"
 
 git ls-files --error-unmatch "$VERSION_FILE" >/dev/null 2>&1 || die "$VERSION_FILE is not tracked"
 
@@ -114,15 +113,6 @@ git ls-files --error-unmatch "$NOTES_FILE" >/dev/null 2>&1 || die "$NOTES_FILE i
 if git diff HEAD --quiet -- "$NOTES_FILE"; then
   die "$NOTES_FILE must have uncommitted changes so notes and version are committed together"
 fi
-ruby - "$NOTES_FILE" "$tag" <<'RUBY'
-path, tag = ARGV
-lines = File.readlines(path)
-unless lines.first&.strip == "# #{tag}" && !lines.drop(1).join.strip.empty?
-  warn "#{path}: replace the contents with notes for #{tag}, starting with '# #{tag}'"
-  exit 1
-end
-RUBY
-
 if git rev-parse --quiet --verify "refs/tags/$tag" >/dev/null; then
   die "local tag already exists: $tag"
 fi
@@ -145,7 +135,7 @@ if git ls-remote --exit-code --tags "$remote" "refs/tags/$tag" >/dev/null 2>&1; 
   die "remote tag already exists: $tag"
 fi
 
-ruby release/plugin-api-lifecycle.rb "$PLUGIN_DEPRECATIONS_FILE" "$PLUGIN_COMPATIBILITY_FILE" "$version"
+ruby backend/crates/gateway-plugin/runtime/plugin-api-lifecycle.rb "$PLUGIN_DEPRECATIONS_FILE" "$PLUGIN_COMPATIBILITY_FILE" "$version"
 update_version_file "$version"
 
 git add -- "$VERSION_FILE" "$NOTES_FILE" "$PLUGIN_DEPRECATIONS_FILE"

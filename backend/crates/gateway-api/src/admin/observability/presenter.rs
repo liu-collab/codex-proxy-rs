@@ -262,6 +262,8 @@ pub(crate) fn usage_list_record_view(
         .clone()
         .or_else(|| record.requested_model_id.clone());
     UsageListRecordView {
+        error_code: record.error_code,
+        error_message: record.error_message,
         logical_outcome: record.outcome.as_str().to_owned(),
         client_api_key_name: record.client_api_key_name,
         id: record.id,
@@ -302,10 +304,6 @@ pub(crate) fn usage_list_record_view(
             upstream_response_ms: record.upstream_response_ms,
             upstream_api_overhead_ms: record.upstream_api_overhead_ms,
             upstream_engine_ms: record.upstream_engine_ms,
-            upstream_engine_iapi_ttft_ms: record.upstream_engine_iapi_ttft_ms,
-            upstream_engine_service_ttft_ms: record.upstream_engine_service_ttft_ms,
-            upstream_engine_iapi_tbt_ms: record.upstream_engine_iapi_tbt_ms,
-            upstream_engine_service_tbt_ms: record.upstream_engine_service_tbt_ms,
         },
         first_token_latency_ms: record.first_token_ms,
         latency_ms: record.latency_ms,
@@ -409,10 +407,6 @@ pub(crate) fn usage_record_view(
             upstream_response_ms: record.upstream_response_ms,
             upstream_api_overhead_ms: record.upstream_api_overhead_ms,
             upstream_engine_ms: record.upstream_engine_ms,
-            upstream_engine_iapi_ttft_ms: record.upstream_engine_iapi_ttft_ms,
-            upstream_engine_service_ttft_ms: record.upstream_engine_service_ttft_ms,
-            upstream_engine_iapi_tbt_ms: record.upstream_engine_iapi_tbt_ms,
-            upstream_engine_service_tbt_ms: record.upstream_engine_service_tbt_ms,
         },
         attempt_index: None,
         attempt_count: u64::from(record.attempt_count),

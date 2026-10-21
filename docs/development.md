@@ -14,7 +14,7 @@
 
 ## 环境与依赖
 
-需要 Node.js 24、pnpm、[Rust 工具链](architecture.md#验证命令)、PostgreSQL 和 Redis
+需要 Node.js 26.12.0、pnpm、[Rust 工具链](architecture.md#验证命令)、PostgreSQL 和 Redis
 
 各前端的 `packageManager` 固定 pnpm 版本，宿主 CI 和 Docker 从 `frontend/package.json` 读取
 
@@ -41,7 +41,7 @@ pnpm --dir frontend install --frozen-lockfile
 
 ```bash
 docker compose -f deploy/compose.yaml up -d postgres redis
-cargo +1.97.0 run --manifest-path backend/Cargo.toml -p codex-proxy-rs --locked
+cargo +1.99.1 run --manifest-path backend/Cargo.toml -p codex-proxy-rs --locked
 ```
 
 后端从当前目录向上查找 `deploy/config.yaml`，本机运行时数据库与 Redis 地址应指向可访问的本机端口
@@ -130,7 +130,7 @@ pnpm --dir modules/plugins/examples/workbench/frontend build:source
   cp -R modules/plugins/examples/workbench/backend/{src,tests} "$cpr_sdk_check_dir/backend/"
   cp modules/plugins/examples/workbench/plugin.json "$cpr_sdk_check_dir/"
   RUST_MIN_STACK=16777216 CARGO_TARGET_DIR="$PWD/backend/target/plugin-development" \
-    cargo +1.97.0 test --manifest-path "$cpr_sdk_check_dir/backend/Cargo.toml" \
+    cargo +1.99.1 test --manifest-path "$cpr_sdk_check_dir/backend/Cargo.toml" \
     --config "patch.\"https://github.com/zyycn/codex-proxy-rs.git\".gateway-plugin-sdk.path=\"$PWD/backend/crates/gateway-plugin/sdk\""
 )
 ```

@@ -315,6 +315,7 @@ pub struct DashboardObservation {
     pub analytics: admin_observability::AnalyticsMetadata,
     pub range: ObservabilityRange,
     pub totals: DashboardTotals,
+    pub yesterday: RequestMetrics,
     pub provider_accounts: ProviderAccountMetrics,
     pub runtime_slots: admin_observability::DashboardRuntimeSlots,
     pub trend: Vec<RequestMetricPoint>,

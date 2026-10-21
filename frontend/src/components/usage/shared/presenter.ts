@@ -9,6 +9,9 @@ export type UsagePerformanceRecord = Pick<UsageCommonRecord, 'latencyDetails' | 
   tokenDetails: Pick<UsageListRecord['tokenDetails'], 'outputTokens'> | null
 }
 
+export type UsageModelRecord = Pick<UsageCommonRecord, 'model'> & Partial<Pick<UsageCommonRecord, 'requestedModel' | 'upstreamModel' | 'upstreamResponseModel'>>
+export type UsageReasoningRecord = Pick<UsageCommonRecord, 'reasoningEffort'> & Partial<Pick<UsageCommonRecord, 'reasoningPreset' | 'subagentKind'>>
+
 interface UsageTimingItem {
   label: string
   value: string
@@ -58,7 +61,7 @@ export function usageTransportTypeClass(transport?: string | null) {
   return 'bg-cp-fill-tertiary text-cp-text-secondary'
 }
 
-export function usageAccountText(record: UsageCommonRecord) {
+export function usageAccountText(record: Pick<UsageCommonRecord, 'accountEmail' | 'accountName' | 'accountId'>) {
   return record.accountEmail || record.accountName || record.accountId || '—'
 }
 
@@ -70,14 +73,14 @@ export function usageUserAgent(record: { userAgent?: string | null }) {
   return record.userAgent || '—'
 }
 
-export function usageReasoningEffort(record: UsageCommonRecord) {
+export function usageReasoningEffort(record: UsageReasoningRecord) {
   const reasoningEffort = record.reasoningEffort || '—'
   if (record.subagentKind)
     return reasoningEffort
   return record.reasoningPreset || reasoningEffort
 }
 
-export function usageModelDisplay(record: UsageCommonRecord) {
+export function usageModelDisplay(record: UsageModelRecord) {
   const requestedModel = record.requestedModel || ''
   const upstreamModel = record.upstreamModel || ''
   const storedModel = record.model || ''
@@ -194,10 +197,6 @@ export function usageLatencyDetails(record: UsageLatencyRecord) {
   const performanceItems = [
     { label: 'API 开销', value: durationValue(latencyDetails?.upstreamApiOverheadMs) },
     { label: '引擎耗时', value: durationValue(latencyDetails?.upstreamEngineMs) },
-    { label: 'TTFT · IAPI', value: durationValue(latencyDetails?.upstreamEngineIapiTtftMs) },
-    { label: 'TTFT · Service', value: durationValue(latencyDetails?.upstreamEngineServiceTtftMs) },
-    { label: 'Token 间隔 · IAPI', value: durationValue(latencyDetails?.upstreamEngineIapiTbtMs) },
-    { label: 'Token 间隔 · Service', value: durationValue(latencyDetails?.upstreamEngineServiceTbtMs) },
   ]
   for (const item of performanceItems) {
     if (item.value !== null)

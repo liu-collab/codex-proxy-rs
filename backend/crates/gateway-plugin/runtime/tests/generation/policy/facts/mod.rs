@@ -102,7 +102,21 @@ async fn reading_websocket_facts_preserves_original_text_and_opaque_messages() {
         );
     }
     assert_eq!(delivered, messages);
-    assert_eq!(marker_lines(&marker, 4).await.len(), 4);
+    let snapshots = marker_lines(&marker, 4).await;
+    for (snapshot, original) in snapshots[1..].iter().zip(&messages) {
+        let event: gateway_plugin_sdk::call::model::ExecutionEvent =
+            serde_json::from_value(snapshot.clone()).unwrap();
+        let gateway_plugin_sdk::call::model::WirePayload::WebSocket { data, message, .. } =
+            event.wire.unwrap().payload
+        else {
+            panic!("WebSocket facts must retain their original transport");
+        };
+        assert_eq!(message, original.as_bytes());
+        assert_eq!(
+            data.is_some(),
+            serde_json::from_str::<serde_json::Value>(original).is_ok()
+        );
+    }
     drop(stream);
     runtime.shutdown().await;
 }
@@ -186,7 +200,7 @@ async fn facts_are_readable_without_replacing_or_duplicating_the_original_execut
             .with_timings(ProviderResponseTimings {
                 headers_ms: Some(19),
                 upstream_response_ms: Some(7_000),
-                upstream_engine_iapi_tbt_ms: Some(2.450638),
+                upstream_engine_ms: Some(2.450638),
                 ..Default::default()
             }),
     );
@@ -273,7 +287,7 @@ async fn facts_are_readable_without_replacing_or_duplicating_the_original_execut
     );
     assert_eq!(facts["observation"]["timings"]["headers_ms"], 19);
     assert_eq!(
-        facts["observation"]["timings"]["upstream_engine_iapi_tbt_ms"],
+        facts["observation"]["timings"]["upstream_engine_ms"],
         2.450638
     );
     assert_eq!(

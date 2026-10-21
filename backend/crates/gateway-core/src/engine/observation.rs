@@ -807,10 +807,6 @@ impl ResponseObservation {
         self.timings.upstream_response_ms = None;
         self.timings.upstream_api_overhead_ms = None;
         self.timings.upstream_engine_ms = None;
-        self.timings.upstream_engine_iapi_ttft_ms = None;
-        self.timings.upstream_engine_service_ttft_ms = None;
-        self.timings.upstream_engine_iapi_tbt_ms = None;
-        self.timings.upstream_engine_service_tbt_ms = None;
     }
 
     pub(super) fn observe_response(&mut self, observation: &ProviderResponseObservation) {
@@ -847,18 +843,6 @@ impl ResponseObservation {
         }
         if let Some(value) = observed.upstream_engine_ms {
             self.timings.upstream_engine_ms = Some(value);
-        }
-        if let Some(value) = observed.upstream_engine_iapi_ttft_ms {
-            self.timings.upstream_engine_iapi_ttft_ms = Some(value);
-        }
-        if let Some(value) = observed.upstream_engine_service_ttft_ms {
-            self.timings.upstream_engine_service_ttft_ms = Some(value);
-        }
-        if let Some(value) = observed.upstream_engine_iapi_tbt_ms {
-            self.timings.upstream_engine_iapi_tbt_ms = Some(value);
-        }
-        if let Some(value) = observed.upstream_engine_service_tbt_ms {
-            self.timings.upstream_engine_service_tbt_ms = Some(value);
         }
     }
 }

@@ -12,6 +12,7 @@ mod precommit;
 mod privacy;
 mod recovery;
 mod response_interrupt;
+mod search_history;
 mod search_model_access;
 mod selection_retry;
 mod session_binding;
@@ -1067,6 +1068,34 @@ async fn capture_replay_compatibility_request(
     api_key: bool,
     websocket: bool,
 ) -> Value {
+    let original = json!({
+        "model":"gpt-5.4","store":false,"stream":true,"input":input,
+        "instructions":"Preserve the original instructions.",
+        "tools":[{"type":"function","name":"echo","parameters":{"type":"object","properties":{"status":{"type":"string"},"content":{"type":"array"}}}}],
+        "future_field":{"status":"keep","content":[1]},
+        "client_metadata":{"extension":{"status":"keep","content":[1]}}
+    });
+    let actual = capture_downstream_request(original.clone(), api_key, websocket, false).await;
+    for field in ["model", "store", "instructions", "tools", "future_field"] {
+        assert_eq!(
+            actual[field].to_string(),
+            original[field].to_string(),
+            "unexpected change in {field}"
+        );
+    }
+    assert_eq!(
+        actual["client_metadata"]["extension"],
+        original["client_metadata"]["extension"]
+    );
+    actual
+}
+
+async fn capture_downstream_request(
+    original: Value,
+    api_key: bool,
+    websocket: bool,
+    lite: bool,
+) -> Value {
     let http = MockServer::start().await;
     let (base_url, websocket_server) = if websocket {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1117,33 +1146,33 @@ async fn capture_replay_compatibility_request(
     } else {
         create_account(&store, "acct_provider_contract").await;
     }
-    let original = json!({
-        "model":"gpt-5.4","store":false,"stream":true,"input":input,
-        "instructions":"Preserve the original instructions.",
-        "tools":[{"type":"function","name":"echo","parameters":{"type":"object","properties":{"status":{"type":"string"},"content":{"type":"array"}}}}],
-        "future_field":{"status":"keep","content":[1]},
-        "client_metadata":{"extension":{"status":"keep","content":[1]}}
-    });
     let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
         ProtocolPayload::json_object("openai", original.as_object().unwrap().clone())
             .unwrap()
-            .with_context(Map::from_iter([(
-                "use_websocket".to_owned(),
-                json!(websocket),
-            )])),
+            .with_context(Map::from_iter([
+                ("use_websocket".to_owned(), json!(websocket)),
+                (
+                    "responses_lite".to_owned(),
+                    json!(if lite { "true" } else { "false" }),
+                ),
+            ])),
     ));
     let provider = provider_with_base_url(&store, base_url);
     let mut stream = provider
         .execute(
             planned_request("openai", operation),
-            context("req_replay_compatibility", CancellationToken::new()),
+            context_with_state_owner_and_location(
+                "req_replay_compatibility",
+                "acct_provider_contract",
+                None,
+            ),
         )
         .await
         .unwrap();
     while let Some(event) = stream.next().await {
         event.expect("successful upstream completion");
     }
-    let actual = if let Some(server) = websocket_server {
+    if let Some(server) = websocket_server {
         timeout(Duration::from_secs(5), server)
             .await
             .unwrap()
@@ -1156,19 +1185,7 @@ async fn capture_replay_compatibility_request(
             "compatibility must run before the first send, without retry"
         );
         captured_request_body(&requests[0])
-    };
-    for field in ["model", "store", "instructions", "tools", "future_field"] {
-        assert_eq!(
-            actual[field].to_string(),
-            original[field].to_string(),
-            "unexpected change in {field}"
-        );
     }
-    assert_eq!(
-        actual["client_metadata"]["extension"],
-        original["client_metadata"]["extension"]
-    );
-    actual
 }
 
 const CAPTURE_COMPLETED_SSE: &str = concat!(
@@ -9377,6 +9394,82 @@ async fn official_usage_limit_failure_persists_fact_without_fabricating_usage() 
         QuotaAccessState::Exhausted,
         "a failure follow-up must preserve access even when the reset recovery condition is met"
     );
+}
+
+#[tokio::test]
+async fn usage_limit_failure_recovers_with_credits_without_replaying_the_failed_request() {
+    let store = Arc::new(MemoryAccountStore::default());
+    let account_id = "acct_provider_contract";
+    create_account(&store, account_id).await;
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/codex/usage"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "rate_limit": {
+                "allowed": false,
+                "limit_reached": true,
+                "primary_window": {"used_percent": 100, "reset_at": 1_900_000_000}
+            },
+            "credits": {"has_credits": true, "unlimited": false, "balance": "20"}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/codex/responses"))
+        .respond_with(ResponseTemplate::new(429).set_body_json(json!({
+            "error": {"type": "usage_limit_reached", "message": "usage limit reached", "resets_at": 1_900_000_000}
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut stream = provider_with_base_url(&store, server.uri())
+        .execute(
+            planned_request("openai", http_generate_operation()),
+            context("req_usage_limit_credits", CancellationToken::new()),
+        )
+        .await
+        .expect("provider stream");
+    let failure = loop {
+        match stream.next().await {
+            Some(Ok(_)) => {}
+            Some(Err(error)) => break error,
+            None => panic!("quota failure must reach the caller"),
+        }
+    };
+    assert_eq!(failure.kind(), ProviderErrorKind::QuotaExhausted);
+    assert!(
+        store
+            .account(account_id)
+            .expect("account")
+            .quota()
+            .is_exhausted()
+    );
+
+    timeout(Duration::from_secs(5), async {
+        while store
+            .account(account_id)
+            .expect("account")
+            .quota()
+            .is_exhausted()
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("credits restore access after background refresh");
+    assert!(stream.next().await.is_none());
+    let account = store.account(account_id).expect("recovered account");
+    assert_eq!(account.quota().access(), QuotaAccessState::Allowed);
+    assert_eq!(account.credential_state(), CredentialState::Ready);
+    let quota = store.quota_json(account_id).expect("persisted credits");
+    assert_eq!(quota.pointer("/credits/has_credits"), Some(&json!(true)));
+    assert_eq!(
+        quota.pointer("/rate_limits_by_limit_id/codex/primary_window/used_percent"),
+        Some(&json!(100))
+    );
+    assert!(quota.get("_quota_recovery").is_none());
+    server.verify().await;
 }
 
 #[tokio::test]

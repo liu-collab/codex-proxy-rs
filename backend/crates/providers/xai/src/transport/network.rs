@@ -349,11 +349,11 @@ impl ReqwestGrokInferenceTransport {
     async fn client_for(
         &self,
         binding: &GrokSessionBinding,
-    ) -> Result<(Client, GrokInferenceClientCacheStatus), GrokInferenceTransportError> {
+    ) -> Result<(Client, GrokInferenceClientCacheStatus), Box<GrokInferenceTransportError>> {
         let entry = self
             .clients
             .entry(binding.clone())
-            .ok_or_else(inference_client_pool_unavailable_for_cache_miss)?;
+            .ok_or_else(|| Box::new(inference_client_pool_unavailable_for_cache_miss()))?;
         let status = if entry.initialized() {
             GrokInferenceClientCacheStatus::Hit
         } else {
@@ -374,7 +374,7 @@ impl ReqwestGrokInferenceTransport {
                     .build_inference_client(None, binding.outbound_proxy())
             })
             .await
-            .map_err(|_| inference_client_pool_unavailable_for_cache_miss())?;
+            .map_err(|_| Box::new(inference_client_pool_unavailable_for_cache_miss()))?;
         Ok((client.clone(), status))
     }
 }
@@ -410,7 +410,10 @@ impl GrokInferenceTransport for ReqwestGrokInferenceTransport {
                     .map(|header| (header.name(), header.value().expose().as_bytes())),
             );
             trace.capture("upstream.request.body", request.body());
-            let (client, client_cache_status) = self.client_for(request.binding()).await?;
+            let (client, client_cache_status) = self
+                .client_for(request.binding())
+                .await
+                .map_err(|error| *error)?;
             let mut builder = client
                 .post(request.endpoint().clone())
                 .body(request.body().to_vec());

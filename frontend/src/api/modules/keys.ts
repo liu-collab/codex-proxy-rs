@@ -92,6 +92,10 @@ interface ApiKeyIdParam {
   id: string
 }
 
+interface ApiKeyResetBudgetParam extends ApiKeyIdParam {
+  period: ApiKeyBudgetPeriod
+}
+
 export function getApiKeys(data: ApiKeyListParams, options: RequestOptions = {}) {
   return request<ApiKeyListResponse>({
     url: '/api/admin/client-keys',
@@ -133,7 +137,7 @@ export function deleteApiKey(data: ApiKeyIdParam) {
   })
 }
 
-export function resetApiKeyBudget(data: ApiKeyIdParam & { period: ApiKeyBudgetPeriod }) {
+export function resetApiKeyBudget(data: ApiKeyResetBudgetParam) {
   return request<ApiKeyMutationResponse>({
     url: '/api/admin/client-keys/reset-budget',
     method: 'POST',

@@ -10,6 +10,8 @@ const customLocation = computed(() => props.proxy.autoLocation ? null : props.pr
 const customLabel = computed(() => customLocation.value ? `${countryName(customLocation.value.country)} · ${customLocation.value.city}` : '')
 const flag = computed(() => location.value ? countryFlagUrl(location.value.country) : undefined)
 const label = computed(() => {
+  if (props.proxy.lastTest?.success === false)
+    return '连接失败'
   if (location.value)
     return `${countryName(location.value.country)} · ${location.value.city}`
   const detection = props.proxy.lastTest?.location
@@ -20,6 +22,8 @@ const label = computed(() => {
   return '出口未识别'
 })
 const description = computed(() => {
+  if (props.proxy.lastTest?.success === false)
+    return props.proxy.lastTest.message
   const detection = props.proxy.lastTest?.location
   if (detection?.status === 'failed')
     return detection.message
@@ -35,7 +39,7 @@ const description = computed(() => {
     <Globe v-else class="size-4 shrink-0 text-cp-text-tertiary" aria-hidden="true" />
     <span class="truncate">{{ label }}</span>
     <span v-if="customLocation" class="col-start-2 truncate text-cp-xs text-cp-text-secondary" :title="`自定义位置：${customLabel} · ${customLocation.timezone}`">
-      <span class="sr-only">自定义位置：</span>{{ customLabel }}
+      自定义：{{ customLabel }}
     </span>
   </span>
 </template>

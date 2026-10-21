@@ -8,6 +8,8 @@ import { resetUnauthorizedHandling } from '@/api/request'
 
 export const useAuthStore = defineStore('auth', () => {
   const session = shallowRef<AuthSession | null>(null)
+  // 登录身份变化使关联数据失效，正常续期只更新会话有效期。
+  const sessionGeneration = shallowRef(0)
   const isAuthenticated = computed(() => session.value !== null)
   const isAdmin = computed(() => session.value?.role === 'admin')
   const sessionChecked = shallowRef(false)
@@ -41,7 +43,10 @@ export const useAuthStore = defineStore('auth', () => {
       // 登录或退出之后到达的旧状态响应，不覆盖新会话。
       if (currentRevision === revision) {
         const wasAuthenticated = isAuthenticated.value
+        const previousRole = session.value?.role
         session.value = status.session
+        if (previousRole !== status.session?.role)
+          sessionGeneration.value += 1
         sessionChecked.value = true
         if (status.authenticated && !wasAuthenticated)
           resetUnauthorizedHandling()
@@ -61,6 +66,7 @@ export const useAuthStore = defineStore('auth', () => {
       revision += 1
       pendingCheck.value = undefined
       session.value = result
+      sessionGeneration.value += 1
       sessionChecked.value = true
       resetUnauthorizedHandling()
       return result
@@ -97,9 +103,10 @@ export const useAuthStore = defineStore('auth', () => {
     revision += 1
     pendingCheck.value = undefined
     session.value = null
+    sessionGeneration.value += 1
     sessionChecked.value = true
     resetUnauthorizedHandling()
   }
 
-  return { session, isAuthenticated, isAdmin, sessionChecked, loading, checking, checkAuth, refreshSession, login, logout, invalidateSession }
+  return { session, sessionGeneration, isAuthenticated, isAdmin, sessionChecked, loading, checking, checkAuth, refreshSession, login, logout, invalidateSession }
 })

@@ -59,10 +59,6 @@ export interface UsageLatencyDetails {
   upstreamResponseMs?: number
   upstreamApiOverheadMs?: number
   upstreamEngineMs?: number
-  upstreamEngineIapiTtftMs?: number
-  upstreamEngineServiceTtftMs?: number
-  upstreamEngineIapiTbtMs?: number
-  upstreamEngineServiceTbtMs?: number
   admissionDecisionMs?: number
   accountSelectionWaitMs?: number
   capacityUsedSlots?: number
@@ -85,6 +81,8 @@ export type UsageRecordStatus = 'success' | 'error' | 'all'
 
 export interface UsageListRecord {
   logicalOutcome: string
+  errorCode: string | null
+  errorMessage: string | null
   clientApiKeyName: string | null
   id: string
   provider: string | null
@@ -394,6 +392,8 @@ interface UsageDetailQuery {
 
 type UsageDiagnosticsQuery = UsageRangeQuery & { dimension: string }
 
+type DiagnosticsDownloadParams = { requestId: string } | { errorId: string }
+
 export function getUsageRecords(data: UsagePageQuery, options: RequestOptions = {}) {
   return request<UsageRecordsResponse>({
     url: '/api/admin/usage/records',
@@ -439,7 +439,7 @@ export function getUsageRecordInsightsDiagnostics(data: UsageDiagnosticsQuery, o
   })
 }
 
-export function downloadDiagnostics(data: { requestId: string } | { errorId: string }, options: RequestOptions = {}) {
+export function downloadDiagnostics(data: DiagnosticsDownloadParams, options: RequestOptions = {}) {
   return requestRaw({
     url: '/api/admin/diagnostics/export',
     method: 'GET',

@@ -3,7 +3,7 @@ import type { ApiKeyAccountForm } from '../utils/upstreamApiKey'
 
 import type { Account, AccountGroupRef, AccountModelAccess } from '@/api'
 
-import { ZButton, ZDialog, ZFormItem, ZSegmented, ZTextarea } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZEmpty, ZFormItem, ZSegmented, ZTextarea } from '@codex-proxy/ui'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { isOpenAiApiKeyAccount, isOpenAiOAuthAccount } from '../utils/upstreamApiKey'
@@ -70,9 +70,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         <p v-if="configurationLoading" role="status" class="m-0 text-cp-sm text-cp-text-secondary">
           正在读取上游设置…
         </p>
-        <p v-else-if="!configurationReady" role="alert" class="m-0 text-cp-sm text-cp-error">
-          传输方式读取失败，其他设置仍可保存
-        </p>
+        <ZEmpty v-else-if="!configurationReady" title="传输方式读取失败" description="其他设置仍可保存" size="small" surface="none" role="alert" />
         <ZSegmented v-else v-model="oauthTransport" aria-label="上游传输方式" :options="transportOptions" :disabled="saving" />
       </ZFormItem>
 
@@ -83,9 +81,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         <p v-if="configurationLoading" role="status" class="m-0 text-cp-sm text-cp-text-secondary">
           正在读取上游设置…
         </p>
-        <p v-else-if="!configurationReady" role="alert" class="m-0 text-cp-sm text-cp-error">
-          上游设置读取失败，请关闭后重试
-        </p>
+        <ZEmpty v-else-if="!configurationReady" title="上游设置读取失败" description="请关闭后重试" size="small" surface="none" role="alert" />
         <AccountApiKeyFields v-else v-model="apiKey" editing :disabled="saving" />
       </section>
 
@@ -101,6 +97,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         :groups-loading="groupsLoading"
         :disabled="saving"
         :show-scheduling="false"
+        :current-proxy-id="account.outboundProxyId"
         :endpoint="account.outboundProxyEndpoint"
         :account-id="account.id"
       />

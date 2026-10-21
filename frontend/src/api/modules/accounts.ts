@@ -128,6 +128,7 @@ export interface AccountModelAccess {
 
 export interface Account {
   capabilities: AccountCapabilities
+  outboundProxyId: string | null
   outboundProxyEndpoint: string | null
   id: string
   name: string
@@ -485,6 +486,30 @@ interface AccountExportParam {
   confirm: string
 }
 
+interface AccountExportResponse {
+  exportedAt: string
+  fileName: string
+  documents: unknown[]
+}
+
+interface AccountImportTaskListResponse {
+  items: AccountImportTask[]
+}
+
+interface AccountDetailResponse {
+  account: Account
+  credentialConfiguration?: Record<string, unknown>
+}
+
+interface AccountResetCreditAutomationParam extends AccountIdParam {
+  enabled: boolean
+}
+
+interface AccountConcurrencyParams extends AccountIdParam {
+  page: number
+  pageSize: number
+}
+
 export function getAccounts(data: AccountListParams, options: RequestOptions = {}) {
   return request<AccountListResponse>({
     url: '/api/admin/accounts',
@@ -495,7 +520,7 @@ export function getAccounts(data: AccountListParams, options: RequestOptions = {
 }
 
 export function exportAccounts(data: AccountExportParam) {
-  return request<{ exportedAt: string, fileName: string, documents: unknown[] }>({
+  return request<AccountExportResponse>({
     url: '/api/admin/accounts/export',
     method: 'GET',
     params: data,
@@ -623,7 +648,7 @@ export function createAccountImportTask(data: CreateAccountImportTaskParam) {
 }
 
 export function getAccountImportTasks(options: RequestOptions = {}) {
-  return request<{ items: AccountImportTask[] }>({
+  return request<AccountImportTaskListResponse>({
     url: '/api/admin/accounts/import-tasks',
     method: 'GET',
     ...options,
@@ -701,7 +726,7 @@ export interface ApiKeyConfiguration {
 }
 
 export function getAccountDetail(data: AccountIdParam, options: RequestOptions = {}) {
-  return request<{ account: Account, credentialConfiguration?: Record<string, unknown> }>({
+  return request<AccountDetailResponse>({
     url: '/api/admin/accounts/detail',
     method: 'GET',
     params: data,
@@ -726,7 +751,7 @@ export function getAccountResetCreditAutomation(data: AccountIdParam, options: R
   })
 }
 
-export function setAccountResetCreditAutomation(data: AccountIdParam & { enabled: boolean }, options: RequestOptions = {}) {
+export function setAccountResetCreditAutomation(data: AccountResetCreditAutomationParam, options: RequestOptions = {}) {
   return request<AccountResetCreditAutomation>({
     url: '/api/admin/accounts/reset-credits/automation',
     method: 'POST',
@@ -756,7 +781,7 @@ export interface AccountConcurrencyPage {
   observedAt: string
 }
 
-export function getAccountConcurrency(data: { accountId: string, page: number, pageSize: number }, options: RequestOptions = {}) {
+export function getAccountConcurrency(data: AccountConcurrencyParams, options: RequestOptions = {}) {
   return request<AccountConcurrencyPage>({
     url: '/api/admin/accounts/concurrency',
     method: 'GET',

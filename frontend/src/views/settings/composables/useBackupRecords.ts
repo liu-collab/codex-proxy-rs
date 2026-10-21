@@ -101,14 +101,11 @@ export function useBackupRecords() {
   }
 
   async function changePage(page: number): Promise<void> {
-    paged.page.value = page
-    await paged.execute()
+    await paged.execute({ page })
   }
 
   async function changePageSize(pageSize: number): Promise<void> {
-    paged.pageSize.value = pageSize
-    paged.page.value = 1
-    await paged.execute()
+    await paged.execute({ page: 1, pageSize })
   }
 
   async function create(): Promise<void> {

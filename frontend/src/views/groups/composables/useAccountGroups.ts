@@ -256,26 +256,21 @@ export function useAccountGroups() {
   }
 
   function handlePageChange(page: number) {
-    query.page.value = page
-    void query.execute()
+    void query.execute({ page })
   }
 
   function handlePageSizeChange(pageSize: number) {
-    query.pageSize.value = pageSize
-    query.page.value = 1
-    void query.execute()
+    void query.execute({ page: 1, pageSize })
   }
 
   watch(searchQuery, (_value, _previous, onCleanup) => {
     const timer = setTimeout(() => {
-      query.page.value = 1
-      void query.execute()
+      void query.reloadFromStart()
     }, 250)
     onCleanup(() => clearTimeout(timer))
   })
   watch(statusQuery, () => {
-    query.page.value = 1
-    void query.execute()
+    void query.reloadFromStart()
   })
   onMounted(() => {
     void Promise.all([query.execute(), loadReferenceKeys()])

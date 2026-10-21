@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { XaiClientProfilePreview, XaiClientProfileSelection } from '@/api/modules/settings/profiles'
-import { ZButton, ZFormItem, ZInput, ZSegmented, ZSelect } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZFormItem, ZInput, ZSegmented, ZSelect } from '@codex-proxy/ui'
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { getXaiClientProfileOptions, previewXaiClientProfile } from '@/api/modules/settings/profiles'
 import { errorMessage } from '@/utils/operation'
@@ -73,7 +73,7 @@ watch([model, () => props.active], ([configuration, active], _, onCleanup) => {
     return
   const timer = setTimeout(async () => {
     try {
-      const result = await previewXaiClientProfile(configuration)
+      const result = await previewXaiClientProfile({ configuration })
       if (!cancelled)
         preview.value = result
     }
@@ -107,12 +107,13 @@ onMounted(() => props.allowInherit && void load())
       />
       <slot name="source-extra" />
     </div>
-    <div v-if="loadError" role="alert" class="flex items-center justify-between gap-3 text-cp text-cp-error">
-      <span>全局配置加载失败：{{ loadError }}</span>
-      <ZButton size="small" @click="load">
-        重试
-      </ZButton>
-    </div>
+    <ZEmpty v-if="loadError" title="全局配置加载失败" :description="loadError" size="small" surface="none" role="alert">
+      <template #action>
+        <ZButton size="small" @click="load">
+          重试
+        </ZButton>
+      </template>
+    </ZEmpty>
     <template v-if="model">
       <div class="grid gap-4 sm:grid-cols-2">
         <ZFormItem label="客户端类型">
@@ -131,6 +132,6 @@ onMounted(() => props.allowInherit && void load())
         </ZFormItem>
       </div>
     </template>
-    <ClientProfilePreviewPanel :preview="preview" :previewing="previewing" :needs-version-input="needsVersionInput" :error="previewError" />
+    <ClientProfilePreviewPanel v-if="!loadError" :preview="preview" :previewing="previewing" :needs-version-input="needsVersionInput" :error="previewError" />
   </div>
 </template>

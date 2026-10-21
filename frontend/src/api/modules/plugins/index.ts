@@ -271,6 +271,38 @@ export interface PluginRollbackPlan {
   targets: { artifactSha256: string, version: string, platforms: string[] }[]
 }
 
+interface PluginArtifactParam {
+  sha256: string
+}
+
+interface PluginSourceCredentialIdParam {
+  id: string
+}
+
+interface PluginUpdateCheckParam {
+  pluginId: string
+  credentialIds: string[]
+}
+
+interface PluginInstanceIdParam {
+  id: string
+}
+
+interface PluginInstanceUpdateParam extends PluginInstanceIdParam {
+  instance: ConfigurePluginInstanceRequest
+}
+
+interface PluginVersionPlanParams extends PluginInstanceIdParam {
+  artifactSha256: string
+}
+
+interface PluginVersionChangeParam extends PluginInstanceIdParam {
+  target: {
+    artifactSha256: string
+    expectedRevision: number
+  }
+}
+
 export function getPluginArtifacts(options: RequestOptions = {}) {
   return request<PluginArtifact[]>({
     url: '/api/admin/plugins/artifacts',
@@ -297,11 +329,11 @@ export function uploadPluginArtifact(file: File, sha256: string, options: Reques
   })
 }
 
-export function verifyUploadedPlugin(file: File, options: RequestOptions = {}) {
+export function verifyUploadedPlugin(data: File, options: RequestOptions = {}) {
   return request<VerifiedPluginArtifact>({
     url: '/api/admin/plugins/artifacts/upload/verify',
     method: 'POST',
-    data: file,
+    data,
     headers: {
       'Content-Type': 'application/octet-stream',
     },
@@ -320,7 +352,7 @@ export function installRemotePlugin(data: InstallRemotePluginRequest, options: R
   })
 }
 
-export function acceptPluginArtifact(data: { sha256: string }, options: RequestOptions = {}) {
+export function acceptPluginArtifact(data: PluginArtifactParam, options: RequestOptions = {}) {
   return request<PluginArtifactMutationResponse>({
     url: '/api/admin/plugins/artifacts/accept',
     method: 'POST',
@@ -339,7 +371,7 @@ export function verifyRemotePlugin(data: VerifyRemotePluginRequest, options: Req
   })
 }
 
-export function deletePluginArtifact(data: { sha256: string }, options: RequestOptions = {}) {
+export function deletePluginArtifact(data: PluginArtifactParam, options: RequestOptions = {}) {
   return request<void>({
     url: '/api/admin/plugins/artifacts/delete',
     method: 'POST',
@@ -375,7 +407,7 @@ export function createPluginSourceCredential(data: CreatePluginSourceCredentialR
   })
 }
 
-export function deletePluginSourceCredential(data: { id: string }, options: RequestOptions = {}) {
+export function deletePluginSourceCredential(data: PluginSourceCredentialIdParam, options: RequestOptions = {}) {
   return request<PluginMutationResponse>({
     url: '/api/admin/plugins/source-credentials/delete',
     method: 'POST',
@@ -401,7 +433,7 @@ export function updatePluginSource(data: PluginUpdateSourceBinding, options: Req
   })
 }
 
-export function checkPluginUpdate(data: { pluginId: string, credentialIds: string[] }, options: RequestOptions = {}) {
+export function checkPluginUpdate(data: PluginUpdateCheckParam, options: RequestOptions = {}) {
   return request<PluginUpdateCheck>({
     url: '/api/admin/plugins/updates/check',
     method: 'POST',
@@ -418,7 +450,7 @@ export function getPluginInstances(options: RequestOptions = {}) {
   })
 }
 
-export function updatePluginInstance(data: { id: string, instance: ConfigurePluginInstanceRequest }, options: RequestOptions = {}) {
+export function updatePluginInstance(data: PluginInstanceUpdateParam, options: RequestOptions = {}) {
   return request<PluginInstanceMutationResponse>({
     url: '/api/admin/plugins/instances/update',
     method: 'POST',
@@ -427,16 +459,16 @@ export function updatePluginInstance(data: { id: string, instance: ConfigurePlug
   })
 }
 
-export function getPluginRollbackPlan(id: string, options: RequestOptions = {}) {
+export function getPluginRollbackPlan(data: PluginInstanceIdParam, options: RequestOptions = {}) {
   return request<PluginRollbackPlan>({
     url: '/api/admin/plugins/instances/rollback-plan',
     method: 'GET',
-    params: { id },
+    params: data,
     ...options,
   })
 }
 
-export function rollbackPluginInstance(data: { id: string, target: { artifactSha256: string, expectedRevision: number } }, options: RequestOptions = {}) {
+export function rollbackPluginInstance(data: PluginVersionChangeParam, options: RequestOptions = {}) {
   return request<PluginInstanceMutationResponse>({
     url: '/api/admin/plugins/instances/rollback',
     method: 'POST',
@@ -445,7 +477,7 @@ export function rollbackPluginInstance(data: { id: string, target: { artifactSha
   })
 }
 
-export function disablePluginInstance(data: { id: string }, options: RequestOptions = {}) {
+export function disablePluginInstance(data: PluginInstanceIdParam, options: RequestOptions = {}) {
   return request<PluginMutationResponse>({
     url: '/api/admin/plugins/instances/disable',
     method: 'POST',
@@ -454,7 +486,7 @@ export function disablePluginInstance(data: { id: string }, options: RequestOpti
   })
 }
 
-export function deletePluginInstance(data: { id: string }, options: RequestOptions = {}) {
+export function deletePluginInstance(data: PluginInstanceIdParam, options: RequestOptions = {}) {
   return request<PluginMutationResponse>({
     url: '/api/admin/plugins/instances/delete',
     method: 'POST',
@@ -472,16 +504,16 @@ export interface PluginVersionPlan {
   restored: boolean
 }
 
-export function getPluginVersionPlan(id: string, artifactSha256: string, options: RequestOptions = {}) {
+export function getPluginVersionPlan(data: PluginVersionPlanParams, options: RequestOptions = {}) {
   return request<PluginVersionPlan>({
     url: '/api/admin/plugins/instances/version-plan',
     method: 'GET',
-    params: { id, artifactSha256 },
+    params: data,
     ...options,
   })
 }
 
-export function switchPluginVersion(data: { id: string, target: { artifactSha256: string, expectedRevision: number } }, options: RequestOptions = {}) {
+export function switchPluginVersion(data: PluginVersionChangeParam, options: RequestOptions = {}) {
   return request<PluginInstanceMutationResponse>({
     url: '/api/admin/plugins/instances/switch-version',
     method: 'POST',

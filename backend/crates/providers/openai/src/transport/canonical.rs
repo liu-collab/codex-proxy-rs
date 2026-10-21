@@ -342,6 +342,14 @@ impl CodexCanonicalDecoder {
         raw_sse_frame: Option<RawResponseFrame>,
         output: &mut Vec<ProviderEvent>,
     ) -> Result<(), CodexCanonicalError> {
+        // 首字只要求响应载荷，不依赖 JSON、事件类型或实际输出内容
+        let data = event.data.trim();
+        self.timing_signals.response_data |=
+            if matches!(raw_sse_frame, Some(RawResponseFrame::WebSocket(_))) {
+                !event.data.is_empty()
+            } else {
+                !data.is_empty() && !data.starts_with("[DONE]")
+            };
         if event.data.trim() == "[DONE]"
             && !matches!(raw_sse_frame, Some(RawResponseFrame::WebSocket(_)))
         {
@@ -371,7 +379,7 @@ impl CodexCanonicalDecoder {
             .or_else(|| value.get("type").and_then(Value::as_str));
         if event_type == Some("codex.rate_limits") {
             // HTTP 传输已将此控制帧投影为本地额度事实
-            // 此帧不能成为客户端输出，也不能启动首个输出计时
+            // 此帧只贡献首响应观测，不能成为客户端输出
             return Ok(());
         }
         if event_type == Some("responsesapi.websocket_timing") && self.started && !self.completed {
@@ -438,7 +446,6 @@ impl CodexCanonicalDecoder {
 
     fn merge_timing_signals(&mut self, signals: ResponseEventSignals) {
         self.timing_signals.protocol_progress |= signals.protocol_progress;
-        self.timing_signals.output_start |= signals.output_start;
         self.timing_signals.semantic_output |= signals.semantic_output;
         self.timing_signals.reasoning_output |= signals.reasoning_output;
         self.timing_signals.text_output |= signals.text_output;

@@ -3,8 +3,8 @@
 use super::{
     client_keys::ClientKeyRecord,
     observability::{
-        HealthTimeline, ObservabilityPageSize, OpsErrorPage, RequestMetricPoint, TimeRange,
-        UsageOverview, UsagePage,
+        HealthTimeline, ObservabilityPageSize, RequestMetricPoint, TimeRange, UsageOverview,
+        UsagePage,
     },
 };
 
@@ -18,6 +18,7 @@ pub struct KeyUsageQuery {
 pub enum KeyUsageRecordKind {
     Success,
     Error,
+    All,
 }
 
 #[derive(Debug, Clone)]
@@ -35,7 +36,4 @@ pub struct KeyUsageOverview {
     pub health_timeline: HealthTimeline,
 }
 
-pub enum KeyUsageRecords {
-    Success(UsagePage),
-    Error(OpsErrorPage),
-}
+pub type KeyUsageRecords = UsagePage;

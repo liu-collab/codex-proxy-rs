@@ -4,7 +4,7 @@ version = "0.0.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
-rust-version = "1.97"
+rust-version = "1.99.1"
 autotests = false
 
 [[test]]

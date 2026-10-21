@@ -86,6 +86,8 @@ pub struct ImageBillingView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageListRecordView {
+    pub error_code: Option<String>,
+    pub error_message: Option<String>,
     pub logical_outcome: String,
     pub client_api_key_name: Option<String>,
     pub id: String,
@@ -228,14 +230,6 @@ pub struct UsageLatencyDetailsView {
     pub upstream_api_overhead_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub upstream_engine_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_iapi_ttft_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_service_ttft_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_iapi_tbt_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_service_tbt_ms: Option<f64>,
 }
 
 /// 单次上游尝试展示

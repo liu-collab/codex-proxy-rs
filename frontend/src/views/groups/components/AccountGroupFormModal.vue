@@ -79,7 +79,7 @@ const description = computed(() => props.group
           v-model="form.description"
           aria-label="分组描述"
           :rows="4"
-          placeholder="说明这个分组的用途..."
+          placeholder="说明这个分组的用途"
           :disabled="saving"
         />
       </ZFormItem>

@@ -14,8 +14,7 @@ use gateway_core::engine::{
     ModelRequestId, NewModelRequest, ProbeFailure, RecoveryReport,
 };
 use gateway_core::error::{ProviderError, StoreError};
-use gateway_core::lifecycle::CancellationToken;
-use gateway_core::task::{DaemonTask, WorkerTaskError};
+use gateway_core::task::{DaemonTask, WorkerDaemonContext, WorkerTaskError};
 use gateway_core::upstream::UpstreamSendState;
 use tokio::sync::{Mutex, Notify, mpsc};
 
@@ -81,13 +80,13 @@ impl ExecutionBufferState {
             0
         });
         self.queued_items
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current.checked_add(1).filter(|next| *next <= item_limit)
             })
             .map_err(|_| ReservationFailure::ItemCapacity)?;
         let bytes_reserved = self
             .queued_bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 current
                     .checked_add(bytes)
                     .filter(|next| *next <= byte_limit)
@@ -158,7 +157,7 @@ impl ReservationFailure {
 }
 
 fn saturating_increment(counter: &AtomicU64, increment: u64) {
-    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+    let _ = counter.try_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
         Some(current.saturating_add(increment))
     });
 }
@@ -486,7 +485,7 @@ where
 {
     fn run(
         &self,
-        cancellation: CancellationToken,
+        context: WorkerDaemonContext,
     ) -> futures::future::BoxFuture<'_, Result<(), WorkerTaskError>> {
         Box::pin(async move {
             let shutdown_deadline = OnceLock::new();
@@ -496,7 +495,7 @@ where
                     receiver,
                     self.inner.as_ref(),
                     self.state.as_ref(),
-                    cancellation.clone(),
+                    context.clone(),
                     &shutdown_deadline,
                 )
             }))
@@ -511,12 +510,13 @@ async fn run_lane<S>(
     receiver: &Mutex<mpsc::UnboundedReceiver<QueuedExecutionObservation>>,
     store: &S,
     state: &ExecutionBufferState,
-    cancellation: CancellationToken,
+    context: WorkerDaemonContext,
     shutdown_deadline: &OnceLock<Instant>,
 ) -> Result<(), WorkerTaskError>
 where
     S: ExecutionStore + OperationalDiagnostics + ?Sized,
 {
+    let cancellation = context.cancellation();
     let mut receiver = receiver.lock().await;
     loop {
         let queued = tokio::select! {
@@ -564,7 +564,11 @@ where
                 drain_on_shutdown(lane, &mut receiver, store, state, deadline).await;
                 return Ok(());
             },
-            () = &mut persistence => {},
+            succeeded = &mut persistence => {
+                if succeeded {
+                    context.succeeded();
+                }
+            },
         }
     }
 }
@@ -573,7 +577,7 @@ fn shared_shutdown_deadline(deadline: &OnceLock<Instant>) -> Instant {
     *deadline.get_or_init(|| Instant::now() + SHUTDOWN_DRAIN_TIMEOUT)
 }
 
-async fn persist_queued<S>(mut queued: QueuedExecutionObservation, store: &S)
+async fn persist_queued<S>(mut queued: QueuedExecutionObservation, store: &S) -> bool
 where
     S: ExecutionStore + OperationalDiagnostics + ?Sized,
 {
@@ -587,18 +591,21 @@ where
             request_id = ?request_id,
             "执行观测队列内部状态无效，已丢弃本次写入"
         );
-        return;
+        return false;
     };
     // Store 写入没有统一幂等键；超时可能表示已提交，不能在这里盲目重试并
     // 制造重复 ops_events
     // 失败会被计数并丢弃，数据面始终不等待补偿
     match write.persist(store).await {
-        Ok(()) => state.record_persisted(),
+        Ok(()) => {
+            state.record_persisted();
+            true
+        }
         Err(error) => {
             state.record_write_failure();
             let stats = state.snapshot();
             if !stats.write_failure_total.is_power_of_two() {
-                return;
+                return false;
             }
             tracing::warn!(
                 operation,
@@ -607,6 +614,7 @@ where
                 write_failure_total = stats.write_failure_total,
                 "执行观测写入失败，数据面不受影响"
             );
+            false
         }
     }
 }

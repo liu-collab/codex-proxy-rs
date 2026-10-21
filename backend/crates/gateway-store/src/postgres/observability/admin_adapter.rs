@@ -170,6 +170,7 @@ impl PgObservabilityRepository {
         observed_at: DateTime<Utc>,
     ) -> StoreResult<DashboardObservation> {
         let range = store_range(query.range)?;
+        let yesterday_range = store_range(query.yesterday_range)?;
         let account_usage_query = ProviderAccountUsageQuery::recent(range, query.account_limit)?
             .with_hourly_request_buckets()?;
         let recent_query = UsageRecordQuery {
@@ -180,7 +181,7 @@ impl PgObservabilityRepository {
             page_size: ObservabilityPageSize::new(query.recent_request_limit)
                 .map_err(|_| invalid("invalid dashboard page size"))?,
         };
-        let (totals, trend, analytics, account_usage) = self
+        let (totals, yesterday, trend, analytics, account_usage) = self
             .query_budget
             .run(
                 &self.pool,
@@ -188,6 +189,7 @@ impl PgObservabilityRepository {
                 |mut connection| async move {
                     let mut snapshot = analytics::AnalyticsSnapshot::new(&mut connection).await?;
                     let totals = snapshot.totals().await?;
+                    let yesterday = snapshot.dashboard_card_metrics(yesterday_range).await?;
                     let trend = snapshot
                         .trend(
                             range,
@@ -201,7 +203,7 @@ impl PgObservabilityRepository {
                         provider_account_usage(&mut snapshot, account_usage_query).await?;
                     let metadata = snapshot.metadata();
                     snapshot.finish().await?;
-                    Ok((totals, trend, metadata, account_usage))
+                    Ok((totals, yesterday, trend, metadata, account_usage))
                 },
             )
             .await?;
@@ -222,6 +224,7 @@ impl PgObservabilityRepository {
             analytics,
             range,
             totals,
+            yesterday,
             provider_accounts,
             runtime_slots,
             trend,

@@ -1,14 +1,11 @@
 <script setup lang="ts">
 import type { AccountConcurrencyEntry } from '@/api'
 import { defineTableColumns, ZTable } from '@codex-proxy/ui'
-import { computed } from 'vue'
 import UsageClientIpCell from '@/components/usage/UsageClientIpCell.vue'
 import { formatDuration } from '@/utils/format'
 
-const props = defineProps<{
+defineProps<{
   entries: AccountConcurrencyEntry[]
-  total: number
-  pageSize: number
   loading: boolean
   emptyText: string
 }>()
@@ -20,15 +17,11 @@ const columns = defineTableColumns<AccountConcurrencyEntry>([
   { key: 'startedAtDisplay', label: '开始时间', kind: 'datetime', size: 'xl' },
   { key: 'occupiedMs', label: '占用时长', kind: 'numeric', size: 'lg', formatter: (_, row) => formatDuration(row.occupiedMs) },
 ])
-
-// 按分页容量保留高度，切页与末页记录较少时不让弹窗收缩
-const tableHeight = computed(() => `min(60dvh, max(16rem, calc(2.5rem + 3px + ${Math.min(props.total, props.pageSize, 10)} * var(--cp-table-row-height))))`)
 </script>
 
 <template>
   <ZTable
-    class="min-h-0 [--cp-table-row-height:3rem]"
-    :style="{ height: tableHeight }"
+    class="h-[min(60dvh,20rem)]! min-h-0 [--cp-table-row-height:3rem]"
     :columns="columns" :data="entries" row-key="leaseId"
     :loading="loading" :empty-text="emptyText"
   >

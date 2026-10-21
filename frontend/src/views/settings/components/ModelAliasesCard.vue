@@ -6,10 +6,8 @@ import { Plus, Trash2 } from '@lucide/vue'
 withDefaults(defineProps<{
   mappings: Array<{ requestedModel: string, upstreamModel: string }>
   loading?: boolean
-  error?: string
 }>(), {
   loading: false,
-  error: '',
 })
 
 const emit = defineEmits<{
@@ -32,7 +30,6 @@ const emit = defineEmits<{
           </template>
           添加映射
         </ZButton>
-        <span v-if="error" class="text-xs font-emphasis text-cp-error-text">{{ error }}</span>
       </div>
 
       <div

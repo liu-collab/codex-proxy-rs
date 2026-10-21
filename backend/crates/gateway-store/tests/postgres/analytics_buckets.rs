@@ -1,7 +1,10 @@
 //! 小时重建合并、分段快照失效与阻塞桶调度的真实数据库验收
 
 use chrono::{DateTime, TimeDelta, Utc};
-use gateway_store::postgres::{ObservabilityRange, PgRequestAnalyticsRepository};
+use gateway_store::{
+    RequestAnalyticsCycle,
+    postgres::{ObservabilityRange, PgRequestAnalyticsRepository},
+};
 
 use super::{
     TestDatabase, analytics::seed, drain_analytics, observability_query_budget,
@@ -351,4 +354,65 @@ async fn incremental_summary_write_failure_rolls_back_facts_and_preserves_queue(
     assert_eq!(actual.requests.total_tokens, 240);
     assert_eq!(actual.requests.request_count, 1);
     database.close().await;
+}
+
+#[tokio::test]
+async fn extrema_rebuild_reads_only_its_bucket_when_history_is_large() {
+    let Some(database) = TestDatabase::create("analytics_rebuild_bucket_range").await else {
+        return;
+    };
+    // 强制刷新只作用于当前连接，Worker 与计数读取必须复用同一条连接
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect_with(database.pool.connect_options().as_ref().clone())
+        .await
+        .unwrap();
+    for number in 1..=3_i64 {
+        let id = format!("rebuild_range_{number}");
+        seed(&pool, &id, hour() + TimeDelta::minutes(number), &[]).await;
+        sqlx::query("update model_requests set provider_account_ref='rebuild_range_account',request_observation_json=jsonb_set(request_observation_json,'{timings,local}',jsonb_build_object('latencyMs',$2::bigint,'firstTokenMs',$2::bigint)) where id=$1")
+            .bind(id).bind(number).execute(&pool).await.unwrap();
+    }
+    drain_analytics(&pool).await;
+    // 只扩充其他时间桶的事实，规划器拿到真实行数后不能再为一个分组扫描全部历史
+    sqlx::query("insert into request_analytics_facts select ('history_'||n)::text as id,(f.started_at-make_interval(hours=>n/1000+2))::timestamptz,f.completed_at-make_interval(hours=>n/1000+2),f.client_api_key_ref,f.provider_account_ref,f.routing_group_refs,f.operation,f.provider_kind,f.requested_model_id,f.upstream_model_id,f.outcome,f.client_status_code,f.upstream_status_code,f.client_transport,f.upstream_transport,f.attempt_count,null,null,null,f.recovered_at,f.downstream_committed_at,f.request_kind,f.image_generation_requested,f.image_generation_succeeded,f.error_kind,f.input_tokens,f.output_tokens,f.cached_input_tokens,f.cache_write_input_tokens,f.reasoning_output_tokens,f.image_input_tokens,f.image_output_tokens,f.total_tokens,f.cost_source,f.cost_currency,f.cost_amount,f.first_token_ms,f.latency_ms,f.admission_decision_ms,f.account_selection_wait_ms,f.upstream_response_ms,f.capacity_used_slots,f.capacity_total_slots,f.standard_cost_amount,f.no_cache_cost_amount,f.source_version,f.schema_version,f.ops_failure_count,f.ops_rate_limited_count,f.ops_auth_failure_count,f.ops_provider_5xx_count from request_analytics_facts f cross join generate_series(1,300000) n where f.id='rebuild_range_2'")
+        .execute(&pool).await.unwrap();
+    sqlx::query("analyze request_analytics_facts")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("delete from model_requests where id='rebuild_range_1'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let worker = PgRequestAnalyticsRepository::new(pool.clone(), observability_query_budget());
+    let scanned_before = sequentially_read_facts(&pool).await;
+    RequestAnalyticsCycle::default()
+        .run(&worker)
+        .await
+        .expect("extrema rebuild must finish within the cycle budget");
+    // 耗时随机器和数据量变化，用顺序扫描读取的行数判断重建是否越出所在统计桶
+    let scanned = sequentially_read_facts(&pool).await - scanned_before;
+    assert!(
+        scanned < 300_000,
+        "extrema rebuild scanned {scanned} fact rows"
+    );
+    let status = worker.status().await.unwrap();
+    assert_eq!((status.pending_requests, status.pending_buckets), (0, 0));
+    let row: (i64, f64, f64) = sqlx::query_as("select (counts->>'request_count')::bigint,(distributions->'latency_ms'->>'minimum')::double precision,(distributions->'latency_ms'->>'maximum')::double precision from request_analytics_15m where collection='global' and bucket_start=$1")
+        .bind(hour()).fetch_one(&pool).await.unwrap();
+    assert_eq!(row, (2, 2.0, 3.0));
+    pool.close().await;
+    database.close().await;
+}
+
+async fn sequentially_read_facts(pool: &sqlx::PgPool) -> i64 {
+    sqlx::query("select pg_stat_force_next_flush()")
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query_scalar("select coalesce(seq_tup_read,0) from pg_stat_user_tables where relid='request_analytics_facts'::regclass")
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }

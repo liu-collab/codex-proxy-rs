@@ -471,7 +471,7 @@ export const useSystemUpdateStore = defineStore('system-update', () => {
 
     try {
       // 进程可能在返回响应前退出，由下面的目标版本探测判定是否完成。
-      await restartSystem(confirmation, { silent: true })
+      await restartSystem({ confirmation }, { silent: true })
     }
     catch (error: unknown) {
       if (error instanceof ApiError && error.status > 0) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ZButton, ZIconButton, ZPageHeader, ZSegmented, ZSelect } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZIconButton, ZPageHeader, ZSegmented, ZSelect } from '@codex-proxy/ui'
 
 import { Save, Undo2 } from '@lucide/vue'
 import { computed, nextTick, reactive, shallowRef, watch } from 'vue'
@@ -138,14 +138,13 @@ watch(section, (value) => {
     </div>
 
     <div v-if="settingsVisited" v-show="isBasicSection" class="mt-5 grid w-full gap-5">
-      <div v-if="error" role="alert" class="flex flex-wrap items-center justify-between gap-3 rounded-cp-card bg-cp-error-container p-5 text-cp-error-on-container">
-        <p class="m-0 text-cp">
-          设置加载失败：{{ error }}
-        </p>
-        <ZButton :loading="loading" @click="loadSettings()">
-          重新加载
-        </ZButton>
-      </div>
+      <ZEmpty v-if="error" title="设置加载失败" role="alert">
+        <template #action>
+          <ZButton :loading="loading" @click="loadSettings()">
+            重新加载
+          </ZButton>
+        </template>
+      </ZEmpty>
 
       <SettingsAccessSection
         v-if="visited.has('access')"

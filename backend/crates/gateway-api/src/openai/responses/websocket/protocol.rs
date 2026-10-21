@@ -58,7 +58,8 @@ fn decode_response_create_inner(
     else {
         return Err(ResponseCreateFrameError::ExpectedObject);
     };
-    match body.remove("type") {
+    // 保持剩余字段顺序，避免末尾元数据交换到模型等路由字段之前
+    match body.shift_remove("type") {
         Some(Value::String(message_type)) if message_type == "response.create" => {}
         _ => return Err(ResponseCreateFrameError::UnsupportedType),
     }

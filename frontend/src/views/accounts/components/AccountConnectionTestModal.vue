@@ -91,7 +91,7 @@ function connectionLogClass(tone: string) {
             aria-label="测试模型"
             :options="modelOptions"
             :disabled="status === 'running' || loadingModels || refreshingModels"
-            :placeholder="loadingModels ? '加载模型中...' : '选择上游模型'"
+            :placeholder="loadingModels ? '加载模型中' : '选择上游模型'"
             empty-text="上游没有返回模型"
           />
         </div>

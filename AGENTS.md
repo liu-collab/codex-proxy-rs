@@ -4,7 +4,7 @@
 
 | 任务意图与常见说法 | 必用技能 |
 | --- | --- |
-| 开发、实现、修复、排查报错、审查问题或代码、修改文档 | [cpr-dev-guide](.agents/skills/cpr-dev-guide/SKILL.md) |
+| 开发、修复、排障、代码审查、改文档；包括“改弹窗／样式／文案”“修接口／调度／数据库”等省略请求 | [cpr-dev-guide](.agents/skills/cpr-dev-guide/SKILL.md)，按实际操作和文件匹配规范，跨前后端同时执行 |
 | 提交／提个 PR、准备或更新 PR、看下 PR、回复 PR 讨论、处理 PR 审查意见 | [cpr-github-pr](.agents/skills/cpr-github-pr/SKILL.md)；需要修改时同时执行 cpr-dev-guide |
 | 提 Issue、反馈到仓库、把问题或建议整理成 Issue、补充或回复 Issue | [cpr-github-issue](.agents/skills/cpr-github-issue/SKILL.md) |
 | 写网关插件、修改插件能力、排查插件接入、打包插件 | [cpr-plugin-dev](.agents/skills/cpr-plugin-dev/SKILL.md)，同时执行 cpr-dev-guide |
@@ -16,7 +16,7 @@
 
 执行所选流程中的问题核实、自审、验证与交付要求，协作流程和审查标准见 [CONTRIBUTING.md](CONTRIBUTING.md)
 
-Issue 和 PR 回复分别按对应技能的[Issue 回复口吻](.agents/skills/cpr-github-issue/SKILL.md#回复口吻)与[PR 回复口吻](.agents/skills/cpr-github-pr/SKILL.md#回复口吻)执行
+Issue 和 PR 回复统一按 [GitHub 回复口吻](CONTRIBUTING.md#github-回复口吻)执行
 
 模块职责以 [系统架构](docs/architecture.md) 为准，界面约定以 [管理端主题](docs/theme.md) 为准；
 没有明确约定时保持与相邻实现一致，不把单次页面反馈扩展成全仓规则
@@ -34,10 +34,10 @@ If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is 
 
 ## 工作方式
 
-- 开发和审查按 [问题与方案依据](CONTRIBUTING.md#问题与方案依据) 先核实问题；涉及 Codex 行为、协议或兼容性时，按[参考仓库优先级](.agents/skills/cpr-dev-guide/SKILL.md#参考仓库的优先级)以官方 Codex 仓库对应版本源码为第一手资料，三方仓库仅作参考
+- 开发和审查按 [问题与方案依据](CONTRIBUTING.md#问题与方案依据) 先核实问题及方案必要性；涉及 Codex 行为、协议或兼容性时，以官方对应版本源码为第一手资料，三方仓库仅作参考
 - 先定位变更所属模块、同类实现和上下游调用关系，再选择最小合理改动。复用已有能力，也避免为尚不存在的需求增加抽象。
 - 提交前自审最终差异，先处理本次引入的职责混淆、重复规则、冗余状态和无依据的兼容分支；后端按 [后端自审](docs/architecture.md#后端自审) 追踪状态与资源生命周期，不能把自审留给 CI 或 PR 审查者。
-- 页面变更先复用已有页面设计与组件，不因个人偏好重排页面或另建交互。文案取舍遵循 [界面文案与信息层级](docs/theme.md#界面文案与信息层级)，页面 PR 必须提供 [实际截图](CONTRIBUTING.md#界面验证)。
+- 前端开发与审查执行[前端流程](.agents/skills/cpr-dev-guide/references/frontend.md)，先复用已有页面设计与组件，不因个人偏好重排页面或另建交互；页面 PR 必须提供 [实际截图](CONTRIBUTING.md#界面验证)。
 - 代码注释使用中文，解释原因与边界；提交信息使用英文，沿用历史中的 Conventional Commits 格式。
 - 常规文档只描述当前状态，不记录变更历史；按[文档职责与更新条件](CONTRIBUTING.md#文档职责与更新条件)在所属章节就地修订，分清层次与详略，短段和列表少用句号，交付前逐段检查必要性、归属、重复与当前状态表达
 - 按变更范围执行验证，记录命令、结果和缺口。跳过的测试不算通过；界面与集成行为需要对应运行证据，构建通过不能替代实际验收。

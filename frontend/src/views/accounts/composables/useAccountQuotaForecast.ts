@@ -3,6 +3,8 @@ import type { Account, AccountQuotaForecastResponse } from '@/api'
 import { ZNotification } from '@codex-proxy/ui'
 import { onScopeDispose, shallowRef, watch } from 'vue'
 import { getAccountQuotaForecast, refreshAccountQuota } from '@/api'
+import { useRequestState } from '@/composables/useRequestState'
+import { errorMessage } from '@/utils/operation'
 
 export function useAccountQuotaForecast(
   accountId: Ref<string>,
@@ -10,44 +12,27 @@ export function useAccountQuotaForecast(
   onAccountUpdated: (account: Account) => void,
 ) {
   const report = shallowRef<AccountQuotaForecastResponse | null>(null)
-  const loading = shallowRef(false)
+  const request = useRequestState()
+  const { loading, error } = request
   const refreshing = shallowRef(false)
-  const error = shallowRef(false)
-  let requestVersion = 0
-  let controller: AbortController | undefined
   let disposed = false
-
-  function cancelLoad(resetLoading = true) {
-    requestVersion += 1
-    controller?.abort()
-    controller = undefined
-    if (resetLoading)
-      loading.value = false
-  }
 
   async function load() {
     if (!open.value || !accountId.value || disposed)
       return false
-    cancelLoad()
-    const version = requestVersion
-    controller = new AbortController()
-    loading.value = true
-    error.value = false
+    const requestId = request.start()
     try {
-      const result = await getAccountQuotaForecast({ accountId: accountId.value }, { signal: controller.signal })
-      if (version === requestVersion) {
+      const result = await getAccountQuotaForecast({ accountId: accountId.value }, { signal: request.signal })
+      if (request.isCurrent(requestId)) {
         report.value = result
         return true
       }
     }
-    catch {
-      if (version === requestVersion) {
-        error.value = true
-      }
+    catch (cause) {
+      request.fail(requestId, cause)
     }
     finally {
-      if (version === requestVersion)
-        loading.value = false
+      request.finish(requestId)
     }
     return false
   }
@@ -56,9 +41,9 @@ export function useAccountQuotaForecast(
     if (refreshing.value || !open.value)
       return
     const targetAccountId = accountId.value
-    cancelLoad()
+    request.invalidate()
     refreshing.value = true
-    error.value = false
+    error.value = ''
     try {
       // 刷新属于现有额度动作；预测查询本身始终只读。
       const result = await refreshAccountQuota({ accountId: targetAccountId })
@@ -68,10 +53,10 @@ export function useAccountQuotaForecast(
       if (accountId.value === targetAccountId && await load())
         ZNotification.success({ message: '额度已刷新' })
     }
-    catch {
+    catch (cause) {
       if (!disposed && accountId.value === targetAccountId) {
         if (!report.value)
-          error.value = true
+          error.value = errorMessage(cause)
       }
     }
     finally {
@@ -80,17 +65,16 @@ export function useAccountQuotaForecast(
   }
 
   watch([open, accountId], ([isOpen]) => {
-    cancelLoad(isOpen)
+    request.invalidate({ resetLoading: isOpen })
     if (!isOpen)
       return
     report.value = null
-    error.value = false
+    error.value = ''
     void load()
   }, { immediate: true })
 
   onScopeDispose(() => {
     disposed = true
-    cancelLoad()
   })
 
   return { report, loading, refreshing, error, load, refresh }

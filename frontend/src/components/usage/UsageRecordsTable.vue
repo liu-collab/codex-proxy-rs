@@ -3,7 +3,6 @@ import type { TableColumn } from '@codex-proxy/ui'
 import type { UsageListRecord } from '@/api'
 
 import { ZTable } from '@codex-proxy/ui'
-import { Minimize2 } from '@lucide/vue'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import UsageBillingCell from '@/components/usage/UsageBillingCell.vue'
@@ -12,6 +11,8 @@ import UsageLatencyCell from '@/components/usage/UsageLatencyCell.vue'
 import UsageModelCell from '@/components/usage/UsageModelCell.vue'
 import UsagePerformanceCell from '@/components/usage/UsagePerformanceCell.vue'
 import UsageReasoningEffortCell from '@/components/usage/UsageReasoningEffortCell.vue'
+import UsageRouteCell from '@/components/usage/UsageRouteCell.vue'
+import UsageTimeCell from '@/components/usage/UsageTimeCell.vue'
 import UsageTokenCell from '@/components/usage/UsageTokenCell.vue'
 import UsageTransportBadge from '@/components/usage/UsageTransportBadge.vue'
 import {
@@ -83,6 +84,10 @@ withDefaults(
       <span v-else class="text-cp-text-quaternary">—</span>
     </template>
 
+    <template #createdAtDisplay="{ row }">
+      <UsageTimeCell :value="row.createdAtDisplay" />
+    </template>
+
     <template #clientIp="{ row }">
       <UsageClientIpCell :record="row" />
     </template>
@@ -102,16 +107,17 @@ withDefaults(
     </template>
 
     <template #route="{ row }">
-      <div class="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap">
-        <code class="font-mono text-cp-sm font-emphasis">{{ row.route || '—' }}</code>
-        <span
-          v-if="row.compact"
-          class="inline-flex shrink-0 text-cp-orange-text"
-          title="压缩请求"
-          aria-label="压缩请求"
-        >
-          <Minimize2 class="size-3.5" stroke-width="2.4" />
-        </span>
+      <UsageRouteCell :record="row" />
+    </template>
+
+    <template #errorMessage="{ row }">
+      <div class="min-w-0 py-0.5" :title="row.errorMessage || row.errorCode || undefined">
+        <code class="block truncate font-mono text-cp-sm font-bold text-cp-error-text">
+          {{ row.errorCode || (row.logicalOutcome === 'incomplete' ? '响应未完成' : '请求失败') }}
+        </code>
+        <p v-if="row.errorMessage" class="mt-1 mb-0 truncate text-cp-xs leading-[1.45] font-emphasis text-cp-text-secondary">
+          {{ row.errorMessage }}
+        </p>
       </div>
     </template>
 

@@ -79,7 +79,7 @@ impl CodexWebSocketPool {
             // 不限额时也跟踪 socket，后续调低或启用预算不会丢失已有连接的占用
             if capacity
                 .connections
-                .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+                .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                     if limit != 0 && used >= limit {
                         None
                     } else {

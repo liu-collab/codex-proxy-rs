@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { AccountResetCreditAutomation } from '@/api'
-import { ZButton, ZIconButton, ZPopover, ZSwitch } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZIconButton, ZPopover, ZSwitch } from '@codex-proxy/ui'
 import { CircleHelp, Clock3 } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -88,7 +88,7 @@ watch(() => props.accountId, () => {
       <div class="flex items-center gap-3">
         <ZButton size="small" variant="text" aria-label="设置全局提前时间" @click="router.push('/settings#reset-credits')">
           <template #icon>
-            <Clock3 class="size-3.5 -translate-y-px" />
+            <Clock3 class="size-3.5" />
           </template>
           {{ status ? `提前 ${status.leadMinutes} 分钟` : '提前时间' }}
         </ZButton>
@@ -107,12 +107,13 @@ watch(() => props.accountId, () => {
     <p v-if="resultText" class="text-cp-xs text-cp-warning" role="status">
       {{ resultText }}
     </p>
-    <div v-if="loadError" class="flex items-center justify-between gap-2 text-cp-xs text-cp-error" role="alert">
-      <span>{{ loadError }}</span>
-      <ZButton size="small" variant="plain" :loading="loadAction.loading.value" @click="load">
-        重试
-      </ZButton>
-    </div>
+    <ZEmpty v-if="loadError" title="自动使用设置加载失败" :description="loadError" size="small" surface="none" role="alert">
+      <template #action>
+        <ZButton size="small" variant="plain" :loading="loadAction.loading.value" @click="load">
+          重试
+        </ZButton>
+      </template>
+    </ZEmpty>
   </section>
 </template>
 

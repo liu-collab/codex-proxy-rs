@@ -4,7 +4,7 @@ import type {
   ClientProfilePreview,
   ClientProfileSelection,
 } from '@/api/modules/settings/profiles'
-import { ZButton, ZSegmented } from '@codex-proxy/ui'
+import { ZButton, ZEmpty, ZSegmented } from '@codex-proxy/ui'
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { getClientProfileOptions, previewClientProfile } from '@/api/modules/settings/profiles'
 import { errorMessage } from '@/utils/operation'
@@ -70,7 +70,7 @@ watch([model, () => props.active], ([configuration, active], _, onCleanup) => {
     return
   const timer = setTimeout(async () => {
     try {
-      const result = await previewClientProfile(configuration)
+      const result = await previewClientProfile({ configuration })
       if (!cancelled)
         preview.value = result
     }
@@ -107,14 +107,15 @@ onMounted(() => load())
       />
       <slot name="source-extra" />
     </div>
-    <div v-if="loadError" role="alert" class="flex flex-wrap items-center justify-between gap-3 text-cp text-cp-error">
-      <span>预设加载失败：{{ loadError }}</span>
-      <ZButton size="small" :disabled="disabled || loading" @click="load()">
-        重试
-      </ZButton>
-    </div>
+    <ZEmpty v-if="loadError" title="预设加载失败" :description="loadError" size="small" surface="none" role="alert">
+      <template #action>
+        <ZButton size="small" :disabled="disabled || loading" @click="load()">
+          重试
+        </ZButton>
+      </template>
+    </ZEmpty>
     <ClientProfilePresetFields
-      v-if="!inherited"
+      v-if="!loadError && !inherited"
       :model-value="effective ?? null"
       :presets="options?.presets ?? []"
       :preview="preview"
@@ -126,7 +127,7 @@ onMounted(() => load())
       @update:model-value="model = $event"
     />
     <ClientProfilePreviewPanel
-      v-if="inherited || !custom"
+      v-if="!loadError && (inherited || !custom)"
       :preview="preview"
       :previewing="previewing"
       :needs-version-input="!!needsInput"

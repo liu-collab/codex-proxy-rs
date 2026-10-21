@@ -96,7 +96,7 @@ fn percent_decode(value: &str) -> String {
             index += 1;
         }
     }
-    String::from_utf8_lossy(&output).into_owned()
+    String::from_utf8_lossy_owned(output)
 }
 
 async fn open_sideband(

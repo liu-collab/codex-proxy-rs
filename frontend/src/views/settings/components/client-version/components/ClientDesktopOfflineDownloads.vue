@@ -101,14 +101,6 @@ function formatFileSize(value: number | null): string {
       {{ downloads.warning }}
     </p>
 
-    <p
-      v-if="error && downloads"
-      class="m-0 rounded-cp bg-cp-error-container px-3 py-2.5 text-cp-sm leading-[1.45] font-bold text-cp-error-on-container"
-      role="alert"
-    >
-      {{ error }}，当前仍显示上次成功结果
-    </p>
-
     <div v-if="loading && !downloads" class="grid gap-3 sm:grid-cols-2" aria-label="正在加载离线安装包">
       <div v-for="index in 2" :key="index" class="grid gap-3 rounded-cp bg-cp-bg-container p-4 shadow-cp-tertiary">
         <ZSkeleton class="h-4 w-28" />

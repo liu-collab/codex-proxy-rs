@@ -9,7 +9,6 @@ export function usePrivacyPreview() {
   function invalidate() {
     state.invalidate()
     result.value = undefined
-    state.error.value = ''
   }
   async function run(policy: CodexPrivacyPolicy, sample: PrivacySample) {
     const id = state.start()
@@ -21,8 +20,8 @@ export function usePrivacyPreview() {
       result.value = response
       return response
     }
-    catch (cause) { state.fail(id, cause) }
+    catch {}
     finally { state.finish(id) }
   }
-  return { loading: state.loading, error: state.error, result, run, invalidate }
+  return { loading: state.loading, result, run, invalidate }
 }

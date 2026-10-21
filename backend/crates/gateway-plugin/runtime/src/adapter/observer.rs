@@ -543,10 +543,6 @@ fn wire_timings(observation: &RequestObservation) -> RequestTimings {
         upstream_response_ms: timings.upstream_response_ms,
         upstream_api_overhead_ms: timings.upstream_api_overhead_ms,
         upstream_engine_ms: timings.upstream_engine_ms,
-        upstream_engine_iapi_ttft_ms: timings.upstream_engine_iapi_ttft_ms,
-        upstream_engine_service_ttft_ms: timings.upstream_engine_service_ttft_ms,
-        upstream_engine_iapi_tbt_ms: timings.upstream_engine_iapi_tbt_ms,
-        upstream_engine_service_tbt_ms: timings.upstream_engine_service_tbt_ms,
         latency_ms: timings.latency_ms,
     }
 }

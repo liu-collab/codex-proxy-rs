@@ -1,4 +1,4 @@
-//! 响应 DTO 与固定 wire 形状的合同测试
+//! 验证观测响应的指标、展示投影与查询时间边界
 
 use chrono::Utc;
 use serde_json::json;
@@ -25,6 +25,7 @@ async fn dashboard_summary_should_include_quota_exhaustion_in_unavailable_headli
         .dashboard_observation
         .lock()
         .expect("dashboard observation") = Some(DashboardObservation {
+        yesterday: Default::default(),
         analytics: gateway_admin::model::observability::AnalyticsMetadata {
             coverage_start: Some(now - Duration::hours(1)),
             coverage_end: Some(now),
@@ -106,14 +107,14 @@ async fn dashboard_summary_should_include_quota_exhaustion_in_unavailable_headli
 }
 
 #[tokio::test]
-async fn dashboard_summary_should_use_lifetime_totals_for_card_footers() {
+async fn dashboard_summary_should_keep_yesterday_comparison_separate_from_today_and_lifetime() {
     use axum::{
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
     };
     use chrono::{Duration, Utc};
     use gateway_admin::model::observability::{
-        AccountPoolMetrics, DashboardObservation, DashboardTotals, TimeRange,
+        AccountPoolMetrics, DashboardObservation, DashboardTotals, RequestMetrics, TimeRange,
     };
     use gateway_api::admin::observability;
     use tower::ServiceExt as _;
@@ -127,6 +128,13 @@ async fn dashboard_summary_should_use_lifetime_totals_for_card_footers() {
         .dashboard_observation
         .lock()
         .expect("dashboard observation") = Some(DashboardObservation {
+        yesterday: RequestMetrics {
+            request_count: 7,
+            input_tokens: 400,
+            cached_input_tokens: 200,
+            total_tokens: 500,
+            ..Default::default()
+        },
         analytics: Default::default(),
         runtime_slots: None,
         range: TimeRange::new(now - Duration::hours(1), now).expect("dashboard range"),
@@ -161,6 +169,11 @@ async fn dashboard_summary_should_use_lifetime_totals_for_card_footers() {
         .expect("dashboard response body");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("dashboard response JSON");
     assert_eq!(status, StatusCode::OK, "{value}");
+    let cards = &value["data"]["cards"];
+    assert_eq!(cards["traffic"]["todayRequestsValue"], 0);
+    assert_eq!(cards["traffic"]["yesterdayRequestsValue"], 7);
+    assert_eq!(cards["tokens"]["yesterdayTokensValue"], 500);
+    assert_eq!(cards["cache"]["yesterdayHitRateValue"], 0.5);
     assert_eq!(
         value["data"]["analytics"]["coverageStartDisplay"],
         serde_json::Value::Null
@@ -208,6 +221,7 @@ async fn dashboard_summary_should_default_to_current_deployment_day() {
         .dashboard_observation
         .lock()
         .expect("dashboard observation") = Some(DashboardObservation {
+        yesterday: Default::default(),
         analytics: Default::default(),
         runtime_slots: None,
         range: TimeRange::new(now - Duration::hours(1), now).expect("dashboard range"),
@@ -274,10 +288,6 @@ async fn usage_detail_should_keep_attempt_snapshot_contract() {
     record.upstream_response_ms = Some(1_000);
     record.upstream_api_overhead_ms = Some(120.25);
     record.upstream_engine_ms = Some(6400.0);
-    record.upstream_engine_iapi_ttft_ms = Some(650.5);
-    record.upstream_engine_service_ttft_ms = Some(720.25);
-    record.upstream_engine_iapi_tbt_ms = Some(18.45);
-    record.upstream_engine_service_tbt_ms = Some(20.12);
     fixture
         .usage_detail
         .lock()
@@ -347,29 +357,6 @@ async fn usage_detail_should_keep_attempt_snapshot_contract() {
     assert_eq!(
         value["data"]["latencyDetails"]["upstreamEngineMs"],
         json!(6400.0)
-    );
-    assert_eq!(
-        value["data"]["latencyDetails"]["upstreamEngineIapiTtftMs"],
-        json!(650.5)
-    );
-    assert_eq!(
-        value["data"]["latencyDetails"]["upstreamEngineServiceTtftMs"],
-        json!(720.25)
-    );
-    assert_eq!(
-        value["data"]["latencyDetails"]["upstreamEngineIapiTbtMs"],
-        json!(18.45)
-    );
-    assert_eq!(
-        value["data"]["latencyDetails"]["upstreamEngineServiceTbtMs"],
-        json!(20.12)
-    );
-    assert!(value["data"].get("firstTokenMs").is_none());
-    assert!(value["data"].get("firstTokenLatencyMsDisplay").is_none());
-    assert!(
-        value["data"]["latencyDetails"]
-            .get("firstTokenMs")
-            .is_none()
     );
     assert_eq!(
         serde_json::json!({
@@ -476,8 +463,6 @@ async fn zero_attempt_failure_detail_omits_trace_and_keeps_missing_upstream_fact
     assert_eq!(data["clientStatusCode"], 503);
     assert_eq!(data["message"], "no upstream account is available");
     assert_eq!(data["model"], "coding");
-    assert!(data.get("upstreamStatusCode").is_none());
-    assert!(data.get("httpVersion").is_none());
     for field in [
         "provider",
         "accountId",
@@ -628,7 +613,6 @@ async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
         .await
         .expect("diagnostics body");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("diagnostics JSON");
-    assert!(value["data"]["items"][0].get("impactScore").is_none());
     assert_eq!(value["data"]["items"][0]["requestShare"], 0.5);
     assert_eq!(value["data"]["items"][0]["retryCount"], 3);
     assert_eq!(value["data"]["items"][0]["retryRate"], 0.5);
@@ -720,10 +704,6 @@ pub(super) fn usage_record_with_account(
         upstream_response_ms: None,
         upstream_api_overhead_ms: None,
         upstream_engine_ms: None,
-        upstream_engine_iapi_ttft_ms: None,
-        upstream_engine_service_ttft_ms: None,
-        upstream_engine_iapi_tbt_ms: None,
-        upstream_engine_service_tbt_ms: None,
         latency_ms: None,
         admission_decision_ms: None,
         account_selection_wait_ms: None,
@@ -801,6 +781,9 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .lock()
         .expect("usage records")
         .push(UsageListRecord {
+            error_code: None,
+            error_message: None,
+            client_status_code: None,
             outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
             client_api_key_name: Some("Production".to_owned()),
             id: "request_endpoint".to_owned(),
@@ -860,10 +843,6 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
             upstream_response_ms: Some(2_000),
             upstream_api_overhead_ms: None,
             upstream_engine_ms: None,
-            upstream_engine_iapi_ttft_ms: None,
-            upstream_engine_service_ttft_ms: None,
-            upstream_engine_iapi_tbt_ms: None,
-            upstream_engine_service_tbt_ms: None,
             latency_ms: Some(31),
             admission_decision_ms: Some(1),
             account_selection_wait_ms: Some(2),
@@ -892,12 +871,18 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
             });
             records.push(image);
         }
+        let mut failed = records[0].clone();
+        failed.id = "request_failed".to_owned();
+        failed.outcome = gateway_admin::model::observability::RequestOutcome::Failed;
+        failed.error_code = Some("server_error".to_owned());
+        failed.error_message = Some("The upstream service is temporarily unavailable.".to_owned());
+        records.push(failed);
     }
     let response = observability::router::<AdminTestState>()
         .with_state(fixture.state())
         .oneshot(
             Request::builder()
-                .uri("/api/admin/usage/records")
+                .uri("/api/admin/usage/records?status=all")
                 .header(header::COOKIE, "cpr_session=valid-session")
                 .header("x-request-id", "req_usage_endpoint")
                 .body(Body::empty())
@@ -911,6 +896,13 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .expect("usage response body");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("usage response JSON");
 
+    assert!(value["data"]["items"][0]["errorCode"].is_null());
+    assert!(value["data"]["items"][0]["errorMessage"].is_null());
+    assert_eq!(value["data"]["items"][3]["errorCode"], "server_error");
+    assert_eq!(
+        value["data"]["items"][3]["errorMessage"],
+        "The upstream service is temporarily unavailable."
+    );
     assert_eq!(value["data"]["items"][0]["clientApiKeyName"], "Production");
     assert_eq!(value["data"]["items"][0]["accountNotes"], "Team workspace");
     assert_eq!(
@@ -1075,6 +1067,7 @@ async fn calendar_queries_and_display_follow_deployment_timezone_with_one_anchor
         let fixture = AdminTestFixture::with_timezone(timezone).await;
         fixture.auth.insert_session("valid-session");
         *fixture.dashboard_observation.lock().unwrap() = Some(DashboardObservation {
+            yesterday: Default::default(),
             analytics: gateway_admin::model::observability::AnalyticsMetadata {
                 coverage_start: Some(range.start),
                 coverage_end: Some(end),

@@ -70,10 +70,7 @@ export const usePluginViewsStore = defineStore('plugin-views', () => {
     return pending ?? refresh()
   }
 
-  watch(() => authStore.session, (session, previous) => {
-    if (session !== previous)
-      reset()
-  })
+  watch(() => authStore.sessionGeneration, reset, { flush: 'sync' })
 
   return {
     views,

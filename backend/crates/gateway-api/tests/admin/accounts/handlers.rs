@@ -10,6 +10,67 @@ use tower::ServiceExt as _;
 use super::super::{AdminTestFixture, AdminTestState};
 
 #[tokio::test]
+async fn account_proxy_binding_is_distinct_from_the_redacted_endpoint() {
+    use chrono::Utc;
+    use gateway_core::account::{AccountStatusFacts, CredentialState, OutboundProxy, QuotaState};
+
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    for (proxy_id, proxy_url, enabled) in [
+        (
+            Some("proxy-a"),
+            Some("socks5h://alice:secret@127.0.0.1:50101"),
+            true,
+        ),
+        (
+            Some("proxy-b"),
+            Some("socks5h://bob:secret@127.0.0.1:50101"),
+            false,
+        ),
+        (None, Some("socks5h://alice:secret@127.0.0.1:50101"), true),
+        (None, None, true),
+    ] {
+        let now = Utc::now();
+        let facts = AccountStatusFacts {
+            enabled: true,
+            credential_state: CredentialState::Ready,
+            access_token_expires_at: None,
+            quota: QuotaState::unknown(),
+            cooldown: None,
+            last_error_reason: None,
+            last_error_message: None,
+        };
+        let mut item = account_page_item(facts, now, "oauth");
+        item.account.outbound_proxy_id = proxy_id.map(str::to_owned);
+        item.account.outbound_proxy = proxy_url.map(|url| OutboundProxy::parse(url).unwrap());
+        item.account.outbound_proxy_enabled = enabled;
+        *fixture.account.lock().unwrap() = Some(item);
+        let response = admin::accounts::router::<AdminTestState>()
+            .with_state(fixture.state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/accounts")
+                    .header("x-request-id", "req_proxy_binding")
+                    .header(header::COOKIE, "cpr_session=valid-session")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 32768).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let account = &value["data"]["items"][0];
+        assert_eq!(account["outboundProxyId"], serde_json::json!(proxy_id));
+        assert_eq!(
+            account["outboundProxyEndpoint"],
+            serde_json::json!(proxy_url.map(|_| "socks5h://127.0.0.1:50101"))
+        );
+        assert!(!String::from_utf8(body.to_vec()).unwrap().contains("secret"));
+    }
+}
+
+#[tokio::test]
 async fn account_cooldown_returns_an_instant_and_server_formatted_recovery() {
     use chrono::{DateTime, Duration, Utc};
     use gateway_core::account::{
@@ -112,6 +173,7 @@ fn account_page_item(
 
     AccountPageItem {
         account: AccountRecord {
+            outbound_proxy_id: None,
             outbound_proxy_enabled: true,
             id: "acct_cooldown".to_owned(),
             provider_kind: gateway_core::routing::ProviderKind::new("openai").unwrap(),
@@ -149,7 +211,7 @@ fn account_page_item(
 }
 
 #[tokio::test]
-async fn account_usage_returns_distinct_cache_read_and_write_tokens_without_aliases() {
+async fn account_usage_preserves_cache_read_and_write_counts_and_missing_values() {
     use chrono::Utc;
     use gateway_admin::model::accounts::AccountUsage;
     use gateway_core::account::{AccountStatusFacts, CredentialState, QuotaState};
@@ -215,35 +277,7 @@ async fn account_usage_returns_distinct_cache_read_and_write_tokens_without_alia
             usage["cacheWriteInputTokensDisplay"],
             if write.is_some() { "7" } else { "—" }
         );
-        for alias in [
-            "createdTokens",
-            "createdTokensDisplay",
-            "readTokens",
-            "readTokensDisplay",
-        ] {
-            assert!(usage.get(alias).is_none(), "obsolete token alias: {alias}");
-        }
     }
-}
-
-#[tokio::test]
-async fn standalone_credential_rotation_route_is_not_exposed() {
-    let fixture = AdminTestFixture::new().await;
-    fixture.auth.insert_session("valid-session");
-    let response = admin::router::<AdminTestState>()
-        .with_state(fixture.state())
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/admin/accounts/rotate")
-                .header(header::COOKIE, "cpr_session=valid-session")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from("{}"))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

@@ -5,7 +5,7 @@ use gateway_admin::model::{
     client_keys::ClientKeySecret,
     key_usage::{KeyUsageOverview, KeyUsageRecords},
     observability::{
-        CostCoverage, CurrencyCost, Granularity, OpsError, RequestMetrics, UsageListRecord,
+        CostCoverage, CurrencyCost, Granularity, RequestMetrics, RequestOutcome, UsageListRecord,
     },
     system::SystemVersion,
 };
@@ -213,14 +213,6 @@ struct OutputTimingView {
     #[serde(skip_serializing_if = "Option::is_none")]
     upstream_engine_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    upstream_engine_iapi_ttft_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    upstream_engine_service_ttft_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    upstream_engine_iapi_tbt_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    upstream_engine_service_tbt_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     first_event_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     first_reasoning_ms: Option<u64>,
@@ -228,8 +220,20 @@ struct OutputTimingView {
     first_text_ms: Option<u64>,
 }
 
-fn success_record(value: UsageListRecord, time: crate::time::TimePresenter) -> RecordView {
-    let token_details = Some(usage_list_token_details(&value));
+fn usage_record(value: UsageListRecord, time: crate::time::TimePresenter) -> RecordView {
+    let token_details = [
+        value.input_tokens,
+        value.output_tokens,
+        value.cached_input_tokens,
+        value.cache_write_input_tokens,
+        value.reasoning_output_tokens,
+        value.image_input_tokens,
+        value.image_output_tokens,
+        value.total_tokens,
+    ]
+    .iter()
+    .any(Option::is_some)
+    .then(|| usage_list_token_details(&value));
     let billing = billing_view(value.billing.as_ref());
     RecordView {
         id: value.id,
@@ -248,68 +252,36 @@ fn success_record(value: UsageListRecord, time: crate::time::TimePresenter) -> R
             upstream_response_ms: value.upstream_response_ms,
             upstream_api_overhead_ms: value.upstream_api_overhead_ms,
             upstream_engine_ms: value.upstream_engine_ms,
-            upstream_engine_iapi_ttft_ms: value.upstream_engine_iapi_ttft_ms,
-            upstream_engine_service_ttft_ms: value.upstream_engine_service_ttft_ms,
-            upstream_engine_iapi_tbt_ms: value.upstream_engine_iapi_tbt_ms,
-            upstream_engine_service_tbt_ms: value.upstream_engine_service_tbt_ms,
             first_event_ms: value.first_event_ms,
             first_reasoning_ms: value.first_reasoning_ms,
             first_text_ms: value.first_text_ms,
         },
         client_ip: value.client_ip,
         user_agent: value.user_agent,
-        status: "success",
-        // 成功记录不保存 HTTP 状态，不能用 200 伪造缺失的原始事实
-        status_code: None,
-    }
-}
-
-fn error_record(value: OpsError, time: crate::time::TimePresenter) -> RecordView {
-    RecordView {
-        id: value.event_id,
-        created_at: value.occurred_at,
-        created_at_display: time.datetime(&value.occurred_at),
-        model: value.requested_model_id,
-        route: value.endpoint,
-        reasoning_effort: value.reasoning_effort,
-        client_transport: value.client_transport,
-        upstream_transport: value.upstream_transport,
-        token_details: None,
-        billing: None,
-        latency_ms: value.latency_ms,
-        first_token_latency_ms: None,
-        latency_details: OutputTimingView::default(),
-        client_ip: value.client_ip,
-        user_agent: value.user_agent,
-        status: "error",
+        status: match value.outcome {
+            RequestOutcome::Succeeded => "success",
+            RequestOutcome::Failed => "error",
+            RequestOutcome::Incomplete => "incomplete",
+            RequestOutcome::Cancelled => "cancelled",
+            RequestOutcome::Running => "running",
+            RequestOutcome::Other(_) => "unknown",
+        },
         status_code: value.client_status_code,
     }
 }
 
 pub(super) fn records(
-    value: KeyUsageRecords,
+    page: KeyUsageRecords,
     time: crate::time::TimePresenter,
 ) -> PageData<RecordView> {
-    match value {
-        KeyUsageRecords::Success(page) => PageData {
-            items: page
-                .items
-                .into_iter()
-                .map(|value| success_record(value, time))
-                .collect(),
-            current_page: page.current_page,
-            page_size: page.page_size,
-            total: page.total,
-        },
-        KeyUsageRecords::Error(page) => PageData {
-            items: page
-                .items
-                .into_iter()
-                .map(|value| error_record(value, time))
-                .collect(),
-            current_page: page.current_page,
-            page_size: page.page_size,
-            total: page.total,
-        },
+    PageData {
+        items: page
+            .items
+            .into_iter()
+            .map(|value| usage_record(value, time))
+            .collect(),
+        current_page: page.current_page,
+        page_size: page.page_size,
+        total: page.total,
     }
 }

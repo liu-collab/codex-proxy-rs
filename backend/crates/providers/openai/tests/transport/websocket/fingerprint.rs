@@ -110,8 +110,7 @@ async fn official_websocket_wire_fingerprint_should_remain_aligned() {
         opening.lines().next(),
         Some("GET /backend-api/codex/responses HTTP/1.1")
     );
-    // 固定身份字段沿用官方画像，专项计时头按官方客户端在 openai-beta 后插入
-    // HeaderMap 序列化会随新增头调整迭代顺序，锁定启用计时后的完整 opening
+    // 固定身份字段沿用官方画像，锁定默认不请求专项计时的完整 opening
     assert_eq!(
         read_header_names(&opening),
         vec![
@@ -124,7 +123,7 @@ async fn official_websocket_wire_fingerprint_should_remain_aligned() {
             "authorization",
             "user-agent",
             "originator",
-            "x-responsesapi-include-timing-metrics",
+            "openai-beta",
             "version",
             "x-codex-beta-features",
             "x-client-request-id",
@@ -133,13 +132,12 @@ async fn official_websocket_wire_fingerprint_should_remain_aligned() {
             "x-codex-window-id",
             "x-codex-turn-metadata",
             "x-codex-routing-hint",
-            "openai-beta",
             "sec-websocket-extensions",
         ]
     );
     assert_eq!(
         read_header_value(&opening, "x-responsesapi-include-timing-metrics"),
-        Some("true"),
+        None,
     );
     assert_eq!(
         read_header_value(&opening, "sec-websocket-extensions"),

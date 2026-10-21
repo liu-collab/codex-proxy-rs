@@ -61,7 +61,7 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
       const current = instances.value.find(value => value.id === instance.id)
       if (error instanceof ApiError && error.status === 400 && current?.revision === instance.revision) {
         try {
-          const plan = await getPluginVersionPlan(instance.id, artifact.metadata.sha256, { silent: true })
+          const plan = await getPluginVersionPlan({ id: instance.id, artifactSha256: artifact.metadata.sha256 }, { silent: true })
           if (plan.instanceRevision !== instance.revision)
             throw new Error('插件设置已变更，请刷新后重试')
           showVersionSwitch.value = false
@@ -89,7 +89,7 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
     showRollback.value = true
     loadingRollback.value = true
     try {
-      const plan = await getPluginRollbackPlan(instance.id, { signal: controller.signal, silent: true })
+      const plan = await getPluginRollbackPlan({ id: instance.id }, { signal: controller.signal, silent: true })
       if (rollbackController === controller)
         rollbackPlan.value = plan
     }

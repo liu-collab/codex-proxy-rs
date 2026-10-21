@@ -25,22 +25,15 @@ export function useProxyAccounts(options: {
     total: query.total.value,
   }))
 
-  function load() {
-    if (options.isOpen() && options.proxyId())
-      void query.execute()
-  }
-
   function setPage(page: number) {
-    if (!options.isOpen())
+    if (!options.isOpen() || !options.proxyId())
       return
-    query.page.value = page
-    query.items.value = []
-    load()
+    void query.execute({ page })
   }
 
   function setPageSize(size: number) {
-    query.pageSize.value = size
-    setPage(1)
+    if (options.isOpen() && options.proxyId())
+      void query.execute({ page: 1, pageSize: size })
   }
 
   async function removeAccount(accountId: string) {
@@ -67,16 +60,19 @@ export function useProxyAccounts(options: {
     query.invalidate({ resetLoading: options.isOpen() })
     if (!options.isOpen())
       return
-    query.items.value = []
-    query.total.value = 0
-    query.error.value = ''
-    query.page.value = 1
     search.value = ''
-    load()
+    if (options.proxyId()) {
+      void query.reloadFromStart()
+    }
+    else {
+      query.items.value = []
+      query.total.value = 0
+    }
   }, { immediate: true, flush: 'sync' })
   watch(search, (_value, _previous, onCleanup) => {
     const timer = setTimeout(() => {
-      void setPage(1)
+      if (options.isOpen() && options.proxyId())
+        void query.reloadFromStart()
     }, 300)
     onCleanup(() => clearTimeout(timer))
   })

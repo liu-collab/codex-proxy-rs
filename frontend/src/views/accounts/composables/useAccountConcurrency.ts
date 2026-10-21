@@ -6,17 +6,12 @@ import { getAccountConcurrency } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
 
 export function useAccountConcurrency(account: Ref<Account | null>, open: Ref<boolean>) {
-  const page = shallowRef(1)
-  const pageSize = shallowRef(20)
-  const data = shallowRef<AccountConcurrencyPage | null>(null)
+  const data = shallowRef<Pick<AccountConcurrencyPage, 'entries'> | null>(null)
   const receivedAt = shallowRef(0)
   const now = shallowRef(performance.now())
   const visibility = useDocumentVisibility()
   const active = computed(() => open.value && !!account.value && visibility.value === 'visible')
   const request = useRequestState()
-  const tableLoading = computed(() => request.loading.value && (
-    !data.value || data.value.page !== page.value || data.value.pageSize !== pageSize.value
-  ))
   let timer: ReturnType<typeof setTimeout> | undefined
 
   const ticker = useIntervalFn(() => {
@@ -44,21 +39,34 @@ export function useAccountConcurrency(account: Ref<Account | null>, open: Ref<bo
     const id = request.start(true)
     request.loading.value = true
     try {
-      const result = await getAccountConcurrency({
-        accountId: account.value.id,
-        page: page.value,
-        pageSize: pageSize.value,
-      }, { signal: request.signal, silent: true, retry: false })
+      const accountId = account.value.id
+      const loadPage = (page: number) => getAccountConcurrency({ accountId, page, pageSize: 100 }, { signal: request.signal, silent: true, retry: false })
+      const result = await loadPage(1)
       if (!request.isCurrent(id))
         return
-      const lastPage = Math.max(1, Math.ceil(result.total / pageSize.value))
-      if (page.value > lastPage) {
-        page.value = lastPage
-        return
+      const firstReceivedAt = performance.now()
+      const collected = new Map(result.entries.map(entry => [entry.leaseId, { entry, receivedAt: firstReceivedAt }]))
+      // 按首次总数限定本轮读取，避免持续新增占用让刷新无界延长
+      const pages = Math.ceil(result.total / result.pageSize)
+      for (let page = 2; page <= pages; page++) {
+        const next = await loadPage(page)
+        if (!request.isCurrent(id))
+          return
+        const receivedAt = performance.now()
+        for (const entry of next.entries)
+          collected.set(entry.leaseId, { entry, receivedAt })
+        if (!next.entries.length)
+          break
       }
-      data.value = result
+      const snapshotAt = performance.now()
+      data.value = {
+        entries: [...collected.values()].map(({ entry, receivedAt }) => ({
+          ...entry,
+          occupiedMs: entry.occupiedMs === null ? null : entry.occupiedMs + snapshotAt - receivedAt,
+        })),
+      }
       request.error.value = ''
-      receivedAt.value = performance.now()
+      receivedAt.value = snapshotAt
       now.value = receivedAt.value
     }
     catch (cause: unknown) {
@@ -72,15 +80,9 @@ export function useAccountConcurrency(account: Ref<Account | null>, open: Ref<bo
     }
   }
 
-  watch(() => account.value?.id, () => {
-    page.value = 1
-  })
-  watch(pageSize, () => {
-    page.value = 1
-  })
-  watch([active, () => account.value?.id, page, pageSize], ([isActive, accountId], [, previousAccountId]) => {
+  watch([active, () => account.value?.id], ([isActive, accountId], [, previousAccountId]) => {
     stop()
-    // 同一账号保留已确认的页快照，切页、暂停轮询和弹窗退场都不提前清空内容
+    // 同一账号保留已确认内容，暂停轮询和弹窗退场不提前清空
     if (accountId !== previousAccountId) {
       data.value = null
       request.error.value = ''
@@ -92,17 +94,5 @@ export function useAccountConcurrency(account: Ref<Account | null>, open: Ref<bo
   }, { immediate: true })
   onScopeDispose(stop)
 
-  function setPage(value: number) {
-    if (page.value === value)
-      void refresh()
-    else page.value = value
-  }
-
-  function setPageSize(value: number) {
-    if (pageSize.value === value)
-      void refresh()
-    else pageSize.value = value
-  }
-
-  return { page, pageSize, data, entries, loading: request.loading, tableLoading, error: request.error, refresh, setPage, setPageSize }
+  return { data, entries, loading: request.loading, error: request.error }
 }

@@ -66,9 +66,10 @@ async fn observe_timing_events(websocket: bool, events: Vec<Value>) -> ProviderR
             let mut ws = crate::transport::accept_codex_test_websocket_with(
                 socket,
                 |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
-                    assert_eq!(
-                        request.headers()["x-responsesapi-include-timing-metrics"],
-                        "true"
+                    assert!(
+                        !request
+                            .headers()
+                            .contains_key("x-responsesapi-include-timing-metrics")
                     );
                     response.headers_mut().insert(
                         "sec-websocket-extensions",
@@ -125,19 +126,11 @@ async fn official_response_duration_is_observed_independently_of_the_request_clo
         let metrics = json!({"type":"responsesapi.websocket_timing","timing_metrics":{
             "responses_duration_excl_engine_and_client_tool_time_ms":120.25,
             "engine_service_total_ms":6400.0,
-            "engine_iapi_ttft_total_ms":650.5,
-            "engine_service_ttft_total_ms":720.25,
-            "engine_iapi_tbt_across_engine_calls_ms":18.45,
-            "engine_service_tbt_across_engine_calls_ms":20.12
         }});
         let wrong_id = json!({"type":"responsesapi.websocket_timing","response_id":"resp_other","timing_metrics":{"engine_service_total_ms":999.0}});
         let invalid = json!({"type":"responsesapi.websocket_timing","timing_metrics":{
             "responses_duration_excl_engine_and_client_tool_time_ms":null,
             "engine_service_total_ms":"100",
-            "engine_iapi_ttft_total_ms":-1,
-            "engine_service_ttft_total_ms":1e99,
-            "engine_iapi_tbt_across_engine_calls_ms":{},
-            "engine_service_tbt_across_engine_calls_ms":[]
         }});
         let stale = json!({"type":"responsesapi.websocket_timing","timing_metrics":{"engine_service_total_ms":999.0}});
         let events = [stale, created, metrics, wrong_id, invalid, completed];
@@ -145,11 +138,6 @@ async fn official_response_duration_is_observed_independently_of_the_request_clo
         assert_eq!(timings.upstream_response_ms, Some(7_000));
         assert_eq!(timings.upstream_api_overhead_ms, Some(120.25));
         assert_eq!(timings.upstream_engine_ms, Some(6400.0));
-        assert_eq!(timings.upstream_engine_iapi_ttft_ms, Some(650.5));
-        assert_eq!(timings.upstream_engine_service_ttft_ms, Some(720.25));
-        assert_eq!(timings.upstream_engine_iapi_tbt_ms, Some(18.45));
-        assert_eq!(timings.upstream_engine_service_tbt_ms, Some(20.12));
-        assert_eq!(timings.first_token_ms, None);
         assert!(timings.first_event_ms.is_some_and(|value| value >= 20_000));
     }
 }
@@ -197,7 +185,6 @@ async fn response_critical_path_is_observed_without_logical_turn_totals_on_both_
         let mut metrics = response_critical_path_event();
         // 同帧即使携带整轮专项值，也不能与响应级 critical path 混算
         metrics["timing_metrics"]["engine_service_total_ms"] = json!(25_000);
-        metrics["timing_metrics"]["engine_iapi_ttft_total_ms"] = json!(500);
         let mut events = critical_path_response_events(metrics);
         let mut wrong_id = response_critical_path_event();
         wrong_id["timing_metrics"]["response_id"] = json!("resp_other");
@@ -207,11 +194,6 @@ async fn response_critical_path_is_observed_without_logical_turn_totals_on_both_
         assert_eq!(timings.upstream_engine_ms, Some(6710.68507));
         assert!((timings.upstream_api_overhead_ms.unwrap() - 81.409594).abs() < 0.000001);
         assert_eq!(timings.upstream_response_ms, Some(7000));
-        assert_eq!(timings.first_token_ms, None);
-        assert_eq!(timings.upstream_engine_iapi_ttft_ms, None);
-        assert_eq!(timings.upstream_engine_service_ttft_ms, None);
-        assert_eq!(timings.upstream_engine_iapi_tbt_ms, None);
-        assert_eq!(timings.upstream_engine_service_tbt_ms, None);
     }
 }
 
@@ -252,12 +234,10 @@ async fn critical_path_rejects_mismatched_identity_and_incomplete_or_cumulative_
         "timing_scope":"logical_turn",
         "engine_service_total_ms":25_000,
         "responses_duration_excl_engine_and_client_tool_time_ms":500,
-        "engine_iapi_ttft_total_ms":200
     }});
     let timings = observe_timing_events(false, critical_path_response_events(metrics)).await;
     assert_eq!(timings.upstream_engine_ms, None);
     assert_eq!(timings.upstream_api_overhead_ms, None);
-    assert_eq!(timings.upstream_engine_iapi_ttft_ms, None);
 }
 
 #[tokio::test]
@@ -288,10 +268,6 @@ async fn timing_frames_outside_the_active_response_do_not_enter_request_metrics(
     let timing = json!({"type":"responsesapi.websocket_timing","timing_metrics":{
         "responses_duration_excl_engine_and_client_tool_time_ms":0,
         "engine_service_total_ms":450,
-        "engine_iapi_ttft_total_ms":211,
-        "engine_service_ttft_total_ms":233,
-        "engine_iapi_tbt_across_engine_calls_ms":2.450638,
-        "engine_service_tbt_across_engine_calls_ms":5.267279
     }});
     let created = json!({"type":"response.created","response":{"id":"resp_boundary"}});
     let completed = json!({"type":"response.completed","response":{"id":"resp_boundary","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}});
@@ -311,16 +287,39 @@ async fn timing_frames_outside_the_active_response_do_not_enter_request_metrics(
     let timings = finish_timings(&mut stream, ProviderResponseTimings::default()).await;
     assert_eq!(timings.upstream_api_overhead_ms, None);
     assert_eq!(timings.upstream_engine_ms, None);
-    assert_eq!(timings.upstream_engine_iapi_ttft_ms, None);
-    assert_eq!(timings.upstream_engine_service_ttft_ms, None);
-    assert_eq!(timings.upstream_engine_iapi_tbt_ms, None);
-    assert_eq!(timings.upstream_engine_service_tbt_ms, None);
-    assert_eq!(timings.first_token_ms, None);
     server.await.unwrap();
 }
 
 #[tokio::test]
-async fn content_without_output_item_start_keeps_ttft_unknown_on_every_attempt() {
+async fn sse_keepalive_and_empty_data_do_not_start_ttft() {
+    let store = Arc::new(MemoryAccountStore::default());
+    create_account(&store, "acct_provider_contract").await;
+    let (base_url, release, _, server) = paused_chunked_sse_server(
+        ": ping\n\nevent: response.created\n\ndata: \t\n\ndata: [DONE]\n\n".to_owned(),
+        CAPTURE_COMPLETED_SSE.to_owned(),
+    )
+    .await;
+    let mut stream = provider_with_base_url(&store, base_url)
+        .execute(
+            planned_request("openai", http_generate_operation()),
+            timed_context(Instant::now() - Duration::from_secs(3), 1),
+        )
+        .await
+        .unwrap();
+    let first = first_upstream_timings(&mut stream).await;
+    assert_eq!(first.first_token_ms, None);
+    release.send(()).unwrap();
+    let final_timings = finish_timings(&mut stream, first).await;
+    assert!(
+        final_timings
+            .first_token_ms
+            .is_some_and(|value| value >= 3_000)
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn first_response_uses_request_clock_on_every_attempt() {
     for attempt in [1, 2] {
         let store = Arc::new(MemoryAccountStore::default());
         create_account(&store, "acct_provider_contract").await;
@@ -344,7 +343,7 @@ async fn content_without_output_item_start_keeps_ttft_unknown_on_every_attempt()
             .unwrap();
         let first = first_upstream_timings(&mut stream).await;
         assert!(first.first_event_ms.is_some_and(|value| value >= 3_000));
-        assert_eq!(first.first_token_ms, None);
+        assert!(first.first_token_ms.is_some_and(|value| value >= 3_000));
         assert!(first.first_text_ms.is_some_and(|value| value >= 3_000));
         release.send(()).unwrap();
         let final_timings = finish_timings(&mut stream, first).await;
@@ -354,7 +353,7 @@ async fn content_without_output_item_start_keeps_ttft_unknown_on_every_attempt()
 }
 
 #[tokio::test]
-async fn structural_frames_start_ttft_before_content_on_http_and_websocket() {
+async fn created_response_starts_ttft_before_output_on_http_and_websocket() {
     for websocket in [false, true] {
         for (output, has_content) in [
             (
@@ -395,9 +394,10 @@ async fn structural_frames_start_ttft_before_content_on_http_and_websocket() {
                         socket,
                         |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
                          response| {
-                            assert_eq!(
-                                request.headers()["x-responsesapi-include-timing-metrics"],
-                                "true"
+                            assert!(
+                                !request
+                                    .headers()
+                                    .contains_key("x-responsesapi-include-timing-metrics")
                             );
                             response.headers_mut().insert(
                                 "sec-websocket-extensions",
@@ -407,13 +407,11 @@ async fn structural_frames_start_ttft_before_content_on_http_and_websocket() {
                     )
                     .await;
                     ws.next().await.unwrap().unwrap();
-                    for event in [created, added] {
-                        ws.send(Message::Text(event.to_string().into()))
-                            .await
-                            .unwrap();
-                    }
+                    ws.send(Message::Text(created.to_string().into()))
+                        .await
+                        .unwrap();
                     released.await.unwrap();
-                    for event in [output, completed] {
+                    for event in [added, output, completed] {
                         ws.send(Message::Text(event.to_string().into()))
                             .await
                             .unwrap();
@@ -422,8 +420,8 @@ async fn structural_frames_start_ttft_before_content_on_http_and_websocket() {
                 (base_url, release, server)
             } else {
                 let (base_url, release, _, server) = paused_chunked_sse_server(
-                    format!("data: {created}\n\ndata: {added}\n\n"),
-                    format!("data: {output}\n\ndata: {completed}\n\n"),
+                    format!("data: {created}\n\n"),
+                    format!("data: {added}\n\ndata: {output}\n\ndata: {completed}\n\n"),
                 )
                 .await;
                 (base_url, release, server)
@@ -448,10 +446,10 @@ async fn structural_frames_start_ttft_before_content_on_http_and_websocket() {
                         return observation.timings();
                     }
                 }
-                panic!("missing structural first-token observation");
+                panic!("missing first-response observation");
             })
             .await
-            .expect("structural first token before releasing content");
+            .expect("first response before releasing output");
             assert!(first.first_token_ms.is_some_and(|value| value >= 3_000));
             assert_eq!(first.first_text_ms, None);
             assert_eq!(first.first_reasoning_ms, None);

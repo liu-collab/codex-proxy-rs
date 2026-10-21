@@ -4,8 +4,12 @@
 mod body;
 mod grok;
 mod headers;
+mod search_history;
 
+use gateway_core::engine::middleware::MiddlewareHeader;
 use serde_json::{Map, Value};
+
+use super::protocol::responses::CodexResponsesRequest;
 
 pub(super) use body::normalize_codex_request_body;
 
@@ -25,13 +29,19 @@ pub(crate) fn normalize_universal_history_cleanup(
     body::normalize_non_codex_request_body(body);
 }
 
-/// Codex/OAuth 专属的下游兼容清洗：只处理已确认由 Codex/OAuth 上游拒绝的形状
-/// （客户端标记内容的 xAI 改写等）。跨模型历史清洗见 `normalize_universal_history_cleanup`。
+/// Codex/OAuth 路径的下游兼容清洗：先按通用规则整理正文，再处理已确认由
+/// Codex/OAuth 上游拒绝的形状（客户端标记内容的 xAI 改写、托管搜索历史等）。
+/// 跨模型历史清洗见 `normalize_universal_history_cleanup`。
 pub(crate) fn normalize_selected_codex_downstream_body(
-    body: &mut Map<String, Value>,
+    request: &mut CodexResponsesRequest,
     context: &Map<String, Value>,
+    middleware_headers: &[MiddlewareHeader],
+    request_id: &str,
 ) {
+    let body = request.body_mut();
+    body::normalize_non_codex_request_body(body);
     grok::normalize_request_body(body, context);
+    search_history::normalize_search_history(request, middleware_headers, request_id);
 }
 
 pub(super) fn is_non_codex_request_header(name: &str) -> bool {

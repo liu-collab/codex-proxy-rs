@@ -429,7 +429,7 @@ impl LimitedProxy {
                             peak.fetch_max(count, Ordering::SeqCst);
                             let request = read_http_request(&mut stream).await;
                             assert!(request.starts_with("CONNECT upstream.invalid:80 "));
-                            if reject_connects.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1)).is_ok() {
+                            if reject_connects.try_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| remaining.checked_sub(1)).is_ok() {
                                 stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n").await.unwrap();
                                 return;
                             }

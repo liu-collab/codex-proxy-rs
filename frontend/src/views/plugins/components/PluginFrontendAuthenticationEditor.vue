@@ -304,7 +304,7 @@ defineExpose({ validationError })
               :model-value="identity.clientKeyId"
               :options="keyOptions"
               :disabled="disabled || loadingKeys"
-              :placeholder="loadingKeys ? '加载中…' : keysFailed ? '加载失败，请重试' : '选择客户端 Key'"
+              :placeholder="loadingKeys ? '加载中' : keysFailed ? '加载失败，请重试' : '选择客户端 Key'"
               empty-text="暂无客户端 Key"
               class="w-full min-w-0"
               @update:model-value="updateIdentity(index, { clientKeyId: $event })"

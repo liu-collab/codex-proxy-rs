@@ -16,6 +16,29 @@ export function fieldValueClass(mono?: boolean) {
   return [fieldValueBaseClass, mono ? 'font-mono tabular-nums' : undefined]
 }
 
+export function isErrorUsageRecord(record: Pick<UsageRecordDetail, 'logicalOutcome'> | null) {
+  return record?.logicalOutcome === 'failed' || record?.logicalOutcome === 'incomplete'
+}
+
+export function attemptOutcomeText(outcome: string) {
+  const labels: Record<string, string> = {
+    succeeded: '成功',
+    failed: '失败',
+    cancelled: '取消',
+    incomplete: '未完成',
+    running: '进行中',
+  }
+  return labels[outcome] ?? outcome
+}
+
+export function attemptOutcomeClass(outcome: string) {
+  if (outcome === 'succeeded')
+    return 'text-cp-success-text'
+  if (outcome === 'failed')
+    return 'text-cp-error-text'
+  return 'text-cp-text-secondary'
+}
+
 export function visibleRequestText(record: UsageRecordDetail) {
   const body = record.metadata.requestBody
   if (!body)

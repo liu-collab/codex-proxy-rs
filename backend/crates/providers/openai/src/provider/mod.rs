@@ -929,8 +929,10 @@ impl CodexProvider {
         normalize_universal_history_cleanup(upstream_request.body_mut(), &cleanup_model);
         if codex_oauth {
             normalize_selected_codex_downstream_body(
-                upstream_request.body_mut(),
+                &mut upstream_request,
                 generate.protocol_payload().context(),
+                &middleware_headers,
+                context.request_id().as_str(),
             );
         }
         // 网关本地压缩摘要（`cpr-local-v1:`）还原：带标记的历史项换回普通 user 摘要

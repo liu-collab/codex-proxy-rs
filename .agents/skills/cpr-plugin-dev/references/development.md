@@ -58,7 +58,7 @@ cargo build --manifest-path /path/to/plugin/Cargo.toml --release --locked --targ
 需要从目标宿主源码构建工具时，在主仓根目录运行以下命令，把 `--help` 换成实际参数即可，不必全局安装：
 
 ```bash
-cargo +1.97.0 run --manifest-path backend/Cargo.toml -p codex-proxy-plugin-cli --locked -- package --help
+cargo +1.99.1 run --manifest-path backend/Cargo.toml -p codex-proxy-plugin-cli --locked -- package --help
 ```
 
 直接打包的示意命令：

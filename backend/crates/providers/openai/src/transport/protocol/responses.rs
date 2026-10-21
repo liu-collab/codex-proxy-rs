@@ -226,14 +226,14 @@ pub(crate) fn is_replaceable_response_prelude(event_type: &str, value: &Value) -
     }
 }
 
-/// 单个 Responses 事件对计时系统提供的稳定语义信号
+/// Responses 响应载荷与实际内容的观测信号
 ///
-/// `output_start` 只表示官方输出项开始事件；`semantic_output` 仍要求
+/// `response_data` 表示收到非空响应载荷；`semantic_output` 仍要求
 /// 实际内容，供重试与交付边界使用，不能与首字观测互换
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ResponseEventSignals {
     pub protocol_progress: bool,
-    pub output_start: bool,
+    pub response_data: bool,
     pub semantic_output: bool,
     pub reasoning_output: bool,
     pub text_output: bool,
@@ -259,10 +259,6 @@ pub(crate) fn response_duration_ms(value: &Value) -> Option<u64> {
 pub(crate) struct ResponseTimingMetrics {
     pub upstream_api_overhead_ms: Option<f64>,
     pub upstream_engine_ms: Option<f64>,
-    pub upstream_engine_iapi_ttft_ms: Option<f64>,
-    pub upstream_engine_service_ttft_ms: Option<f64>,
-    pub upstream_engine_iapi_tbt_ms: Option<f64>,
-    pub upstream_engine_service_tbt_ms: Option<f64>,
 }
 
 impl ResponseTimingMetrics {
@@ -291,7 +287,6 @@ impl ResponseTimingMetrics {
             return Self {
                 upstream_api_overhead_ms: overhead,
                 upstream_engine_ms: milliseconds(path, "engine_wall_ms"),
-                ..Self::default()
             };
         }
         // 直接返回的专项指标保留原口径，明确标为整轮累计的值不能归入单次请求
@@ -307,16 +302,6 @@ impl ResponseTimingMetrics {
                 "responses_duration_excl_engine_and_client_tool_time_ms",
             ),
             upstream_engine_ms: milliseconds(metrics, "engine_service_total_ms"),
-            upstream_engine_iapi_ttft_ms: milliseconds(metrics, "engine_iapi_ttft_total_ms"),
-            upstream_engine_service_ttft_ms: milliseconds(metrics, "engine_service_ttft_total_ms"),
-            upstream_engine_iapi_tbt_ms: milliseconds(
-                metrics,
-                "engine_iapi_tbt_across_engine_calls_ms",
-            ),
-            upstream_engine_service_tbt_ms: milliseconds(
-                metrics,
-                "engine_service_tbt_across_engine_calls_ms",
-            ),
         }
     }
 
@@ -327,29 +312,16 @@ impl ResponseTimingMetrics {
         if incoming.upstream_engine_ms.is_some() {
             self.upstream_engine_ms = incoming.upstream_engine_ms;
         }
-        if incoming.upstream_engine_iapi_ttft_ms.is_some() {
-            self.upstream_engine_iapi_ttft_ms = incoming.upstream_engine_iapi_ttft_ms;
-        }
-        if incoming.upstream_engine_service_ttft_ms.is_some() {
-            self.upstream_engine_service_ttft_ms = incoming.upstream_engine_service_ttft_ms;
-        }
-        if incoming.upstream_engine_iapi_tbt_ms.is_some() {
-            self.upstream_engine_iapi_tbt_ms = incoming.upstream_engine_iapi_tbt_ms;
-        }
-        if incoming.upstream_engine_service_tbt_ms.is_some() {
-            self.upstream_engine_service_tbt_ms = incoming.upstream_engine_service_tbt_ms;
-        }
     }
 }
 
 /// 从已解析的 Responses 事件提取计时语义
 ///
-/// 首字采用官方 Codex 的首个 output_item.added 边界
+/// 首响应载荷由解码器在 JSON 解析前观测
 /// 语义输出仍要求文本、推理、工具参数、图片结果或工具执行
 pub fn response_event_signals(event_type: Option<&str>, value: &Value) -> ResponseEventSignals {
     let mut signals = ResponseEventSignals {
         protocol_progress: !matches!(event_type, Some("response.failed" | "error")),
-        output_start: event_type == Some("response.output_item.added"),
         ..ResponseEventSignals::default()
     };
     match event_type {

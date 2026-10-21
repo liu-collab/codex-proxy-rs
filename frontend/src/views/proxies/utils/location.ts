@@ -5,11 +5,11 @@ const flags = import.meta.glob<string>('/node_modules/circle-flags/flags/??.svg'
 
 export function proxyExitLocation(proxy: OutboundProxyRecord) {
   const detected = proxy.detectedLocation
-  if (!detected)
-    return null
   const test = proxy.lastTest
-  // 没有重新解析位置的单条测试也可能换出口，旧地区不能套到新的 IP 上
-  if (test?.success && (test.exitIpv4 !== detected.exitIpv4 || test.exitIpv6 !== detected.exitIpv6))
+  if (!detected || !test?.success || test.location.status === 'failed' || test.location.status === 'conflict')
+    return null
+  // 未请求解析的测试也可能换出口，旧地区不能套到新的 IP 上
+  if (test.exitIpv4 !== detected.exitIpv4 || test.exitIpv6 !== detected.exitIpv6)
     return null
   return detected.location
 }

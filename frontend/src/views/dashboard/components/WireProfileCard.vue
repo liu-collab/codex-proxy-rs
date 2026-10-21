@@ -111,9 +111,10 @@ const releaseStatus = computed(() => {
   }
 })
 
-const verifiedLabel = computed(() =>
-  profile.value?.verifiedAt ? `画像核验 ${profile.value.verifiedAtDisplay}` : undefined,
-)
+const verifiedLabel = computed(() => {
+  const verifiedAt = profile.value?.verifiedAtDisplay
+  return verifiedAt ? `画像核验 ${verifiedAt}` : undefined
+})
 
 const checkedLabel = computed(() => {
   const checkedAt = profile.value?.release?.checkedAtDisplay

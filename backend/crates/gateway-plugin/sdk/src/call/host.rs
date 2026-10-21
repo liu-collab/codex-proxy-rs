@@ -63,15 +63,17 @@ pub struct HttpRequest {
     pub method: String,
     pub url: String,
     #[serde(default)]
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<(String, Vec<u8>)>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct HttpResponse {
     pub status: u16,
-    pub headers: Vec<(String, String)>,
+    pub http_version: String,
+    pub headers: Vec<(String, Vec<u8>)>,
     pub stream: Option<String>,
+    pub trailers: Vec<(String, Vec<u8>)>,
 }
 
 /// 宿主账号列表查询；cursor 是上次结果返回的稳定账号 ID
@@ -352,11 +354,9 @@ impl ModelEventBatch {
         }
         let mut cursor = payload_start;
         let mut events = Vec::with_capacity(count);
-        for chunk in bytes[8..payload_start].chunks_exact(4) {
-            let length = usize::try_from(u32::from_be_bytes(
-                chunk.try_into().map_err(|_| ModelEventBatchError)?,
-            ))
-            .map_err(|_| ModelEventBatchError)?;
+        for chunk in bytes[8..payload_start].as_chunks::<4>().0 {
+            let length =
+                usize::try_from(u32::from_be_bytes(*chunk)).map_err(|_| ModelEventBatchError)?;
             let end = cursor.checked_add(length).ok_or(ModelEventBatchError)?;
             let event = bytes.get(cursor..end).ok_or(ModelEventBatchError)?;
             events.push(ExecutionEvent::decode(event).map_err(|_| ModelEventBatchError)?);

@@ -311,7 +311,7 @@ async fn request_status_pages_share_one_request_timeline() {
             .bind(id).bind(outcome).execute(&database.pool).await.unwrap();
     }
     sqlx::query(
-        "update model_requests set requested_model_id='model_status_b' where id='status_b'",
+        r#"update model_requests set requested_model_id='model_status_b',request_observation_json=jsonb_set(request_observation_json,'{error}','{"providerErrorCode":"server_error","message":"The upstream service is temporarily unavailable."}'::jsonb),client_status_code=502 where id='status_b'"#,
     )
     .execute(&database.pool)
     .await
@@ -377,6 +377,12 @@ async fn request_status_pages_share_one_request_timeline() {
         .unwrap();
     assert_eq!(page.total, 1);
     assert_eq!(page.items[0].id, "status_b");
+    assert_eq!(page.items[0].client_status_code, Some(502));
+    assert_eq!(page.items[0].error_code.as_deref(), Some("server_error"));
+    assert_eq!(
+        page.items[0].error_message.as_deref(),
+        Some("The upstream service is temporarily unavailable.")
+    );
     // 诊断包仍可按请求 ID 关联中间事件，不受列表时间范围或最终结果限制
     let errors = super::admin_observability_store(&database.pool)
         .diagnostic_errors(&DiagnosticTarget::Request("status_a".into()), 100)

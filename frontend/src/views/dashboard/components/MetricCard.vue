@@ -88,6 +88,7 @@ const sparklineOption = computed<EChartsOption | null>(() => {
       </strong>
       <i
         v-if="metric.trend && metric.trend.direction !== 'flat'"
+        title="较昨日"
         class="mb-1.25 block size-3"
         :class="[
           trendToneClasses[metric.trend.tone],

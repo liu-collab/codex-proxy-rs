@@ -1,8 +1,7 @@
 # 插件页面
 
-仅在创建或修改插件页面时读取，同时使用[开发入口](../../cpr-dev-guide/SKILL.md)的页面分支
+仅在创建或修改插件页面时读取，先执行[前端流程](../../cpr-dev-guide/references/frontend.md)，再核对以下插件特有合同
 
-- 沿用已有插件页面与 [管理端主题](../../../../docs/theme.md#界面文案与信息层级) 的设计和文案层级，详细帮助使用现有 Popover；页面 PR 按 [界面验证](../../../../CONTRIBUTING.md#界面验证) 提供实际截图
 - 优先参考独立示例仓库的 `examples/workbench/frontend/src/api/`：业务路由放在 `modules/`，`request.ts` 封装公开宿主桥；按需使用 `@codex-proxy/ui` 包出口，不跨仓导入宿主或 UI 的内部源码
 - Vue 页面保留 SFC，逻辑、脚本和配置使用 TypeScript；只实现业务内容，标题和副标题由 `ManagementPage` 交给宿主显示
 - 隔离页面通过 `window.codexProxyPlugin.request` 调用已注册管理路由；`models.responses` 通过普通请求链交付 JSON/SSE，支持取消且不暴露 Key 明文。不直接 `fetch` 宿主、不读取管理 Cookie 或借用宿主 Vue 实例

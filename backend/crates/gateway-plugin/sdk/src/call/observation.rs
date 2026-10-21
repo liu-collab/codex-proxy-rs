@@ -110,14 +110,6 @@ pub struct RequestTimings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_engine_ms: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_iapi_ttft_ms: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_service_ttft_ms: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_iapi_tbt_ms: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub upstream_engine_service_tbt_ms: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u64>,
 }
 

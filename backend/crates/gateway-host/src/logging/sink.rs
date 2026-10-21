@@ -37,7 +37,7 @@ impl Budget {
 
     fn reserve(self: &Arc<Self>, bytes: usize) -> Option<Reservation> {
         self.items
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |items| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |items| {
                 items
                     .checked_add(1)
                     .filter(|items| *items <= self.maximum_items)
@@ -45,7 +45,7 @@ impl Budget {
             .ok()?;
         if self
             .bytes
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |used| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |used| {
                 used.checked_add(bytes)
                     .filter(|used| *used <= self.maximum_bytes)
             })

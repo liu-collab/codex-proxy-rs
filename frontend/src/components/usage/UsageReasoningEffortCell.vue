@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import type { UsageListRecord } from '@/api'
+import type { UsageReasoningRecord } from './shared/presenter'
 
 import { Bot, SquareDashedBottomCode } from '@lucide/vue'
 import { usageReasoningEffort } from './shared/presenter'
 
 defineProps<{
-  record: UsageListRecord
+  record: UsageReasoningRecord
 }>()
 </script>
 

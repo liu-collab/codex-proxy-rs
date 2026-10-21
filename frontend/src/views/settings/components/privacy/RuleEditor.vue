@@ -25,7 +25,7 @@ const fixedValue = computed({ get: () => fixedValues.value[selectedIndex.value] 
 } })
 const localError = shallowRef('')
 const preview = usePrivacyPreview()
-const { loading, error, result } = preview
+const { loading, result } = preview
 const processed = computed(() => result.value ? JSON.stringify({ body: result.value.body, headers: result.value.headers, turnMetadata: result.value.turnMetadata }, null, 2) : '')
 const outcome = computed(() => result.value?.outcomes[0])
 
@@ -147,8 +147,8 @@ async function apply() {
                 <pre class="cp-scrollbar m-0 min-h-0 overflow-auto rounded-cp bg-cp-fill-quaternary p-3 font-mono text-cp-xs break-all whitespace-pre-wrap" data-preview-output>{{ processed || '点击测试查看结果' }}</pre>
               </div>
             </div>
-            <p v-if="localError || error || outcome?.reason" role="alert" class="m-0 shrink-0 text-cp-sm text-cp-error-text">
-              {{ localError || error || outcome?.reason }}
+            <p v-if="localError || outcome?.reason" role="alert" class="m-0 shrink-0 text-cp-sm text-cp-error-text">
+              {{ localError || outcome?.reason }}
             </p>
           </section>
         </div>

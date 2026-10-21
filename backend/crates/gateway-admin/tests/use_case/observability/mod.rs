@@ -147,6 +147,123 @@ async fn dashboard_summary_should_derive_first_token_average_from_trend() {
     assert_eq!(summary.average_first_token_latency_ms, Some(100));
 }
 
+#[test]
+fn dashboard_comparison_should_follow_deployment_calendar_across_dst() {
+    let timezone = "America/New_York".parse().unwrap();
+    for (end, previous_start, previous_end, hours) in [
+        (
+            "2026-03-09T16:00:00Z",
+            "2026-03-08T05:00:00Z",
+            "2026-03-09T04:00:00Z",
+            23,
+        ),
+        (
+            "2026-11-02T17:00:00Z",
+            "2026-11-01T04:00:00Z",
+            "2026-11-02T05:00:00Z",
+            25,
+        ),
+        (
+            "2026-11-02T05:00:00Z",
+            "2026-11-01T04:00:00Z",
+            "2026-11-02T05:00:00Z",
+            25,
+        ),
+    ] {
+        let end = end.parse().unwrap();
+        let range = TimeRange::calendar_at(
+            gateway_admin::model::observability::CalendarPeriod::Today,
+            end,
+            timezone,
+        )
+        .unwrap();
+        let query = DashboardQuery::new(range, timezone).unwrap();
+        assert_eq!(query.range, range);
+        assert_eq!(
+            query.yesterday_range.start,
+            previous_start.parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(
+            query.yesterday_range.end,
+            previous_end.parse::<DateTime<Utc>>().unwrap()
+        );
+        assert_eq!(
+            (query.yesterday_range.end - query.yesterday_range.start).num_hours(),
+            hours
+        );
+    }
+}
+
+#[tokio::test]
+async fn dashboard_summary_should_compare_separate_yesterday_metrics_with_today_only_trend() {
+    let end: DateTime<Utc> = "2026-10-18T04:00:00Z".parse().unwrap();
+    let range = TimeRange::calendar_at(
+        gateway_admin::model::observability::CalendarPeriod::Today,
+        end,
+        Default::default(),
+    )
+    .unwrap();
+    let store = Arc::new(FixtureObservabilityStore::new(range));
+    store.replace_trend(vec![health_metric_point(
+        range.start,
+        RequestMetrics {
+            request_count: 2,
+            input_tokens: 100,
+            cached_input_tokens: 20,
+            total_tokens: 120,
+            ..Default::default()
+        },
+    )]);
+    *store.yesterday.lock().unwrap() = RequestMetrics {
+        request_count: 4,
+        input_tokens: 400,
+        cached_input_tokens: 200,
+        total_tokens: 500,
+        ..Default::default()
+    };
+    let result = observability_services(store.clone())
+        .await
+        .observability()
+        .dashboard_summary(range, TrendKind::Usage)
+        .await
+        .unwrap();
+    assert_eq!(result.today.request_count, 2);
+    assert_eq!(result.today.total_tokens, 120);
+    assert_eq!(result.today.observed_cached_token_rate, Some(0.2));
+    assert_eq!(result.yesterday.request_count, 4);
+    assert_eq!(result.yesterday.total_tokens, 500);
+    assert_eq!(result.yesterday.observed_cached_token_rate, Some(0.5));
+    assert_eq!(result.observation.range, range);
+    assert_eq!(result.observation.trend.len(), 1);
+    assert_eq!(result.observation.trend[0].bucket_start, range.start);
+    assert_eq!(
+        store
+            .summary_query
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .yesterday_range
+            .end,
+        range.start
+    );
+}
+
+#[tokio::test]
+async fn dashboard_summary_should_keep_missing_yesterday_cache_rate_unknown() {
+    let range = observation_range(Utc::now());
+    let store = Arc::new(FixtureObservabilityStore::new(range));
+    let result = observability_services(store)
+        .await
+        .observability()
+        .dashboard_summary(range, TrendKind::Usage)
+        .await
+        .unwrap();
+    assert_eq!(result.yesterday.request_count, 0);
+    assert_eq!(result.yesterday.total_tokens, 0);
+    assert_eq!(result.yesterday.observed_cached_token_rate, None);
+}
+
 #[tokio::test]
 async fn health_timeline_should_apply_status_precedence_and_thresholds() {
     let now = Utc::now();
@@ -866,6 +983,7 @@ async fn dashboard_should_preserve_provider_plan_names() {
 }
 
 struct FixtureObservabilityStore {
+    yesterday: Mutex<RequestMetrics>,
     trend: Mutex<Vec<RequestMetricPoint>>,
     overview: Mutex<UsageOverview>,
     projected_costs: Mutex<Vec<UsageProjectedCostPoint>>,
@@ -886,6 +1004,7 @@ struct FixtureObservabilityStore {
 impl FixtureObservabilityStore {
     fn new(range: TimeRange) -> Self {
         Self {
+            yesterday: Mutex::new(RequestMetrics::default()),
             trend: Mutex::new(Vec::new()),
             overview: Mutex::new(UsageOverview {
                 analytics: Default::default(),
@@ -973,6 +1092,7 @@ impl ObservabilityStore for FixtureObservabilityStore {
             tokio::time::sleep(dashboard_delay).await;
         }
         Ok(DashboardObservation {
+            yesterday: self.yesterday.lock().unwrap().clone(),
             analytics: self.overview.lock().expect("overview").analytics.clone(),
             range: query.range,
             totals: Default::default(),
@@ -1219,6 +1339,9 @@ fn total_record(
     now: DateTime<Utc>,
 ) -> UsageListRecord {
     UsageListRecord {
+        error_code: None,
+        error_message: None,
+        client_status_code: None,
         outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
         client_api_key_name: Some("Production".to_owned()),
         id: id.to_owned(),
@@ -1267,10 +1390,6 @@ fn total_record(
         upstream_response_ms: None,
         upstream_api_overhead_ms: None,
         upstream_engine_ms: None,
-        upstream_engine_iapi_ttft_ms: None,
-        upstream_engine_service_ttft_ms: None,
-        upstream_engine_iapi_tbt_ms: None,
-        upstream_engine_service_tbt_ms: None,
         latency_ms: Some(100),
         admission_decision_ms: None,
         account_selection_wait_ms: None,

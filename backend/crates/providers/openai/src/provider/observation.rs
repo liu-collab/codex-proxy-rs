@@ -153,8 +153,8 @@ impl OpenAiResponseObservationState {
         started_at: Instant,
     ) -> bool {
         let mut changed = false;
-        // 首字采用官方输出项边界，真实推理与正文仍分别计时
-        if signals.output_start {
+        // 首字采用首响应载荷边界，真实推理与正文仍分别计时
+        if signals.response_data {
             changed |= insert_first_timing(&mut self.timings.first_token_ms, started_at);
         }
         if signals.reasoning_output {
@@ -198,18 +198,6 @@ impl OpenAiResponseObservationState {
         }
         if metrics.upstream_engine_ms.is_some() {
             self.timings.upstream_engine_ms = metrics.upstream_engine_ms;
-        }
-        if metrics.upstream_engine_iapi_ttft_ms.is_some() {
-            self.timings.upstream_engine_iapi_ttft_ms = metrics.upstream_engine_iapi_ttft_ms;
-        }
-        if metrics.upstream_engine_service_ttft_ms.is_some() {
-            self.timings.upstream_engine_service_ttft_ms = metrics.upstream_engine_service_ttft_ms;
-        }
-        if metrics.upstream_engine_iapi_tbt_ms.is_some() {
-            self.timings.upstream_engine_iapi_tbt_ms = metrics.upstream_engine_iapi_tbt_ms;
-        }
-        if metrics.upstream_engine_service_tbt_ms.is_some() {
-            self.timings.upstream_engine_service_tbt_ms = metrics.upstream_engine_service_tbt_ms;
         }
         self.timings != previous
     }

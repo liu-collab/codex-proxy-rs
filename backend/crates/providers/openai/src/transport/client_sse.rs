@@ -595,7 +595,7 @@ impl CodexBackendClient {
             .flatten();
         let body = read_model_catalog_body(response).await?;
         if !status.is_success() {
-            let body = String::from_utf8_lossy(&body).into_owned();
+            let body = String::from_utf8_lossy_owned(body);
             return Err(CodexClientError::Upstream {
                 status,
                 retry_after_seconds: retry_after_seconds

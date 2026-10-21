@@ -905,7 +905,7 @@ impl CappedResponseBody {
     }
 
     pub(super) fn into_string(self) -> String {
-        String::from_utf8_lossy(&self.bytes).into_owned()
+        String::from_utf8_lossy_owned(self.bytes)
     }
 }
 

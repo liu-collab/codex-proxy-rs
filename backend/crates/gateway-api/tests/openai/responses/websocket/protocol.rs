@@ -9,6 +9,26 @@ use serde_json::json;
 use super::decode_response_create;
 
 #[test]
+fn response_create_should_preserve_field_order_when_removing_frame_type() {
+    let expected = r#"{"model":"smart-code","stream":true,"input":"hello","future_field":{"z":1,"a":2},"client_metadata":{"thread_id":"thread","turn_id":"turn"}}"#;
+    for payload in [
+        r#"{"type":"response.create","model":"smart-code","stream":true,"input":"hello","future_field":{"z":1,"a":2},"client_metadata":{"thread_id":"thread","turn_id":"turn"}}"#,
+        r#"{"model":"smart-code","stream":true,"type":"response.create","input":"hello","future_field":{"z":1,"a":2},"client_metadata":{"thread_id":"thread","turn_id":"turn"}}"#,
+        r#"{"model":"smart-code","stream":true,"input":"hello","future_field":{"z":1,"a":2},"client_metadata":{"thread_id":"thread","turn_id":"turn"},"type":"response.create"}"#,
+    ] {
+        let decoded = decode_response_create(payload).expect("decode response.create");
+        let body = decoded
+            .operation()
+            .middleware_body()
+            .expect("encode transparent body");
+        assert_eq!(
+            std::str::from_utf8(&body).expect("UTF-8 JSON body"),
+            expected,
+        );
+    }
+}
+
+#[test]
 fn client_retry_identity_should_follow_each_frame_instead_of_handshake_metadata() {
     let mut headers = HeaderMap::new();
     headers.insert(

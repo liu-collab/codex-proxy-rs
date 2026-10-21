@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ClientProfilePreview } from '@/api/modules/settings/profiles'
-import { ZSkeleton } from '@codex-proxy/ui'
+import { ZEmpty, ZSkeleton } from '@codex-proxy/ui'
 
 defineProps<{
   preview?: Pick<ClientProfilePreview, 'userAgent' | 'versionSource' | 'checkedAtDisplay' | 'error'> & { versionLag?: number | null }
@@ -14,9 +14,7 @@ defineProps<{
   <p v-if="needsVersionInput" role="status" class="m-0 text-cp-sm text-cp-text-tertiary">
     填写版本后预览
   </p>
-  <p v-else-if="error && !previewing" role="alert" class="m-0 text-cp-sm text-cp-error">
-    {{ error }}
-  </p>
+  <ZEmpty v-else-if="error && !previewing" title="预览暂不可用" :description="error" size="small" surface="none" role="alert" />
   <div
     v-else-if="previewing || preview"
     class="grid min-h-20 min-w-0 content-center gap-2 rounded-cp bg-cp-fill-quaternary p-4"

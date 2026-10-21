@@ -73,11 +73,15 @@ export function getClientProfileOptions() {
   })
 }
 
-export function previewClientProfile(configuration: ClientProfileSelection | null) {
+interface ClientProfilePreviewParam {
+  configuration: ClientProfileSelection | null
+}
+
+export function previewClientProfile(data: ClientProfilePreviewParam) {
   return request<ClientProfilePreview>({
     url: '/api/admin/settings/client-profiles/openai/preview',
     method: 'POST',
-    data: { configuration },
+    data,
     silent: true,
   })
 }
@@ -103,19 +107,28 @@ export interface XaiClientProfilePreview extends Omit<XaiClientProfileSelection,
   error: string | null
 }
 
+interface XaiClientProfileOptions {
+  defaults: XaiClientProfileSelection
+  globalConfiguration: XaiClientProfileSelection
+}
+
+interface XaiClientProfilePreviewParam {
+  configuration: XaiClientProfileSelection | null
+}
+
 export function getXaiClientProfileOptions() {
-  return request<{ defaults: XaiClientProfileSelection, globalConfiguration: XaiClientProfileSelection }>({
+  return request<XaiClientProfileOptions>({
     url: '/api/admin/settings/client-profiles/xai',
     method: 'GET',
     silent: true,
   })
 }
 
-export function previewXaiClientProfile(configuration: XaiClientProfileSelection | null) {
+export function previewXaiClientProfile(data: XaiClientProfilePreviewParam) {
   return request<XaiClientProfilePreview>({
     url: '/api/admin/settings/client-profiles/xai/preview',
     method: 'POST',
-    data: { configuration },
+    data,
     silent: true,
   })
 }

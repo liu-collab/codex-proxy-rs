@@ -100,12 +100,12 @@ pub struct AccountProbeError {
     gateway: GatewayError,
     source: AccountProbeErrorSource,
     send_state: Option<UpstreamSendState>,
-    upstream_response: Option<AccountProbeUpstreamResponse>,
+    upstream_response: Option<Box<AccountProbeUpstreamResponse>>,
 }
 
 impl AccountProbeError {
     #[must_use]
-    pub const fn new(
+    pub fn new(
         gateway: GatewayError,
         source: AccountProbeErrorSource,
         send_state: Option<UpstreamSendState>,
@@ -115,7 +115,7 @@ impl AccountProbeError {
             gateway,
             source,
             send_state,
-            upstream_response,
+            upstream_response: upstream_response.map(Box::new),
         }
     }
 
@@ -150,8 +150,8 @@ impl AccountProbeError {
     }
 
     #[must_use]
-    pub const fn upstream_response(&self) -> Option<&AccountProbeUpstreamResponse> {
-        self.upstream_response.as_ref()
+    pub fn upstream_response(&self) -> Option<&AccountProbeUpstreamResponse> {
+        self.upstream_response.as_deref()
     }
 }
 

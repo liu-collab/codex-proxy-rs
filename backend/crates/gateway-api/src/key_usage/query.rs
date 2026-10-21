@@ -67,6 +67,7 @@ enum RecordKind {
     #[default]
     Success,
     Error,
+    All,
 }
 
 #[derive(Deserialize)]
@@ -109,6 +110,7 @@ impl RecordsQuery {
             kind: match self.kind {
                 RecordKind::Success => KeyUsageRecordKind::Success,
                 RecordKind::Error => KeyUsageRecordKind::Error,
+                RecordKind::All => KeyUsageRecordKind::All,
             },
             current_page,
             page_size,

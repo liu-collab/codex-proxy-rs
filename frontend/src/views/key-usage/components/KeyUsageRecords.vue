@@ -1,50 +1,48 @@
 <script setup lang="ts">
 import type { PaginationState as Pagination } from '@codex-proxy/ui'
 import type { KeyUsageRecord, KeyUsageRecordKind } from '@/api/modules/key-usage'
-import { defineTableColumns, ZCard, ZPagination, ZSegmented, ZTable } from '@codex-proxy/ui'
-import { computed } from 'vue'
+import { defineTableColumns, useTableColumns, ZCard, ZPagination, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
+import { usageDataColumns } from '@/components/usage/shared/columns'
 import UsageBillingCell from '@/components/usage/UsageBillingCell.vue'
 import UsageClientIpCell from '@/components/usage/UsageClientIpCell.vue'
 import UsageLatencyCell from '@/components/usage/UsageLatencyCell.vue'
+import UsageModelCell from '@/components/usage/UsageModelCell.vue'
 import UsagePerformanceCell from '@/components/usage/UsagePerformanceCell.vue'
+import UsageReasoningEffortCell from '@/components/usage/UsageReasoningEffortCell.vue'
+import UsageRecordStatusFilter from '@/components/usage/UsageRecordStatusFilter.vue'
+import UsageRouteCell from '@/components/usage/UsageRouteCell.vue'
+import UsageTimeCell from '@/components/usage/UsageTimeCell.vue'
 import UsageTokenCell from '@/components/usage/UsageTokenCell.vue'
 import UsageTransportBadge from '@/components/usage/UsageTransportBadge.vue'
 
 defineProps<{ rows: KeyUsageRecord[], pagination: Pagination, loading: boolean, error: string, stale: boolean }>()
 defineEmits<{ pageChange: [page: number], pageSizeChange: [size: number] }>()
 const kind = defineModel<KeyUsageRecordKind>('kind', { required: true })
-const columns = computed(() => defineTableColumns<KeyUsageRecord>([
-  { key: 'model', label: '模型', kind: 'custom', size: 'xl' },
-  { key: 'reasoningEffort', label: '推理强度', kind: 'status', size: 'lg' },
-  { key: 'route', label: '端点', kind: 'mono' },
-  { key: 'upstreamTransport', label: '上游', kind: 'status', size: 'md' },
-  { key: 'clientTransport', label: '接入', kind: 'status', size: 'md' },
-  { key: 'tokenDetails', label: 'TOKEN', kind: 'numeric', size: 'xl' },
-  { key: 'billing', label: '费用', kind: 'numeric', size: 'xl' },
-  { key: 'latency', label: '延迟', kind: 'numeric', size: 'xl' },
-  { key: 'performance', label: '速率', kind: 'numeric', size: 'lg' },
-  ...(kind.value === 'error' ? [{ key: 'statusCode', label: '状态', kind: 'status' as const }] : []),
-  { key: 'createdAt', label: '时间', kind: 'datetime' },
-  { key: 'clientIp', label: 'IP', kind: 'custom', size: '3xl' },
-  { key: 'userAgent', label: 'User-Agent', kind: 'custom', size: '4xl' },
-]))
+const columns = defineTableColumns<KeyUsageRecord>(usageDataColumns)
+const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(columns, 'key-usage-records')
 </script>
 
 <template>
   <ZCard title="请求日志" description="当前请求记录">
     <template #actions>
-      <ZSegmented v-model="kind" aria-label="请求结果" :options="[{ label: '成功请求', value: 'success' }, { label: '错误记录', value: 'error' }]" />
+      <div class="flex items-center gap-2">
+        <UsageRecordStatusFilter v-model="kind" />
+        <ZTableColumnSettings :options="columnOptions" @change="setColumnVisible" @reorder="setColumnOrder" @reset="resetColumns" />
+      </div>
     </template>
     <p v-if="error || stale" role="status" class="mt-0 mb-3 text-cp-sm text-cp-error-text">
       {{ error || '请求日志刷新失败，暂时保留上次结果' }}
     </p>
     <div class="flex h-120 min-h-0 overflow-hidden">
-      <ZTable class="min-w-0 flex-1" :columns="columns" :data="rows" :loading="loading" scrollbar-always-visible :empty-text="error ? '请求日志加载失败，请点击顶部刷新重试' : '所选条件下暂无记录'">
+      <ZTable class="min-w-0 flex-1" :columns="visibleColumns" :data="rows" :loading="loading" :empty-text="error ? '请求日志加载失败，请点击顶部刷新重试' : '所选条件下暂无记录'">
         <template #model="{ row }">
-          <code class="block max-w-full truncate font-mono text-cp-sm leading-none font-heavy text-cp-text">{{ row.model || '—' }}</code>
+          <UsageModelCell :record="row" />
         </template>
         <template #reasoningEffort="{ row }">
-          <span class="whitespace-nowrap text-cp-sm font-bold text-cp-text">{{ row.reasoningEffort || '—' }}</span>
+          <UsageReasoningEffortCell :record="row" />
+        </template>
+        <template #route="{ row }">
+          <UsageRouteCell :record="row" />
         </template>
         <template #upstreamTransport="{ row }">
           <UsageTransportBadge :transport="row.upstreamTransport" />
@@ -65,11 +63,8 @@ const columns = computed(() => defineTableColumns<KeyUsageRecord>([
         <template #performance="{ row }">
           <UsagePerformanceCell :record="row" />
         </template>
-        <template #statusCode="{ row }">
-          <span class="font-mono text-cp-sm font-bold text-cp-error-text">{{ row.statusCode ?? '错误' }}</span>
-        </template>
-        <template #createdAt="{ row }">
-          {{ row.createdAtDisplay }}
+        <template #createdAtDisplay="{ row }">
+          <UsageTimeCell :value="row.createdAtDisplay" />
         </template>
         <template #clientIp="{ row }">
           <UsageClientIpCell :record="row" />

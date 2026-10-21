@@ -144,6 +144,36 @@ impl<'a> AnalyticsSnapshot<'a> {
         })
     }
 
+    pub async fn dashboard_card_metrics(
+        &mut self,
+        range: ObservabilityRange,
+    ) -> StoreResult<RequestMetrics> {
+        // 日对比只读取卡片计数，复用整桶汇总及脏桶回读，不加载费用和延迟分布
+        let states = self
+            .load_selected(
+                range,
+                &UsageRecordFilter::default(),
+                None,
+                None,
+                Default::default(),
+                ReadSelection {
+                    distributions: false,
+                    costs: false,
+                    keys: None,
+                    counters: Some(&[
+                        "request_count",
+                        "input_tokens",
+                        "output_tokens",
+                        "cached_input_tokens",
+                        "total_tokens",
+                    ]),
+                    distribution_names: None,
+                },
+            )
+            .await?;
+        merge_states(states.into_values())?.request_metrics()
+    }
+
     pub async fn overview(
         &mut self,
         range: ObservabilityRange,

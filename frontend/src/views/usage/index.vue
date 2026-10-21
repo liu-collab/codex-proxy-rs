@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import type { UsageRecordStatus } from '@/api'
-import { useTableColumns, ZCard, ZDatePicker, ZIconButton, ZPageHeader, ZPagination, ZSegmented, ZTableColumnSettings } from '@codex-proxy/ui'
+import type { TableColumn } from '@codex-proxy/ui'
+import type { UsageListRecord, UsageRecordStatus } from '@/api'
+import { useTableColumns, ZCard, ZDatePicker, ZIconButton, ZPageHeader, ZPagination, ZTableColumnSettings } from '@codex-proxy/ui'
 
-import { CloudRain, Eye, List, Sun } from '@lucide/vue'
-import { shallowRef, watch } from 'vue'
+import { Eye } from '@lucide/vue'
+import { computed, shallowRef, watch } from 'vue'
 import ProviderFilter from '@/components/ProviderFilter.vue'
 import { usageRecordColumns } from '@/components/usage/shared/columns'
 import UsageRecordsTable from '@/components/usage/UsageRecordsTable.vue'
+import UsageRecordStatusFilter from '@/components/usage/UsageRecordStatusFilter.vue'
+import UsageErrorDetailModal from './components/UsageErrorDetailModal.vue'
 import UsageFilters from './components/UsageFilters.vue'
 import UsageInsightsGrid from './components/UsageInsightsGrid.vue'
 import UsageRecordDetailModal from './components/UsageRecordDetailModal.vue'
@@ -14,14 +17,15 @@ import UsageSummaryCards from './components/UsageSummaryCards.vue'
 import { useUsageRecordDetail } from './composables/useUsageRecordDetail'
 import { useUsageRecordsTable } from './composables/useUsageRecordsTable'
 import { useUsageTimeRange } from './composables/useUsageTimeRange'
+import { isErrorUsageRecord } from './utils/detail'
 
 const recordView = shallowRef<UsageRecordStatus>('success')
-const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(usageRecordColumns, 'usage-records')
-const recordViewOptions = [
-  { label: '成功', value: 'success', icon: Sun },
-  { label: '错误', value: 'error', icon: CloudRain },
-  { label: '全部', value: 'all', icon: List },
-]
+const recordColumns = computed<TableColumn<UsageListRecord>[]>(() => recordView.value === 'error'
+  ? usageRecordColumns.flatMap(column => column.key === 'route'
+      ? [column, { key: 'errorMessage', label: '错误', kind: 'custom', size: '4xl', hideable: false }]
+      : [column])
+  : usageRecordColumns)
+const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(recordColumns, 'usage-records')
 const { timeRange, timeRangeParams, disabledDate, refreshTimeRangeEnd, latestTimeRangeParams }
   = useUsageTimeRange()
 
@@ -48,6 +52,9 @@ const {
 })
 
 const { showDetailModal, selectedUsageRecord, handleViewDetail } = useUsageRecordDetail()
+const detailComponent = computed(() => isErrorUsageRecord(selectedUsageRecord.value)
+  ? UsageErrorDetailModal
+  : UsageRecordDetailModal)
 
 watch(timeRange, () => {
   refreshTimeRangeEnd()
@@ -112,7 +119,7 @@ watch(timeRange, () => {
             @refresh="refreshUsageRecords"
           >
             <template #actions>
-              <ZSegmented v-model="recordView" aria-label="请求明细类型" :options="recordViewOptions" display="icon" class="w-30 shrink-0" />
+              <UsageRecordStatusFilter v-model="recordView" />
               <ZTableColumnSettings
                 :options="columnOptions"
                 @change="setColumnVisible"
@@ -134,7 +141,7 @@ watch(timeRange, () => {
                 <div class="flex items-center justify-start">
                   <ZIconButton
                     size="small"
-                    aria-label="查看使用记录详情"
+                    :aria-label="isErrorUsageRecord(row) ? '查看错误详情' : '查看使用记录详情'"
                     @click="handleViewDetail(row)"
                   >
                     <Eye class="size-3.5" />
@@ -153,6 +160,6 @@ watch(timeRange, () => {
       </template>
     </ZCard>
 
-    <UsageRecordDetailModal v-model="showDetailModal" :record="selectedUsageRecord" />
+    <component :is="detailComponent" v-model="showDetailModal" :record="selectedUsageRecord" />
   </div>
 </template>

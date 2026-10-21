@@ -71,7 +71,7 @@ watch(search, () => {
     <ZCard class="mt-5 flex h-[calc(100dvh-136px)] min-h-125 flex-col">
       <template #header>
         <div class="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
-          <ZInput v-model="search" :disabled="batchTesting" class="sm:w-80" aria-label="搜索代理" placeholder="搜索代理名称...">
+          <ZInput v-model="search" :disabled="batchTesting" class="sm:w-80" aria-label="搜索代理" placeholder="搜索代理名称">
             <template #prefix>
               <Search class="size-4.5 text-cp-text-tertiary" />
             </template>

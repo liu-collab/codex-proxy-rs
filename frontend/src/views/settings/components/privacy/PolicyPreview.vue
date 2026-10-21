@@ -10,7 +10,7 @@ const open = defineModel<boolean>({ required: true })
 const sample = shallowRef('')
 const localError = shallowRef('')
 const preview = usePrivacyPreview()
-const { loading, error, result } = preview
+const { loading, result } = preview
 const output = computed(() => result.value ? JSON.stringify({ body: result.value.body, headers: result.value.headers, turnMetadata: result.value.turnMetadata }, null, 2) : '')
 watch(open, (value) => {
   preview.invalidate()
@@ -52,8 +52,8 @@ async function test() {
           </p>
         </li>
       </ol>
-      <p v-if="localError || error" role="alert" class="m-0 text-cp-sm text-cp-error-text">
-        {{ localError || error }}
+      <p v-if="localError" role="alert" class="m-0 text-cp-sm text-cp-error-text">
+        {{ localError }}
       </p>
     </div>
     <template #footer>

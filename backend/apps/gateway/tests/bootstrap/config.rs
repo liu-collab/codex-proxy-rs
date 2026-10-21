@@ -106,8 +106,11 @@ fn config_loader_should_apply_only_explicit_topology_overrides() {
             "postgres://codex_proxy@127.0.0.1:5432/codex_proxy",
         )
         .env("CPR_REDIS_URL", "redis://127.0.0.1:6379/")
-        .env("CPR_DATABASE_PASSWORD", POSTGRES_PASSWORD)
-        .env("CPR_REDIS_PASSWORD", REDIS_PASSWORD)
+        .env(
+            "CPR_DATABASE_PASSWORD",
+            "RdsTest9!abcdefGhRdsTest9!abcdefGh",
+        )
+        .env("CPR_REDIS_PASSWORD", "ManagedRedis9!abcdefGh")
         .status()
         .expect("run isolated environment override test");
     assert!(status.success());
@@ -153,14 +156,6 @@ fn config_loader_should_ignore_unknown_fields_in_configuration_sections() {
 }
 
 #[test]
-fn config_loader_should_ignore_removed_tls_and_fingerprint_sections() {
-    let mut document = valid_config_document();
-    document["openai"]["tls"] = serde_json::json!({});
-    document["openai"]["fingerprint"] = serde_json::json!({"browser": "removed"});
-    parse_config(&document.to_string()).expect("removed provider settings are ignored");
-}
-
-#[test]
 fn config_loader_should_reject_invalid_known_fields_alongside_unknown_fields() {
     for port in [serde_json::json!(0), serde_json::json!("not-a-port")] {
         let mut document = valid_config_document();
@@ -189,7 +184,7 @@ fn config_loader_should_report_startup_configuration_diagnostics() {
     ] {
         let mut document = valid_config_document();
         if case == "unused" {
-            document["openai"]["wire_profile"]["location"] = serde_json::json!(UNUSED_SECRET);
+            document["openai"]["unused_setting"] = serde_json::json!(UNUSED_SECRET);
         } else if case == "missing" {
             document["host"]["listen"]
                 .as_object_mut()
@@ -229,7 +224,7 @@ fn config_loader_should_report_startup_configuration_diagnostics() {
         );
         match case {
             "unused" => assert!(
-                stderr.contains("openai.wire_profile") && stderr.contains("已忽略"),
+                stderr.contains("openai.unused_setting") && stderr.contains("已忽略"),
                 "{stderr}"
             ),
             "missing" => assert!(stderr.contains("host.listen.port"), "{stderr}"),
@@ -253,19 +248,7 @@ fn config_loader_should_allow_missing_provider_configuration() {
     let mut document = valid_config_document();
     document.as_object_mut().unwrap().remove("openai");
     document.as_object_mut().unwrap().remove("xai");
-    parse_config(&document.to_string()).expect("provider defaults require no YAML identity");
-}
-
-#[test]
-fn config_loader_should_ignore_removed_provider_identity_sections() {
-    let mut document = valid_config_document();
-    document["openai"]["wire_profile"] = serde_json::json!({"codex_version":"legacy-invalid"});
-    document["xai"] = serde_json::json!({"wire_profile": {"client_identifier": "legacy-client"}});
-    let (config, _directory) =
-        parse_config(&document.to_string()).expect("removed identities ignored");
-    let debug = format!("{config:?}");
-    assert!(!debug.contains("legacy-invalid"));
-    assert!(!debug.contains("legacy-client"));
+    parse_config(&document.to_string()).expect("providers use defaults when omitted");
 }
 
 #[test]
@@ -282,13 +265,53 @@ fn config_loader_should_reject_embedded_database_password() {
 }
 
 #[test]
-fn config_loader_should_reject_non_hex_postgres_password() {
-    assert_rejected(valid_config().replace(POSTGRES_PASSWORD, &"g".repeat(48)));
+fn config_loader_should_accept_managed_store_passwords() {
+    for password in [
+        "RdsTest9!abcdefGh".to_owned(),
+        "RdsTest9!abcdefGhRdsTest9!abcdefGh".to_owned(),
+        POSTGRES_PASSWORD.to_owned(),
+        "x".repeat(128),
+        "Managed@:/?#%&+Password9!".to_owned(),
+        "数据库密码".repeat(4),
+    ] {
+        for field in ["database", "redis"] {
+            let mut document = valid_config_document();
+            document["store"][field]["password"] = serde_json::json!(password);
+            let (config, _directory) =
+                parse_config(&document.to_string()).expect("managed store password");
+            assert!(!format!("{config:?}").contains(&password));
+        }
+    }
 }
 
 #[test]
-fn config_loader_should_reject_wrong_length_redis_password() {
-    assert_rejected(valid_config().replace(REDIS_PASSWORD, "1234"));
+fn config_loader_should_reject_invalid_store_passwords() {
+    for password in [
+        String::new(),
+        "x".repeat(15),
+        "x".repeat(129),
+        " ".repeat(32),
+        "\u{3000}".repeat(6),
+        "数据库密码".repeat(9),
+        "RdsTest9!abcdefGh\u{0000}".to_owned(),
+        "RdsTest9!abcdefGh\n".to_owned(),
+        "RdsTest9!abcdefGh\t".to_owned(),
+        "RdsTest9!abcdefGh\u{007f}".to_owned(),
+    ] {
+        for field in ["database", "redis"] {
+            let mut document = valid_config_document();
+            document["store"][field]["password"] = serde_json::json!(password);
+            assert_rejected(document.to_string());
+        }
+    }
+}
+
+#[test]
+fn config_loader_should_reject_embedded_redis_password() {
+    assert_rejected(valid_config().replace(
+        "redis://127.0.0.1:6379/",
+        "redis://default:embedded@127.0.0.1:6379/",
+    ));
 }
 
 #[test]

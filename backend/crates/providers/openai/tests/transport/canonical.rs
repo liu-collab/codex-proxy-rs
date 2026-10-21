@@ -141,11 +141,42 @@ fn official_response_duration_does_not_cross_response_identity_or_incomplete_bou
 }
 
 #[test]
-fn official_timing_frames_do_not_start_first_output_wait() {
+fn first_response_observation_uses_nonempty_data_before_json_or_event_classification() {
+    for data in [
+        r#"{"type":"response.created","response":{"id":"resp_first"}}"#,
+        r#"{"type":"response.failed","response":{"error":{"message":"failed"}}}"#,
+        r#"{"type":"future.event"}"#,
+        "not-json",
+    ] {
+        for websocket in [false, true] {
+            let mut decoder = CodexCanonicalDecoder::new("fallback").with_raw_sse_passthrough();
+            if websocket {
+                let _ = decoder.push_websocket(data);
+            } else {
+                let _ = decoder
+                    .push(b": ping\r\nevent: response.created\r\ndata: \t\r\n\r\ndata: [DONE]\n\n");
+                assert!(!decoder.take_timing_signals().response_data);
+                let frame = format!("data: {data}\r\n\r\n");
+                let split = frame.len() / 2;
+                let _ = decoder.push(&frame.as_bytes()[..split]);
+                assert!(!decoder.take_timing_signals().response_data);
+                let _ = decoder.push(&frame.as_bytes()[split..]);
+            }
+            let signals = decoder.take_timing_signals();
+            assert!(signals.response_data, "websocket={websocket}, data={data}");
+            assert!(!signals.semantic_output);
+            assert!(!signals.reasoning_output);
+            assert!(!signals.text_output);
+        }
+    }
+}
+
+#[test]
+fn official_timing_frames_start_first_response_without_content() {
     let mut decoder = CodexCanonicalDecoder::new("gpt-5.4");
     let events = decoder.push(b"data: {\"type\":\"responsesapi.websocket_timing\",\"timing_metrics\":{\"total_turn_time_s\":20}}\n\n").expect("timing frame");
     assert!(!events.is_empty());
-    assert!(!decoder.take_timing_signals().output_start);
+    assert!(decoder.take_timing_signals().response_data);
     assert_eq!(decoder.upstream_response_ms(), None);
 }
 
@@ -169,7 +200,7 @@ fn decoder_should_not_forward_codex_rate_limit_metadata_fixture_as_openai_wire()
 }
 
 #[test]
-fn raw_sse_passthrough_should_drop_rate_limit_control_without_timing_side_effects() {
+fn raw_sse_passthrough_should_observe_rate_limit_response_without_forwarding_it() {
     let frame = concat!(
         "event: codex.rate_limits\n",
         "data: {\"type\":\"codex.rate_limits\",\"rate_limits\":{\"primary\":{\"used_percent\":90}}}\n\n",
@@ -183,7 +214,7 @@ fn raw_sse_passthrough_should_drop_rate_limit_control_without_timing_side_effect
 
     assert!(events.is_empty());
     assert!(!signals.protocol_progress);
-    assert!(!signals.output_start);
+    assert!(signals.response_data);
     assert!(!signals.semantic_output);
 }
 

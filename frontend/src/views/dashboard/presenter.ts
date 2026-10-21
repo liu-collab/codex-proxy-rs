@@ -132,6 +132,7 @@ function metricCards(
 ): MetricCardView[] {
   const { credentials, traffic, tokens, cache } = cards
   const recentPoints = recentTrendWindow(points)
+  const hasTodayRequests = traffic.todayRequestsValue > 0
   return [
     {
       title: '账号',
@@ -164,7 +165,7 @@ function metricCards(
         recentPoints.map(point => point.requestsValue),
         'info',
       ),
-      trend: trendState(traffic.todayRequestsValue, traffic.yesterdayRequestsValue, 'info'),
+      trend: hasTodayRequests ? trendState(traffic.todayRequestsValue, traffic.yesterdayRequestsValue, 'info') : undefined,
       details: [
         { label: '总请求', value: traffic.totalRequests, tone: 'info' },
         { label: '首字均值', value: cache.averageFirstTokenLatencyMs, tone: 'info' },
@@ -181,7 +182,7 @@ function metricCards(
         recentPoints.map(point => point.tokensValue),
         'success',
       ),
-      trend: trendState(tokens.todayTokensValue, tokens.yesterdayTokensValue, 'success'),
+      trend: hasTodayRequests ? trendState(tokens.todayTokensValue, tokens.yesterdayTokensValue, 'success') : undefined,
       details: [
         { label: '总 Token', value: tokens.totalTokens, tone: 'success' },
         { label: '总计费', value: formatDashboardUsd(tokens.totalBillingAmountUsd), tone: 'success' },
@@ -198,11 +199,9 @@ function metricCards(
         recentPoints.map(point => point.cacheHitRateValue),
         'warning',
       ),
-      trend: trendState(
-        cache.todayHitRateValue ?? 0,
-        cache.yesterdayHitRateValue ?? 0,
-        'warning',
-      ),
+      trend: hasTodayRequests
+        ? trendState(cache.todayHitRateValue, cache.yesterdayHitRateValue, 'warning')
+        : undefined,
       details: [
         { label: '总缓存命中', value: cache.totalHitRate, tone: 'warning' },
         { label: '总缓存', value: cache.totalCachedInputTokens, tone: 'warning' },
@@ -325,10 +324,12 @@ function formatDashboardUsd(value: string) {
 }
 
 function trendState(
-  current: number,
-  previous: number,
+  current: number | null,
+  previous: number | null,
   fallbackTone: MetricTone,
 ): MetricCardView['trend'] {
+  if (current === null || previous === null)
+    return undefined
   if (current > previous)
     return { direction: 'up', tone: 'success' }
   if (current < previous)

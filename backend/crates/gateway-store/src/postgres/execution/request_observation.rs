@@ -107,14 +107,6 @@ struct UpstreamTimings {
     api_overhead_ms: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     engine_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    engine_iapi_ttft_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    engine_service_ttft_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    engine_iapi_tbt_ms: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    engine_service_tbt_ms: Option<f64>,
 }
 
 #[derive(Default, Serialize)]
@@ -229,16 +221,9 @@ impl RequestObservation {
             value.retry_after_ms,
         ])?;
         // serde_json 会把非有限浮点数写成 null，先拒绝以免把非法指标伪装成缺失
-        for value in [
-            timings.upstream_api_overhead_ms,
-            timings.upstream_engine_ms,
-            timings.upstream_engine_iapi_ttft_ms,
-            timings.upstream_engine_service_ttft_ms,
-            timings.upstream_engine_iapi_tbt_ms,
-            timings.upstream_engine_service_tbt_ms,
-        ]
-        .into_iter()
-        .flatten()
+        for value in [timings.upstream_api_overhead_ms, timings.upstream_engine_ms]
+            .into_iter()
+            .flatten()
         {
             if !value.is_finite() || value < 0.0 || value >= i64::MAX as f64 {
                 return Err(invalid(
@@ -263,10 +248,6 @@ impl RequestObservation {
                     response_ms: timings.upstream_response_ms,
                     api_overhead_ms: timings.upstream_api_overhead_ms,
                     engine_ms: timings.upstream_engine_ms,
-                    engine_iapi_ttft_ms: timings.upstream_engine_iapi_ttft_ms,
-                    engine_service_ttft_ms: timings.upstream_engine_service_ttft_ms,
-                    engine_iapi_tbt_ms: timings.upstream_engine_iapi_tbt_ms,
-                    engine_service_tbt_ms: timings.upstream_engine_service_tbt_ms,
                 }),
             }),
             transport: Some(TransportObservation {

@@ -118,7 +118,7 @@ impl NestedExecutionGraph {
     pub(super) fn acquire(self: &Arc<Self>) -> Result<NestedExecutionPermit, GatewayError> {
         if self
             .active
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |active| {
                 (active < MAX_CONCURRENT_NESTED_EXECUTIONS).then_some(active + 1)
             })
             .is_err()
@@ -130,7 +130,7 @@ impl NestedExecutionGraph {
         }
         if self
             .total_started
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |total| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |total| {
                 (total < MAX_NESTED_EXECUTIONS).then_some(total + 1)
             })
             .is_err()
@@ -197,6 +197,15 @@ pub struct BoundModelExecutionContext {
 }
 
 impl BoundModelExecutionContext {
+    /// 与实际执行共用绑定时的快照，不能回退到后续发布的配置
+    #[must_use]
+    pub fn request_body_limit(&self) -> usize {
+        self.authority
+            .client
+            .snapshot
+            .responses_max_decompressed_body_bytes()
+    }
+
     #[must_use]
     pub fn request_settings(&self) -> Option<&RequestSettings> {
         self.authority.client.request_settings()

@@ -428,7 +428,7 @@ async fn service_chain_preserves_onion_order_parent_scope_and_native_results_wit
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect::<Vec<_>>();
     assert_eq!(events.len(), 8);
-    for round in events.chunks_exact(4) {
+    for round in events.as_chunks::<4>().0 {
         let phases = round
             .iter()
             .map(|event| {

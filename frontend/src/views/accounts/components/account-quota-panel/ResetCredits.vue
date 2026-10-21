@@ -192,13 +192,7 @@ function handleRequestConsume(creditId: string) {
         </div>
 
         <div :aria-busy="loading || consuming">
-          <p
-            v-if="loadError"
-            class="m-0 rounded-cp bg-cp-error-container px-4 py-3 text-cp-xs leading-normal font-emphasis text-cp-error-on-container"
-            role="status"
-          >
-            {{ loadError }}，请刷新重试
-          </p>
+          <ZEmpty v-if="loadError" title="重置卡加载失败" description="请刷新重试" size="small" surface="none" role="alert" />
           <p
             v-else-if="loading && !hasSnapshot"
             class="m-0 px-4 py-4 text-cp-xs font-emphasis text-cp-text-secondary"

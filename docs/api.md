@@ -270,7 +270,8 @@ Codex 的 review 等子代理请求仍使用 `/v1/responses`，并通过 `x-open
 多帧连续解码，整体展开结果受运行设置 `responsesMaxDecompressedBodyBytes` 约束（默认 64 MiB），
 超限在继续展开前返回 `400 request_too_large`，错误信息包含当前请求的上限字节数。zstd
 回溯窗口独立固定为最多 64 MiB，不能满足该限制的帧按解码失败处理。这个限制保护入站解压资源，不是
-模型上下文或 Token 上限；未压缩正文不受此长度限制。
+模型上下文或 Token 上限；未压缩正文不经过此解压检查。插件受管出站仍受同一设置约束，
+见[请求解压上限](#请求解压上限)。
 不支持的编码、逗号分隔的叠加编码和重复 `Content-Encoding` 头返回
 `400 unsupported_content_encoding`；压缩正文损坏、截断或解压后不是合法 JSON 返回
 `400 invalid_json`。本地错误不包含原始正文或解压库细节。WebSocket 文本帧不经过这条解压路径
@@ -720,13 +721,14 @@ call 与账号的绑定保存在网关进程内，未连接时一小时过期；
 | 方法 | 路由 | 查询 | 说明 |
 | --- | --- | --- | --- |
 | `GET` | `/api/key-usage/overview` | `period?`、`asOf?` 或 `startTime?`、`endTime?`，另含 `model?` | 用量汇总、趋势、当前额度和锚点所在日期的健康时间线 |
-| `GET` | `/api/key-usage/records` | 同上，另含 `kind?`、`currentPage?`、`pageSize?` | 当前 Key 的成功请求或错误记录 |
+| `GET` | `/api/key-usage/records` | 同上，另含 `kind?`、`currentPage?`、`pageSize?` | 当前 Key 的请求记录 |
 | `GET` | `/api/key-usage/config` | 无 | 当前 Key 的客户端配置凭据 |
 | `GET` | `/api/key-usage/version` | 无 | “关于”弹窗使用的当前版本号和提交号 |
 
 用量查询支持[页面时间合同](#页面时间合同)，默认 `period=7d`，一次最多 31 天。模型按完整名称匹配；
 不接受 Key ID、账号、Provider 等范围参数或其他未知字段。页码默认 1，每页默认 20，允许 1–100 条；
-`kind` 为 `success`（默认）或 `error`。分页响应为 `{ items, currentPage, pageSize, total }`
+`kind` 为 `success`（默认）、`error` 或 `all`，沿用使用统计的请求结果筛选：错误包括失败和未完成请求，
+全部还包括取消与进行中的请求；一次请求只占一条记录。分页响应为 `{ items, currentPage, pageSize, total }`
 
 overview 返回 `asOf`、`asOfDisplay`、`startTime`、`endTime`、`key`、`summary`、`trend`、`healthTimeline`。
 `key` 仅包含名称、掩码前缀、并发/RPM、日与周限额、已用 USD 及重置时间；零限额表示不限，
@@ -741,8 +743,8 @@ overview 返回 `asOf`、`asOfDisplay`、`startTime`、`endTime`、`key`、`summ
 日志只返回时间、公开请求模型、推理强度、接口、上下游传输方式、当前请求的 IP / User-Agent、
 Token 明细、费用明细、用时/首字与状态。Token 和费用复用现有展示合同；延迟仅包含当前请求的首事件、
 首推理、首文本、总耗时与上游性能指标，口径见[记录范围与统计口径](#记录范围与统计口径)，不含账号容量或调度诊断。
-成功记录的 `status` 为 `success`，不伪造未保存的 HTTP 状态；错误记录为 `error`，只返回客户端状态码，
-缺失的 Token/费用明细为 null。不返回账号资料、Key ID、上游模型或请求标识、原始错误正文或诊断内容
+`status` 为 `success`、`error`、`incomplete`、`cancelled`、`running` 或 `unknown`，`statusCode` 只返回已记录的客户端状态码。
+各结果均保留已采集的 Token/费用明细，缺失时为 null。不返回账号资料、Key ID、上游模型或请求标识、原始错误正文或诊断内容
 
 version 返回 `{ version, gitSha }`，不接受查询参数，不包含部署模式、更新状态或内部诊断
 
@@ -817,7 +819,10 @@ Codex 的 `model_catalog_json` 配置。账号设置保存不等待上游模型�
 `quota.credits` 返回上游点数余额，未提供点数信息时为 `null`。对象包含 `hasCredits`、`unlimited` 和
 `balance`，余额为保留上游精度的十进制字符串，未提供余额时为 `null`，明确的零余额为 `"0"`。
 OpenAI 点数随现有额度刷新和正常请求的额度信息同步，不与主动重置卡库存或百分比限额合并，
-不参与账号可用性判断
+不根据 `balance` 单独推导可用性。主动查询明确 `hasCredits=true` 或 `unlimited=true`，且无阻止
+点数支出的上限或工作区限制时，即使套餐窗口耗尽也可使用点数，并解除已有额度耗尽状态。
+真实额度拒绝后的后台回读同样支持此恢复路径，但不会自动重发本次失败请求；点数不能清除
+凭据错误、停用或冷却状态。上游点数信息也可能延迟，后续真实拒绝仍会记录额度耗尽
 
 账号列表和详情返回 `notes`（无备注时为 `null`）。编辑时省略或 `null` 保留原备注；字符串最多 500 个 Unicode
 字符，允许换行和制表符，保存时去除首尾空白，空字符串清空备注。备注独立于上游身份，导入时未显式提供备注、
@@ -834,8 +839,9 @@ OpenAI 主动额度刷新和正常响应携带的明确套餐会同步到账号�
 
 `outboundProxyId` 绑定已保存的代理，不要求出口测试成功；省略或 `null` 保留当前绑定，空字符串清除绑定。
 `outboundProxyUrl` 兼容 HTTP、HTTPS、SOCKS5、SOCKS5H 代理 URL，可带用户名和密码；不能与 ID 同时设置。
-编辑时省略或 `null` 表示保持原配置，空字符串表示清除代理并直连。列表和详情只返回
-不含认证信息的 `outboundProxyEndpoint`（直连时为 `null`）；只有显式敏感导出包含完整 URL。
+编辑时省略或 `null` 表示保持原配置，空字符串表示清除代理并直连。列表和详情返回绑定的
+`outboundProxyId`（未绑定时为 `null`，禁用代理仍保留 ID）和不含认证信息的 `outboundProxyEndpoint`
+（未配置时为 `null`）；只有显式敏感导出包含完整 URL。
 指定代理后，推理、OAuth 服务端交换/刷新及账号辅助请求使用同一出口；代理失败不会退回直连。
 浏览器打开的第三方 OAuth 授权页仍使用浏览器自身网络。
 账号出口与连接隔离见 [架构说明](architecture.md#账号出站代理)
@@ -1194,11 +1200,14 @@ OAuth start 使用：
   但上游 authorization code 本身通常只能交换一次；已完成过 token exchange 时应重新创建 OAuth flow
 - `GET /accounts/quota` 只读取最后一次落库快照；`POST /accounts/quota/refresh` 才访问上游。access token
   已过期时，额度刷新要求先走 credential 刷新或重新授权，不会拿过期 token 探测额度
-- OpenAI 已耗尽账号每 30 分钟主动复核一次，也会在最早未恢复窗口的 `resetAt + 2 分钟` 到期后
-  提前复核；周期复核不等待旧重置时间，因此也能发现官方提前重置。正常账号有非零用量或触顶窗口时，
-  在该窗口的 `resetAt + 2 分钟` 后主动复核。后台每 30 秒检查触发条件；同一重置边界复核后仍未更新时
-  回到 30 分钟重试，避免旧 reset 持续触发请求。各窗口独立确认恢复，时间到期本身不会直接解除账号
-  耗尽或将展示用量归零
+- OpenAI 已耗尽账号首次可复核，在 `resetAt` 尚未到达或未知时按 30 分钟间隔兜底，也可发现
+  官方提前重置。到达最早未恢复窗口的 `resetAt` 后，先等待 10 秒传播余量，再在下一轮后台检查
+  复核；reset 后前 5 分钟最小查询间隔为 30 秒，之后仍耗尽则改为 5 分钟。正常账号有非零用量或触顶窗口时，仍在
+  `resetAt + 2 分钟` 后复核，未更新则按 30 分钟间隔重试。后台每 30 秒检查条件，实际恢复时间还受
+  排队、查询耗时和上游传播影响；查询失败也遵守间隔。无可用点数时，到期前仍按原窗口证据恢复；
+  本次耗尽之后的已记录窗口 reset 全部到期后，新查询明确 `allowed=true` 可解除限制，即使用量仍为
+  100%。未知 reset 或再次拒绝后残留的旧 reset 仍走原规则，不复用旧边界解封；时间到期本身不会
+  解除限制，也不会将展示用量归零
 - 账号 `enabled` 控制是否参与请求调度，不控制 OAuth 凭据续期。OpenAI 与 xAI 的停用账号仍按各自刷新
   策略维护 Token；刷新结果更新凭据状态，但不会启用调度。无 refresh token 或凭据已进入失效、无效、
   封禁状态的账号不参加后台自动续期
@@ -1696,10 +1705,15 @@ Guardian 以 `subagent_kind` 或 `client_metadata.x-openai-subagent` 值 `guardi
 
 ### 请求解压上限
 
-`responsesMaxDecompressedBodyBytes` 是压缩 Responses HTTP 请求的解压输出上限，单位字节，默认
-67108864（64 MiB）。必须为正整数，且可表示为进程平台的 `isize`；管理端以整数 MiB 编辑。
-保存并发布成功后，新请求使用新值；已鉴权请求沿用原快照，无需重启。调高上限会增加大请求的内存占用，
-它不代表整个进程的内存预算
+`responsesMaxDecompressedBodyBytes` 限制压缩 Responses HTTP 请求的解压输出，以及插件受管 HTTP
+的实际出站正文（包括账号上游请求，无论是否压缩），单位字节，默认 67108864（64 MiB）。
+必须为正整数，且可表示为进程平台的 `isize`；管理端以整数 MiB 编辑。
+插件模型调用从同一设置派生内部请求编码预算，具体边界见 [SDK 模型请求](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#key模型与模型调用)
+
+保存并发布成功后，新请求使用新值；在途模型请求及其路由、调度、attempt 和重试回调沿用冻结预算。
+显式 Key 的模型调用沿用当前父调用内绑定的快照，父调用结束后重新绑定时使用新值；无模型请求上下文的
+受管 HTTP 调用读取当前发布值，无需重启插件。调小该值可能使插件上传或转发返回 413，且不发送出站请求。
+调高上限会增加大请求的内存占用，不代表扩大模型 Token 上限、响应缓冲或整个进程的内存预算
 
 ### 智能调度
 
@@ -1932,6 +1946,11 @@ Desktop 三段 SemVer 门禁，也不会自动回写最低版本设置。门禁�
 
 全部备份端点位于 `/api/admin/settings/backups/*`，使用管理接口响应信封，字段为 camelCase，响应带 `Cache-Control: no-store`
 
+归档为 `.sql.gz` 业务备份，包含账号、Key、设置、插件、已用额度和已发布用量汇总，不包含请求明细与诊断/审计日志。
+汇总范围和离线恢复限制见 [备份内容与限制](../deploy/README.md#备份内容与限制)；没有在线恢复端点
+
+统计重建或时间桶尚未发布完成时，任务以 `backup.analytics_not_ready` 失败；统计就绪后重新创建备份
+
 | 方法 | 路由 | 请求 | 说明 |
 | --- | --- | --- | --- |
 | `GET` | `/api/admin/settings/backups` | 无 | 读取存储配置（含明文 Secret）、验证状态与调度配置 |
@@ -2051,6 +2070,8 @@ request/response/upstream ID、outcome 与搜索文本。`search` 仅供明细�
 重试中间错误不改变请求最终分类；`logicalOutcome` 保留真实结果。状态筛选只影响明细列表，
 不改变顶部统计，独立运维事件仍通过 `/api/admin/operations/errors` 查询
 
+请求列表的 `errorCode` / `errorMessage` 提供最终请求的错误码与错误信息，未记录时为 `null`
+
 诊断 `dimension` 可取 `model`、`account`、
 `apiKey`、`provider`、`transport`、`failureClass`、`status`。诊断按请求量降序返回最多 100 项，
 同请求量按维度标识稳定排列
@@ -2115,7 +2136,8 @@ OpenAI 优先采用服务端 `openai-model` / `x-openai-model` 报告（流内�
 
 `latencyMs` 从模型执行会话开始计到终结，包含账号选择、重试及流交付等待，不包含此前的入口解析、路由和准入。
 `firstTokenLatencyMs` 与它使用同一计时起点，首字边界由 Provider 协议定义。
-OpenAI Responses 采用官方 Codex 的首个 `response.output_item.added` 边界；
+OpenAI Responses 在 HTTP SSE 收到首个非空且非 `[DONE]` 的 `data` 载荷、
+或 WebSocket 收到首个非空响应消息时记录首字，不要求实际输出内容；
 xAI 采用首个非空文本、推理或工具参数输出。对应事件缺失时保留未知，不用其他事件补齐首字。
 请求级首字统一通过 `firstTokenLatencyMs` 返回，由前端格式化。
 `latencyDetails` 的首事件、首推理和首正文时间也使用请求级起点，首推理与首正文仍要求实际内容，
@@ -2129,7 +2151,7 @@ OpenAI 仅使用同一条 `response.completed` 中的 `created_at` 与 `complete
 
 `latencyDetails` 还可包含以下上游性能指标，单位为毫秒，保留上游返回的小数。
 OpenAI 从当前响应的 `responsesapi.websocket_timing.timing_metrics` 读取，
-WebSocket 握手默认请求专项计时，客户端显式提供的开关保留原值。
+WebSocket 握手不主动添加专项计时请求头，客户端显式提供的开关保留原值。
 各字段独立可选；响应开始前、终态后的计时和明确属于其他响应的事件不写入当前请求，重试时清空
 
 `critical_path` 仅采集 `scope=response`、`coverage=complete` 且边界为
@@ -2141,10 +2163,6 @@ WebSocket 握手默认请求专项计时，客户端显式提供的开关保留�
 | --- | --- |
 | `upstreamApiOverheadMs` | API 排除引擎与客户端工具时间后的耗时 |
 | `upstreamEngineMs` | 响应级引擎耗时，取完整 critical path 的墙钟时间或直接返回的 Engine Service 时间 |
-| `upstreamEngineIapiTtftMs` | Engine IAPI TTFT 总计 |
-| `upstreamEngineServiceTtftMs` | Engine Service TTFT 总计 |
-| `upstreamEngineIapiTbtMs` | 跨引擎调用的 IAPI Token 间隔 |
-| `upstreamEngineServiceTbtMs` | 跨引擎调用的 Service Token 间隔 |
 
 以上指标按上游内部口径展示，不相加重建总耗时，不替换请求级 `firstTokenLatencyMs`。
 它们仅补充性能诊断，不改变列表与聚合统计的速率分母

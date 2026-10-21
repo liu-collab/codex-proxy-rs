@@ -111,14 +111,21 @@ export interface SystemRestartPlan {
 }
 
 export function checkSystemRestart() {
-  return request<SystemRestartPlan>({ url: '/api/admin/system/restart/check', method: 'GET' })
+  return request<SystemRestartPlan>({
+    url: '/api/admin/system/restart/check',
+    method: 'GET',
+  })
 }
 
-export function restartSystem(confirmation?: SystemRestartPlan, options: RequestOptions = {}) {
+interface SystemRestartParam {
+  confirmation?: SystemRestartPlan
+}
+
+export function restartSystem(data: SystemRestartParam = {}, options: RequestOptions = {}) {
   return request<SystemRestartAccepted>({
     url: '/api/admin/system/restart',
     method: 'POST',
-    data: { confirmation },
+    data,
     ...options,
   })
 }

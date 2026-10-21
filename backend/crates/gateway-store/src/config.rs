@@ -184,12 +184,17 @@ pub(crate) struct StoreConnectionConfig {
 impl StoreConnectionConfig {
     fn validate(&self, field: &'static str) -> StoreResult<()> {
         require_nonempty("store config", field, &self.url)?;
-        if self.password.len() != 48 || !self.password.bytes().all(|byte| byte.is_ascii_hexdigit())
+        // 托管存储的具体密码策略由服务端约束，客户端共用长度与控制字符边界
+        if !(16..=128).contains(&self.password.len())
+            || self.password.chars().any(char::is_control)
+            || self.password.trim().is_empty()
         {
             return Err(StoreError::InvalidData {
                 source: None,
                 entity: "store config",
-                message: format!("{field}.password must be exactly 48 hexadecimal characters"),
+                message: format!(
+                    "{field}.password must be 16 to 128 bytes, not blank, without control characters"
+                ),
             });
         }
         self.connection_url(field).map(|_| ())
@@ -208,7 +213,8 @@ impl StoreConnectionConfig {
                 message: format!("{field}.url must not contain a password"),
             });
         }
-        url.set_password(Some(&self.password))
+        // set_password 保留已有百分号序列，先转义字面量 %，避免驱动解码后改变原始密码
+        url.set_password(Some(&self.password.replace('%', "%25")))
             .map_err(|()| StoreError::InvalidData {
                 source: None,
                 entity: "store config",

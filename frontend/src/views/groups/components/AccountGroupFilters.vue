@@ -22,7 +22,7 @@ const status = defineModel<string>('status', { required: true })
       v-model="search"
       class="sm:w-80"
       aria-label="搜索账号分组"
-      placeholder="搜索分组名称..."
+      placeholder="搜索分组名称"
     >
       <template #prefix>
         <Search class="size-4.5 text-cp-text-tertiary" />

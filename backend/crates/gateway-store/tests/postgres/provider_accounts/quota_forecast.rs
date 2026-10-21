@@ -159,10 +159,14 @@ async fn quota_forecast_excludes_openai_prewarm_but_preserves_inference_and_audi
     assert_eq!(detail.request.service_tier.as_deref(), Some("auto"));
     let dashboard = repository
         .dashboard_summary(
-            admin_observability::DashboardQuery::new(admin_observability::TimeRange {
-                start: range.start,
-                end: range.end,
-            }),
+            admin_observability::DashboardQuery::new(
+                admin_observability::TimeRange {
+                    start: range.start,
+                    end: range.end,
+                },
+                Default::default(),
+            )
+            .expect("dashboard query"),
             end,
         )
         .await

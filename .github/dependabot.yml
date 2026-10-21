@@ -52,7 +52,7 @@ updates:
           - patch
 
   - package-ecosystem: npm
-    directory: /
+    directory: /frontend
     labels: []
     schedule:
       interval: weekly
