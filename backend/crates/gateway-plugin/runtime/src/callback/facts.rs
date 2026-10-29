@@ -119,7 +119,6 @@ fn observation(value: &ProviderResponseObservation) -> facts::ResponseObservatio
         status_code: value.status_code(),
         request_id: value.request_id().map(|value| value.as_str().to_owned()),
         service_tier: value.service_tier().map(str::to_owned),
-        upstream_response_model: value.upstream_response_model().map(str::to_owned),
         timings: facts::ResponseTimings {
             transport_decision_wait_ms: timings.transport_decision_wait_ms,
             connect_ms: timings.connect_ms,

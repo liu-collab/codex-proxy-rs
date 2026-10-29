@@ -1484,12 +1484,12 @@ async fn count_client_api_keys(pool: &PgPool, search: Option<&str>) -> StoreResu
 
 fn push_client_key_search(statement: &mut QueryBuilder<Postgres>, search: Option<&str>) {
     if let Some(search) = search {
-        let prefix = crate::postgres::literal_prefix_pattern(search);
+        let pattern = crate::postgres::literal_contains_pattern(&search.to_lowercase());
         statement.push(" and (lower(name) like ");
-        statement.push_bind(prefix.clone());
+        statement.push_bind(pattern.clone());
         statement.push(" escape '\\'");
         statement.push(" or lower(coalesce(label, '')) like ");
-        statement.push_bind(prefix);
+        statement.push_bind(pattern);
         statement.push(" escape '\\'");
         statement.push(")");
     }

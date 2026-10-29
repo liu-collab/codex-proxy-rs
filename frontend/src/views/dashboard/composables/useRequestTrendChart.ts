@@ -1,12 +1,15 @@
 import type { BarSeriesOption, EChartsOption, LineSeriesOption } from 'echarts'
 import type { Ref } from 'vue'
 import type { dashboardTrendView, normalizeDashboardTrendKind } from '../presenter'
+import type { DashboardTrendMetric } from '@/api'
 import { usePreferredReducedMotion } from '@vueuse/core'
 import { computed, shallowRef, watch } from 'vue'
-
 import { sampleGapBridgeSeries } from '@/components/charts/timeSeriesGap'
-import { chartTooltipStyle, tooltipIndex } from '@/components/charts/tooltip'
+import { chartTooltipContent, chartTooltipStyle, tooltipIndex } from '@/components/charts/tooltip'
+
 import { useChartPalette } from '@/composables/useChartPalette'
+import { t } from '@/i18n'
+import { trendMetricView } from '../presenter'
 
 type TrendKind = ReturnType<typeof normalizeDashboardTrendKind>
 type TrendView = ReturnType<typeof dashboardTrendView>
@@ -39,22 +42,30 @@ interface BarSeriesOptions {
   borderRadius?: number | [number, number, number, number]
 }
 
-const tabs = [
-  { label: '用量', value: 'usage' },
-  { label: '延迟', value: 'latency' },
-  { label: '错误', value: 'errors' },
-]
+const tabs = computed(() => ([
+  {
+    label: t('usage.usage'),
+    value: 'usage',
+  },
+  {
+    label: t('dashboard.trends.latency'),
+    value: 'latency',
+  },
+  {
+    label: t('dashboard.trends.errors'),
+    value: 'errors',
+  },
+]))
 
 export function useRequestTrendChart(options: {
   points: Readonly<Ref<TrendPoint[]>>
-  summary: Readonly<Ref<TrendSummaryItem[]>>
   activeKind: Ref<TrendKind>
   onTrendChange: (kind: TrendKind) => void
 }) {
-  const { points, summary, activeKind } = options
+  const { points, activeKind } = options
   const { color: themeColor, palette } = useChartPalette()
   const preferredMotion = usePreferredReducedMotion()
-  const pinnedSummaryLabel = shallowRef<string>()
+  const pinnedSummaryMetric = shallowRef<DashboardTrendMetric>()
 
   const hasSamples = computed(() =>
     points.value.some(
@@ -82,8 +93,12 @@ export function useRequestTrendChart(options: {
     return {
       ...getCoordinateSystem(buckets),
       series: getSeries(),
-      animationDuration: preferredMotion.value === 'reduce' ? 0 : 420,
-      animationDurationUpdate: preferredMotion.value === 'reduce' ? 0 : 220,
+      animationDuration: preferredMotion.value === 'reduce'
+        ? 0
+        : 420,
+      animationDurationUpdate: preferredMotion.value === 'reduce'
+        ? 0
+        : 220,
       animationEasing: 'cubicOut',
       animationEasingUpdate: 'cubicOut',
       tooltip: {
@@ -91,7 +106,7 @@ export function useRequestTrendChart(options: {
         ...chartTooltipStyle(palette.value, {
           axisPointer: true,
           confine: true,
-          fontFamily: 'Inter, system-ui, sans-serif',
+          fontFamily: themeColor('--font-sans', 'sans-serif'),
           fontWeight: 600,
         }),
         formatter: formatTooltip,
@@ -106,7 +121,9 @@ export function useRequestTrendChart(options: {
     return {
       grid: {
         left: 8,
-        right: activeKind.value === 'latency' ? 8 : 10,
+        right: activeKind.value === 'latency'
+          ? 8
+          : 10,
         top: 10,
         bottom: 2,
         outerBoundsMode: 'same' as const,
@@ -116,12 +133,15 @@ export function useRequestTrendChart(options: {
         type: 'category' as const,
         data: buckets,
         boundaryGap: activeKind.value === 'errors',
-        axisLine: { show: true, lineStyle: { color: axisLine } },
+        axisLine: {
+          show: true,
+          lineStyle: { color: axisLine },
+        },
         axisTick: { show: false },
         axisLabel: {
           color: muted,
           fontSize: 10,
-          fontFamily: 'JetBrains Mono Variable, JetBrains Mono',
+          fontFamily: themeColor('--font-mono', 'monospace'),
           hideOverlap: true,
           formatter: (_value: string, index: number) => points.value[index]?.time ?? '',
         },
@@ -136,7 +156,7 @@ export function useRequestTrendChart(options: {
           axisLabel: {
             color: muted,
             fontSize: 9,
-            fontFamily: 'JetBrains Mono Variable, JetBrains Mono',
+            fontFamily: themeColor('--font-mono', 'monospace'),
             formatter: formatPrimaryAxisValue,
           },
           splitLine: {
@@ -147,17 +167,19 @@ export function useRequestTrendChart(options: {
         {
           type: 'value' as const,
           min: 0,
-          max: activeKind.value === 'errors' ? 100 : undefined,
+          max: activeKind.value === 'errors'
+            ? 100
+            : undefined,
           splitNumber: 3,
           axisLine: { show: false },
           axisTick: { show: false },
           axisLabel: {
             show: true,
             color: activeKind.value === 'usage'
-              ? trendColor('输出', '--cp-color-green-solid', '#12B981')
-              : trendColor('成功', '--cp-color-green-solid', '#12B981'),
+              ? trendColor('outputTokens')
+              : trendColor('successRate'),
             fontSize: 9,
-            fontFamily: 'JetBrains Mono Variable, JetBrains Mono',
+            fontFamily: themeColor('--font-mono', 'monospace'),
             formatter: formatSecondaryAxisValue,
           },
           splitLine: { show: false },
@@ -168,7 +190,9 @@ export function useRequestTrendChart(options: {
 
   function formatPrimaryAxisValue(value: number) {
     if (activeKind.value === 'latency') {
-      return value >= 1000 ? `${formatAxisNumber(value / 1000)}s` : `${Math.round(value)}ms`
+      return value >= 1000
+        ? `${formatAxisNumber(value / 1000)} s`
+        : `${Math.round(value)} ms`
     }
     return formatAxisCompact(value)
   }
@@ -182,73 +206,68 @@ export function useRequestTrendChart(options: {
   }
 
   function formatTooltip(params: unknown) {
-    const rows = Array.isArray(params) ? params : [params]
+    const rows = Array.isArray(params)
+      ? params
+      : [params]
     const point = points.value[tooltipIndex(rows[0])]
     const title = point?.label ?? ''
 
     if (activeKind.value === 'usage') {
-      return [
-        title,
-        tooltipItem('输入', point?.inputTokens, trendColor('输入', '--cp-color-blue-solid', '#5983F4')),
-        tooltipItem('输出', point?.outputTokens, trendColor('输出', '--cp-color-green-solid', '#12B981')),
+      return chartTooltipContent(title, [
+        tooltipItem(t('dashboard.metrics.inputTokens'), point?.inputTokens, trendColor('inputTokens')),
+        tooltipItem(t('dashboard.metrics.outputTokens'), point?.outputTokens, trendColor('outputTokens')),
         tooltipItem(
-          '缓存',
+          t('dashboard.metrics.cachedInputTokens'),
           point?.cachedInputTokens,
-          trendColor('缓存', '--cp-color-text-tertiary', '#94A3B8'),
+          trendColor('cachedInputTokens'),
         ),
         tooltipItem(
-          '缓存命中',
+          t('dashboard.metrics.cacheHits'),
           zeroAwareRateText(point, 'cacheHitRate', 'inputTokensValue'),
-          trendColor('缓存', '--cp-color-text-tertiary', '#94A3B8'),
+          trendColor('cachedInputTokens'),
         ),
-        tooltipItem('请求', point?.requests, palette.value.textSecondary),
-      ]
-        .filter(Boolean)
-        .join('<br/>')
+        tooltipItem(t('dashboard.metrics.requests'), point?.requests, palette.value.textSecondary),
+      ])
     }
 
     const lines = rows.map((row) => {
       const name = tooltipValue(row, 'seriesName')
+      const metric = tooltipValue(row, 'seriesId')
       const value = tooltipValue(row, 'value')
       const marker = tooltipValue(row, 'marker')
-      return `${marker}${name}: ${tooltipDisplayValue(point, name, value)}`
+      return `${marker}${name}: ${tooltipDisplayValue(point, metric, value)}`
     })
-    return [title, ...lines].filter(Boolean).join('<br/>')
+    return chartTooltipContent(title, lines)
   }
 
-  function tooltipDisplayValue(point: TrendPoint | undefined, name: string, value: string) {
-    if (activeKind.value === 'usage') {
-      if (name === '输入')
-        return point?.inputTokens ?? value
-      if (name === '输出')
-        return point?.outputTokens ?? value
-      if (name === '缓存')
-        return point?.cachedInputTokens ?? value
-    }
-    if (activeKind.value === 'latency') {
-      if (name === '首字 P95')
+  function tooltipDisplayValue(point: TrendPoint | undefined, metric: string, value: string) {
+    switch (metric) {
+      case 'firstTokenP95Ms':
         return formatLatency(point?.firstTokenP95Ms, value)
-      if (name === '总耗时 P95')
+      case 'latencyP95Ms':
         return formatLatency(point?.latencyP95Ms, value)
-      if (name === '速率 P50')
-        return point?.outputThroughputP50 == null ? value : `${point.outputThroughputP50} tok/s`
+      case 'outputThroughputP50':
+        return point?.outputThroughputP50 == null
+          ? value
+          : `${point.outputThroughputP50} tok/s`
+      case 'errors':
+        return point?.errors ?? value
+      case 'successRate':
+        return zeroAwareRateText(point, 'successRate', 'requestsValue') ?? value
+      case 'requests':
+        return point?.requests ?? value
+      default:
+        return value
     }
-    if (name === '错误数')
-      return point?.errors ?? value
-    if (name === '成功率')
-      return zeroAwareRateText(point, 'successRate', 'requestsValue') ?? value
-    if (name === '总请求')
-      return point?.requests ?? value
-    return value
   }
 
   function getSeries(): Array<BarSeriesOption | LineSeriesOption> {
     if (activeKind.value === 'usage') {
-      const cacheColor = trendColor('缓存', '--cp-color-text-tertiary', '#94A3B8')
-      const inputColor = trendColor('输入', '--cp-color-blue-solid', '#5983F4')
-      const outputColor = trendColor('输出', '--cp-color-green-solid', '#12B981')
+      const cacheColor = trendColor('cachedInputTokens')
+      const inputColor = trendColor('inputTokens')
+      const outputColor = trendColor('outputTokens')
       return [
-        lineSeries('缓存', seriesValues('cachedInputTokensValue'), cacheColor, {
+        lineSeries('cachedInputTokens', seriesValues('cachedInputTokensValue'), cacheColor, {
           area: true,
           areaStartAlpha: '30',
           areaEndAlpha: '08',
@@ -258,7 +277,7 @@ export function useRequestTrendChart(options: {
           width: 1.25,
           z: 1,
         }),
-        lineSeries('输入', seriesValues('uncachedInputTokensValue'), inputColor, {
+        lineSeries('inputTokens', seriesValues('uncachedInputTokensValue'), inputColor, {
           area: true,
           areaStartAlpha: '2A',
           areaEndAlpha: '05',
@@ -267,7 +286,7 @@ export function useRequestTrendChart(options: {
           width: 2.3,
           z: 3,
         }),
-        lineSeries('输出', seriesValues('outputTokensValue'), outputColor, {
+        lineSeries('outputTokens', seriesValues('outputTokensValue'), outputColor, {
           smooth: 0.24,
           width: 2.1,
           yAxisIndex: 1,
@@ -279,42 +298,57 @@ export function useRequestTrendChart(options: {
     if (activeKind.value === 'latency') {
       return [
         ...gapLineSeries(
-          '总耗时 P95',
+          'latencyP95Ms',
           activeSeriesValues('latencyP95Ms'),
-          trendColor('总耗时', '--cp-color-orange-solid', '#F59E0B'),
-          { lineType: 'dashed', smooth: 0.2, width: 1.8, z: 2 },
+          trendColor('latencyP95Ms'),
+          {
+            lineType: 'dashed',
+            smooth: 0.2,
+            width: 1.8,
+            z: 2,
+          },
         ),
         ...gapLineSeries(
-          '首字 P95',
+          'firstTokenP95Ms',
           activeSeriesValues('firstTokenP95Ms'),
-          trendColor('首字', '--cp-color-cyan-solid', '#13C2C2'),
-          { area: true, smooth: 0.24, width: 2.5, z: 4 },
+          trendColor('firstTokenP95Ms'),
+          {
+            area: true,
+            smooth: 0.24,
+            width: 2.5,
+            z: 4,
+          },
         ),
         ...gapLineSeries(
-          '速率 P50',
+          'outputThroughputP50',
           activeSeriesValues('outputThroughputP50'),
-          trendColor('速率', '--cp-color-green-solid', '#12B981'),
-          { smooth: 0.2, width: 2, yAxisIndex: 1, z: 3 },
+          trendColor('outputThroughputP50'),
+          {
+            smooth: 0.2,
+            width: 2,
+            yAxisIndex: 1,
+            z: 3,
+          },
         ),
       ]
     }
 
     return [
       barSeries(
-        '错误数',
+        'errors',
         seriesValues('errorsValue'),
-        trendColor('错误', '--cp-color-red-solid', '#EF4444'),
+        trendColor('errors'),
       ),
       ...gapLineSeries(
-        '成功率',
+        'successRate',
         activeSeriesValues('successRateValue'),
-        trendColor('成功', '--cp-color-green-solid', '#12B981'),
+        trendColor('successRate'),
         { width: 2.4, yAxisIndex: 1 },
       ),
       lineSeries(
-        '总请求',
+        'requests',
         seriesValues('requestsValue'),
-        trendColor('请求', '--cp-color-blue-solid', '#5983F4'),
+        trendColor('requests'),
         { lineType: 'dashed', width: 1.8 },
       ),
     ]
@@ -326,20 +360,23 @@ export function useRequestTrendChart(options: {
 
   function activeSeriesValues(key: string) {
     return points.value.map(point =>
-      Number(point.requestsValue) > 0 ? trendPointNumber(point, key) : 0,
+      Number(point.requestsValue) > 0
+        ? trendPointNumber(point, key)
+        : 0,
     )
   }
 
   function lineSeries(
-    name: string,
+    metric: DashboardTrendMetric,
     data: (number | null)[],
     color: string,
     lineOptions: LineSeriesOptions = {},
   ): LineSeriesOption {
     const area = lineOptions.area ?? false
-    const muted = isSeriesMuted(name)
+    const muted = isSeriesMuted(metric)
     return {
-      name,
+      id: metric,
+      name: trendMetricView(metric).label,
       type: 'line',
       data,
       connectNulls: false,
@@ -357,7 +394,10 @@ export function useRequestTrendChart(options: {
         width: lineOptions.width ?? 2.2,
         opacity: muted ? 0.18 : 1,
       },
-      itemStyle: { color, opacity: muted ? 0.18 : 1 },
+      itemStyle: {
+        color,
+        opacity: muted ? 0.18 : 1,
+      },
       emphasis: { disabled: true },
       areaStyle: area
         ? {
@@ -379,16 +419,16 @@ export function useRequestTrendChart(options: {
   }
 
   function gapLineSeries(
-    name: string,
+    metric: DashboardTrendMetric,
     data: (number | null)[],
     color: string,
     lineOptions: LineSeriesOptions = {},
   ) {
-    const primary = lineSeries(name, data, color, lineOptions)
+    const primary = lineSeries(metric, data, color, lineOptions)
     return [
       primary,
       ...sampleGapBridgeSeries(data, {
-        name,
+        name: metric,
         color,
         width: lineOptions.width,
         xAxisIndex: lineOptions.xAxisIndex,
@@ -399,14 +439,15 @@ export function useRequestTrendChart(options: {
   }
 
   function barSeries(
-    name: string,
+    metric: DashboardTrendMetric,
     data: (number | null)[],
     color: string,
     barOptions: BarSeriesOptions = {},
   ): BarSeriesOption {
-    const muted = isSeriesMuted(name)
+    const muted = isSeriesMuted(metric)
     return {
-      name,
+      id: metric,
+      name: trendMetricView(metric).label,
       type: 'bar',
       data,
       barMaxWidth: barOptions.maxWidth ?? 16,
@@ -416,7 +457,9 @@ export function useRequestTrendChart(options: {
       z: barOptions.z ?? 2,
       itemStyle: {
         color,
-        opacity: muted ? 0.14 : (barOptions.opacity ?? 0.72),
+        opacity: muted
+          ? 0.14
+          : (barOptions.opacity ?? 0.72),
         borderRadius: barOptions.borderRadius ?? [3, 3, 0, 0],
       },
       emphasis: { disabled: true },
@@ -424,37 +467,40 @@ export function useRequestTrendChart(options: {
   }
 
   function summaryMarkerStyle(item: TrendSummaryItem) {
-    return item.colorVar ? { backgroundColor: `var(${item.colorVar})` } : undefined
+    return item.colorVar
+      ? { backgroundColor: `var(${item.colorVar})` }
+      : undefined
   }
 
-  function trendColor(label: string, fallbackVar: string, fallback: string) {
-    const colorVar = summary.value.find(item => String(item.label).includes(label))?.colorVar
-    return themeColor(colorVar || fallbackVar, fallback)
+  function trendColor(metric: DashboardTrendMetric) {
+    return themeColor(trendMetricView(metric).colorVar, palette.value.textSecondary)
   }
 
   function handleTrendChange(value: string) {
     options.onTrendChange(value as TrendKind)
   }
 
-  function toggleSummarySeries(label: string) {
-    pinnedSummaryLabel.value = pinnedSummaryLabel.value === label ? undefined : label
+  function toggleSummarySeries(metric: DashboardTrendMetric) {
+    pinnedSummaryMetric.value = pinnedSummaryMetric.value === metric
+      ? undefined
+      : metric
   }
 
-  function isSeriesMuted(name: string) {
-    return Boolean(pinnedSummaryLabel.value && pinnedSummaryLabel.value !== name)
+  function isSeriesMuted(metric: DashboardTrendMetric) {
+    return Boolean(pinnedSummaryMetric.value && pinnedSummaryMetric.value !== metric)
   }
 
-  function isSummarySeriesActive(label: string) {
-    return pinnedSummaryLabel.value === label
+  function isSummarySeriesActive(metric: DashboardTrendMetric) {
+    return pinnedSummaryMetric.value === metric
   }
 
   watch(activeKind, () => {
-    pinnedSummaryLabel.value = undefined
+    pinnedSummaryMetric.value = undefined
   })
 
   return {
     tabs,
-    pinnedSummaryLabel,
+    pinnedSummaryMetric,
     hasSamples,
     chartOption,
     summaryMarkerStyle,
@@ -476,7 +522,9 @@ function formatAxisCompact(value: number) {
 }
 
 function formatAxisNumber(value: number) {
-  return value >= 10 ? value.toFixed(0) : value.toFixed(1).replace(/\.0$/, '')
+  return value >= 10
+    ? value.toFixed(0)
+    : value.toFixed(1).replace(/\.0$/, '')
 }
 
 function formatLatency(value: number | null | undefined, fallback: string) {
@@ -500,7 +548,9 @@ function tooltipValue(source: unknown, key: string) {
   if (typeof source !== 'object' || source === null || !(key in source))
     return ''
   const value = (source as Record<string, unknown>)[key]
-  return typeof value === 'number' || typeof value === 'string' ? String(value) : ''
+  return typeof value === 'number' || typeof value === 'string'
+    ? String(value)
+    : ''
 }
 
 function trendPointProperty(point: TrendPoint | undefined, key: string) {
@@ -511,7 +561,9 @@ function trendPointProperty(point: TrendPoint | undefined, key: string) {
 
 function trendPointText(point: TrendPoint | undefined, key: string) {
   const value = trendPointProperty(point, key)
-  return typeof value === 'string' ? value : undefined
+  return typeof value === 'string'
+    ? value
+    : undefined
 }
 
 function zeroAwareRateText(
@@ -527,5 +579,7 @@ function zeroAwareRateText(
 
 function trendPointNumber(point: TrendPoint, key: string) {
   const value = trendPointProperty(point, key)
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
+  return typeof value === 'number' && Number.isFinite(value)
+    ? value
+    : null
 }

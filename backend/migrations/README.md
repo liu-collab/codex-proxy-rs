@@ -3,7 +3,8 @@
 sqlx 在服务启动、监听请求之前按编号执行迁移，并把文件 checksum 记入 `_sqlx_migrations`。
 已应用迁移的字节与记录不一致时，服务会拒绝启动
 
-迁移按递增编号组织，完整清单以本目录 SQL 文件和 `.frozen-sha256` 为准
+迁移按递增编号组织，完整清单以本目录 SQL 文件和 `.frozen-sha256` 为准。
+业务状态与存储职责见[状态所有权](../../docs/architecture.md#8-状态所有权)，离线恢复见[部署文档](../../deploy/README.md#人工恢复数据库)
 
 ## 命名约定
 
@@ -39,13 +40,16 @@ sha256sum --check --strict .frozen-sha256
 
 ## 本地测试库
 
-`gateway-store` 的 PG/Redis 集成测试需要以下环境变量，未设置时在本地
-静默跳过（CI 缺失则直接失败）：
+`gateway-store` 的 PostgreSQL/Redis 集成测试使用以下环境变量；所需测试服务未配置时，本地相关测试跳过，CI 直接失败：
 
 ```bash
 export CPR_TEST_DATABASE_URL='postgres://<user>:<password>@127.0.0.1:5432/<db>'
 export CPR_TEST_REDIS_URL='redis://:<password>@127.0.0.1:6379'
 ```
+
+插件 Runtime 的真实子进程与持久化测试优先使用 `CPR_PLUGIN_TEST_DATABASE_URL` 和
+`CPR_PLUGIN_TEST_REDIS_URL`。设置插件数据库变量时必须同时提供对应 Redis 变量；未设置插件数据库变量时，
+使用上述标准测试服务。两种配置遵守相同的密码与隔离要求；缺少服务时的跳过和 CI 失败规则也相同
 
 测试自建随机 schema / key 前缀做隔离，但仍应使用专用开发或测试实例，不要连接生产库。
 凭据从自己的部署配置或 CI Secret 中读取，不要粘贴未脱敏的 `docker inspect` 输出。

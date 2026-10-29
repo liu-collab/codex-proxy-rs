@@ -58,6 +58,156 @@ impl ExecutionStore for NoopExecutionStore {
 }
 
 #[tokio::test]
+async fn contributed_model_scope_survives_affinity_and_account_rotation() {
+    use gateway_core::routing::ContributedModel;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Catalog(Vec<ContributedModel>);
+    impl ExtensionSetLease for Catalog {
+        fn is_ready(&self) -> bool {
+            true
+        }
+        fn models(&self) -> &[ContributedModel] {
+            &self.0
+        }
+    }
+
+    for native_supports_tools in [false, true] {
+        let store = Arc::new(MemoryAccountStore::default());
+        create_account(&store, "acct_provider_contract").await;
+        let server = MockServer::start().await;
+        let calls = AtomicUsize::new(0);
+        Mock::given(method("POST"))
+            .and(path("/codex/responses"))
+            .respond_with(move |_: &wiremock::Request| {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    ResponseTemplate::new(429).set_body_json(json!({
+                        "error":{"type":"rate_limit_error","message":"fixture rate limit"}
+                    }))
+                } else {
+                    ResponseTemplate::new(200)
+                        .set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream")
+                }
+            })
+            .expect(2)
+            .mount(&server)
+            .await;
+        let provider = provider_with_affinity_and_base_url(
+            &store,
+            Arc::new(MemorySessionAffinity::default()),
+            server.uri(),
+        );
+        let Operation::Generate(generate) = turn_request("scope-session", "scope-turn") else {
+            unreachable!()
+        };
+        let mut body = generate.protocol_payload().body().clone();
+        if native_supports_tools {
+            body.insert(
+                "tools".into(),
+                json!([{
+                    "type":"function", "name":"fixture", "parameters":{"type":"object"}
+                }]),
+            );
+        }
+        let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+            ProtocolPayload::json_object("openai", body)
+                .unwrap()
+                .with_context(generate.protocol_payload().context().clone()),
+        ));
+        // 先冻结 A 的会话亲和，再开放 B/C；后续选号不能借亲和绕过模型能力范围
+        drop(
+            provider
+                .clone()
+                .execute(
+                    planned_request("openai", operation.clone()),
+                    context("req_scope_seed", CancellationToken::new()),
+                )
+                .await
+                .unwrap(),
+        );
+        for account in ["acct_subagent_a", "acct_subagent_b"] {
+            create_account(&store, account).await;
+        }
+        let kind = ProviderKind::new("openai").unwrap();
+        let capabilities = ModelCapabilities::new(BTreeSet::from([OperationKind::Generate]), None);
+        let models = if native_supports_tools {
+            vec![ProviderModel::new(
+                kind.clone(),
+                UpstreamModelId::new("gpt-5.4").unwrap(),
+                capabilities.clone().with_upstream_feature_validation(),
+            )]
+        } else {
+            Vec::new()
+        };
+        // 适配专属模型只属于 B/C；同名原生模型支持 tools 时，适配账号 A 不支持
+        let contributed_accounts = if native_supports_tools {
+            vec!["acct_provider_contract"]
+        } else {
+            vec!["acct_subagent_a", "acct_subagent_b"]
+        };
+        let snapshot = RuntimeSnapshot::new(
+            ConfigRevision::new(1).unwrap(),
+            SettingsValues::new(3, "smart", Default::default(), None, None),
+            vec![kind.clone()],
+            models,
+            Vec::new(),
+        )
+        .unwrap()
+        .with_extensions(Some(ExtensionSetReference::new(
+            ExtensionSetId::new("scope-test".into()).unwrap(),
+            Arc::new(Catalog(vec![ContributedModel {
+                owner: "scope-test".into(),
+                id: PublicModelId::new("gpt-5.4").unwrap(),
+                provider: kind,
+                accounts: contributed_accounts
+                    .into_iter()
+                    .map(|id| ProviderAccountId::new(id).unwrap())
+                    .collect(),
+                capabilities,
+                presentation: Default::default(),
+            }])),
+        )));
+        let plan = snapshot
+            .plan(
+                &PublicModelId::new("gpt-5.4").unwrap(),
+                &operation,
+                contract_account_scope(),
+                &RoutingContext::default(),
+            )
+            .unwrap();
+        let providers =
+            ProviderRegistry::new([provider as Arc<dyn gateway_core::engine::provider::Provider>])
+                .unwrap();
+        let coordinator =
+            AttemptCoordinator::new(GatewayEngine::new(Arc::new(NoopExecutionStore), providers));
+        let mut session = coordinator
+            .start(
+                execution_request("req_scope_rotation", &operation, Duration::from_secs(10)),
+                operation,
+                plan,
+                None,
+                None,
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        session.collect_uncommitted().await.unwrap();
+        session.commit_downstream(Some(200)).await.unwrap();
+        let requests = server.received_requests().await.unwrap();
+        assert_eq!(requests.len(), 2);
+        let selected: BTreeSet<_> = requests
+            .iter()
+            .map(|request| request.headers["authorization"].to_str().unwrap())
+            .collect();
+        assert_eq!(
+            selected,
+            BTreeSet::from(["Bearer at-acct_subagent_a", "Bearer at-acct_subagent_b",]),
+            "native_supports_tools={native_supports_tools}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn cyber_policy_rotation_preserves_upstream_response_and_next_request_stays_local() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_subagent_a").await;
@@ -137,6 +287,145 @@ async fn cyber_policy_rotation_preserves_upstream_response_and_next_request_stay
         Some("cyber_policy")
     );
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn streaming_not_found_preserves_accounts_and_stops_gateway_retries() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let raw = json!({
+        "type": "error", "status": 404,
+        "error": {
+            "type": "invalid_request_error", "code": null, "param": "input",
+            "message": "Item with id 'rs_missing' not found. Items are not persisted when `store` is set to false. Try again with `store` set to true, or remove this item from your input."
+        }
+    })
+    .to_string();
+    let created = json!({
+        "type": "response.created",
+        "response": {"id": "resp_missing_item", "model": "gpt-5.4", "output": []}
+    })
+    .to_string();
+    for websocket in [false, true] {
+        let store = Arc::new(MemoryAccountStore::default());
+        create_account(&store, "acct_provider_contract").await;
+        let requests = Arc::new(AtomicUsize::new(0));
+        let upstream_requests = Arc::clone(&requests);
+        let http = MockServer::start().await;
+        let (base_url, server) = if websocket {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let created = created.clone();
+            let raw = raw.clone();
+            let server = tokio::spawn(async move {
+                loop {
+                    let (socket, _) = listener.accept().await.unwrap();
+                    let mut ws = accept_codex_test_websocket(socket).await;
+                    while let Some(Ok(message)) = ws.next().await {
+                        match message {
+                            Message::Text(_) => {
+                                let count = upstream_requests.fetch_add(1, Ordering::SeqCst) + 1;
+                                ws.send(Message::Text(created.clone().into()))
+                                    .await
+                                    .unwrap();
+                                ws.send(Message::Ping(Bytes::new())).await.unwrap();
+                                ws.send(Message::Text(raw.clone().into())).await.unwrap();
+                                if count == 3 {
+                                    return;
+                                }
+                            }
+                            Message::Close(_) => break,
+                            _ => {}
+                        }
+                    }
+                }
+            });
+            (base_url, Some(server))
+        } else {
+            let response = ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(format!("data: {created}\n\n: keepalive\n\ndata: {raw}\n\n"));
+            Mock::given(method("POST"))
+                .and(path("/codex/responses"))
+                .respond_with(move |_: &wiremock::Request| {
+                    upstream_requests.fetch_add(1, Ordering::SeqCst);
+                    response.clone()
+                })
+                .mount(&http)
+                .await;
+            (http.uri(), None)
+        };
+        let provider = provider_with_base_url(&store, base_url);
+        let providers =
+            ProviderRegistry::new([provider as Arc<dyn gateway_core::engine::provider::Provider>])
+                .unwrap();
+        let coordinator =
+            AttemptCoordinator::new(GatewayEngine::new(Arc::new(NoopExecutionStore), providers));
+        let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
+            ProtocolPayload::json_object(
+                "openai",
+                Map::from_iter([
+                    ("model".to_owned(), json!("gpt-5.4")),
+                    (
+                        "input".to_owned(),
+                        json!([{"type": "item_reference", "id": "rs_missing"}]),
+                    ),
+                    ("store".to_owned(), json!(false)),
+                ]),
+            )
+            .unwrap()
+            .with_context(Map::from_iter([(
+                "use_websocket".to_owned(),
+                json!(websocket),
+            )])),
+        ));
+        let plan = execution_plan(&operation);
+        // 重复请求必须继续使用同一可调度账号，不能把历史条目缺失累计为凭据失效
+        for index in 1..=3 {
+            let mut session = coordinator
+                .start(
+                    execution_request(
+                        &format!("req_missing_item_{index}"),
+                        &operation,
+                        Duration::from_secs(5),
+                    ),
+                    operation.clone(),
+                    plan.clone(),
+                    None,
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            let EngineError::Provider(error) =
+                timeout(Duration::from_secs(5), session.collect_uncommitted())
+                    .await
+                    .unwrap()
+                    .unwrap_err()
+            else {
+                panic!("expected the original upstream rejection");
+            };
+            assert_eq!(
+                error.kind(),
+                ProviderErrorKind::InvalidRequest,
+                "websocket={websocket}"
+            );
+            assert_eq!(error.upstream_status(), Some(404));
+            assert!(!error.replay_is_safe());
+            assert!(error.retry_is_prohibited());
+            assert_eq!(error.raw_upstream_error().unwrap().as_str(), raw);
+            assert_eq!(requests.load(Ordering::SeqCst), index);
+            let account = store.account("acct_provider_contract").unwrap();
+            assert_eq!(account.credential_state(), CredentialState::Ready);
+            assert_eq!(account.last_error_reason(), None);
+        }
+        if let Some(server) = server {
+            timeout(Duration::from_secs(5), server)
+                .await
+                .unwrap()
+                .unwrap();
+        }
+    }
 }
 
 #[tokio::test]

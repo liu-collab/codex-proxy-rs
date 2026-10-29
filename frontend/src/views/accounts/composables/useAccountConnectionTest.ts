@@ -1,14 +1,15 @@
 import type { Account, AccountModelsResponse } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
-
 import { CheckCircle2, Clock3, Wifi, XCircle } from '@lucide/vue'
 import { useEventSource } from '@vueuse/core'
+
 import { clamp } from 'es-toolkit'
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { getAccountModels, refreshAccountModels } from '@/api'
 import { API_BASE_URL } from '@/api/constants'
 import { useIdSet } from '@/composables/useIdSet'
 import { useRequestState } from '@/composables/useRequestState'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, withMinimumDuration } from '@/utils/operation'
 
 interface ConnectionTestRun {
@@ -99,27 +100,27 @@ const CONNECTION_TEST_EVENT_TYPES = new Set<ConnectionTestEvent['type']>([
   'error',
 ])
 
-const CONNECTION_TEST_FAILURE_TEXT: Record<string, string> = {
-  invalid_request: '测试请求不合法',
-  unsupported: '当前 Provider 不支持连接测试',
-  unauthorized: '账号凭据无效',
-  policy_denied: '测试请求被网关策略拒绝',
-  model_not_found: '测试模型不存在',
-  no_available_provider: '指定账号当前不可用于连接测试',
-  account_capacity_unavailable: '指定账号当前没有可用容量',
-  provider_infrastructure_unavailable: 'Provider 本地基础设施暂不可用',
-  rate_limited: '上游请求过于频繁',
-  upstream_unavailable: '上游服务暂不可用',
-  timeout: '上游请求超时',
-  cancelled: '测试请求已取消',
-  internal_error: '网关内部错误',
-}
+const CONNECTION_TEST_FAILURE_TEXT = computed<Record<string, string>>(() => ({
+  invalid_request: t('accounts.connectionTest.errors.invalidRequest'),
+  unsupported: t('accounts.connectionTest.errors.unsupported'),
+  unauthorized: t('accounts.connectionTest.errors.credentials'),
+  policy_denied: t('accounts.connectionTest.errors.policyRejected'),
+  model_not_found: t('accounts.connectionTest.errors.modelNotFound'),
+  no_available_provider: t('accounts.connectionTest.errors.accountUnavailable'),
+  account_capacity_unavailable: t('accounts.connectionTest.errors.capacityUnavailable'),
+  provider_infrastructure_unavailable: t('accounts.connectionTest.errors.infrastructureUnavailable'),
+  rate_limited: t('accounts.connectionTest.errors.rateLimited'),
+  upstream_unavailable: t('accounts.connectionTest.errors.upstreamUnavailable'),
+  timeout: t('accounts.connectionTest.errors.timeout'),
+  cancelled: t('accounts.connectionTest.errors.canceled'),
+  internal_error: t('accounts.connectionTest.errors.internal'),
+}))
 
-const CONNECTION_TEST_SOURCE_LABEL: Record<ConnectionTestFailureSource, string> = {
-  gateway: '网关校验',
-  provider: 'Provider 本地准备',
-  upstream: '上游响应',
-}
+const CONNECTION_TEST_SOURCE_LABEL = computed<Record<ConnectionTestFailureSource, string>>(() => ({
+  gateway: t('accounts.connectionTest.stages.gateway'),
+  provider: t('accounts.connectionTest.stages.provider'),
+  upstream: t('accounts.connectionTest.stages.upstream'),
+}))
 
 function parseConnectionTestEvent(raw: string): ConnectionTestEvent | null {
   const value: unknown = JSON.parse(raw)
@@ -132,12 +133,14 @@ function parseConnectionTestEvent(raw: string): ConnectionTestEvent | null {
 
 function connectionTestFailureText(event: ConnectionTestFailureEvent) {
   return event.gatewayErrorCode
-    ? CONNECTION_TEST_FAILURE_TEXT[event.gatewayErrorCode] || '未分类错误'
-    : '测试连接失败'
+    ? CONNECTION_TEST_FAILURE_TEXT.value[event.gatewayErrorCode] || t('accounts.connectionTest.errors.unknown')
+    : t('accounts.connectionTest.errors.failed')
 }
 
 function connectionTestFailureLabel(event: ConnectionTestFailureEvent) {
-  return event.source ? CONNECTION_TEST_SOURCE_LABEL[event.source] || '测试失败' : '测试失败'
+  return event.source
+    ? CONNECTION_TEST_SOURCE_LABEL.value[event.source] || t('accounts.connectionTest.failed')
+    : t('accounts.connectionTest.failed')
 }
 
 function connectionTestFailureDiagnostics(event: ConnectionTestFailureEvent) {
@@ -193,8 +196,8 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
   const connectionTestStatusView = computed(() => {
     if (connectionTestStatus.value === 'running') {
       return {
-        label: '正在测试',
-        description: '正在向所选模型发送请求并接收流式响应',
+        label: t('accounts.connectionTest.testing'),
+        description: t('accounts.connectionTest.runningDescription'),
         icon: Clock3,
         badge: 'bg-cp-info-container text-cp-info-on-container',
         iconClass: 'text-cp-info',
@@ -202,8 +205,8 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
     }
     if (connectionTestStatus.value === 'success') {
       return {
-        label: '连接正常',
-        description: '请求已完成，可在下方查看模型、耗时和事件轨迹',
+        label: t('accounts.connectionTest.successTitle'),
+        description: t('accounts.connectionTest.completedDescription'),
         icon: CheckCircle2,
         badge: 'bg-cp-success-container text-cp-success-on-container',
         iconClass: 'text-cp-success',
@@ -211,16 +214,16 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
     }
     if (connectionTestStatus.value === 'error') {
       return {
-        label: '测试失败',
-        description: '请求未完成，请在下方查看失败来源与原始诊断',
+        label: t('accounts.connectionTest.failed'),
+        description: t('accounts.connectionTest.failedDescription'),
         icon: XCircle,
         badge: 'bg-cp-error-container text-cp-error-on-container',
         iconClass: 'text-cp-error',
       }
     }
     return {
-      label: '准备测试',
-      description: '选择模型后，点击“开始测试”发送真实请求',
+      label: t('accounts.connectionTest.readyTitle'),
+      description: t('accounts.connectionTest.readyDescription'),
       icon: Wifi,
       badge: 'bg-cp-fill-quaternary text-cp-text-secondary',
       iconClass: 'text-cp-text-quaternary',
@@ -307,7 +310,9 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
       return
     }
     connectionTestLogs.value = connectionTestLogs.value.map((item, itemIndex) =>
-      itemIndex === index ? { ...next, time: item.time } : item,
+      itemIndex === index
+        ? { ...next, time: item.time }
+        : item,
     )
   }
 
@@ -331,9 +336,9 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
     }
   }
 
-  function failConnectionTest(message = '测试连接失败') {
+  function failConnectionTest(message = t('accounts.connectionTest.errors.failed')) {
     if (connectionTestStatus.value === 'running') {
-      recordConnectionTestFailure('failure', '测试失败', message)
+      recordConnectionTestFailure('failure', t('accounts.connectionTest.failed'), message)
     }
     clearConnectionTestRun()
   }
@@ -354,11 +359,11 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
     if (event.type === 'test_start') {
       connectionTestStartedAt.value = event.occurredAtDisplay
       connectionTestModel.value = event.model || connectionTestModel.value
-      appendConnectionTestLog(`开始测试 ${connectionTestModel.value || '未选择模型'}`, 'info', undefined, event)
+      appendConnectionTestLog(t('accounts.connectionTest.starting', { value: connectionTestModel.value || t('accounts.connectionTest.errors.modelRequired') }), 'info', undefined, event)
       return
     }
     if (event.type === 'request') {
-      setConnectionTestLog('request', '发起请求', 'info', connectionTestRequestText(event.payload), event)
+      setConnectionTestLog('request', t('accounts.connectionTest.events.request'), 'info', connectionTestRequestText(event.payload), event)
       return
     }
     if (event.type === 'status' && event.text) {
@@ -367,22 +372,22 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
     }
     if (event.type === 'content' && event.text) {
       connectionTestContent.value += event.text
-      setConnectionTestLog('response', '接收响应内容', 'success', connectionTestContent.value, event)
+      setConnectionTestLog('response', t('accounts.connectionTest.events.response'), 'success', connectionTestContent.value, event)
       return
     }
     if (event.type === 'test_complete') {
       if (event.success) {
         if (!connectionTestContent.value) {
-          setConnectionTestLog('response', '响应完成', 'success', '上游已完成，没有返回文本内容', event)
+          setConnectionTestLog('response', t('accounts.connectionTest.events.completed'), 'success', t('accounts.connectionTest.emptyResponse'), event)
         }
-        appendConnectionTestLog('测试完成', 'success', undefined, event)
+        appendConnectionTestLog(t('accounts.connectionTest.testCompleted'), 'success', undefined, event)
         finishConnectionTest('success', event)
       }
       else {
         recordConnectionTestFailure(
           'test-complete-failure',
-          '测试失败',
-          '测试连接失败',
+          t('accounts.connectionTest.failed'),
+          t('accounts.connectionTest.errors.failed'),
           { error: event.error ?? null },
           event,
         )
@@ -424,10 +429,12 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
         return
       applyConnectionTestModels(result, refresh)
       if (refresh) {
-        ZNotification.success({ message: `已刷新 ${connectionTestModelOptions.value.length} 个上游模型` })
+        ZNotification.success({
+          message: t('accounts.connectionTest.modelsRefreshed', { count: connectionTestModelOptions.value.length }),
+        })
       }
       else if (!connectionTestSelectedModel.value) {
-        connectionTestError.value = '没有可测试模型'
+        connectionTestError.value = t('accounts.connectionTest.noModelsAvailable')
       }
     }
     catch (error: unknown) {
@@ -470,7 +477,7 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
     if (!account?.id)
       return
     if (!connectionTestSelectedModel.value) {
-      connectionTestError.value = '请先选择测试模型'
+      connectionTestError.value = t('accounts.connectionTest.errors.modelRequired')
       return
     }
     if (testingConnections.has(account.id))
@@ -486,7 +493,6 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
     connectionTestStartedAtMs = performance.now()
     connectionTestStartedAt.value = ''
     connectionTestFinishedAt.value = ''
-    appendConnectionTestLog('准备发送测试请求', 'info')
     testingConnections.add(account.id)
     try {
       await withMinimumDuration(
@@ -504,15 +510,15 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
               = `${API_BASE_URL}/api/admin/accounts/connection-test?${params}`
             openConnectionTestEventSource()
             if (!connectionTestEventSource.value)
-              failConnectionTest('当前浏览器不支持连接测试')
+              failConnectionTest(t('accounts.connectionTest.errors.browserUnsupported'))
           }),
       )
       if (connectionTestStatus.value === 'running') {
-        recordConnectionTestFailure('failure', '测试失败', '测试连接未返回完成事件')
+        recordConnectionTestFailure('failure', t('accounts.connectionTest.failed'), t('accounts.connectionTest.errors.missingCompletion'))
       }
     }
     catch (error: unknown) {
-      recordConnectionTestFailure('failure', '测试失败', errorMessage(error, '测试连接失败'))
+      recordConnectionTestFailure('failure', t('accounts.connectionTest.failed'), errorMessage(error, t('accounts.connectionTest.errors.failed')))
     }
     finally {
       clearConnectionTestRun()
@@ -528,16 +534,19 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
         handleConnectionTestEvent(event)
     }
     catch {
-      failConnectionTest('测试响应解析失败')
+      failConnectionTest(t('accounts.connectionTest.errors.invalidResponse'))
     }
   })
 
   watch(connectionTestStreamError, (error) => {
     if (error && connectionTestRun)
-      failConnectionTest('测试连接已断开')
+      failConnectionTest(t('accounts.connectionTest.errors.disconnected'))
   })
 
-  watch([showConnectionTestModal, () => testingAccount.value?.id], ([open]) => {
+  watch([
+    showConnectionTestModal,
+    () => testingAccount.value?.id,
+  ], ([open]) => {
     modelsRequest.invalidate({ resetLoading: open })
     if (!open) {
       abortConnectionTest()

@@ -1,7 +1,6 @@
 import type { BackupRecord, BackupStatus } from '@/api'
-
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, onScopeDispose, shallowRef } from 'vue'
+
 import {
   createBackup,
   deleteBackup,
@@ -10,6 +9,8 @@ import {
 } from '@/api'
 import { ApiError } from '@/api/request'
 import { usePagedQuery } from '@/composables/usePagedQuery'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 const ACTIVE_STATUSES: BackupStatus[] = ['queued', 'dumping', 'uploading']
@@ -114,7 +115,9 @@ export function useBackupRecords() {
     creating.value = true
     try {
       await createBackup()
-      ZNotification.success({ message: '备份任务已创建' })
+      ZNotification.success({
+        message: t('settings.backup.backupTaskCreated'),
+      })
       await paged.execute({ silent: true })
     }
     catch {}
@@ -138,8 +141,11 @@ export function useBackupRecords() {
       link.remove()
     }
     catch (cause) {
-      if (!(cause instanceof ApiError))
-        ZNotification.error({ message: errorMessage(cause, '下载备份失败') })
+      if (!(cause instanceof ApiError)) {
+        ZNotification.error({
+          message: errorMessage(cause, t('settings.backup.failedToDownloadBackup')),
+        })
+      }
     }
     finally {
       downloadStates.value = { ...downloadStates.value, [record.id]: false }
@@ -158,7 +164,9 @@ export function useBackupRecords() {
     deleting.value = true
     try {
       await deleteBackup({ backupId: target.id })
-      ZNotification.success({ message: '已请求删除备份' })
+      ZNotification.success({
+        message: t('settings.backup.backupDeletionRequested'),
+      })
       await paged.execute({ silent: true })
     }
     catch {}

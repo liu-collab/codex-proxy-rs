@@ -1209,6 +1209,50 @@ fn upgrade_request(authorization: &str) -> Request<Body> {
 }
 
 #[tokio::test]
+async fn official_core_version_gate_should_run_before_websocket_upgrade() {
+    let app = api_router(ModelsExecution::with_cli_min("0.162.0")).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    for version in ["0.158.0", "0.162.0"] {
+        let mut request = format!("ws://{address}/v1/responses")
+            .into_client_request()
+            .unwrap();
+        request.headers_mut().insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("Bearer sk_models_test"),
+        );
+        request.headers_mut().insert(
+            "user-agent",
+            HeaderValue::from_str(&format!(
+                "codex-tui/{version} (Mac OS 26.6.2; arm64) Apple_Terminal (codex-tui; 0.165.0)"
+            ))
+            .unwrap(),
+        );
+        let result = connect_async(request).await;
+        if version == "0.162.0" {
+            let (mut socket, response) = result.expect("current Core upgrades successfully");
+            assert_eq!(response.status(), StatusCode::SWITCHING_PROTOCOLS);
+            socket.close(None).await.unwrap();
+        } else {
+            let tokio_tungstenite::tungstenite::Error::Http(response) =
+                result.expect_err("old Core must not upgrade")
+            else {
+                panic!("expected an HTTP version rejection");
+            };
+            assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+            let value: Value = serde_json::from_slice(response.body().as_deref().unwrap()).unwrap();
+            assert_eq!(value["error"]["code"], "client_version_too_old");
+            assert_eq!(value["error"]["current_version"], "0.158.0");
+            assert_eq!(value["error"]["min_version"], "0.162.0");
+        }
+    }
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
 async fn get_responses_should_route_to_the_websocket_upgrade_boundary() {
     let response = api_router(ModelsExecution::new())
         .await

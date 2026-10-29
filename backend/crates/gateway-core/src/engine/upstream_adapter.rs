@@ -31,7 +31,16 @@ pub trait UpstreamAdapterPlan: fmt::Debug + Send + Sync {
         context: &AttemptContext,
         provider: &ProviderKind,
         model: &UpstreamModelId,
-    ) -> Result<Option<Arc<dyn UpstreamAdapter>>, ProviderError>;
+        account: Option<&ProviderAccountId>,
+    ) -> Result<UpstreamAdapterSelection, ProviderError>;
+}
+
+/// 未确定账号时不能把账号范围声明视为原生执行或继续命中后置兜底
+#[derive(Debug)]
+pub enum UpstreamAdapterSelection {
+    Native,
+    Adapter(Arc<dyn UpstreamAdapter>),
+    PendingAccount,
 }
 
 /// 请求同时持有计划及发布集合，防止旧集合先排空进程而中断在途调用
@@ -58,8 +67,9 @@ impl FrozenUpstreamAdapterPlan {
         context: &AttemptContext,
         provider: &ProviderKind,
         model: &UpstreamModelId,
-    ) -> Result<Option<Arc<dyn UpstreamAdapter>>, ProviderError> {
-        self.plan.select(context, provider, model)
+        account: Option<&ProviderAccountId>,
+    ) -> Result<UpstreamAdapterSelection, ProviderError> {
+        self.plan.select(context, provider, model, account)
     }
 }
 
@@ -71,6 +81,9 @@ pub trait UpstreamAdapter: fmt::Debug + Send + Sync {
 
     /// 注册时声明的上游传输，用于宿主登记 attempt
     fn transport(&self) -> &str;
+
+    /// 选号前复核注册的认证资格，发送前仍由执行端校验当前凭据
+    fn supports_authentication(&self, kind: &str) -> bool;
 }
 
 /// 一次执行的宿主事实；账号及 Provider 归属不可由插件返回值覆盖

@@ -1,4 +1,7 @@
 //! 执行服务的准入、预算、请求记录与终结行为测试
+
+mod identity;
+mod outbound;
 use gateway_core::routing::extensions::{ExtensionSetId, ExtensionSetLease, ExtensionSetReference};
 
 use std::{
@@ -10,6 +13,7 @@ use std::{
     time::{Duration, Instant, SystemTime},
 };
 
+use gateway_core::engine::authentication::ClientIdentityPort;
 use gateway_core::engine::budget::{ClientBudgetCharge, ClientBudgetError, ClientBudgetPort};
 use gateway_core::error::GatewayError;
 
@@ -1213,9 +1217,7 @@ fn plugin_origin_scope() -> gateway_core::engine::extensions::ExtensionCallScope
 
 #[test]
 fn explicit_key_model_execution_preserves_http_origin_and_leaves_background_origin_unknown() {
-    use gateway_core::engine::nested::{
-        BoundModelExecutionBinding, BoundModelExecutionRequest, NestedModelExecutionPort,
-    };
+    use gateway_core::engine::nested::{BoundModelExecutionRequest, NestedModelExecutionPort};
     block_on(async {
         for has_origin in [true, false] {
             let store = Arc::new(TrackingExecutionStore::default());
@@ -1232,11 +1234,17 @@ fn explicit_key_model_execution_preserves_http_origin_and_leaves_background_orig
                 Arc::new(crate::RecordingDiagnostics::default()),
             );
             let input = request(&service, ClientTransport::InternalPlugin);
-            let context = NestedModelExecutionPort::bind(
+            let client = ClientIdentityPort::resolve_client(
                 &service,
-                BoundModelExecutionBinding {
-                    settings: None,
-                    client_key_id: ClientApiKeyId::new("key_start_test").unwrap(),
+                ClientApiKeyId::new("key_start_test").unwrap(),
+                None,
+            )
+            .await
+            .unwrap();
+            let mut started = NestedModelExecutionPort::start_bound(
+                &service,
+                BoundModelExecutionRequest {
+                    client,
                     initiating_plugin_instance_id: "origin-fixture".into(),
                     cancellation: Default::default(),
                     extension_scope: if has_origin {
@@ -1244,14 +1252,6 @@ fn explicit_key_model_execution_preserves_http_origin_and_leaves_background_orig
                     } else {
                         Default::default()
                     },
-                },
-            )
-            .await
-            .unwrap();
-            let mut started = NestedModelExecutionPort::start_bound(
-                &service,
-                BoundModelExecutionRequest {
-                    context: context.clone(),
                     public_model: input.public_model,
                     operation: input.operation,
                     metadata: input.metadata,
@@ -2280,7 +2280,6 @@ impl Provider for ObservationProvider {
                     gateway_core::event::ProviderResponseObservation::new(
                         UpstreamTransport::new("http_sse").unwrap(),
                     )
-                    .with_upstream_response_model_if_valid("gpt-reported")
                     .with_service_tier_if_valid("priority"),
                 );
                 Ok(ProviderStream::new(
@@ -2613,7 +2612,6 @@ fn final_observation_is_emitted_once_for_success_rejection_and_detached_cancella
                     .map(UpstreamModelId::as_str),
                 Some("gpt-start")
             );
-            assert_eq!(observations[0].response_model(), Some("gpt-reported"));
             assert_eq!(observations[0].service_tier(), Some("priority"));
             assert_eq!(
                 observations[0].outcome(),
@@ -3304,6 +3302,7 @@ struct FailingProvider;
 
 struct NativeCatalogProvider {
     fail: bool,
+    empty: bool,
 }
 
 #[async_trait]
@@ -3333,6 +3332,9 @@ impl Provider for NativeCatalogProvider {
         assert_eq!((protocol, version), ("codex", "0.154.0"));
         if self.fail {
             return Err(gateway_core::routing::ProviderCatalogUnavailable);
+        }
+        if self.empty {
+            return Ok(Some(Vec::new()));
         }
         Ok(Some(
             ["gpt-new", "gpt-start"]
@@ -3364,7 +3366,10 @@ impl Provider for NativeCatalogProvider {
 #[test]
 fn client_catalog_forwards_scope_maps_whole_objects_and_omits_unroutable_models() {
     #[derive(Debug)]
-    struct Aliases(Vec<gateway_core::routing::ContributedModelAlias>);
+    struct Aliases(
+        Vec<gateway_core::routing::ContributedModelAlias>,
+        Vec<gateway_core::routing::ContributedModel>,
+    );
     impl gateway_core::routing::extensions::ExtensionSetLease for Aliases {
         fn is_ready(&self) -> bool {
             true
@@ -3372,8 +3377,29 @@ fn client_catalog_forwards_scope_maps_whole_objects_and_omits_unroutable_models(
         fn model_aliases(&self) -> &[gateway_core::routing::ContributedModelAlias] {
             &self.0
         }
+        fn models(&self) -> &[gateway_core::routing::ContributedModel] {
+            &self.1
+        }
     }
-    for fail in [false, true] {
+    for (fail, empty) in [(false, false), (false, true), (true, false)] {
+        let contributed = [
+            ("gpt-start", "acct_start"),
+            ("adapted", "acct_start"),
+            ("private-model", "acct_other"),
+        ]
+        .into_iter()
+        .map(|(id, account)| gateway_core::routing::ContributedModel {
+            owner: "catalog-plugin".into(),
+            id: PublicModelId::new(id).unwrap(),
+            provider: ProviderKind::new("openai").unwrap(),
+            accounts: [ProviderAccountId::new(account).unwrap()].into(),
+            capabilities: ModelCapabilities::new([OperationKind::Generate].into(), None),
+            presentation: gateway_core::routing::ModelPresentation::new(
+                Some(format!("Plugin {id}")),
+                None,
+            ),
+        })
+        .collect();
         let snapshot = start_snapshot();
         let settings = snapshot
             .settings()
@@ -3388,20 +3414,23 @@ fn client_catalog_forwards_scope_maps_whole_objects_and_omits_unroutable_models(
             .with_extensions(Some(ExtensionSetReference::new(
                 gateway_core::routing::extensions::ExtensionSetId::new("catalog-aliases".into())
                     .unwrap(),
-                Arc::new(Aliases(vec![
-                    gateway_core::routing::ContributedModelAlias {
+                Arc::new(Aliases(
+                    vec![gateway_core::routing::ContributedModelAlias {
                         owner: "catalog-plugin".into(),
                         id: PublicModelId::new("plugin-alias").unwrap(),
                         provider: ProviderKind::new("openai").unwrap(),
                         target: UpstreamModelId::new("gpt-start").unwrap(),
-                    },
-                ])),
+                    }],
+                    contributed,
+                )),
             )));
         let service = DefaultExecutionService::new(
             RuntimeSnapshotHandle::new(snapshot),
             Arc::new(TrackingExecutionStore::default()),
-            ProviderRegistry::new([Arc::new(NativeCatalogProvider { fail }) as Arc<dyn Provider>])
-                .expect("registry"),
+            ProviderRegistry::new([
+                Arc::new(NativeCatalogProvider { fail, empty }) as Arc<dyn Provider>
+            ])
+            .expect("registry"),
             Arc::new(UnusedAdmissions),
             Arc::new(UnusedContinuation),
             Arc::new(RecordingClientApiKeyUsage::default()),
@@ -3417,8 +3446,35 @@ fn client_catalog_forwards_scope_maps_whole_objects_and_omits_unroutable_models(
             continue;
         }
         let models = result.expect("models");
+        let adapted = models
+            .iter()
+            .filter_map(|entry| match entry {
+                gateway_core::routing::PublicModelDescriptor::Adapted(profile) => {
+                    Some(profile.model().as_str())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            adapted,
+            if empty {
+                vec!["gpt-start", "adapted"]
+            } else {
+                vec!["adapted"]
+            }
+        );
+        if empty {
+            assert_eq!(models.len(), 2);
+            continue;
+        }
         let pairs = models
             .iter()
+            .filter(|entry| {
+                matches!(
+                    entry,
+                    gateway_core::routing::PublicModelDescriptor::Native { .. }
+                )
+            })
             .map(|entry| {
                 let gateway_core::routing::PublicModelDescriptor::Native { model, payload } = entry
                 else {

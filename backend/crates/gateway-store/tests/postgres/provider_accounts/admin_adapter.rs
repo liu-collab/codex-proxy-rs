@@ -45,6 +45,7 @@ async fn account_capacity_should_resolve_limits_for_list_and_detail() {
             Some(BTreeMap::from([("acct_override".to_owned(), 2)])),
         ] {
             let runtime = AccountRuntimeSnapshot {
+                protection_rules: std::collections::BTreeMap::new(),
                 in_flight: counts,
                 ..Default::default()
             };
@@ -86,6 +87,60 @@ async fn account_capacity_should_resolve_limits_for_list_and_detail() {
                     .unwrap();
                 assert_eq!(detail.capacity, item.capacity);
             }
+        }
+    }
+    database.close().await;
+}
+
+#[tokio::test]
+async fn account_search_matches_only_name_and_email_literal_substrings() {
+    let Some(database) = TestDatabase::create("account_contains_search").await else {
+        return;
+    };
+    let repository = PgProviderAccountRepository::new(database.pool.clone());
+    let mut record = account("acct_searchable", "upstream-user-needle");
+    record.name = r"Team\Ops_100%".to_owned();
+    record.email = Some("maker@example.invalid".to_owned());
+    record.upstream_account_id = Some("upstream-account-marker".to_owned());
+    repository.insert_provider_account(record).await.unwrap();
+    let mut other = account("acct_other", "user-other");
+    other.email = None;
+    repository.insert_provider_account(other).await.unwrap();
+    let store = admin_account_store(&database.pool);
+    for (search, expected) in [
+        ("ma", 1),
+        ("ak", 1),
+        ("EXAMPLE", 1),
+        ("invalid", 1),
+        (r"\OPS_", 1),
+        ("_100%", 1),
+        ("%", 1),
+        (r"\", 1),
+        ("searchable", 0),
+        ("user-needle", 0),
+        ("account-marker", 0),
+        ("Ops_100_", 0),
+        ("missing", 0),
+    ] {
+        let page = store
+            .list_accounts(
+                AccountListQuery {
+                    page: 1,
+                    page_size: PageSize::new(10).unwrap(),
+                    provider_kind: None,
+                    group_filter: None,
+                    search: Some(search.to_owned()),
+                    status: None,
+                    sort: None,
+                },
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(page.total, expected, "search: {search}");
+        assert_eq!(page.items.len() as u64, expected, "search: {search}");
+        if expected == 1 {
+            assert_eq!(page.items[0].account.id, "acct_searchable");
         }
     }
     database.close().await;

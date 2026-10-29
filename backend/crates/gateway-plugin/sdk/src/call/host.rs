@@ -1,9 +1,29 @@
-//! 宿主回调的数据合同；这里只传递数据，不持有宿主服务或执行资源
+//! 宿主回调的方法名与数据合同；不持有宿主服务或执行资源
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::model::ExecutionEvent;
+
+pub const LOG: &str = "host.log";
+pub const STATE_GET: &str = "host.state.get";
+pub const STATE_PUT: &str = "host.state.put";
+pub const STATE_DELETE: &str = "host.state.delete";
+pub const KEYS_LIST: &str = "host.keys.list";
+pub const MODELS_LIST: &str = "host.models.list";
+pub const MODEL_EXECUTE: &str = "host.model.execute";
+pub const MODEL_EXECUTE_STREAM: &str = "host.model.execute_stream";
+pub const MODEL_STREAM_READ: &str = "host.model.stream_read";
+pub const MODEL_STREAM_CLOSE: &str = "host.model.stream_close";
+pub const AFFINITY_LOOKUP: &str = "host.affinity.lookup";
+pub const AUTH_LIST: &str = "host.auth.list";
+pub const AUTH_GET: &str = "host.auth.get";
+pub const AUTH_GET_RUNTIME: &str = "host.auth.get_runtime";
+pub const AUTH_SAVE: &str = "host.auth.save";
+pub const HTTP_DO: &str = "host.http.do";
+pub const HTTP_DO_STREAM: &str = "host.http.do_stream";
+pub const HTTP_STREAM_READ: &str = "host.http.stream_read";
+pub const HTTP_STREAM_CLOSE: &str = "host.http.stream_close";
 
 const MODEL_EVENT_BATCH_PREFIX: [u8; 4] = *b"HME1";
 const MAX_MODEL_EVENT_BATCH_BYTES: usize = 8 * 1024 * 1024;
@@ -64,6 +84,16 @@ pub struct HttpRequest {
     pub url: String,
     #[serde(default)]
     pub headers: Vec<(String, Vec<u8>)>,
+}
+
+pub const ACCOUNT_HTTP: &str = "host.http.account";
+
+/// 显式选择账号代理和凭据版本；认证头仍由插件提供，不取得推理租约
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AccountHttpRequest {
+    pub account_id: String,
+    pub credential_revision: u64,
+    pub request: HttpRequest,
 }
 
 #[derive(Clone, Serialize, Deserialize)]

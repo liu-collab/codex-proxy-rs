@@ -1,8 +1,8 @@
 //! 查询 wire 校验的固定合同测试
 
 use gateway_api::admin::observability::{
-    DashboardQuery, DiagnosticDimension, DiagnosticsQuery, OpsQuery, TrendKind, UsageQuery,
-    parse_attempt_index, parse_datetime, parse_status,
+    DashboardQuery, DiagnosticDimension, DiagnosticsQuery, OpsQuery, TrendKind,
+    UsageAnalyticsQuery, UsageQuery, parse_attempt_index, parse_datetime, parse_status,
 };
 use serde_json::json;
 
@@ -33,6 +33,7 @@ fn observability_queries_should_reject_unknown_fields() {
     let query = json!({"unknownFilter": true});
     assert!(serde_json::from_value::<DashboardQuery>(query.clone()).is_err());
     assert!(serde_json::from_value::<UsageQuery>(query.clone()).is_err());
+    assert!(serde_json::from_value::<UsageAnalyticsQuery>(query.clone()).is_err());
     assert!(serde_json::from_value::<OpsQuery>(query.clone()).is_err());
     assert!(serde_json::from_value::<DiagnosticsQuery>(query).is_err());
 }

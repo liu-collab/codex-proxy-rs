@@ -23,10 +23,10 @@ pub(crate) async fn load_admin_account_page(
         .provider_kind
         .as_ref()
         .map(|provider| provider.as_str().to_owned());
-    let search_prefix = query
+    let search_pattern = query
         .search
         .as_deref()
-        .map(crate::postgres::literal_prefix_pattern);
+        .map(|search| crate::postgres::literal_contains_pattern(&search.to_lowercase()));
     let status = query.status.map(|status| status.as_str().to_owned());
     let (group_mode, group_id) = match query.group_filter.as_ref() {
         None => (0_i16, None),
@@ -79,11 +79,8 @@ pub(crate) async fn load_admin_account_page(
              join provider_accounts a on a.id = status.id
             where ($3::text is null or a.provider_kind = $3)
               and ($4::text is null or
-                   lower(a.id) like $4 escape '\\' or
                    lower(a.name) like $4 escape '\\' or
-                   lower(coalesce(a.email, '')) like $4 escape '\\' or
-                   lower(coalesce(a.upstream_account_id, '')) like $4 escape '\\' or
-                   lower(coalesce(a.upstream_user_id, '')) like $4 escape '\\')
+                   lower(coalesce(a.email, '')) like $4 escape '\\')
               and ($5::text is null or status.admin_status = $5)
               and ($6::smallint = 0 or
                    ($6 = 1 and exists (
@@ -157,7 +154,7 @@ pub(crate) async fn load_admin_account_page(
                     .bind(active_rate_limited_ids)
                     .bind(now)
                     .bind(provider_kind)
-                    .bind(search_prefix)
+                    .bind(search_pattern)
                     .bind(status)
                     .bind(group_mode)
                     .bind(group_id)

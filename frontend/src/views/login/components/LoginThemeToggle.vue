@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { Moon, Sun } from '@lucide/vue'
+
 import { storeToRefs } from 'pinia'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { useThemeStore } from '@/stores/modules/theme'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const themeStore = useThemeStore()
 const { effectiveTheme } = storeToRefs(themeStore)
 
-const label = computed(() => effectiveTheme.value === 'dark' ? '切换浅色模式' : '切换暗黑模式')
+const label = computed(() => effectiveTheme.value === 'dark'
+  ? t('appearance.switchToLight')
+  : t('appearance.switchToDark'))
 </script>
 
 <template>

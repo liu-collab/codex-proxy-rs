@@ -1,21 +1,34 @@
 <script setup lang="ts">
 import type { ProfileActivityLevel, ProfileActivityMode } from './activity'
+
 import type { ProfileActivityCalendar } from '@/api'
 import { ZEmpty, ZSegmented } from '@codex-proxy/ui'
-
 import { computed, shallowRef } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import { buildProfileActivityGrid, profileActivityCellLabel } from './activity'
 
 const props = defineProps<{
   calendar: ProfileActivityCalendar | null
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const mode = shallowRef<ProfileActivityMode>('daily')
-const modeOptions = [
-  { label: '每日', value: 'daily' },
-  { label: '每周', value: 'weekly' },
-  { label: '累计', value: 'cumulative' },
-]
+const modeOptions = computed(() => ([
+  {
+    label: t('accounts.profile.activity.daily'),
+    value: 'daily',
+  },
+  {
+    label: t('accounts.profile.activity.weekly'),
+    value: 'weekly',
+  },
+  {
+    label: t('accounts.profile.activity.cumulative'),
+    value: 'cumulative',
+  },
+]))
 const levelClasses: Record<ProfileActivityLevel, string> = {
   0: 'bg-cp-activity-level-0',
   1: 'bg-cp-activity-level-1',
@@ -27,7 +40,11 @@ const grid = computed(() => buildProfileActivityGrid(props.calendar, mode.value)
 const rangeLabel = computed(() => grid.value.rangeLabel)
 const monthLabels = computed(() =>
   grid.value.weeks.flatMap((week, weekIndex) =>
-    week.monthLabel ? [{ label: week.monthLabel, weekIndex }] : [],
+    week.monthLabel
+      ? [
+          { label: week.monthLabel, weekIndex },
+        ]
+      : [],
   ),
 )
 </script>
@@ -37,21 +54,21 @@ const monthLabels = computed(() =>
     <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
       <div>
         <h3 id="profile-token-activity-title" class="m-0 text-cp-lg font-heavy text-cp-text">
-          Token 活动
+          {{ t('accounts.profile.activity.tokenActivity') }}
         </h3>
       </div>
-      <ZSegmented v-model="mode" aria-label="Token 活动统计方式" size="small" :options="modeOptions" />
+      <ZSegmented v-model="mode" :aria-label="t('accounts.profile.activity.tokenActivityStatisticsMethod')" size="small" :options="modeOptions" />
     </div>
 
     <ZEmpty
       v-if="calendar === null"
-      title="暂无 Token 活动"
-      description="本次未获取到每日 Token 活动"
+      :title="t('accounts.profile.activity.noTokenActivityYet')"
+      :description="t('accounts.profile.activity.noDailyActivity')"
       size="small"
       surface="none"
     />
 
-    <div v-else class="overflow-x-auto pb-1" role="img" :aria-label="`Token 活动热力图，${rangeLabel}`">
+    <div v-else class="overflow-x-auto pb-1" role="img" :aria-label="t('accounts.profile.activity.tokenActivityHeatmap', { rangeLabel })">
       <div class="min-w-190">
         <div class="mb-1.5 grid gap-1" style="grid-template-columns: repeat(52, minmax(0, 1fr))">
           <!-- 首尾月份可能只占一周；标签固定在同一行，避免跨列占位触发自动换行。 -->

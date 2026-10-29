@@ -4,7 +4,7 @@ use super::*;
 
 const SELECTED_ACCOUNT: &str = "acct_scope_same";
 
-fn isolation_history() -> Value {
+pub(super) fn isolation_history() -> Value {
     json!([
         {"role":"user", "content":"hello"},
         {"type":"function_call", "id":"fc_history", "call_id":"call_history", "name":"lookup", "arguments":"{}"},

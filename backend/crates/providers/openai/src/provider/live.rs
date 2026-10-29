@@ -22,10 +22,10 @@ use gateway_core::live::{
     LiveCallOutcome, LiveGateway, LiveGatewayError, LiveGatewayErrorKind, LiveHangupRequest,
     LiveRelay, LiveSidebandRequest, LiveSidebandStyle, call_id_from_location, is_valid_call_id,
 };
-use gateway_core::operation::{ProviderHttpMethod, ProviderHttpRequest};
+use gateway_core::operation::{ProviderHttpHeader, ProviderHttpMethod, ProviderHttpRequest};
 use gateway_core::policy::ClientApiKeyId;
 use gateway_core::upstream::{UpstreamSendState, UpstreamTransport};
-use secrecy::ExposeSecret;
+use secrecy::{ExposeSecret, SecretString};
 use url::Url;
 use uuid::Uuid;
 
@@ -252,10 +252,7 @@ impl CodexProvider {
                 request_url: &self.live_calls_url,
                 attempt: &context,
                 session_affinity: session_affinity.as_ref(),
-                model: CodexSelectionModel::Requested(upstream_model.as_str()),
-                // realtime calls 端点绑定 ChatGPT OAuth 身份；在候选阶段就排除
-                // API Key 账号，避免混合账号池选中不支持语音的账号后必然失败。
-                requires_oauth: true,
+                model: CodexSelectionModel::Live(upstream_model.as_str()),
             })
             .await
             .map_err(map_selection_error)?;
@@ -333,6 +330,11 @@ impl CodexProvider {
         let allows_account_state_mutation = lease.allows_account_state_mutation();
         let provider_kind = ProviderKind::new(PROVIDER_NAME)
             .map_err(|_| provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent))?;
+        let outbound_middleware = context.outbound_middleware(
+            provider_kind.clone(),
+            Some(upstream_model.as_str().to_owned()),
+            lease.account_id().clone(),
+        );
         let metadata = ProviderCallMetadata::new(
             provider_kind,
             upstream_model.clone(),
@@ -341,6 +343,7 @@ impl CodexProvider {
                 provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
             })?,
         )
+        .with_credential_revision(lease.account().revision())
         .with_account_snapshot(Some(
             gateway_core::account::AccountHistorySnapshot::from_account(lease.account()),
         ))
@@ -358,12 +361,7 @@ impl CodexProvider {
             .headers()
             .iter()
             .filter(|header| !header.name().eq_ignore_ascii_case("content-type"))
-            .map(|header| {
-                (
-                    header.name().to_ascii_lowercase(),
-                    String::from_utf8_lossy(header.value()).into_owned(),
-                )
-            })
+            .cloned()
             .collect::<Vec<_>>();
         let events = cold_live_call_stream(ColdLiveCall {
             client: self
@@ -371,7 +369,8 @@ impl CodexProvider {
                 .for_account(lease.account())
                 .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
-                .with_middleware_headers(middleware_headers),
+                .with_middleware_headers(middleware_headers)
+                .with_outbound_middleware(outbound_middleware),
             registry: Arc::clone(&self.live_registry),
             response_origin: self.live_calls_url.clone(),
             endpoint_query: request.query().map(str::to_owned),
@@ -402,7 +401,7 @@ struct ColdLiveCall {
     response_origin: Url,
     endpoint_query: Option<String>,
     content_type: Option<String>,
-    protocol_headers: Vec<(String, String)>,
+    protocol_headers: Vec<ProviderHttpHeader>,
     upstream_model: UpstreamModelId,
     body: Bytes,
     context: AttemptContext,
@@ -424,7 +423,6 @@ fn cold_live_call_stream(request: ColdLiveCall) -> EventStream {
             response_origin: &request.response_origin,
             cyber_policy_scope: None,
             allows_account_state_mutation,
-            allows_capacity_feedback: !request.context.is_diagnostic_required_account(),
         };
         let active_account = request.lease.account().clone();
         let authorization = request
@@ -496,12 +494,7 @@ fn cold_live_call_stream(request: ColdLiveCall) -> EventStream {
             response
                 .forwarded_headers
                 .iter()
-                .map(|(name, value)| {
-                    ProviderResponseHeader::new(
-                        name.clone(),
-                        Bytes::copy_from_slice(value.as_bytes()),
-                    )
-                })
+                .map(|(name, value)| ProviderResponseHeader::new(name.clone(), value.clone()))
                 .collect(),
         );
         yield ProviderEvent::observation(observation);
@@ -560,7 +553,7 @@ impl CodexLiveGateway {
     async fn load_pinned_credential(
         &self,
         account_id: &gateway_core::account::ProviderAccountId,
-    ) -> Result<(ProviderAccount, String), LiveGatewayError> {
+    ) -> Result<(ProviderAccount, SecretString, String), LiveGatewayError> {
         let credential_unavailable = |message: &'static str| {
             LiveGatewayError::new(LiveGatewayErrorKind::CredentialUnavailable, message)
         };
@@ -586,7 +579,7 @@ impl CodexLiveGateway {
             .authentication
             .authorization_header()
             .map_err(|_| credential_unavailable("codex live pinned credential is unusable"))?;
-        Ok((account, authorization.expose_secret().to_owned()))
+        Ok((account, authorization, credential.installation_id))
     }
 
     fn sideband_endpoint(style: LiveSidebandStyle, call_id: &str) -> String {
@@ -669,7 +662,8 @@ impl LiveGateway for CodexLiveGateway {
                 })?;
             // 认领与 guard 构造之间没有 await 点，取消不会留下孤儿认领。
             let claim = LiveCallClaim::new(Arc::clone(&self.registry), request.call_id.to_owned());
-            let (account, authorization) = self.load_pinned_credential(&account_id).await?;
+            let (account, authorization, installation_id) =
+                self.load_pinned_credential(&account_id).await?;
             if !account.enabled() {
                 return Err(LiveGatewayError::new(
                     LiveGatewayErrorKind::OwnerMismatch,
@@ -679,13 +673,13 @@ impl LiveGateway for CodexLiveGateway {
             let endpoint = Self::sideband_endpoint(request.style, request.call_id);
             let client = self.client.clone().with_request_profile(profile);
             let context = CodexRequestContext::auxiliary(
-                &authorization,
+                authorization.expose_secret(),
                 account.upstream_account_id(),
                 request.call_id,
-                None,
+                Some(&installation_id),
             );
             let headers = client
-                .live_request_headers(context, &request.protocol_headers)
+                .live_request_headers(context, &request.protocol_headers, None)
                 .map_err(map_live_http_error)?;
             let mut headers = websocket_header_pairs(&headers);
             if !request.subprotocols.is_empty() {
@@ -726,7 +720,8 @@ impl LiveGateway for CodexLiveGateway {
                 .map_err(|claim_error| {
                     LiveGatewayError::new(claim_error.kind(), claim_error.message())
                 })?;
-            let (account, authorization) = self.load_pinned_credential(&account_id).await?;
+            let (account, authorization, installation_id) =
+                self.load_pinned_credential(&account_id).await?;
             // hangup 与引导同源：必须走钉住账号的出口代理与连接池，
             // 不能使用共享 client 直连发出。
             let client = self
@@ -742,10 +737,10 @@ impl LiveGateway for CodexLiveGateway {
                 })?;
             let request_id = Uuid::new_v4().to_string();
             let mut context = CodexRequestContext::auxiliary(
-                authorization.as_str(),
+                authorization.expose_secret(),
                 account.upstream_account_id(),
                 &request_id,
-                None,
+                Some(&installation_id),
             );
             context.account_selection = CodexAccountSelectionTelemetry::NONE;
             let url = format!(
@@ -768,7 +763,11 @@ impl LiveGateway for CodexLiveGateway {
                     }
                     Ok(LiveCallOutcome {
                         status: response.status,
-                        headers: response.forwarded_headers,
+                        headers: response
+                            .forwarded_headers
+                            .into_iter()
+                            .map(|(name, value)| ProviderResponseHeader::new(name, value))
+                            .collect(),
                         body: response.body,
                     })
                 }

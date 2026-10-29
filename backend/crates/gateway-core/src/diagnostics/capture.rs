@@ -1,6 +1,9 @@
 //! 诊断内容的统一筛选边界
 //! 未知键名与值只保留有界结构和摘要
 
+use std::io::{self, Write};
+
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
@@ -12,6 +15,10 @@ pub fn body_fingerprint(bytes: &[u8]) -> Value {
 
 fn fingerprint_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
+    digest_hex(&digest)
+}
+
+fn digest_hex(digest: &[u8]) -> String {
     digest
         .iter()
         .flat_map(|byte| {
@@ -22,6 +29,36 @@ fn fingerprint_hex(bytes: &[u8]) -> String {
             ]
         })
         .collect()
+}
+
+/// 从已解析对象流式计算 JSON 指纹，不复制或保留序列化正文
+#[must_use]
+pub fn json_fingerprint<T: Serialize + ?Sized>(value: &T) -> Value {
+    struct FingerprintWriter {
+        digest: Sha256,
+        bytes: usize,
+    }
+
+    impl Write for FingerprintWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.digest.update(bytes);
+            self.bytes = self.bytes.saturating_add(bytes.len());
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let mut writer = FingerprintWriter {
+        digest: Sha256::new(),
+        bytes: 0,
+    };
+    if serde_json::to_writer(&mut writer, value).is_err() {
+        return json!({"omitted": true, "reason": "fingerprint_serialization_failed"});
+    }
+    json!({"bytes": writer.bytes, "sha256": digest_hex(&writer.digest.finalize())})
 }
 
 /// 仅保留有限协议骨架；任意 JSON（包括 headers 和 metadata）不能声明自己可信

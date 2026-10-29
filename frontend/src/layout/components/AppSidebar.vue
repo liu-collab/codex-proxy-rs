@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import type { PluginManagementView } from '@/api'
 
-import { ZIconButton, ZMotionIcon, ZScrollbar } from '@codex-proxy/ui'
+import { ZIconButton, ZMotionIcon, ZPopover, ZScrollbar } from '@codex-proxy/ui'
+
 import {
   ArrowUpCircle,
   Blocks,
+  BringToFront,
   ChartNoAxesColumn,
   ChevronDown,
   FolderTree,
-  Info,
   KeyRound,
   LayoutDashboard,
   LogOut,
@@ -17,7 +18,6 @@ import {
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
-  PanelsTopLeft,
   Puzzle,
   Settings,
   Sun,
@@ -25,11 +25,13 @@ import {
 } from '@lucide/vue'
 import { usePreferredReducedMotion, useTimeoutFn } from '@vueuse/core'
 import { gsap } from 'gsap'
-
 import { storeToRefs } from 'pinia'
+
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, useId, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import AppBrandMark from '@/components/AppBrandMark.vue'
+import AppLanguageMenu from '@/components/AppLanguageMenu.vue'
 import { useAuthStore } from '@/stores/modules/auth'
 import { usePluginViewsStore } from '@/stores/modules/plugin-views'
 import { useSystemUpdateStore } from '@/stores/modules/system-update'
@@ -46,13 +48,16 @@ const props = withDefaults(
     mobile: false,
   },
 )
+
 const emit = defineEmits<{
   close: []
   navigate: []
-  openAbout: []
   openSystemUpdate: []
   toggle: []
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
@@ -68,18 +73,54 @@ const isCollapsed = computed(() => !props.mobile && Boolean(props.collapsed))
 const pluginMenuId = useId()
 const pluginGroupExpanded = shallowRef(route.path.startsWith('/plugins'))
 
-const navItems = [
-  { label: '概览', icon: LayoutDashboard, path: '/' },
-  { label: '账号管理', icon: Users, path: '/accounts' },
-  { label: '代理管理', icon: Network, path: '/proxies' },
-  { label: '分组管理', icon: FolderTree, path: '/groups' },
-  { label: 'API 密钥', icon: KeyRound, path: '/keys' },
-  { label: '使用统计', icon: ChartNoAxesColumn, path: '/usage' },
-  { label: '插件', icon: Puzzle, path: '/plugins' },
-  { label: '主题设置', icon: Palette, path: '/theme' },
-  { label: '系统设置', icon: Settings, path: '/settings' },
-]
-const pluginNavIndex = navItems.findIndex(item => item.path === '/plugins')
+const navItems = computed(() => ([
+  {
+    label: t('navigation.overview'),
+    icon: LayoutDashboard,
+    path: '/',
+  },
+  {
+    label: t('navigation.accounts'),
+    icon: Users,
+    path: '/accounts',
+  },
+  {
+    label: t('navigation.proxies'),
+    icon: Network,
+    path: '/proxies',
+  },
+  {
+    label: t('navigation.groups'),
+    icon: FolderTree,
+    path: '/groups',
+  },
+  {
+    label: t('navigation.apiKeys'),
+    icon: KeyRound,
+    path: '/keys',
+  },
+  {
+    label: t('navigation.usage'),
+    icon: ChartNoAxesColumn,
+    path: '/usage',
+  },
+  {
+    label: t('navigation.plugins'),
+    icon: Puzzle,
+    path: '/plugins',
+  },
+  {
+    label: t('navigation.appearance'),
+    icon: Palette,
+    path: '/theme',
+  },
+  {
+    label: t('navigation.settings'),
+    icon: Settings,
+    path: '/settings',
+  },
+]))
+const pluginNavIndex = navItems.value.findIndex(item => item.path === '/plugins')
 const pluginMenuVisible = computed(() => pluginGroupExpanded.value && !isCollapsed.value)
 const pluginViewNameCounts = computed(() => pluginPageViews.value.reduce((counts, view) => {
   const title = view.pages[0]?.title ?? view.name
@@ -97,19 +138,25 @@ function isActive(path: string) {
 }
 
 const activeNavIndex = computed(() => {
-  const index = navItems.findIndex(item => isActive(item.path))
+  const index = navItems.value.findIndex(item => isActive(item.path))
   return Math.max(0, index)
 })
 const activeNavIndicatorStyle = computed(() => ({
-  transform: `translate3d(0, ${activeNavIndex.value * 58 + (activeNavIndex.value > pluginNavIndex ? pluginChildrenHeight.value : 0)}px, 0)`,
-  opacity: isActive('/plugins') && pluginMenuVisible.value ? 0 : 1,
+  transform: `translate3d(0, ${activeNavIndex.value * 58 + (activeNavIndex.value > pluginNavIndex
+    ? pluginChildrenHeight.value
+    : 0)}px, 0)`,
+  opacity: isActive('/plugins') && pluginMenuVisible.value
+    ? 0
+    : 1,
 }))
 const activePluginIndex = computed(() => route.name === 'plugins'
   ? 0
   : pluginPageViews.value.findIndex(isPluginViewActive) + 1)
 const activePluginIndicatorStyle = computed(() => ({
   transform: `translate3d(0, ${activePluginIndex.value * 44}px, 0)`,
-  opacity: isActive('/plugins') && pluginMenuVisible.value ? 1 : 0,
+  opacity: isActive('/plugins') && pluginMenuVisible.value
+    ? 1
+    : 0,
 }))
 const navFeedbackMuted = shallowRef(false)
 const { start: restoreNavFeedback, stop: stopNavFeedbackRestore } = useTimeoutFn(
@@ -148,7 +195,9 @@ function navigatePluginView(view: PluginManagementView) {
 
 function isPluginViewActive(view: PluginManagementView) {
   const value = route.params.instanceId
-  const routeInstanceId = Array.isArray(value) ? value[0] : value
+  const routeInstanceId = Array.isArray(value)
+    ? value[0]
+    : value
   return route.name === 'plugin-page' && routeInstanceId === view.target.instanceId
 }
 
@@ -157,7 +206,9 @@ function pluginViewLabel(view: PluginManagementView) {
   if (pluginViewNameCounts.value.get(title) === 1)
     return title
   const duplicateName = pluginPageViews.value.some(item => item !== view && item.name === view.name && item.pages[0]?.title === title)
-  return `${title} · ${duplicateName ? shortPluginInstanceId(view.target.instanceId) : view.name}`
+  return `${title} · ${duplicateName
+    ? shortPluginInstanceId(view.target.instanceId)
+    : view.name}`
 }
 
 function openSystemUpdate() {
@@ -179,11 +230,15 @@ const collapsedSidebarWidth = 88
 const expandedSidebarWidth = 251
 const sidebarWidth = computed(() => (isCollapsed.value ? collapsedSidebarWidth : expandedSidebarWidth))
 const brandLabelVisible = shallowRef(!isCollapsed.value)
-const themeToggleLabel = computed(() => (effectiveTheme.value === 'dark' ? '切换浅色模式' : '切换暗黑模式'))
+const themeToggleLabel = computed(() => (effectiveTheme.value === 'dark'
+  ? t('appearance.switchToLight')
+  : t('appearance.switchToDark')))
 const versionText = computed(() => version.value?.version.trim() ?? '')
 const hasVersionLabel = computed(() => versionText.value.length > 0)
 const versionLabel = computed(() => `v${versionText.value}`)
-const updateButtonLabel = computed(() => (hasUpdate.value ? '发现新版本，打开系统更新' : '打开系统更新'))
+const updateButtonLabel = computed(() => (hasUpdate.value
+  ? t('navigation.update.available')
+  : t('navigation.update.open')))
 
 function prefersReducedMotion() {
   return preferredMotion.value === 'reduce'
@@ -199,14 +254,18 @@ function animateSidebarLabels(collapsed: boolean) {
   if (prefersReducedMotion()) {
     gsap.set(labels, {
       opacity: collapsed ? 0 : 1,
-      x: collapsed ? -6 : 0,
+      x: collapsed
+        ? -6
+        : 0,
     })
     return
   }
 
   gsap.to(labels, {
     opacity: collapsed ? 0 : 1,
-    x: collapsed ? -6 : 0,
+    x: collapsed
+      ? -6
+      : 0,
     duration: collapsed ? 0.16 : 0.2,
     ease: collapsed ? 'power2.in' : 'power3.out',
     stagger: collapsed ? 0 : 0.018,
@@ -290,7 +349,9 @@ function animateSidebarWidth(collapsed: boolean) {
 }
 
 function animateNavSignal() {
-  const signal = isActive('/plugins') && pluginMenuVisible.value ? pluginNavSignalEls.value?.[0] : navSignalEl.value
+  const signal = isActive('/plugins') && pluginMenuVisible.value
+    ? pluginNavSignalEls.value?.[0]
+    : navSignalEl.value
   if (!signal)
     return
 
@@ -366,7 +427,12 @@ watch(
 
 onBeforeUnmount(() => {
   stopNavFeedbackRestore()
-  const targets = [sidebarEl.value, brandLabelEl.value, navSignalEl.value, ...(pluginNavSignalEls.value ?? [])].filter((target): target is HTMLElement =>
+  const targets = [
+    sidebarEl.value,
+    brandLabelEl.value,
+    navSignalEl.value,
+    ...(pluginNavSignalEls.value ?? []),
+  ].filter((target): target is HTMLElement =>
     Boolean(target),
   )
   gsap.killTweensOf(targets)
@@ -423,7 +489,7 @@ onBeforeUnmount(() => {
     <ZScrollbar class="my-6 w-full flex-1">
       <div class="px-4">
         <!-- 焦点环绘制在按钮内侧，避免被滚动区和折叠菜单裁切 -->
-        <nav class="relative grid gap-3" :class="isCollapsed ? 'mx-auto w-11.5' : 'w-full'" aria-label="主导航">
+        <nav class="relative grid gap-3" :class="isCollapsed ? 'mx-auto w-11.5' : 'w-full'" :aria-label="t('navigation.mainLabel')">
           <span
             class="pointer-events-none absolute inset-x-0 top-0 h-11.5 overflow-hidden rounded-cp bg-cp-menu-item-selected-bg transition-[transform,opacity] duration-260 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
             :style="activeNavIndicatorStyle"
@@ -435,50 +501,54 @@ onBeforeUnmount(() => {
           </span>
           <template v-for="item in navItems" :key="item.label">
             <div v-if="item.path === '/plugins'" class="relative z-10 grid min-w-0">
-              <button
-                type="button"
-                class="inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 bg-transparent text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline"
-                :class="[
-                  isCollapsed ? 'w-11.5 justify-center' : 'w-full gap-3 px-4',
-                  isActive(item.path)
-                    ? navFeedbackMuted
-                      ? 'font-bold text-cp-text transition-none'
-                      : 'font-bold text-cp-text transition-colors duration-200'
-                    : navFeedbackMuted
-                      ? 'font-semibold text-cp-text-secondary transition-none'
-                      : 'font-semibold text-cp-text-secondary transition-colors duration-200 hover:bg-cp-fill-quaternary hover:text-cp-text',
-                ]"
-                :aria-expanded="isCollapsed ? undefined : pluginGroupExpanded"
-                :aria-controls="isCollapsed ? undefined : pluginMenuId"
-                :aria-label="isCollapsed ? item.label : undefined"
-                :title="isCollapsed ? item.label : undefined"
-                @click="togglePluginGroup"
-              >
-                <component :is="item.icon" class="shrink-0" :size="20" />
-                <span
-                  class="sidebar-label min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left transition-[opacity,transform] duration-200"
-                  :class="isCollapsed ? 'hidden' : 'w-auto'"
-                >
-                  {{ item.label }}
-                </span>
-                <span
-                  v-if="!isCollapsed"
-                  class="sidebar-label inline-flex size-4 shrink-0"
-                  aria-hidden="true"
-                >
-                  <ChevronDown
-                    class="size-4 transition-transform duration-200 motion-reduce:transition-none"
-                    :class="pluginGroupExpanded ? undefined : '-rotate-90'"
-                  />
-                </span>
-              </button>
+              <ZPopover trigger="hover" placement="right" role="tooltip" :show-after="800" :disabled="!isCollapsed" :enterable="false" class="w-full">
+                <template #reference="{ close }">
+                  <button
+                    type="button"
+                    class="inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 bg-transparent text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline"
+                    :class="[
+                      isCollapsed ? 'w-11.5 justify-center' : 'w-full gap-3 px-4',
+                      isActive(item.path)
+                        ? navFeedbackMuted
+                          ? 'font-bold text-cp-text transition-none'
+                          : 'font-bold text-cp-text transition-colors duration-200'
+                        : navFeedbackMuted
+                          ? 'font-semibold text-cp-text-secondary transition-none'
+                          : 'font-semibold text-cp-text-secondary transition-colors duration-200 hover:bg-cp-fill-quaternary hover:text-cp-text',
+                    ]"
+                    :aria-expanded="isCollapsed ? undefined : pluginGroupExpanded"
+                    :aria-controls="isCollapsed ? undefined : pluginMenuId"
+                    :aria-label="isCollapsed ? item.label : undefined"
+                    @click="close(); togglePluginGroup()"
+                  >
+                    <component :is="item.icon" class="shrink-0" :size="20" />
+                    <span
+                      class="sidebar-label min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left transition-[opacity,transform] duration-200"
+                      :class="isCollapsed ? 'hidden' : 'w-auto'"
+                    >
+                      {{ item.label }}
+                    </span>
+                    <span
+                      v-if="!isCollapsed"
+                      class="sidebar-label inline-flex size-4 shrink-0"
+                      aria-hidden="true"
+                    >
+                      <ChevronDown
+                        class="size-4 transition-transform duration-200 motion-reduce:transition-none"
+                        :class="pluginGroupExpanded ? undefined : '-rotate-90'"
+                      />
+                    </span>
+                  </button>
+                </template>
+                <span class="block px-3 py-2 text-cp-sm whitespace-nowrap">{{ item.label }}</span>
+              </ZPopover>
 
               <div
                 :id="pluginMenuId"
                 class="grid transition-[grid-template-rows] duration-260 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
                 :class="pluginMenuVisible ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
                 :inert="!pluginMenuVisible"
-                aria-label="插件导航"
+                :aria-label="t('navigation.pluginsLabel')"
               >
                 <div class="min-h-0 overflow-hidden">
                   <div class="relative ml-3 grid gap-1 pt-1 pl-3">
@@ -498,8 +568,8 @@ onBeforeUnmount(() => {
                       :aria-current="route.name === 'plugins' ? 'page' : undefined"
                       @click="navigate('/plugins')"
                     >
-                      <PanelsTopLeft class="block size-4 shrink-0" />
-                      <span class="sidebar-label truncate leading-none">插件管理</span>
+                      <BringToFront class="block size-4 shrink-0" />
+                      <span class="sidebar-label truncate leading-none">{{ t('navigation.pluginManagement') }}</span>
                     </button>
                     <button
                       v-for="view in pluginPageViews"
@@ -520,30 +590,35 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <button
-              v-else
-              type="button"
-              class="relative z-10 inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline"
-              :class="[
-                isCollapsed ? 'w-11.5 justify-center' : 'w-full gap-3 px-4',
-                isActive(item.path)
-                  ? navFeedbackMuted
-                    ? 'bg-transparent font-bold text-cp-text transition-none'
-                    : 'bg-transparent font-bold text-cp-text transition-colors duration-200'
-                  : navFeedbackMuted
-                    ? 'bg-transparent font-semibold text-cp-text-secondary transition-none'
-                    : 'bg-transparent font-semibold text-cp-text-secondary transition-colors duration-200 hover:bg-cp-fill-quaternary hover:text-cp-text',
-              ]"
-              @click="navigate(item.path)"
-            >
-              <component :is="item.icon" class="shrink-0" :size="20" />
-              <span
-                class="sidebar-label overflow-hidden whitespace-nowrap transition-[opacity,transform] duration-200"
-                :class="isCollapsed ? 'pointer-events-none w-0' : 'w-auto'"
-              >
-                {{ item.label }}
-              </span>
-            </button>
+            <ZPopover v-else trigger="hover" placement="right" role="tooltip" :show-after="800" :disabled="!isCollapsed" :enterable="false" class="relative z-10 w-full">
+              <template #reference="{ close }">
+                <button
+                  type="button"
+                  class="relative z-10 inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline"
+                  :class="[
+                    isCollapsed ? 'w-11.5 justify-center' : 'w-full gap-3 px-4',
+                    isActive(item.path)
+                      ? navFeedbackMuted
+                        ? 'bg-transparent font-bold text-cp-text transition-none'
+                        : 'bg-transparent font-bold text-cp-text transition-colors duration-200'
+                      : navFeedbackMuted
+                        ? 'bg-transparent font-semibold text-cp-text-secondary transition-none'
+                        : 'bg-transparent font-semibold text-cp-text-secondary transition-colors duration-200 hover:bg-cp-fill-quaternary hover:text-cp-text',
+                  ]"
+                  :aria-label="isCollapsed ? item.label : undefined"
+                  @click="close(); navigate(item.path)"
+                >
+                  <component :is="item.icon" class="shrink-0" :size="20" />
+                  <span
+                    class="sidebar-label overflow-hidden whitespace-nowrap transition-[opacity,transform] duration-200"
+                    :class="isCollapsed ? 'pointer-events-none w-0' : 'w-auto'"
+                  >
+                    {{ item.label }}
+                  </span>
+                </button>
+              </template>
+              <span class="block px-3 py-2 text-cp-sm whitespace-nowrap">{{ item.label }}</span>
+            </ZPopover>
           </template>
         </nav>
       </div>
@@ -552,17 +627,17 @@ onBeforeUnmount(() => {
     <div class="mx-4 mb-6 shrink-0" :class="isCollapsed ? 'w-11' : 'self-stretch'">
       <div
         class="bg-cp-fill-quaternary"
-        :class="isCollapsed ? 'grid gap-1 rounded-cp p-1' : 'flex h-11 items-center justify-between rounded-cp-lg px-2'"
+        :class="isCollapsed ? 'grid gap-1 rounded-cp p-1' : 'grid h-11 grid-cols-[4.25rem_auto] items-center justify-between rounded-cp-lg px-2'"
       >
         <span
           v-if="!isCollapsed"
-          class="inline-flex whitespace-nowrap h-7 items-center gap-1.5 rounded-lg bg-cp-success-container px-2.5 text-xs leading-none font-emphasis text-cp-success-on-container"
+          class="inline-flex h-7 items-center justify-self-start gap-1.5 whitespace-nowrap rounded-lg bg-cp-success-container px-2 text-xs leading-none font-emphasis text-cp-success-on-container"
         >
           <i class="size-1.5 rounded-full bg-cp-success" />
-          在线
+          {{ t('navigation.online') }}
         </span>
 
-        <div class="flex items-center" :class="isCollapsed ? 'grid gap-1' : 'gap-1'">
+        <div class="flex shrink-0 items-center" :class="isCollapsed ? 'grid gap-1' : 'gap-1'">
           <ZIconButton
             v-if="isCollapsed && hasUpdate"
             type="success" variant="plain"
@@ -575,7 +650,7 @@ onBeforeUnmount(() => {
 
           <ZIconButton
             :size="isCollapsed ? 'default' : 'small'"
-            aria-label="退出登录"
+            :aria-label="t('auth.signOut')"
             type="danger"
             :disabled="authStore.loading || !authStore.isAuthenticated"
             @click="handleLogout"
@@ -592,11 +667,9 @@ onBeforeUnmount(() => {
             <Moon v-else :size="isCollapsed ? 19 : 18" />
           </ZIconButton>
 
-          <ZIconButton :size="isCollapsed ? 'default' : 'small'" aria-label="关于" @click="emit('openAbout')">
-            <Info :size="isCollapsed ? 19 : 18" />
-          </ZIconButton>
+          <AppLanguageMenu :size="isCollapsed ? 'default' : 'small'" />
 
-          <ZIconButton v-if="mobile" size="small" aria-label="关闭侧边栏" @click="emit('close')">
+          <ZIconButton v-if="mobile" size="small" :aria-label="t('navigation.sidebar.close')" @click="emit('close')">
             <PanelLeftClose :size="18" />
           </ZIconButton>
 
@@ -604,7 +677,7 @@ onBeforeUnmount(() => {
             v-else
             :size="isCollapsed ? 'default' : 'small'"
             data-sidebar-toggle
-            :aria-label="isCollapsed ? '展开侧边栏' : '收缩侧边栏'"
+            :aria-label="isCollapsed ? t('navigation.sidebar.expand') : t('navigation.sidebar.collapse')"
             @click="emit('toggle')"
           >
             <PanelLeftOpen v-if="isCollapsed" :size="19" />

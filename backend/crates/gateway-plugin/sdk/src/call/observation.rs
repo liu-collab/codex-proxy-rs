@@ -187,9 +187,6 @@ pub struct RequestCompleted {
     /// 本次实际选中账号使用的上游模型，未进入上游时可能不存在
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub upstream_model: Option<String>,
-    /// 上游响应报告的模型，与请求中的模型名称分开保存
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub response_model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub service_tier: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

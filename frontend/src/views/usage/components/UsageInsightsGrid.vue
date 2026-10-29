@@ -4,6 +4,8 @@ import type {
   getUsageRecordInsightsOverview,
 } from '@/api'
 
+import { useI18n } from 'vue-i18n'
+
 import UsageCostCard from './UsageCostCard.vue'
 import UsageDiagnosticCard from './UsageDiagnosticCard.vue'
 import UsageHealthCard from './UsageHealthCard.vue'
@@ -20,6 +22,8 @@ withDefaults(
   },
 )
 
+const { t } = useI18n({ useScope: 'global' })
+
 const diagnosticDimension = defineModel('diagnosticDimension', {
   type: String,
   default: 'model',
@@ -28,8 +32,8 @@ const diagnosticDimension = defineModel('diagnosticDimension', {
 
 <template>
   <section
-    class="mt-5 grid grid-cols-1 gap-3 xl:auto-rows-97 xl:grid-cols-2"
-    aria-label="使用统计观测"
+    class="mt-5 grid grid-cols-1 gap-3 xl:auto-rows-[minmax(24.25rem,auto)] xl:grid-cols-2"
+    :aria-label="t('usage.insights.useStatisticalObservations')"
   >
     <UsageHealthCard
       :health="overview.health"

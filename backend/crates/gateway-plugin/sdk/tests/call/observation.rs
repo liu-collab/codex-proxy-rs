@@ -64,7 +64,6 @@ fn observation() -> RequestCompleted {
         client_key_id: Some("key_fixture".into()),
         account_id: Some("acct_fixture".into()),
         upstream_model: Some("upstream-model".into()),
-        response_model: Some("reported-model".into()),
         service_tier: Some("default".into()),
         provider: None,
         completed_at_ms: 1234,
@@ -114,19 +113,12 @@ fn observation_exposes_selected_and_reported_facts_without_inventing_values() {
     assert_eq!(wire["client_key_id"], "key_fixture");
     assert_eq!(wire["account_id"], "acct_fixture");
     assert_eq!(wire["upstream_model"], "upstream-model");
-    assert_eq!(wire["response_model"], "reported-model");
     assert_eq!(wire["service_tier"], "default");
     request.account_id = None;
     request.upstream_model = None;
-    request.response_model = None;
     request.service_tier = None;
     let wire = serde_json::to_value(request).unwrap();
-    for field in [
-        "account_id",
-        "upstream_model",
-        "response_model",
-        "service_tier",
-    ] {
+    for field in ["account_id", "upstream_model", "service_tier"] {
         assert!(wire.get(field).is_none(), "unknown {field} must be omitted");
     }
 }

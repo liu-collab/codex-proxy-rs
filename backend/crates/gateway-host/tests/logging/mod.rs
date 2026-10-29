@@ -265,6 +265,57 @@ fn oauth_recovery_switch_controls_only_its_dedicated_file() {
     }
 }
 
+#[test]
+fn disabled_target_queries_do_not_drop_application_warnings() {
+    if env::var_os(CHILD_PROCESS_ENV).is_some() {
+        let mut config = logging_config(
+            PathBuf::from(env::var_os(LOG_DIRECTORY_ENV).unwrap()),
+            false,
+        );
+        config.logging.level = "info".to_owned();
+        config.logging.oauth_recovery = false;
+        with_logging(config, || {
+            fn warning(index: u64) {
+                tracing::warn!(target: APPLICATION_LOG_TARGET, disabled_target_probe_index = index);
+            }
+            warning(0);
+            let dump_enabled =
+                tracing::enabled!(target: REQUEST_DUMP_LOG_TARGET, tracing::Level::INFO);
+            warning(1);
+            let recovery_enabled =
+                tracing::enabled!(target: OAUTH_RECOVERY_LOG_TARGET, tracing::Level::INFO);
+            warning(2);
+            assert!(!dump_enabled);
+            assert!(!recovery_enabled);
+        });
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let output = Command::new(env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "logging::disabled_target_queries_do_not_drop_application_warnings",
+            "--nocapture",
+        ])
+        .env(CHILD_PROCESS_ENV, "1")
+        .env(LOG_DIRECTORY_ENV, directory.path())
+        .env("RUST_LOG", "info")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let log = read_log_file_set(directory.path(), APPLICATION_LOG_FILE_PREFIX);
+    let indices = log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter_map(|row| row["fields"]["disabled_target_probe_index"].as_u64())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(indices, std::collections::BTreeSet::from([0, 1, 2]));
+}
+
 fn write_sensitive_logs(directory: PathBuf, request_dump: bool) {
     with_file_logging(directory, request_dump, || {
         tracing::info!(

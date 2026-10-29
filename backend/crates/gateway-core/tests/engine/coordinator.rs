@@ -491,7 +491,6 @@ struct FinalState {
     http_version: Option<String>,
     websocket_pool: Option<String>,
     service_tier: Option<String>,
-    upstream_response_model: Option<String>,
     upstream_request_id: Option<String>,
     upstream_status_code: Option<u16>,
     transport_decision_wait_ms: Option<u64>,
@@ -530,6 +529,8 @@ struct FakeStore {
     failures: BTreeSet<StoreWriteFailure>,
     create_gate: Mutex<Option<oneshot::Receiver<()>>>,
     finalize_gate: Mutex<Option<oneshot::Receiver<()>>>,
+    send_gate: Mutex<Option<oneshot::Receiver<()>>>,
+    intermediate_gate: Mutex<Option<oneshot::Receiver<()>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -587,6 +588,10 @@ impl ExecutionStore for FakeStore {
             .expect("store lock")
             .send_states
             .push(state);
+        let gate = self.send_gate.lock().expect("send gate lock").take();
+        if let Some(gate) = gate {
+            gate.await.expect("send state write released");
+        }
         Ok(())
     }
 
@@ -620,14 +625,24 @@ impl ExecutionStore for FakeStore {
         &self,
         failure: IntermediateFailure,
     ) -> Result<(), StoreError> {
-        let mut state = self.state.lock().expect("store lock");
-        state.intermediate_failures += 1;
-        state
-            .intermediate_status_codes
-            .push(failure.upstream_status_code);
-        state
-            .intermediate_request_ids
-            .push(failure.upstream_request_id);
+        {
+            let mut state = self.state.lock().expect("store lock");
+            state.intermediate_failures += 1;
+            state
+                .intermediate_status_codes
+                .push(failure.upstream_status_code);
+            state
+                .intermediate_request_ids
+                .push(failure.upstream_request_id);
+        }
+        let gate = self
+            .intermediate_gate
+            .lock()
+            .expect("intermediate gate lock")
+            .take();
+        if let Some(gate) = gate {
+            gate.await.expect("intermediate failure write released");
+        }
         Ok(())
     }
 
@@ -666,7 +681,6 @@ impl ExecutionStore for FakeStore {
                 http_version: finalization.http_version,
                 websocket_pool: finalization.websocket_pool,
                 service_tier: finalization.service_tier,
-                upstream_response_model: finalization.upstream_response_model,
                 upstream_request_id: finalization.upstream_request_id,
                 upstream_status_code: finalization.upstream_status_code,
                 transport_decision_wait_ms: finalization.timings.transport_decision_wait_ms,
@@ -704,6 +718,10 @@ impl ExecutionStore for FakeStore {
 }
 
 enum Script {
+    ProtectedStream {
+        account_id: &'static str,
+        items: Vec<Result<GatewayEvent, ProviderError>>,
+    },
     Stream {
         account_id: &'static str,
         items: Vec<Result<GatewayEvent, ProviderError>>,
@@ -809,7 +827,10 @@ impl Provider for ScriptedProvider {
             .lock()
             .expect("operations lock")
             .push(request.operation().clone());
-        self.contexts.lock().expect("contexts lock").push(context);
+        self.contexts
+            .lock()
+            .expect("contexts lock")
+            .push(context.clone());
         // 模拟官方发布在每次上游尝试开始后推进，重试应继续使用首次解析版本
         self.profile_generation.fetch_add(1, Ordering::SeqCst);
         let script = self
@@ -818,10 +839,12 @@ impl Provider for ScriptedProvider {
             .expect("scripts lock")
             .pop_front()
             .expect("one script per provider call");
+        let protected = matches!(script, Script::ProtectedStream { .. });
         match script {
             Script::Error(error) => Err(error),
             Script::Pending => futures::future::pending().await,
-            Script::Stream { account_id, items } => {
+            Script::Stream { account_id, items }
+            | Script::ProtectedStream { account_id, items } => {
                 let candidate = request.candidate();
                 let metadata = ProviderCallMetadata::new(
                     candidate.provider().clone(),
@@ -833,13 +856,29 @@ impl Provider for ScriptedProvider {
                     UpstreamTransport::new("http_sse").expect("transport"),
                 )
                 .with_upstream_request_id(OpaqueUpstreamValue::new("upstream-request"));
-                Ok(ProviderStream::new(
+                let metadata = metadata.with_credential_revision(
+                    gateway_core::account::CredentialRevision::new(7).unwrap(),
+                );
+                let stream = ProviderStream::new(
                     metadata,
                     Box::pin(futures::stream::iter(
                         items.into_iter().map(canonical_provider_event),
                     )),
                     TrackedLease(Arc::clone(&self.released_leases)),
-                ))
+                );
+                if protected {
+                    context
+                        .execute_middleware(
+                            request.operation().clone(),
+                            candidate.provider().clone(),
+                            Some("gpt-5".into()),
+                            ProviderAccountId::new(account_id).unwrap(),
+                            Box::new(move |_, _| Box::pin(async move { Ok(stream) })),
+                        )
+                        .await
+                } else {
+                    Ok(stream)
+                }
             }
             Script::HangingStream { account_id, items } => {
                 let candidate = request.candidate();
@@ -1128,6 +1167,24 @@ fn plan_with_profiles(
     fast_mode: FastMode,
     profiles: BTreeMap<ProviderKind, gateway_core::account::OpaqueProviderData>,
 ) -> RoutingPlan {
+    plan_with_protection(
+        operation,
+        account_selection_policy,
+        request_location,
+        fast_mode,
+        profiles,
+        Default::default(),
+    )
+}
+
+fn plan_with_protection(
+    operation: &Operation,
+    account_selection_policy: AccountSelectionPolicy,
+    request_location: gateway_core::account::RequestLocation,
+    fast_mode: FastMode,
+    profiles: BTreeMap<ProviderKind, gateway_core::account::OpaqueProviderData>,
+    protection: gateway_core::account::AccountErrorProtection,
+) -> RoutingPlan {
     let provider = ProviderKind::new("openai").expect("provider");
     let public_model = PublicModelId::new("gpt-5").expect("public model");
     let capabilities = ModelCapabilities::new(BTreeSet::from([operation.kind()]), Some(32_000))
@@ -1179,7 +1236,8 @@ fn plan_with_profiles(
             )
             .unwrap(),
         )
-        .with_request_location(request_location, true),
+        .with_request_location(request_location, true)
+        .with_account_error_protection(protection),
         vec![provider.clone()],
         vec![ProviderModel::new(
             provider.clone(),
@@ -1429,6 +1487,16 @@ fn success_updates_one_model_request_and_persists_usage() {
     assert!(finalization.committed);
     assert_eq!(finalization.client_status_code, Some(200));
     assert_eq!(finalization.total_tokens, Some(12));
+    let trace: Value =
+        serde_json::from_str(finalization.diagnostic_trace_json.as_deref().unwrap()).unwrap();
+    let evidence = trace["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|event| event["stage"] == "request.usage")
+        .unwrap();
+    assert_eq!(evidence["data"]["totalTokens"], 12);
+    assert_eq!(evidence["data"]["downstreamCommitted"], true);
     assert!(finalization.latency_ms.is_some());
     assert_eq!(finalization.client_response_id.as_deref(), Some(started_id));
     assert_eq!(
@@ -1714,6 +1782,16 @@ fn failure_request_id_prefers_error_then_response_observation() {
             Some(error_request_id.unwrap_or("upstream-opening"))
         );
         assert_eq!(finalization.upstream_status_code, Some(400));
+        let trace: Value =
+            serde_json::from_str(finalization.diagnostic_trace_json.as_deref().unwrap()).unwrap();
+        assert!(
+            trace["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|event| event["stage"] == "request.usage"
+                    && event["data"]["boundary"] == "finalization_prepared")
+        );
     }
 }
 
@@ -1728,7 +1806,6 @@ fn response_observation_is_persisted_but_never_delivered() {
     .with_websocket_pool(WebSocketPoolKind::New)
     .with_status_code(200)
     .with_request_id(OpaqueUpstreamValue::new("upstream-observed"))
-    .with_upstream_response_model_if_valid("gpt-returned")
     .try_with_service_tier("priority")
     .expect("service tier")
     .with_timings(ProviderResponseTimings {
@@ -1768,10 +1845,6 @@ fn response_observation_is_persisted_but_never_delivered() {
     assert_eq!(finalization.http_version.as_deref(), Some("HTTP/2"));
     assert_eq!(finalization.websocket_pool.as_deref(), Some("new"));
     assert_eq!(finalization.service_tier.as_deref(), Some("priority"));
-    assert_eq!(
-        finalization.upstream_response_model.as_deref(),
-        Some("gpt-returned")
-    );
     assert_eq!(
         finalization.upstream_request_id.as_deref(),
         Some("upstream-observed")
@@ -2047,7 +2120,6 @@ fn discarded_attempt_observation_does_not_leak_into_retry_result() {
     .with_http_version(UpstreamHttpVersion::Http11)
     .with_status_code(503)
     .with_request_id(OpaqueUpstreamValue::new("discarded-request"))
-    .with_upstream_response_model_if_valid("discarded-model")
     .with_timings(ProviderResponseTimings {
         transport_decision_wait_ms: Some(7),
         connect_ms: Some(11),
@@ -2110,7 +2182,6 @@ fn discarded_attempt_observation_does_not_leak_into_retry_result() {
 
     let state = store.state.lock().expect("store lock");
     let finalization = &state.finalizations[0];
-    assert_eq!(finalization.upstream_response_model, None);
     let trace: Value =
         serde_json::from_str(finalization.diagnostic_trace_json.as_deref().unwrap()).unwrap();
     let events = trace["events"].as_array().unwrap();
@@ -4624,15 +4695,10 @@ fn transient_backoff_can_be_cancelled_before_the_next_attempt() {
             cancellation.clone(),
         ))
         .expect("start execution");
-        let cancel = std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(50));
-            cancellation.cancel();
-        });
-        assert!(matches!(
-            block_on(session.collect_uncommitted()),
-            Err(EngineError::Cancelled)
-        ));
-        cancel.join().expect("cancel task");
+        let mut collection = Box::pin(session.collect_uncommitted());
+        assert!(block_on(async { futures::poll!(&mut collection) }).is_pending());
+        cancellation.cancel();
+        assert!(matches!(block_on(collection), Err(EngineError::Cancelled)));
         assert_eq!(provider.contexts.lock().expect("contexts").len(), 1);
     }
 }
@@ -5439,6 +5505,169 @@ fn interrupted_first_attempt_write_never_restarts_selection_or_creates_a_zero_at
 }
 
 #[test]
+fn interrupted_stream_failure_preserves_the_original_attempt_and_retry_decision() {
+    block_on(async {
+        for (retryable, intermediate) in [(false, false), (true, false), (true, true)] {
+            let (release, gate) = oneshot::channel();
+            let operation = generate_operation();
+            let mut items = Vec::new();
+            if !retryable {
+                items.push(Ok(GatewayEvent::Started(ResponseMeta::new(
+                    "original", "gpt-5",
+                ))));
+            }
+            items.push(Err(ProviderError::new(
+                ProviderErrorKind::Transport,
+                if retryable {
+                    UpstreamSendState::NotSent
+                } else {
+                    UpstreamSendState::Sent
+                },
+            )));
+            let (coordinator, store, provider) = coordinator_with_store(
+                vec![
+                    Script::Stream {
+                        account_id: "acct_first",
+                        items,
+                    },
+                    Script::Stream {
+                        account_id: "acct_second",
+                        items: complete_stream(None),
+                    },
+                ],
+                Arc::new(FakeStore::default()),
+            );
+            let mut session = coordinator
+                .start(
+                    model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+                    operation.clone(),
+                    plan(&operation),
+                    None,
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            if !retryable {
+                session.next_event().await.unwrap().unwrap();
+                session.commit_downstream(Some(200)).await.unwrap();
+            }
+            if intermediate {
+                *store.intermediate_gate.lock().unwrap() = Some(gate);
+            } else {
+                *store.send_gate.lock().unwrap() = Some(gate);
+            }
+            let mut next = Box::pin(session.next_event());
+            assert!(futures::poll!(next.as_mut()).is_pending());
+            drop(next);
+            let mut resumed = Box::pin(session.next_event());
+            assert!(futures::poll!(resumed.as_mut()).is_pending());
+            assert_eq!(provider.contexts.lock().unwrap().len(), 1);
+            assert_eq!(provider.released_leases.load(Ordering::SeqCst), 0);
+            release
+                .send(())
+                .expect("the original write still owns its receiver");
+            let result = resumed.await;
+            if retryable {
+                assert!(result.unwrap().is_some());
+                assert_eq!(provider.contexts.lock().unwrap().len(), 2);
+                assert_eq!(store.state.lock().unwrap().intermediate_failures, 1);
+            } else {
+                let Err(EngineError::Provider(error)) = result else {
+                    panic!("original failure must be returned")
+                };
+                assert_eq!(error.kind(), ProviderErrorKind::Transport);
+                assert_eq!(error.send_state(), UpstreamSendState::Sent);
+                assert_eq!(provider.contexts.lock().unwrap().len(), 1);
+                assert_eq!(
+                    store.state.lock().unwrap().finalizations[0].outcome,
+                    ExecutionOutcome::Incomplete
+                );
+            }
+            drop(session);
+            assert_eq!(
+                provider.released_leases.load(Ordering::SeqCst),
+                if retryable { 2 } else { 1 }
+            );
+        }
+    });
+}
+
+#[test]
+fn cancelling_a_pending_failure_write_keeps_atomic_usage_and_cost() {
+    block_on(async {
+        for intermediate in [false, true] {
+            let (release, gate) = oneshot::channel();
+            let operation = generate_operation();
+            let mut failure = bare_atomic_response_failed("charged-failure");
+            let mut events = failure.take_atomic_client_events();
+            events.extend([
+                ProviderEvent::observation(
+                    ProviderResponseObservation::new(UpstreamTransport::new("http_sse").unwrap())
+                        .with_status_code(429)
+                        .with_request_id(OpaqueUpstreamValue::new("charged-upstream"))
+                        .with_timings(ProviderResponseTimings {
+                            headers_ms: Some(13),
+                            ..ProviderResponseTimings::default()
+                        }),
+                ),
+                ProviderEvent::canonical(GatewayEvent::Usage(Usage {
+                    total_tokens: Some(7),
+                    ..Usage::new()
+                })),
+                ProviderEvent::canonical(GatewayEvent::ProviderCost(
+                    ProviderReportedCost::from_usd_ticks(25).unwrap(),
+                )),
+            ]);
+            let (coordinator, store, provider) = coordinator(vec![Script::Stream {
+                account_id: "acct_first",
+                items: vec![Err(failure.with_atomic_client_events(events))],
+            }]);
+            let mut session = coordinator
+                .start(
+                    model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+                    operation.clone(),
+                    plan(&operation),
+                    None,
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            if intermediate {
+                *store.intermediate_gate.lock().unwrap() = Some(gate);
+            } else {
+                *store.send_gate.lock().unwrap() = Some(gate);
+            }
+            let mut next = Box::pin(session.next_event());
+            assert!(futures::poll!(next.as_mut()).is_pending());
+            drop(next);
+            session.cancel_and_finalize().await.unwrap();
+            assert!(
+                release.is_canceled(),
+                "explicit cancellation drops the pending write"
+            );
+            assert_eq!(session.budget_charge().amount_usd.scaled(), 25);
+            let state = store.state.lock().unwrap();
+            assert_eq!(state.finalizations.len(), 1);
+            assert_eq!(state.finalizations[0].total_tokens, Some(7));
+            assert_eq!(state.finalizations[0].cost_ticks, Some(25));
+            assert_eq!(state.finalizations[0].send_state, UpstreamSendState::Sent);
+            assert_eq!(state.finalizations[0].upstream_status_code, Some(429));
+            assert_eq!(state.finalizations[0].headers_ms, Some(13));
+            assert_eq!(
+                state.finalizations[0].upstream_request_id.as_deref(),
+                Some("charged-upstream")
+            );
+            drop(state);
+            drop(session);
+            assert_eq!(provider.contexts.lock().unwrap().len(), 1);
+            assert_eq!(provider.released_leases.load(Ordering::SeqCst), 1);
+        }
+    });
+}
+
+#[test]
 fn rejected_cold_stream_releases_its_lease_before_waiting_for_observation_writes() {
     block_on(async {
         let (release, gate) = oneshot::channel();
@@ -5886,63 +6115,69 @@ fn connection_recovery_rotates_only_after_retrying_the_first_account() {
 
 #[test]
 fn connection_recovery_keeps_one_account_and_http_transport_until_success() {
-    for unavailable in [
+    let cases = [
         ProviderErrorKind::NoEligibleAccount,
         ProviderErrorKind::AccountCapacityUnavailable,
         ProviderErrorKind::QuotaExhausted,
         ProviderErrorKind::ConcurrencyQueueFull,
         ProviderErrorKind::ConcurrencyQueueTimeout,
-    ] {
-        let operation = generate_operation();
-        let route_plan = plan(&operation);
-        let failure = || Script::Stream {
-            account_id: "acct_only",
-            items: vec![Err(ProviderError::new(
-                ProviderErrorKind::Transport,
-                UpstreamSendState::NotSent,
-            )
-            .with_connection_retry(AttemptTransport::Fallback))],
-        };
-        let (coordinator, store, provider) = coordinator(vec![
-            failure(),
-            failure(),
-            Script::Error(ProviderError::new(unavailable, UpstreamSendState::NotSent)),
-            failure(),
-            Script::Stream {
+    ];
+    // 各场景独立持有存储与 Provider，并发等待各自的真实连接退避
+    block_on(futures::future::join_all(cases.into_iter().map(
+        |unavailable| async move {
+            let operation = generate_operation();
+            let route_plan = plan(&operation);
+            let failure = || Script::Stream {
                 account_id: "acct_only",
-                items: complete_stream(None),
-            },
-        ]);
-        let mut session = block_on(coordinator.start(
-            model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
-            operation,
-            route_plan,
-            None,
-            None,
-            CancellationToken::new(),
-        ))
-        .unwrap();
-        block_on(session.collect_uncommitted()).unwrap();
-        block_on(session.commit_downstream(Some(200))).unwrap();
-        let contexts = provider.contexts.lock().unwrap();
-        assert_eq!(contexts.len(), 5);
-        let account = ProviderAccountId::new("acct_only").unwrap();
-        assert!(contexts[2].required_account().is_none());
-        assert!(contexts[2].excluded_accounts().contains(&account));
-        assert_eq!(contexts[2].transport(), AttemptTransport::Fallback);
-        for index in [1, 3, 4] {
-            let context = &contexts[index];
-            assert_eq!(context.required_account(), Some(&account));
-            assert_eq!(context.transport(), AttemptTransport::Fallback);
-            assert!(!context.excluded_accounts().contains(&account));
-        }
-        let state = store.state.lock().unwrap();
-        assert_eq!(state.intermediate_failures, 3);
-        assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Succeeded);
-        assert_eq!(provider.released_leases.load(Ordering::SeqCst), 3);
-        drop(session);
-        assert_eq!(provider.released_leases.load(Ordering::SeqCst), 4);
-    }
+                items: vec![Err(ProviderError::new(
+                    ProviderErrorKind::Transport,
+                    UpstreamSendState::NotSent,
+                )
+                .with_connection_retry(AttemptTransport::Fallback))],
+            };
+            let (coordinator, store, provider) = coordinator(vec![
+                failure(),
+                failure(),
+                Script::Error(ProviderError::new(unavailable, UpstreamSendState::NotSent)),
+                failure(),
+                Script::Stream {
+                    account_id: "acct_only",
+                    items: complete_stream(None),
+                },
+            ]);
+            let mut session = coordinator
+                .start(
+                    model_request(&operation, SystemTime::now() + Duration::from_secs(30)),
+                    operation,
+                    route_plan,
+                    None,
+                    None,
+                    CancellationToken::new(),
+                )
+                .await
+                .unwrap();
+            session.collect_uncommitted().await.unwrap();
+            session.commit_downstream(Some(200)).await.unwrap();
+            let contexts = provider.contexts.lock().unwrap();
+            assert_eq!(contexts.len(), 5);
+            let account = ProviderAccountId::new("acct_only").unwrap();
+            assert!(contexts[2].required_account().is_none());
+            assert!(contexts[2].excluded_accounts().contains(&account));
+            assert_eq!(contexts[2].transport(), AttemptTransport::Fallback);
+            for index in [1, 3, 4] {
+                let context = &contexts[index];
+                assert_eq!(context.required_account(), Some(&account));
+                assert_eq!(context.transport(), AttemptTransport::Fallback);
+                assert!(!context.excluded_accounts().contains(&account));
+            }
+            let state = store.state.lock().unwrap();
+            assert_eq!(state.intermediate_failures, 3);
+            assert_eq!(state.finalizations[0].outcome, ExecutionOutcome::Succeeded);
+            assert_eq!(provider.released_leases.load(Ordering::SeqCst), 3);
+            drop(session);
+            assert_eq!(provider.released_leases.load(Ordering::SeqCst), 4);
+        },
+    )));
 }
 
 #[test]
@@ -6186,15 +6421,10 @@ fn connection_backoff_cancellation_releases_account_without_another_attempt() {
         cancellation.clone(),
     ))
     .expect("start execution");
-    let cancel = std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(50));
-        cancellation.cancel();
-    });
-    assert!(matches!(
-        block_on(session.collect_uncommitted()),
-        Err(EngineError::Cancelled)
-    ));
-    cancel.join().expect("cancel task");
+    let mut collection = Box::pin(session.collect_uncommitted());
+    assert!(block_on(async { futures::poll!(&mut collection) }).is_pending());
+    cancellation.cancel();
+    assert!(matches!(block_on(collection), Err(EngineError::Cancelled)));
     assert_eq!(provider.contexts.lock().expect("contexts").len(), 1);
     assert_eq!(provider.released_leases.load(Ordering::SeqCst), 1);
 }
@@ -6941,4 +7171,88 @@ fn lease_cancellation_is_preserved_in_the_single_request_terminal() {
             Some(reason.message())
         );
     });
+}
+
+#[test]
+fn error_protection_tracks_real_retry_attempts_and_skips_diagnostic_runs() {
+    use super::account_protection::{Feedback, policy};
+    for diagnostic in [false, true] {
+        let operation = generate_operation();
+        let route_plan = plan_with_protection(
+            &operation,
+            AccountSelectionPolicy::new(RotationStrategy::Smart, NonZeroU32::new(1).unwrap()),
+            Default::default(),
+            FastMode::Default,
+            BTreeMap::new(),
+            policy().as_ref().clone(),
+        );
+        let feedback = Arc::new(Feedback::default());
+        let failure = ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::Sent)
+            .with_replay_safe()
+            .with_upstream_failure_fields(gateway_core::upstream::UpstreamFailureFields {
+                status: None,
+                code: Some("invalid_prompt".into()),
+                error_type: None,
+                message: None,
+            });
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            Script::ProtectedStream {
+                account_id: "acct_first",
+                items: vec![Err(failure)],
+            },
+            Script::ProtectedStream {
+                account_id: "acct_second",
+                items: complete_stream(None),
+            },
+        ]));
+        let mut registry = ProviderRegistry::builder();
+        registry.register(provider.clone()).unwrap();
+        let coordinator = AttemptCoordinator::new(
+            GatewayEngine::new(Arc::new(FakeStore::default()), registry.build())
+                .with_account_error_protection(feedback.clone()),
+        );
+        let request = model_request(&operation, SystemTime::now() + Duration::from_secs(30));
+        let mut session = block_on(async {
+            if diagnostic {
+                coordinator
+                    .start_diagnostic(
+                        request,
+                        operation,
+                        route_plan,
+                        ProviderAccountId::new("acct_first").unwrap(),
+                        None,
+                        CancellationToken::new(),
+                    )
+                    .await
+            } else {
+                coordinator
+                    .start(
+                        request,
+                        operation,
+                        route_plan,
+                        None,
+                        None,
+                        CancellationToken::new(),
+                    )
+                    .await
+            }
+        })
+        .unwrap();
+        if diagnostic {
+            assert!(block_on(session.next_event()).is_err());
+            assert_eq!(feedback.begin.load(Ordering::SeqCst), 0);
+        } else {
+            block_on(session.collect_uncommitted()).unwrap();
+            assert_eq!(feedback.begin.load(Ordering::SeqCst), 2);
+            assert_eq!(feedback.failures.lock().unwrap().len(), 1);
+            assert_eq!(feedback.successes.load(Ordering::SeqCst), 1);
+            let observed = feedback.failures.lock().unwrap();
+            assert_eq!(observed[0].0.account_id.as_str(), "acct_first");
+        }
+        drop(session);
+        assert_eq!(
+            provider.released_leases.load(Ordering::SeqCst),
+            if diagnostic { 1 } else { 2 }
+        );
+    }
 }

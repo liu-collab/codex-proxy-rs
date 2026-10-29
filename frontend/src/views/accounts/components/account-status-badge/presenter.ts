@@ -1,6 +1,8 @@
 import type { Component } from 'vue'
-import type { AccountErrorReason, AccountStatus } from '@/api'
+import type { AccountErrorReason, AccountProtectionRule, AccountStatus } from '@/api'
 import { AlertTriangle, CircleCheck, Gauge, Power, Timer } from '@lucide/vue'
+import { computed } from 'vue'
+import { t } from '@/i18n'
 
 import { errorReasonLabels, statusLabels, statusTones } from '../../constants'
 
@@ -37,6 +39,7 @@ interface AccountStatusPresentation {
   nextRefreshDisplay: string | null
   rateLimitRecovery: string | null
   recoveryTimeLabel: string
+  protectionRules: AccountProtectionRule[]
   triggerLabel: string
 }
 
@@ -45,7 +48,8 @@ interface AccountStatusPresentationInput {
   errorReason: AccountErrorReason | null
   errorMessage: string | null
   rateLimitRecoveryDisplay: string | null
-  rateLimitReason: 'upstream_rate_limit' | 'capacity_freeze' | null
+  rateLimitReason: 'upstream_rate_limit' | 'error_protection' | null
+  protectionRules: AccountProtectionRule[]
   recoveryProbeRequired: boolean
   nextRefreshAt: string | null
   nextRefreshAtDisplay: string | null
@@ -85,59 +89,59 @@ const statusStyles: Record<AccountStatusTone, AccountStatusStyle> = {
   },
 }
 
-const displayDefinitions: Record<AccountStatusDisplayMode, AccountStatusDisplayDefinition> = {
+const displayDefinitions = computed<Record<AccountStatusDisplayMode, AccountStatusDisplayDefinition>>(() => ({
   refresh_backoff: {
     tone: 'warning',
-    label: '退避中',
-    title: 'OAuth 刷新退避',
-    description: '刷新失败，系统正在等待下一次自动尝试',
-    recoveryHint: '系统会在计划时间自动重试',
+    label: t('accounts.status.retreating'),
+    title: t('accounts.status.oauthRefreshBackoff'),
+    description: t('accounts.status.refreshFailedHelp'),
+    recoveryHint: t('accounts.status.retryScheduledHelp'),
     icon: Timer,
   },
   normal: {
     tone: statusTones.normal,
-    label: statusLabels.normal,
-    description: '该账号当前状态需要关注',
-    recoveryHint: '重新测试连接以获取最新状态',
+    label: statusLabels.value.normal,
+    description: t('accounts.status.attentionHelp'),
+    recoveryHint: t('accounts.status.retestHelp'),
     icon: CircleCheck,
   },
   quota_exhausted: {
     tone: statusTones.quota_exhausted,
-    label: statusLabels.quota_exhausted,
-    description: '该账号当前状态需要关注',
-    recoveryHint: '重新测试连接以获取最新状态',
+    label: statusLabels.value.quota_exhausted,
+    description: t('accounts.status.attentionHelp'),
+    recoveryHint: t('accounts.status.retestHelp'),
     icon: Gauge,
   },
   rate_limited: {
     tone: statusTones.rate_limited,
-    label: statusLabels.rate_limited,
-    description: '上游暂时限制了请求频率，系统正在冷却该账号',
-    recoveryHint: '冷却结束后，系统会自动恢复调度',
+    label: statusLabels.value.rate_limited,
+    description: t('accounts.status.rateLimitedHelp'),
+    recoveryHint: t('accounts.status.cooldownHelp'),
     icon: Timer,
   },
   disabled: {
     tone: statusTones.disabled,
-    label: statusLabels.disabled,
-    description: '该账号当前状态需要关注',
-    recoveryHint: '重新测试连接以获取最新状态',
+    label: statusLabels.value.disabled,
+    description: t('accounts.status.attentionHelp'),
+    recoveryHint: t('accounts.status.retestHelp'),
     icon: Power,
   },
   error: {
     tone: statusTones.error,
-    label: statusLabels.error,
-    description: '该账号暂不参与调度，处理凭据后可重新测试连接',
-    recoveryHint: '重新测试连接以获取最新状态',
+    label: statusLabels.value.error,
+    description: t('accounts.status.credentialsHelp'),
+    recoveryHint: t('accounts.status.retestHelp'),
     icon: AlertTriangle,
   },
-}
+}))
 
-const errorRecoveryHints: Record<AccountErrorReason, string> = {
-  account_unverified: '重新授权后，账号会重新参与调度',
-  access_token_expired: '重新授权后，账号会重新参与调度',
-  credential_expired: '重新授权后，账号会重新参与调度',
-  credential_invalid: '请更新或重新导入凭据，再次测试连接',
-  account_banned: '请确认上游账号状态，解除限制后再启用',
-}
+const errorRecoveryHints = computed<Record<AccountErrorReason, string>>(() => ({
+  account_unverified: t('accounts.status.reauthorizeHelp'),
+  access_token_expired: t('accounts.status.reauthorizeHelp'),
+  credential_expired: t('accounts.status.reauthorizeHelp'),
+  credential_invalid: t('accounts.status.replaceCredentialsHelp'),
+  account_banned: t('accounts.status.upstreamRestrictionHelp'),
+}))
 
 export function resolveAccountStatusPresentation(
   input: AccountStatusPresentationInput,
@@ -146,19 +150,20 @@ export function resolveAccountStatusPresentation(
     && input.nextRefreshAt !== null
     && Date.parse(input.nextRefreshAt) > input.now
   const mode: AccountStatusDisplayMode = isBackoff ? 'refresh_backoff' : input.status
-  const isFreeze = mode === 'rate_limited' && input.rateLimitReason === 'capacity_freeze'
-  const waitsForProbe = isFreeze && input.recoveryProbeRequired
-  const definition = isFreeze
+  const isProtected = mode === 'rate_limited' && input.rateLimitReason === 'error_protection'
+  const waitsForProbe = isProtected && input.recoveryProbeRequired
+  const definition = isProtected
     ? {
-        ...displayDefinitions.rate_limited,
-        description: '容量类请求失败累计达到阈值，系统已暂停该账号的调度',
+        ...displayDefinitions.value.rate_limited,
+        label: t('accounts.status.errorProtection'),
+        description: t('accounts.status.protectionFailuresHelp'),
         recoveryHint: waitsForProbe
-          ? '冷却结束后进行恢复探测，成功后恢复调度，也可手动恢复账号'
-          : '冷却结束后自动恢复调度，也可手动恢复账号',
+          ? t('accounts.status.recoveryProbeHelp')
+          : t('accounts.status.recoveryHelp'),
       }
-    : displayDefinitions[mode]
+    : displayDefinitions.value[mode]
   const nextRefreshDisplay = isBackoff ? input.nextRefreshAtDisplay : null
-  const reasonLabel = input.errorReason ? errorReasonLabels[input.errorReason] : null
+  const reasonLabel = input.errorReason ? errorReasonLabels.value[input.errorReason] : null
   const title = definition.title ?? reasonLabel ?? definition.label
   const rateLimitRecovery = mode === 'rate_limited'
     ? input.rateLimitRecoveryDisplay
@@ -166,11 +171,13 @@ export function resolveAccountStatusPresentation(
   const recoveryHint = mode !== 'refresh_backoff'
     && mode !== 'rate_limited'
     && input.errorReason
-    ? errorRecoveryHints[input.errorReason]
+    ? errorRecoveryHints.value[input.errorReason]
     : definition.recoveryHint
   const hasDetail = input.status === 'error' || mode === 'rate_limited' || isBackoff
-  const retry = nextRefreshDisplay ? `，下次尝试：${nextRefreshDisplay}` : ''
-  const triggerLabel = `${title}，${definition.description}${retry}，点击或聚焦查看详情`
+  const retry = nextRefreshDisplay
+    ? t('accounts.status.nextAttempt', { nextRefreshDisplay })
+    : ''
+  const triggerLabel = t('accounts.status.clickOrFocusToViewDetails', { title, description: definition.description, retry })
 
   return {
     mode,
@@ -184,7 +191,12 @@ export function resolveAccountStatusPresentation(
     errorText: input.errorMessage || null,
     nextRefreshDisplay,
     rateLimitRecovery,
-    recoveryTimeLabel: waitsForProbe ? '恢复探测' : '预计恢复',
+    recoveryTimeLabel: waitsForProbe
+      ? t('accounts.status.resumeDetection')
+      : t('accounts.status.expectedToRecover'),
+    protectionRules: isProtected
+      ? input.protectionRules
+      : [],
     triggerLabel,
   }
 }

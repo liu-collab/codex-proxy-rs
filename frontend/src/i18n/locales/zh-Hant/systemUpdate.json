@@ -1,0 +1,110 @@
+{
+  "systemUpdate": {
+    "channels": {
+      "stable": {
+        "label": "Stable · 正式",
+        "description": "僅正式版本"
+      },
+      "rc": {
+        "label": "RC · 候選",
+        "description": "包含 RC 和正式版本"
+      },
+      "beta": {
+        "label": "Beta · 測試",
+        "description": "包含 Beta、RC 和正式版本"
+      },
+      "alpha": {
+        "label": "Alpha · 早期",
+        "description": "包含所有常規預發佈和正式版本"
+      },
+      "experimental": {
+        "label": "Exp · 實驗",
+        "description": "僅當前實驗線"
+      },
+      "loading": "正在讀取運行通道",
+      "label": "更新通道",
+      "help": "更新通道說明",
+      "description": "選擇僅用於本次檢查，重新打開時按運行版本選擇通道，不會自動安裝或降級"
+    },
+    "feedback": {
+      "available": "發現可用更新",
+      "noUpdates": "當前沒有可用更新",
+      "started": "更新已開始"
+    },
+    "errors": {
+      "remoteTargetMissing": "遠端目標版本爲空",
+      "infoPending": "請等待系統更新信息加載完成",
+      "preRestartCheck": "重啓前檢查失敗",
+      "restart": "重啓失敗，請重新檢查",
+      "unconfirmed": "尚未確認更新任務，請檢查狀態後重試",
+      "updateFailed": "更新失敗",
+      "startTimeout": "服務未在預期時間內啓動 v{version}",
+      "activationTargetMissing": "缺少待生效的目標版本"
+    },
+    "title": "系統更新",
+    "description": "檢查版本、查看發佈說明並執行在線更新",
+    "application": "應用包更新",
+    "releasePage": "發佈頁",
+    "status": {
+      "checkingVersion": "正在檢查版本",
+      "lastFailed": "上次操作失敗",
+      "updating": "更新中",
+      "restarting": "重啓中",
+      "checking": "檢查中",
+      "restartRequired": "待重啓",
+      "available": "有可用更新",
+      "upToDate": "無可用更新",
+      "notChecked": "未檢查",
+      "retrying": "暫時無法確認更新狀態，正在重試",
+      "confirmingStart": "正在確認更新是否已開始"
+    },
+    "targetVersion": "目標版本 v{version}",
+    "releaseNotes": "發佈說明",
+    "progress": "更新進度",
+    "actions": {
+      "check": "檢查更新",
+      "install": "下載並更新",
+      "continueRestart": "繼續重啓",
+      "restart": "立即重啓"
+    },
+    "plugins": {
+      "title": "插件兼容性提醒",
+      "description": "重新啟動後，不相容插件將維持未啟動",
+      "incompatible": "不兼容插件",
+      "requestErrorHelp": "設定與資料保留，可在插件頁嘗試啟動"
+    },
+    "versionAfterRestart": "重啓後版本",
+    "confirmation": {
+      "newerVersion": "發現新的更新版本",
+      "channelChanged": "所選通道的最新版本已變化",
+      "title": "確認更新",
+      "description": "點擊確認後彈窗會關閉，並按遠端最新目標版本開始更新"
+    },
+    "logs": {
+      "live": "實時",
+      "disconnectedState": "斷開",
+      "waiting": "待連接",
+      "disconnected": "更新日誌連接中斷",
+      "parseFailed": "更新日誌解析失敗",
+      "unsupported": "當前瀏覽器不支持實時更新日誌",
+      "timeout": "更新日誌連接超時"
+    },
+    "currentVersion": "當前版本",
+    "latestVersion": "通道最新",
+    "build": "構建",
+    "deployment": "部署",
+    "displayedTarget": "已顯示目標",
+    "remoteTarget": "遠端最新目標",
+    "buildTypes": {
+      "release": "正式構建",
+      "source": "源碼構建",
+      "dev": "開發構建",
+      "experimental": "實驗構建"
+    },
+    "deploymentModes": {
+      "docker": "Docker",
+      "binary": "二進制",
+      "source": "源碼運行"
+    }
+  }
+}

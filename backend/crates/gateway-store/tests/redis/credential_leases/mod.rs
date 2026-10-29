@@ -189,10 +189,12 @@ async fn scheduling_lease_ignores_future_last_started_signal() {
 
 #[tokio::test]
 async fn maintained_scheduling_lease_survives_initial_ttl_and_releases_on_drop() {
-    for scope in [
+    let scopes = [
         CredentialLeaseScope::ProviderAccount,
         CredentialLeaseScope::ProviderAccountReserved,
-    ] {
+    ];
+    // 每个场景创建独立 namespace，两个真实 TTL 窗口可以同时观察
+    futures::future::join_all(scopes.into_iter().map(|scope| async move {
         let Some((repository, _, _)) = repository().await else {
             return;
         };
@@ -234,7 +236,8 @@ async fn maintained_scheduling_lease_survives_initial_ttl_and_releases_on_drop()
         })
         .await
         .expect("dropped request releases its slot");
-    }
+    }))
+    .await;
 }
 
 #[tokio::test]

@@ -512,43 +512,354 @@ async fn abandoned_candidate_keeps_shared_process_failure_in_restart_budget() {
 }
 
 #[tokio::test]
-async fn a_host_version_mismatch_still_restores_the_enabled_plugin() {
-    use std::sync::Arc;
-    let (cache, store, _) = super::super::setup().await;
-    let runtime = gateway_plugin_runtime::PluginRuntime::new(
+async fn incompatible_start_requires_scoped_confirmation_and_rechecks_after_restart() {
+    use gateway_admin::model::plugins::instances::{
+        PluginCapabilityBinding, PluginCompatibilityConfirmation, PluginFailurePolicy,
+    };
+    use gateway_admin::ports::plugins::{
+        PluginPackageInspector as _, PluginRuntimeDiagnostics as _,
+    };
+    use gateway_plugin_runtime::{PackageInspector, PackageLimits};
+    for mismatch in ["host", "capability"] {
+        let mut contribution =
+            crate::support::contribution(Capability::Middleware, vec![Stage::Http], vec![], vec![]);
+        if mismatch == "capability" {
+            contribution.1.version = 3;
+        }
+        let (cache, store, initial) =
+            super::super::setup_with_contributions(Contributions::from([contribution])).await;
+        drop(initial);
+        let host = if mismatch == "host" { "3.0.0" } else { "1.0.0" };
+        let runtime = compatibility_runtime(&cache, store.clone(), host);
+        let markers = tempfile::tempdir().unwrap();
+        let marker = markers.path().join("started");
+        let other_marker = markers.path().join("other-started");
+        let mut snapshot = store.snapshot.lock().unwrap().clone();
+        snapshot.instances[0].configuration = serde_json::json!({"startup_marker":marker});
+        snapshot.instances[0].bindings = vec![PluginCapabilityBinding {
+            contribution: "test.example.middleware".into(),
+            stage: "http".into(),
+            order: 0,
+            failure_policy: PluginFailurePolicy::Reject,
+            event: None,
+            client_key_ids: vec![],
+            account_group_ids: vec![],
+            provider_ids: vec![],
+            models: vec![],
+            identity_bindings: vec![],
+        }];
+        let mut other = snapshot.instances[0].clone();
+        other.id = "other-instance".into();
+        other.configuration = serde_json::json!({"startup_marker":other_marker});
+        snapshot.instances.push(other);
+        *store.snapshot.lock().unwrap() = snapshot.clone();
+        let restored = ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(1).unwrap())
+            .await
+            .unwrap();
+        assert!(restored.can_serve());
+        assert!(runtime.execution_registry().middleware(&restored).is_none());
+        let diagnostics = runtime
+            .runtime_diagnostics(&snapshot, Some(1), Some(&restored))
+            .await
+            .unwrap();
+        assert_eq!(
+            diagnostics["instance-one"].failure.as_ref().unwrap().code,
+            "version_incompatible"
+        );
+        assert_eq!(startup_count(&marker), 0);
+        assert_eq!(startup_count(&other_marker), 0);
+        assert!(snapshot.instances.iter().all(|instance| instance.enabled));
+
+        snapshot.config_revision = Revision::new(2).unwrap();
+        snapshot.instances[0].revision = snapshot.config_revision;
+        assert!(
+            PluginPreparation::prepare(&runtime, snapshot.clone())
+                .await
+                .is_err()
+        );
+        let inspector = PackageInspector::new(PackageLimits::default(), host.parse().unwrap());
+        let mut confirmation = PluginCompatibilityConfirmation {
+            host_fingerprint: "stale-host".into(),
+            instance_id: "instance-one".into(),
+            instance_revision: 1,
+            artifact_sha256: snapshot.instances[0].artifact_sha256.clone(),
+        };
+        assert!(
+            PluginPreparation::prepare_confirmed(&runtime, snapshot.clone(), confirmation.clone())
+                .await
+                .is_err()
+        );
+        assert_eq!(startup_count(&marker), 0);
+        confirmation.host_fingerprint = inspector.compatibility_host_fingerprint().unwrap();
+        let confirmed =
+            PluginPreparation::prepare_confirmed(&runtime, snapshot.clone(), confirmation)
+                .await
+                .unwrap();
+        assert!(
+            runtime
+                .execution_registry()
+                .middleware(&confirmed)
+                .is_some()
+        );
+        let diagnostics = runtime
+            .runtime_diagnostics(&snapshot, Some(2), Some(&confirmed))
+            .await
+            .unwrap();
+        assert_eq!(
+            diagnostics["instance-one"].status,
+            PluginInstanceRuntimeStatus::Running
+        );
+        assert_eq!(
+            diagnostics["other-instance"].failure.as_ref().unwrap().code,
+            "version_incompatible"
+        );
+        assert_eq!(startup_count(&marker), 1);
+        assert_eq!(startup_count(&other_marker), 0);
+        *store.snapshot.lock().unwrap() = snapshot.clone();
+        let reused = ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(2).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(reused.id(), confirmed.id());
+        drop(reused);
+        drop(confirmed);
+        drop(restored);
+        runtime.shutdown().await;
+        super::super::wait_until_empty(cache.path()).await;
+
+        let restarted = compatibility_runtime(&cache, store.clone(), host);
+        let restored =
+            ExtensionPreparationPort::prepare(&restarted, ConfigRevision::new(2).unwrap())
+                .await
+                .unwrap();
+        assert!(
+            restarted
+                .execution_registry()
+                .middleware(&restored)
+                .is_none()
+        );
+        assert_eq!(
+            startup_count(&marker),
+            1,
+            "confirmation must not survive host restart"
+        );
+        assert_eq!(startup_count(&other_marker), 0);
+        drop(restored);
+        restarted.shutdown().await;
+        super::super::wait_until_empty(cache.path()).await;
+    }
+}
+
+fn compatibility_runtime(
+    cache: &tempfile::TempDir,
+    store: std::sync::Arc<crate::support::store::Store>,
+    host: &str,
+) -> gateway_plugin_runtime::PluginRuntime {
+    gateway_plugin_runtime::PluginRuntime::new(
         store.clone(),
-        store.clone(),
+        store,
         gateway_plugin_runtime::PluginRuntimeConfig {
             cache_directory: cache.path().to_owned(),
-            host_version: "3.0.0".parse().unwrap(),
+            host_version: host.parse().unwrap(),
             package_limits: Default::default(),
             rpc_limits: Default::default(),
             restart_circuit: Default::default(),
         },
-        Arc::new(gateway_host::outbound::HttpClient::new().unwrap()),
-        Arc::new(gateway_host::process::ProcessSupervisor::default()),
-    );
-    let restored = ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(1).unwrap())
-        .await
-        .unwrap();
-    assert!(restored.can_serve());
-    let snapshot = store.snapshot.lock().unwrap().clone();
-    let diagnostics = gateway_admin::ports::plugins::PluginRuntimeDiagnostics::runtime_diagnostics(
-        &runtime,
-        &snapshot,
-        Some(1),
-        Some(&restored),
+        std::sync::Arc::new(gateway_host::outbound::HttpClient::new().unwrap()),
+        std::sync::Arc::new(gateway_host::process::ProcessSupervisor::default()),
+    )
+}
+
+#[tokio::test]
+async fn unloadable_packages_have_no_guards_and_cannot_be_forced_to_start() {
+    use gateway_admin::model::plugins::instances::{
+        PluginCapabilityBinding, PluginCompatibilityConfirmation, PluginFailurePolicy,
+    };
+    use gateway_admin::ports::plugins::{
+        PluginPackageInspector as _, PluginRuntimeDiagnostics as _,
+    };
+    use gateway_plugin_runtime::{PackageInspector, PackageLimits, ValidatedPackage};
+    use sha2::{Digest as _, Sha256};
+    use std::{collections::BTreeMap, sync::Arc};
+    for defect in ["rpc", "manifest", "platform", "archive", "digest"] {
+        let (cache, store, initial) = super::super::setup().await;
+        drop(initial);
+        let mut store = Arc::try_unwrap(store).ok().unwrap();
+        let mut broken = store.artifacts.values().next().unwrap().clone();
+        let package =
+            ValidatedPackage::read(broken.archive.clone(), None, PackageLimits::default()).unwrap();
+        let mut manifest = package.manifest().clone();
+        let bytes = b"must never execute";
+        manifest
+            .package
+            .as_mut()
+            .unwrap()
+            .files
+            .insert("bin/worker".into(), hex::encode(Sha256::digest(bytes)));
+        match defect {
+            "rpc" => manifest.package.as_mut().unwrap().protocol_version += 1,
+            "manifest" => manifest.manifest_version += 1,
+            "platform" => {
+                manifest.package.as_mut().unwrap().target.os = if std::env::consts::OS == "windows"
+                {
+                    "linux"
+                } else {
+                    "windows"
+                }
+                .into()
+            }
+            _ => {}
+        }
+        broken.archive = if defect == "archive" {
+            Arc::from(&b"broken archive"[..])
+        } else {
+            crate::support::archive(BTreeMap::from([
+                ("plugin.json".into(), serde_json::to_vec(&manifest).unwrap()),
+                ("bin/worker".into(), bytes.to_vec()),
+            ]))
+        };
+        broken.metadata.sha256 = if defect == "digest" {
+            "0".repeat(64)
+        } else {
+            hex::encode(Sha256::digest(&broken.archive))
+        };
+        let mut failed = store.snapshot.lock().unwrap().instances[0].clone();
+        failed.id = "unloadable".into();
+        failed.artifact_sha256 = broken.metadata.sha256.clone();
+        failed.bindings = [
+            "http",
+            "request",
+            "routing",
+            "scheduling",
+            "retry",
+            "upstream",
+            "authentication",
+        ]
+        .into_iter()
+        .map(|stage| PluginCapabilityBinding {
+            contribution: "test.example.saved".into(),
+            stage: stage.into(),
+            order: 0,
+            failure_policy: PluginFailurePolicy::Reject,
+            event: None,
+            client_key_ids: vec![],
+            account_group_ids: vec![],
+            provider_ids: vec![],
+            models: vec![],
+            identity_bindings: vec![],
+        })
+        .collect();
+        store
+            .artifacts
+            .insert(broken.metadata.sha256.clone(), broken);
+        store.snapshot.lock().unwrap().instances.push(failed);
+        let store = Arc::new(store);
+        let runtime = compatibility_runtime(&cache, store.clone(), "1.0.0");
+        let restored = ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(1).unwrap())
+            .await
+            .unwrap();
+        assert!(
+            runtime.execution_registry().middleware(&restored).is_none(),
+            "{defect}"
+        );
+        assert!(
+            runtime.policy_registry().resolve(&restored).is_none(),
+            "{defect}"
+        );
+        assert!(
+            runtime
+                .frontend_authentication_registry()
+                .resolve(&restored)
+                .is_none(),
+            "{defect}"
+        );
+        let mut snapshot = store.snapshot.lock().unwrap().clone();
+        let diagnostics = runtime
+            .runtime_diagnostics(&snapshot, Some(1), Some(&restored))
+            .await
+            .unwrap();
+        assert_eq!(
+            diagnostics["unloadable"].failure.as_ref().unwrap().code,
+            "package_unloadable",
+            "{defect}"
+        );
+        assert_eq!(
+            diagnostics["instance-one"].status,
+            PluginInstanceRuntimeStatus::Running
+        );
+        snapshot.config_revision = Revision::new(2).unwrap();
+        snapshot.instances[1].revision = snapshot.config_revision;
+        let confirmation = PluginCompatibilityConfirmation {
+            host_fingerprint: PackageInspector::new(
+                PackageLimits::default(),
+                "1.0.0".parse().unwrap(),
+            )
+            .compatibility_host_fingerprint()
+            .unwrap(),
+            instance_id: "unloadable".into(),
+            instance_revision: 1,
+            artifact_sha256: snapshot.instances[1].artifact_sha256.clone(),
+        };
+        assert!(
+            PluginPreparation::prepare_confirmed(&runtime, snapshot, confirmation)
+                .await
+                .is_err(),
+            "{defect}"
+        );
+        assert!(restored.is_ready());
+        drop(restored);
+        runtime.shutdown().await;
+        super::super::wait_until_empty(cache.path()).await;
+    }
+}
+
+#[tokio::test]
+async fn declared_registration_budget_is_not_cut_short_by_process_preparation_timeout() {
+    let (cache, store, runtime) = super::super::setup().await;
+    let mut snapshot = store.snapshot.lock().unwrap().clone();
+    snapshot.instances[0].configuration = serde_json::json!({
+        "registration_delay_ms":31_000,
+        "call_budgets_ms":{"registration":40_000},
+    });
+    let candidate = tokio::time::timeout(
+        Duration::from_secs(45),
+        PluginPreparation::prepare(&runtime, snapshot),
     )
     .await
+    .expect("registration stays bounded by its declared budget")
+    .expect("ready process may register beyond the startup control deadline");
+    assert!(candidate.is_ready());
+    drop(candidate);
+    super::super::wait_until_empty(cache.path()).await;
+}
+
+#[tokio::test]
+async fn shutdown_cancels_long_registration_and_reclaims_the_unpublished_candidate() {
+    let (cache, store, runtime) = super::super::setup().await;
+    let runtime = std::sync::Arc::new(runtime);
+    let markers = tempfile::tempdir().unwrap();
+    let started = markers.path().join("registration");
+    let mut snapshot = store.snapshot.lock().unwrap().clone();
+    snapshot.instances[0].configuration = serde_json::json!({
+        "registration_started_marker":started,
+        "registration_delay_ms":600_000,
+        "call_budgets_ms":{"registration":600_000},
+    });
+    let preparing = tokio::spawn({
+        let runtime = std::sync::Arc::clone(&runtime);
+        async move { PluginPreparation::prepare(runtime.as_ref(), snapshot).await }
+    });
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !started.exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
     .unwrap();
-    assert!(restored.is_ready());
-    assert!(snapshot.instances[0].enabled);
-    assert_eq!(
-        diagnostics["instance-one"].status,
-        PluginInstanceRuntimeStatus::Running
-    );
-    assert!(diagnostics["instance-one"].failure.is_none());
-    drop(restored);
-    runtime.shutdown().await;
+    tokio::time::timeout(Duration::from_secs(3), runtime.shutdown())
+        .await
+        .expect(
+            "shutdown must cancel candidate preparation instead of waiting for its long budget",
+        );
+    assert!(preparing.await.unwrap().is_err());
     super::super::wait_until_empty(cache.path()).await;
 }

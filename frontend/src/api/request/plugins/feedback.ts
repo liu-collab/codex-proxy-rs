@@ -1,5 +1,5 @@
 import type { RequestContext, RequestNext } from './index'
-import { ZNotification } from '@codex-proxy/ui'
+import { notification as ZNotification } from '@/utils/notification'
 import { ApiError, isSessionRequired } from './error'
 
 // 共享刷新 Promise 的同一个失败只提示一次，弱引用不保留已结束请求

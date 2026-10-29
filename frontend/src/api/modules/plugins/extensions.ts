@@ -1,11 +1,11 @@
 import type { RequestConfig, RequestOptions } from '../../request'
-import { API_BASE_URL } from '../../constants'
-import request, { requestRaw } from '../../request'
+import request, { requestRaw, requestStream } from '../../request'
 
 // 管理路由可能执行长任务，HTTP 与页面桥使用同一等待上限。
 export const PLUGIN_MANAGEMENT_TIMEOUT_MS = 180_000
 
 const MAXIMUM_MANAGEMENT_BODY_BYTES = 1024 * 1024
+const PLUGIN_RESPONSE_HEADER = 'x-cpr-plugin-response'
 
 export interface PluginManagementTarget {
   instanceId: string
@@ -92,12 +92,16 @@ export function callPluginManagementRoute(
   call: PluginManagementRawRequest,
   options: RequestOptions = {},
 ) {
-  const query = call.query ? `?${call.query}` : ''
+  const query = call.query
+    ? `?${call.query}`
+    : ''
   return requestPluginManagementRaw({
     url: `${pluginManagementTargetPath(target)}/api/${encodePluginPath(call.path)}${query}`,
     method: call.method,
     data: call.body?.byteLength ? call.body : undefined,
-    headers: call.contentType ? { 'Content-Type': call.contentType } : undefined,
+    headers: call.contentType
+      ? { 'Content-Type': call.contentType }
+      : undefined,
     timeout: PLUGIN_MANAGEMENT_TIMEOUT_MS,
     ...options,
   })
@@ -110,18 +114,21 @@ export function callPluginModelResponses(
   signal: AbortSignal,
 ) {
   const query = new URLSearchParams({ clientKeyId })
-  return fetch(`${API_BASE_URL}${pluginManagementTargetPath(target)}/models/responses?${query}`, {
+  return requestStream({
+    url: `${pluginManagementTargetPath(target)}/models/responses?${query}`,
     method: 'POST',
-    body,
-    cache: 'no-store',
-    credentials: 'same-origin',
+    data: body,
+    timeout: 0,
+    silent: true,
     headers: {
       'accept': 'application/json, text/event-stream',
       'Content-Type': 'application/json',
     },
-    redirect: 'error',
-    referrerPolicy: 'no-referrer',
+    fetchOptions: { cache: 'no-store', redirect: 'error', referrerPolicy: 'no-referrer' },
     signal,
+  }, {
+    maximumBytes: MAXIMUM_MANAGEMENT_BODY_BYTES,
+    accept: ({ header }) => header(PLUGIN_RESPONSE_HEADER) === '1',
   })
 }
 
@@ -157,10 +164,6 @@ function encodePluginPath(path: string) {
 function requestPluginManagementRaw(config: RequestConfig) {
   return requestRaw(config, {
     maximumBytes: MAXIMUM_MANAGEMENT_BODY_BYTES,
-    accept: ({ header }) => {
-      const policy = header('content-security-policy')
-      return policy?.split(';').some(directive => directive.trim() === 'sandbox allow-scripts') === true
-        && header('x-content-type-options')?.toLowerCase() === 'nosniff'
-    },
+    accept: ({ header }) => header(PLUGIN_RESPONSE_HEADER) === '1',
   })
 }

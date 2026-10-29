@@ -826,3 +826,88 @@ async fn image_generation_defaults_to_allowed_for_new_groups() {
     assert!(allowed);
     database.close().await;
 }
+
+#[tokio::test]
+async fn committed_group_mutations_succeed_when_the_usage_query_budget_is_exhausted() {
+    let Some(database) = TestDatabase::create("account_group_projection_failure").await else {
+        return;
+    };
+    let budget =
+        ObservabilityQueryBudget::try_new(1, Duration::from_millis(1), Duration::from_secs(30))
+            .unwrap();
+    let held_budget = budget.clone();
+    let held_pool = database.pool.clone();
+    let (entered, waiting) = tokio::sync::oneshot::channel();
+    let (release, released) = tokio::sync::oneshot::channel();
+    let holder = tokio::spawn(async move {
+        held_budget
+            .run(
+                &held_pool,
+                "hold projection budget",
+                |connection| async move {
+                    entered.send(()).unwrap();
+                    released.await.unwrap();
+                    drop(connection);
+                    Ok(())
+                },
+            )
+            .await
+    });
+    waiting.await.unwrap();
+    let groups = PgAccountGroupRepository::new(database.pool.clone(), budget);
+    let id = AccountGroupId::new(MIXED_GROUP).unwrap();
+    let before = current_revision(&database.pool).await;
+    let created = groups
+        .create_account_group(
+            NewAccountGroup {
+                id: id.clone(),
+                name: "Committed".to_owned(),
+                description: None,
+                color: AccountGroupColor::parse("#2563EBFF").unwrap(),
+                fast_mode: FastMode::Default,
+                allow_image_generation: true,
+            },
+            &context("projection-create"),
+        )
+        .await
+        .expect("create commits despite observation failure");
+    assert!(created.record.is_none());
+    let updated = groups
+        .update_account_group(
+            gateway_admin::model::account_groups::UpdateAccountGroup {
+                id: id.clone(),
+                name: "Updated".to_owned(),
+                description: None,
+                color: AccountGroupColor::parse("#2563EBFF").unwrap(),
+                fast_mode: None,
+                allow_image_generation: None,
+            },
+            &context("projection-update"),
+        )
+        .await
+        .expect("update commits despite observation failure");
+    assert!(updated.record.is_none());
+    let disabled = groups
+        .set_account_group_enabled(
+            gateway_admin::model::account_groups::SetAccountGroupEnabled {
+                id: id.clone(),
+                enabled: false,
+            },
+            &context("projection-disable"),
+        )
+        .await
+        .expect("disable commits despite observation failure");
+    assert!(disabled.record.is_none());
+    assert_eq!(current_revision(&database.pool).await, before + 3);
+    assert_eq!(audit_count(&database.pool).await, 3);
+    let persisted: (String, bool) =
+        sqlx::query_as("select name, enabled from account_groups where id = $1")
+            .bind(id.as_str())
+            .fetch_one(&database.pool)
+            .await
+            .unwrap();
+    assert_eq!(persisted, ("Updated".to_owned(), false));
+    release.send(()).unwrap();
+    holder.await.unwrap().unwrap();
+    database.close().await;
+}

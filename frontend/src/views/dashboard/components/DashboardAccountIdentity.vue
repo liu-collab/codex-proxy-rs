@@ -1,24 +1,33 @@
 <script setup lang="ts">
 import type { dashboardSnapshotView } from '../presenter'
+
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import { stablePresetVisualToneClass } from '@/utils/color'
 import { authenticationIcon, formatAuthenticationLabel, formatProviderLabel, providerIcon } from '@/utils/providers'
 
-type DashboardSnapshot = ReturnType<typeof dashboardSnapshotView>
-type DashboardAccount = DashboardSnapshot['accountUsage'][number]
-
 const props = defineProps<{
   account: DashboardAccount
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
+type DashboardSnapshot = ReturnType<typeof dashboardSnapshotView>
+type DashboardAccount = DashboardSnapshot['accountUsage'][number]
+
 const email = computed(() => props.account.email?.trim() || String(props.account.id))
 const displayTitle = computed(() => email.value.split('@')[0] || email.value)
+const secondaryText = computed(() => props.account.authenticationKind === 'api_key'
+  ? props.account.notes
+  : email.value)
 const normalizedProvider = computed(() => props.account.provider?.trim().toLowerCase() || '')
-const providerIconComponent = computed(() => normalizedProvider.value ? providerIcon(normalizedProvider.value) : undefined)
+const providerIconComponent = computed(() => normalizedProvider.value
+  ? providerIcon(normalizedProvider.value)
+  : undefined)
 const authenticationIconComponent = computed(() => authenticationIcon(props.account.authenticationKind))
-const providerLabel = computed(() => formatProviderLabel(props.account.provider, '未知平台'))
+const providerLabel = computed(() => formatProviderLabel(props.account.provider, t('common.providers.unknown')))
 
 const authenticationLabel = computed(() => formatAuthenticationLabel(props.account.authenticationKind))
 
@@ -58,10 +67,11 @@ const avatarToneClass = computed(() =>
         <AccountPlanBadge :authentication-kind="account.authenticationKind" :plan-type="account.planType" :plan-type-display="account.planTypeDisplay" size="xs" />
       </span>
       <span
+        v-if="secondaryText"
         class="mt-0.5 block min-w-0 truncate font-mono text-cp-xs font-emphasis text-cp-text-quaternary"
-        :title="email"
+        :title="secondaryText"
       >
-        {{ email }}
+        {{ secondaryText }}
       </span>
     </span>
   </div>

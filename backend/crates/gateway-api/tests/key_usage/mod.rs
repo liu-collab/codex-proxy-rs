@@ -228,11 +228,14 @@ async fn overview_scopes_every_query_and_projects_only_key_visible_fields() {
         assert!(filter.provider_account_ref.is_none());
         assert!(filter.provider_kind.is_none());
     }
-    assert_eq!(observations.summaries[0].1.model.as_deref(), Some("coding"));
+    assert_eq!(
+        observations.summaries[0].1.model_contains.as_deref(),
+        Some("coding")
+    );
     let health = observations
         .trends
         .iter()
-        .find(|(_, filter)| filter.model.is_none())
+        .find(|(_, filter)| filter.model_contains.is_none())
         .unwrap();
     assert_eq!(
         health.0.start,
@@ -346,7 +349,7 @@ async fn records_keep_pagination_and_hide_admin_and_upstream_data() {
     ]) {
         assert_eq!(query.status, status);
         assert_eq!(query.filter.client_api_key_ref.as_deref(), Some("key-42"));
-        assert_eq!(query.filter.model.as_deref(), Some("coding"));
+        assert_eq!(query.filter.model_contains.as_deref(), Some("coding"));
         assert!(query.filter.provider_account_ref.is_none());
         assert!(query.filter.provider_kind.is_none());
     }

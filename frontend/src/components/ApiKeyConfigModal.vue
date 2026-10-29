@@ -2,23 +2,30 @@
 import { ZButton, ZDialog, ZIconButton, ZScrollbar, ZSegmented, ZSwitch } from '@codex-proxy/ui'
 
 import { Apple, Copy, Monitor, Upload } from '@lucide/vue'
-import { computed, shallowRef } from 'vue'
-import { buildCodexCcSwitchImportDeeplink, buildCodexConfig, CODEX_WEBSOCKET_ENABLED_BY_DEFAULT } from '@/utils/client'
 
-const props = withDefaults(defineProps<{
+import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { buildCodexCcSwitchImportDeeplink, buildCodexConfig, CODEX_WEBSOCKET_ENABLED_BY_DEFAULT } from '@/utils/client'
+import ClientImportModal from './ClientImportModal.vue'
+
+const props = defineProps<{
   title?: string
   apiKey: {
     name?: string
     key?: string
   } | null
   apiBaseUrl: string
-}>(), { title: '使用密钥' })
+}>()
 
 const emit = defineEmits<{
   copy: [text: string]
+  afterLeave: []
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const open = defineModel<boolean>({ default: false })
+const showImport = shallowRef(false)
 
 const activePlatform = shallowRef('unix')
 const websocketEnabled = shallowRef(CODEX_WEBSOCKET_ENABLED_BY_DEFAULT)
@@ -40,7 +47,7 @@ const codexConfig = computed(() => buildCodexConfig({
   websocketEnabled: websocketEnabled.value,
 }))
 
-function importToCcs() {
+function importToClient() {
   if (!keyValue.value)
     return
   window.location.href = buildCodexCcSwitchImportDeeplink({
@@ -54,16 +61,17 @@ function importToCcs() {
 <template>
   <ZDialog
     v-model="open"
-    :title="title"
-    description="保存或合并下方配置后重启 Codex"
+    :title="title ?? t('keys.configuration.title')"
+    :description="t('keys.configuration.description')"
     width="48rem"
+    @closed="showImport = false; emit('afterLeave')"
   >
     <div class="flex flex-col gap-5">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <ZSegmented v-model="activePlatform" aria-label="配置平台" :options="platformOptions" />
+        <ZSegmented v-model="activePlatform" :aria-label="t('keys.configuration.platform')" :options="platformOptions" />
         <ZSwitch
           v-model="websocketEnabled"
-          aria-label="切换 WebSocket 配置"
+          :aria-label="t('keys.configuration.toggleWebSocket')"
           active-text="WS"
           inactive-text="WS"
           inline-prompt
@@ -81,7 +89,7 @@ function importToCcs() {
           <ZIconButton
             variant="solid"
             size="small"
-            aria-label="复制"
+            :aria-label="t('common.actions.copy')"
             @click="emit('copy', codexConfig)"
           >
             <Copy class="size-3.5" />
@@ -99,13 +107,14 @@ function importToCcs() {
     </div>
 
     <template #footer>
-      <ZButton :disabled="!keyValue" @click="importToCcs">
+      <ZButton :disabled="!keyValue" @click="showImport = true">
         <Upload class="size-4" />
-        导入 CCSwitch
+        {{ t('keys.configuration.importTo') }}
       </ZButton>
       <ZButton type="primary" @click="open = false">
-        关闭
+        {{ t('common.actions.close') }}
       </ZButton>
     </template>
   </ZDialog>
+  <ClientImportModal v-if="open" v-model="showImport" @select="importToClient" />
 </template>

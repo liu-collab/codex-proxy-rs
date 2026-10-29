@@ -127,19 +127,9 @@ impl TestDatabase {
 }
 
 fn store_config(database_url: &str, redis_url: &str) -> StoreConfig {
-    let (database_url, database_password) = split_connection_url(database_url);
-    let (redis_url, redis_password) = split_connection_url(redis_url);
     serde_json::from_value(serde_json::json!({
-        "database": { "url": database_url, "password": database_password },
-        "redis": { "url": redis_url, "password": redis_password },
+        "database": crate::support::config_connection(url::Url::parse(database_url).unwrap()),
+        "redis": crate::support::config_connection(url::Url::parse(redis_url).unwrap()),
     }))
     .expect("test Store config")
-}
-
-fn split_connection_url(value: &str) -> (String, String) {
-    let mut url = url::Url::parse(value).expect("test connection URL");
-    let password = url.password().expect("test connection password").to_owned();
-    url.set_password(None)
-        .expect("connection URL supports credentials");
-    (url.to_string(), password)
 }

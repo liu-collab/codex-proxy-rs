@@ -1,6 +1,7 @@
 import type { RequestOptions } from '../request'
 import type { AnalyticsMetadata } from './analytics'
-import request, { requestRaw } from '../request'
+import { API_BASE_URL } from '../constants'
+import request from '../request'
 
 export interface UsageTokenDetails {
   inputTokens: number | null
@@ -97,7 +98,6 @@ export interface UsageListRecord {
   model: string | null
   requestedModel: string | null
   upstreamModel: string | null
-  upstreamResponseModel: string | null
   serviceTier: string | null
   clientTransport: string
   upstreamTransport: string | null
@@ -130,7 +130,6 @@ export interface UsageRecord {
   model: string | null
   requestedModel: string | null
   upstreamModel: string | null
-  upstreamResponseModel: string | null
   serviceTier: string | null
   statusCode: number | null
   clientTransport: string
@@ -228,6 +227,7 @@ export interface UsageSummaryResponse {
   cacheWriteInputTokens: string
   totalTokens: string
   averageLatencyMs: string
+  averageLatencyMsValue: number | null
 }
 
 export interface UsageOverviewHealthPoint {
@@ -256,47 +256,32 @@ export interface UsageOverviewHealth {
   points: UsageOverviewHealthPoint[]
 }
 
-export interface UsageOverviewPerformancePoint {
-  bucket: string
-  label: string
-  latencyP50Ms: number | null
-  latencyP95Ms: number | null
-  latencyP99Ms: number | null
-  firstTokenP50Ms: number | null
-  firstTokenP95Ms: number | null
-  firstTokenP99Ms: number | null
-  admissionDecisionP50Ms: number | null
+export interface UsageOverviewLoad {
+  averageConcurrency: number
+  peakConcurrency: number
   admissionDecisionP95Ms: number | null
-  accountSelectionWaitP50Ms: number | null
   accountSelectionWaitP95Ms: number | null
-  outputThroughputP10: number | null
-  outputThroughputP50: number | null
-  outputThroughputP90: number | null
-  capacityUtilization: number | null
-  capacityUtilizationP95: number | null
 }
 
-export interface UsageOverviewPerformance {
+export interface UsageOverviewPerformanceMetrics {
   latencyP50Ms: number | null
   latencyP95Ms: number | null
   latencyP99Ms: number | null
   firstTokenP50Ms: number | null
   firstTokenP95Ms: number | null
   firstTokenP99Ms: number | null
-  admissionDecisionP50Ms: number | null
-  admissionDecisionP95Ms: number | null
-  accountSelectionWaitP50Ms: number | null
-  accountSelectionWaitP95Ms: number | null
   outputThroughputP10: number | null
   outputThroughputP50: number | null
   outputThroughputP90: number | null
-  capacityUtilization: number | null
-  capacityUtilizationP95: number | null
-  latencyCoverage: number
-  firstTokenCoverage: number
-  admissionDecisionCoverage: number
-  accountSelectionWaitCoverage: number
-  capacityCoverage: number
+  load: UsageOverviewLoad
+}
+
+export interface UsageOverviewPerformancePoint extends UsageOverviewPerformanceMetrics {
+  bucket: string
+  label: string
+}
+
+export interface UsageOverviewPerformance extends UsageOverviewPerformanceMetrics {
   points: UsageOverviewPerformancePoint[]
 }
 
@@ -375,8 +360,6 @@ interface UsageRangeQuery {
   startTime: string
   endTime: string
   provider?: string
-  model?: string
-  statusCode?: number
 }
 
 interface PageQuery {
@@ -384,13 +367,18 @@ interface PageQuery {
   pageSize: number
 }
 
-type UsagePageQuery = UsageRangeQuery & PageQuery & { search?: string, status?: UsageRecordStatus }
+type UsagePageQuery = UsageRangeQuery & PageQuery & {
+  clientApiKeyName?: string
+  accountName?: string
+  model?: string
+  status?: UsageRecordStatus
+}
 
 interface UsageDetailQuery {
   id: string
 }
 
-type UsageDiagnosticsQuery = UsageRangeQuery & { dimension: string }
+type UsageDiagnosticsQuery = UsageRangeQuery & { dimension: string, model?: string, statusCode?: number }
 
 type DiagnosticsDownloadParams = { requestId: string } | { errorId: string }
 
@@ -439,15 +427,6 @@ export function getUsageRecordInsightsDiagnostics(data: UsageDiagnosticsQuery, o
   })
 }
 
-export function downloadDiagnostics(data: DiagnosticsDownloadParams, options: RequestOptions = {}) {
-  return requestRaw({
-    url: '/api/admin/diagnostics/export',
-    method: 'GET',
-    params: data,
-    timeout: 25_000,
-    ...options,
-  }, {
-    maximumBytes: 16 * 1024 * 1024,
-    accept: response => response.status === 200 && !!response.header('content-type')?.startsWith('application/json'),
-  })
+export function getDiagnosticsDownloadUrl(data: DiagnosticsDownloadParams) {
+  return `${API_BASE_URL}/api/admin/diagnostics/export?${new URLSearchParams(data)}`
 }

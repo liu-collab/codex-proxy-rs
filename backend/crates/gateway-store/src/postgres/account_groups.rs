@@ -90,6 +90,17 @@ impl PgAccountGroupRepository {
         Ok(record)
     }
 
+    async fn committed_record(&self, id: &AccountGroupId) -> Option<AccountGroupRecord> {
+        // 配置、版本和审计已经提交，展示查询失败不能把成功的变更变成错误返回。
+        match self.required_record(id).await {
+            Ok(record) => Some(record),
+            Err(error) => {
+                tracing::warn!(group_id = %id.as_str(), error = %error, "committed account group projection is unavailable");
+                None
+            }
+        }
+    }
+
     async fn mutate<F>(
         &self,
         audit: super::AdminAuditEvent,
@@ -317,7 +328,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
         Ok(AccountGroupMutation {
             config_revision: revision,
             id: id.clone(),
-            record: Some(self.required_record(&id).await?),
+            record: self.committed_record(&id).await,
         })
     }
 
@@ -363,7 +374,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
         Ok(AccountGroupMutation {
             config_revision: revision,
             id: id.clone(),
-            record: Some(self.required_record(&id).await?),
+            record: self.committed_record(&id).await,
         })
     }
 
@@ -399,7 +410,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
         Ok(AccountGroupMutation {
             config_revision: revision,
             id: id.clone(),
-            record: Some(self.required_record(&id).await?),
+            record: self.committed_record(&id).await,
         })
     }
 

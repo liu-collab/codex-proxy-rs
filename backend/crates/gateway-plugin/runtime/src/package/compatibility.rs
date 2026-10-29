@@ -69,19 +69,16 @@ pub(crate) fn warning(
     requirements: &PluginCompatibilityRequirements,
     host: &semver::Version,
 ) -> Result<Option<String>, AdminError> {
-    let compatibility = host_compatibility()?;
-    let mut warnings = Vec::new();
-    if !semver::VersionReq::parse(&requirements.host_version).is_ok_and(|range| range.matches(host))
-    {
-        warnings.push(format!(
-            "插件声明的宿主范围为 {}，当前为 {host}",
-            requirements.host_version
-        ));
-    }
-    for (capability, version) in &requirements.capabilities {
-        if !compatibility.supports_capability(capability, *version) {
-            warnings.push(format!("{capability} v{version} 不在宿主支持范围内"));
-        }
-    }
+    let warnings = host_compatibility()?.incompatibilities(requirements, host);
     Ok((!warnings.is_empty()).then(|| warnings.join("，")))
+}
+
+pub(crate) fn host_fingerprint(host: &semver::Version) -> Result<String, AdminError> {
+    use sha2::{Digest, Sha256};
+    host_compatibility()?;
+    Ok(hex::encode(Sha256::digest(format!(
+        "{host}\n{}\n{}\n{HOST_COMPATIBILITY_JSON}",
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    ))))
 }

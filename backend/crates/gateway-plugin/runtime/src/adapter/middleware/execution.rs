@@ -7,7 +7,7 @@ use gateway_core::engine::middleware::{
     MiddlewareRequest, MiddlewareResponse,
 };
 use gateway_core::middleware::{Middleware, Next};
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 // 协议适配只提供选择条件与单层调用；顺序、上下文捕获和续体拼接共用这一个入口
 type Invoke<Context, Input, Output, Error> = fn(
@@ -15,7 +15,6 @@ type Invoke<Context, Input, Output, Error> = fn(
     Context,
     Input,
     Next<Input, Output, Error>,
-    Duration,
 ) -> BoxFuture<'static, Result<Output, Error>>;
 
 impl PluginMiddlewarePlan {
@@ -42,8 +41,7 @@ impl PluginMiddlewarePlan {
             .map(|entry| -> Middleware<Input, Output, Error> {
                 let entry = Arc::clone(entry);
                 let context = context.clone();
-                let timeout = self.middleware_timeout;
-                Box::new(move |input, next| invoke(entry, context, input, next, timeout))
+                Box::new(move |input, next| invoke(entry, context, input, next))
             })
             .collect();
         gateway_core::middleware::compose(layers, move |input| next.run(input))
@@ -51,6 +49,33 @@ impl PluginMiddlewarePlan {
 }
 
 impl MiddlewarePlan for PluginMiddlewarePlan {
+    fn has_outbound(&self, context: &MiddlewareContext) -> bool {
+        self.middleware
+            .get(&MiddlewareMount::Outbound)
+            .is_some_and(|entries| entries.iter().any(|entry| outbound_matches(entry, context)))
+    }
+
+    fn handle_outbound(
+        &self,
+        context: MiddlewareContext,
+        request: gateway_core::engine::middleware::outbound::Request,
+        next: gateway_core::engine::middleware::outbound::Next,
+    ) -> BoxFuture<
+        'static,
+        Result<gateway_core::engine::middleware::outbound::Request, MiddlewareError>,
+    > {
+        self.chain(
+            MiddlewareMount::Outbound,
+            context,
+            outbound_matches,
+            |entry, context, request, next| {
+                Box::pin(super::outbound::invoke(entry, context, request, next))
+            },
+            next,
+        )
+        .run(request)
+    }
+
     fn has_service(&self) -> bool {
         self.middleware.contains_key(&MiddlewareMount::Service)
     }
@@ -70,8 +95,8 @@ impl MiddlewarePlan for PluginMiddlewarePlan {
             MiddlewareMount::Service,
             context,
             |entry, context| !context.extensions.contains(&entry.instance_id),
-            |entry, context, input, next, timeout| {
-                Box::pin(super::service::invoke(entry, context, input, next, timeout))
+            |entry, context, input, next| {
+                Box::pin(super::service::invoke(entry, context, input, next))
             },
             next,
         )
@@ -94,10 +119,8 @@ impl MiddlewarePlan for PluginMiddlewarePlan {
             MiddlewareMount::WebSocket,
             context,
             |_entry, _context| true,
-            |entry, context, message, next, timeout| {
-                Box::pin(super::websocket::invoke(
-                    entry, context, message, next, timeout,
-                ))
+            |entry, context, message, next| {
+                Box::pin(super::websocket::invoke(entry, context, message, next))
             },
             next,
         )
@@ -118,8 +141,8 @@ impl MiddlewarePlan for PluginMiddlewarePlan {
             MiddlewareMount::Http,
             context,
             |entry, context| !context.extensions.contains(&entry.instance_id),
-            |entry, context, request, next, timeout| {
-                Box::pin(super::http::invoke(entry, context, request, next, timeout))
+            |entry, context, request, next| {
+                Box::pin(super::http::invoke(entry, context, request, next))
             },
             next,
         )
@@ -144,13 +167,22 @@ impl MiddlewarePlan for PluginMiddlewarePlan {
                         context.model(),
                     )
             },
-            |entry, context, request, next, timeout| {
-                Box::pin(super::request::invoke(
-                    entry, context, request, next, timeout,
-                ))
+            |entry, context, request, next| {
+                Box::pin(super::request::invoke(entry, context, request, next))
             },
             next,
         )
         .run(request)
     }
+}
+
+// 存在性检查与实际组合使用同一选择规则，未命中时不进入原生报文准备
+fn outbound_matches(entry: &MiddlewareEntry, context: &MiddlewareContext) -> bool {
+    !context.extension_scope().contains(&entry.instance_id)
+        && entry.scope.matches_processing(
+            context.client_key_id(),
+            context.account_group_ids(),
+            context.provider(),
+            context.model(),
+        )
 }

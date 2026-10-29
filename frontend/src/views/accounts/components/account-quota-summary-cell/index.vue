@@ -2,9 +2,11 @@
 import type { Account } from '@/api'
 
 import { computed } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import AccountUsageWindow from '@/components/account/account-usage-window/index.vue'
 import { quotaWindowPresentation } from '@/components/account/account-usage-window/presenter'
-import { groupedAccountQuotaWindows, visibleSummaryQuotaWindows } from '../../constants'
+import { groupedAccountQuotaWindows, usageWindowLabels, visibleSummaryQuotaWindows } from '../../constants'
 import AccountCapacityIndicator from '../AccountCapacityIndicator.vue'
 import AccountQuotaSummaryEntry from './Entry.vue'
 import { recentlyUsedQuotaEntry, representativeQuotaWindow } from './presenter'
@@ -14,6 +16,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ showConcurrency: [] }>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 const quotaWindows = computed(() => props.account.quota.windows)
 const visibleQuotaWindows = computed(() => visibleSummaryQuotaWindows(quotaWindows.value))
@@ -36,17 +40,17 @@ const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length
     <template v-if="account.authenticationKind === 'api_key'">
       <span
         class="flex min-w-0 items-baseline gap-1 font-mono leading-none tabular-nums"
-        title="本地累计总 Token"
+        :title="t('accounts.quota.localTokens')"
       >
         <strong class="truncate text-cp-xs font-heavy text-cp-text">{{ account.usage.totalTokensDisplay }}</strong>
-        <span class="shrink-0 text-[9px] font-emphasis tracking-[0.02em] text-cp-text-quaternary">Tokens</span>
+        <span class="shrink-0 text-[9px] font-emphasis tracking-[0.02em] text-cp-text-quaternary">{{ t('common.units.tokens') }}</span>
       </span>
       <div class="grid min-w-0 gap-1.5">
         <div class="flex min-w-0 items-start justify-between gap-2 leading-3">
-          <span class="truncate text-[10px] font-bold text-cp-text-quaternary">{{ account.usage.windowLabelDisplay }}</span>
+          <span class="truncate text-[10px] font-bold text-cp-text-quaternary">{{ usageWindowLabels[account.usage.windowKind] }}</span>
           <AccountCapacityIndicator :capacity="account.capacity" @show-details="emit('showConcurrency')" />
         </div>
-        <div class="h-1 w-full rounded-full bg-cp-success" title="上游额度未提供，绿色条不表示剩余额度" aria-hidden="true" />
+        <div class="h-1 w-full rounded-full bg-cp-success" :title="t('accounts.quota.unavailableHelp')" aria-hidden="true" />
       </div>
     </template>
     <template v-else-if="summaryEntries.length > 0">
@@ -56,21 +60,21 @@ const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length
       >
         <span
           class="flex min-w-0 items-baseline gap-1 font-mono tabular-nums"
-          :title="`${account.usage.windowLabelDisplay}总 Token`"
+          :title="t('accounts.quota.totalTokensFor', { windowLabelDisplay: usageWindowLabels[account.usage.windowKind] })"
         >
           <strong class="truncate text-cp-xs font-heavy text-cp-text">
             {{ account.usage.totalTokensDisplay }}
           </strong>
           <span class="shrink-0 text-[9px] font-emphasis tracking-[0.02em] text-cp-text-quaternary">
-            Tokens
+            {{ t('common.units.tokens') }}
           </span>
         </span>
         <span
           v-if="currentUsageWindow"
           class="flex shrink-0 items-baseline gap-1 text-[9px] font-emphasis text-cp-text-quaternary"
-          title="最近使用额度的当前已用比例"
+          :title="t('accounts.quota.usageRateHelp')"
         >
-          <span>使用率</span>
+          <span>{{ t('accounts.quota.usageRate') }}</span>
           <strong class="font-mono font-heavy tabular-nums" :class="currentUsageTextClass">
             {{ currentUsageDisplay }}
           </strong>
@@ -94,7 +98,7 @@ const additionalEntryCount = computed(() => Math.max(summaryEntries.value.length
         <span
           v-if="additionalEntryCount > 0"
           class="grid h-5 min-w-5 shrink-0 place-items-center rounded-cp bg-cp-fill-quaternary px-1.5 font-mono text-[9px] font-heavy tabular-nums text-cp-text-tertiary"
-          :title="`另有 ${additionalEntryCount} 个额度组，可展开账号查看`"
+          :title="t('accounts.quota.moreGroups', { count: additionalEntryCount })"
         >
           +{{ additionalEntryCount }}
         </span>

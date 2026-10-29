@@ -33,11 +33,11 @@ use gateway_store::postgres::{
 
 use super::TestDatabase;
 
-fn key_id(key: &str) -> ClientApiKeyId {
+pub(super) fn key_id(key: &str) -> ClientApiKeyId {
     ClientApiKeyId::new(key).unwrap()
 }
 
-fn charge(key: &str, request: &str, amount: &str) -> ClientBudgetCharge {
+pub(super) fn charge(key: &str, request: &str, amount: &str) -> ClientBudgetCharge {
     ClientBudgetCharge {
         key_id: key_id(key),
         request_id: ModelRequestId::new(format!("req_{request}")).unwrap(),
@@ -46,7 +46,7 @@ fn charge(key: &str, request: &str, amount: &str) -> ClientBudgetCharge {
     }
 }
 
-async fn seed(database: &TestDatabase, key: &str, daily: &str, weekly: &str) {
+pub(super) async fn seed(database: &TestDatabase, key: &str, daily: &str, weekly: &str) {
     sqlx::query(
         "insert into client_api_keys (id, name, key, daily_limit_usd, weekly_limit_usd, created_at, updated_at)
         values ($1, $1, $2, $3::text::numeric, $4::text::numeric, now(), now())",
@@ -60,7 +60,7 @@ async fn seed(database: &TestDatabase, key: &str, daily: &str, weekly: &str) {
     .unwrap();
 }
 
-async fn status(database: &TestDatabase, key: &str) -> ClientBudgetStatus {
+pub(super) async fn status(database: &TestDatabase, key: &str) -> ClientBudgetStatus {
     PgClientApiKeyRepository::new(database.pool.clone())
         .get_client_api_key(key)
         .await
@@ -69,7 +69,7 @@ async fn status(database: &TestDatabase, key: &str) -> ClientBudgetStatus {
         .budget
 }
 
-fn context() -> MutationContext {
+pub(super) fn context() -> MutationContext {
     MutationContext {
         actor: MutationActor::System,
         request_id: "budget-test".to_owned(),
@@ -687,7 +687,7 @@ async fn zero_cost_and_interrupted_requests_never_block_limited_keys() {
 }
 
 #[tokio::test]
-async fn transient_settlement_failure_rolls_back_and_retries_exact_cost_before_admission() {
+async fn settlement_failure_rolls_back_and_explicit_retry_is_idempotent() {
     let Some(database) = TestDatabase::create("budgets_retry").await else {
         return;
     };
@@ -721,6 +721,7 @@ async fn transient_settlement_failure_rolls_back_and_retries_exact_cost_before_a
         .execute(&database.pool)
         .await
         .unwrap();
+    store.settle(charge("key", "retry", "1.25")).await.unwrap();
     let error = store.admit(key_id("key")).await.unwrap_err();
     assert_eq!(error.client_error_code(), Some("key_daily_budget_exceeded"));
     store.settle(charge("key", "retry", "1.25")).await.unwrap();

@@ -20,14 +20,9 @@ async fn pricing_store(name: &str) -> Option<(TestDatabase, gateway_store::Store
     database_url
         .query_pairs_mut()
         .append_pair("options", &format!("-csearch_path={}", database.schema));
-    let connection = |mut url: url::Url| {
-        let password = url.password().expect("test password").to_owned();
-        url.set_password(None).unwrap();
-        json!({"url":url.as_str(), "password":password})
-    };
     let mut config: gateway_store::StoreConfig = serde_json::from_value(json!({
-        "database":connection(database_url),
-        "redis":connection(url::Url::parse(&redis_url).unwrap()),
+        "database":crate::support::config_connection(database_url),
+        "redis":crate::support::config_connection(url::Url::parse(&redis_url).unwrap()),
     }))
     .unwrap();
     let runtime = tempfile::tempdir().unwrap();

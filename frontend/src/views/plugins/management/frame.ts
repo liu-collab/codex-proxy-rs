@@ -8,8 +8,9 @@ import { THEME_TOKEN_NAMES } from '@codex-proxy/ui/theme'
 import { generate, parse, walk } from 'css-tree'
 import bridgeSource from 'virtual:plugin-bridge-source'
 import { getPluginManagementResource, PLUGIN_MANAGEMENT_TIMEOUT_MS } from '@/api'
-
 import { API_TIMEOUT_MS } from '@/api/constants'
+
+import { t } from '@/i18n'
 import { hasControlCharacter, PLUGIN_MANAGEMENT_BRIDGE, PLUGIN_MANAGEMENT_BRIDGE_VERSION } from './bridge-contract'
 
 export * from './bridge-contract'
@@ -73,7 +74,7 @@ export async function assemblePluginManagementPage(
   const building = new Set<string>()
   const entry = resources.get(page.entry)
   if (!entry || contentType(entry.descriptor.contentType) !== 'text/html')
-    throw new Error('插件页面入口不是已注册的 HTML 资源')
+    throw new Error(t('plugins.frame.invalidEntryPoint'))
 
   const ensureResourceUrl = (path: string): string => {
     const existing = resourceUrls.get(path)
@@ -81,12 +82,12 @@ export async function assemblePluginManagementPage(
       return existing
     const resource = resources.get(path)
     if (!resource)
-      throw new Error(`插件页面引用了未注册资源：${path}`)
+      throw new Error(t('plugins.frame.unregisteredAsset', { path }))
     const mime = contentType(resource.descriptor.contentType)
     if (mime === 'text/html')
-      throw new Error('插件 HTML 资源不能作为子资源加载')
+      throw new Error(t('plugins.frame.htmlSubresource'))
     if (building.has(path))
-      throw new Error(`插件 CSS 资源存在循环引用：${path}`)
+      throw new Error(t('plugins.frame.cyclicCss', { path }))
     building.add(path)
     try {
       const body = mime === 'text/css'
@@ -139,21 +140,23 @@ export function readPluginFrameTheme(): PluginFrameTheme {
   if (fontCode)
     tokens['--cp-font-family-code'] = fontCode
   return {
-    name: root.dataset.theme === 'dark' ? 'dark' : 'light',
+    name: root.dataset.theme === 'dark'
+      ? 'dark'
+      : 'light',
     tokens,
   }
 }
 
 function validateView(view: PluginManagementView, page: PluginManagementPage) {
   if (!Number.isSafeInteger(view.target.revision) || view.target.revision < 1)
-    throw new Error('插件页面版本无效，请刷新后重试')
+    throw new Error(t('plugins.frame.invalidVersion'))
   if (view.resources.length > MAXIMUM_MANAGEMENT_RESOURCES)
-    throw new Error('插件页面资源数量超过限制')
+    throw new Error(t('plugins.frame.resourceCountLimit'))
   for (const resource of view.resources)
     validateDeclaredPath(resource.path)
   validateDeclaredPath(page.entry)
   if (!view.pages.some(candidate => candidate.id === page.id && candidate.entry === page.entry))
-    throw new Error('插件页面已变更，请刷新后重试')
+    throw new Error(t('plugins.frame.pageChanged'))
 }
 
 async function loadResources(view: PluginManagementView, signal: AbortSignal) {
@@ -161,7 +164,9 @@ async function loadResources(view: PluginManagementView, signal: AbortSignal) {
   let cursor = 0
   let total = 0
   const workers = Array.from(
-    { length: Math.min(RESOURCE_CONCURRENCY, view.resources.length) },
+    {
+      length: Math.min(RESOURCE_CONCURRENCY, view.resources.length),
+    },
     async () => {
       while (cursor < view.resources.length) {
         const descriptor = view.resources[cursor++]
@@ -169,14 +174,14 @@ async function loadResources(view: PluginManagementView, signal: AbortSignal) {
           return
         const response = await getPluginManagementResource(view.target, descriptor.path, { signal, silent: true })
         if (response.status < 200 || response.status >= 300)
-          throw new Error(`插件资源返回 HTTP ${response.status}`)
+          throw new Error(t('plugins.frame.pluginAssetReturnedHttp', { status: response.status }))
         if (contentType(response.contentType) !== contentType(descriptor.contentType))
-          throw new Error(`插件资源类型与注册值不一致：${descriptor.path}`)
+          throw new Error(t('plugins.frame.resourceTypeMismatch', { path: descriptor.path }))
         if (response.body.byteLength > MAXIMUM_MANAGEMENT_RESOURCE_BYTES)
-          throw new Error(`插件资源超过 1 MiB：${descriptor.path}`)
+          throw new Error(t('plugins.frame.pluginAssetExceedsMib', { path: descriptor.path }))
         total += response.body.byteLength
         if (total > MAXIMUM_MANAGEMENT_TOTAL_BYTES)
-          throw new Error('插件页面资源总量超过 8 MiB')
+          throw new Error(t('plugins.frame.resourceSizeLimit'))
         resources.set(descriptor.path, { descriptor, body: response.body })
       }
     },
@@ -192,52 +197,68 @@ function rewriteDocument(
   ensureResourceUrl: (path: string) => string,
 ) {
   const unsupported = document.querySelector('base, iframe, frame, frameset, object, embed, portal, template')
-  if (unsupported)
-    throw new Error(`插件页面使用了不受支持的 <${unsupported.tagName.toLowerCase()}> 元素`)
-  if ([...document.querySelectorAll('meta[http-equiv]')].some(meta => meta.getAttribute('http-equiv')?.toLowerCase() === 'refresh'))
-    throw new Error('插件页面不能使用自动跳转')
+  if (unsupported) {
+    throw new Error(t('plugins.frame.unsupportedElement', {
+      value: unsupported.tagName.toLowerCase(),
+    }))
+  }
+  if ([
+    ...document.querySelectorAll('meta[http-equiv]'),
+  ].some(meta => meta.getAttribute('http-equiv')?.toLowerCase() === 'refresh')) {
+    throw new Error(t('plugins.frame.redirectForbidden'))
+  }
 
   for (const script of document.querySelectorAll('script')) {
     if (script.getAttribute('type')?.trim().toLowerCase() === 'module')
-      throw new Error('插件页面暂不支持 ES Module 脚本，请使用经典脚本包')
+      throw new Error(t('plugins.frame.moduleScriptUnsupported'))
     const source = script.getAttribute('src')
     if (!source)
       continue
     const path = resolveResourceReference(entryPath, source, resources)
     if (!JAVASCRIPT_CONTENT_TYPES.has(contentType(resources.get(path)?.descriptor.contentType ?? '')))
-      throw new Error(`插件脚本资源类型无效：${path}`)
+      throw new Error(t('plugins.frame.invalidPluginScriptAssetType', { path }))
     script.setAttribute('src', ensureResourceUrl(path))
   }
 
   for (const link of document.querySelectorAll('link[href]')) {
     const rel = new Set((link.getAttribute('rel') ?? '').toLowerCase().split(/\s+/u).filter(Boolean))
     if (![...rel].every(value => value === 'stylesheet' || value === 'icon') || rel.size === 0)
-      throw new Error('插件页面只支持 stylesheet 和 icon 链接资源')
+      throw new Error(t('plugins.frame.unsupportedLink'))
     const path = resolveResourceReference(entryPath, link.getAttribute('href') ?? '', resources)
     const mime = contentType(resources.get(path)?.descriptor.contentType ?? '')
     if (rel.has('stylesheet') && mime !== 'text/css')
-      throw new Error(`插件样式资源类型无效：${path}`)
+      throw new Error(t('plugins.frame.invalidStylesheet', { path }))
     if (rel.has('icon') && !mime.startsWith('image/'))
-      throw new Error(`插件图标资源类型无效：${path}`)
+      throw new Error(t('plugins.frame.invalidPluginIconAssetType', { path }))
     link.setAttribute('href', ensureResourceUrl(path))
   }
 
-  const supportedSourceElements = new Set(['AUDIO', 'IMG', 'SCRIPT', 'SOURCE', 'TRACK', 'VIDEO'])
+  const supportedSourceElements = new Set([
+    'AUDIO',
+    'IMG',
+    'SCRIPT',
+    'SOURCE',
+    'TRACK',
+    'VIDEO',
+  ])
   for (const element of document.querySelectorAll<HTMLElement>('[src]')) {
     if (element.tagName === 'SCRIPT')
       continue
-    if (!supportedSourceElements.has(element.tagName))
-      throw new Error(`插件页面不支持 <${element.tagName.toLowerCase()}> 的 src 加载`)
+    if (!supportedSourceElements.has(element.tagName)) {
+      throw new Error(t('plugins.frame.unsupportedSrc', {
+        value: element.tagName.toLowerCase(),
+      }))
+    }
     const path = resolveResourceReference(entryPath, element.getAttribute('src') ?? '', resources)
     if (element.tagName === 'IMG' && !contentType(resources.get(path)?.descriptor.contentType ?? '').startsWith('image/'))
-      throw new Error(`插件图像资源类型无效：${path}`)
+      throw new Error(t('plugins.frame.invalidPluginImageAssetType', { path }))
     element.setAttribute('src', ensureResourceUrl(path))
   }
 
   for (const element of document.querySelectorAll<HTMLElement>('[poster]')) {
     const path = resolveResourceReference(entryPath, element.getAttribute('poster') ?? '', resources)
     if (!contentType(resources.get(path)?.descriptor.contentType ?? '').startsWith('image/'))
-      throw new Error(`插件 poster 资源类型无效：${path}`)
+      throw new Error(t('plugins.frame.invalidPluginPosterAssetType', { path }))
     element.setAttribute('poster', ensureResourceUrl(path))
   }
 
@@ -245,9 +266,12 @@ function rewriteDocument(
     const rewritten = (element.getAttribute('srcset') ?? '').split(',').map((candidate) => {
       const [reference, ...descriptor] = candidate.trim().split(/\s+/u)
       if (!reference)
-        throw new Error('插件 srcset 资源引用为空')
+        throw new Error(t('plugins.frame.emptySrcset'))
       const path = resolveResourceReference(entryPath, reference, resources)
-      return [ensureResourceUrl(path), ...descriptor].join(' ')
+      return [
+        ensureResourceUrl(path),
+        ...descriptor,
+      ].join(' ')
     }).join(', ')
     element.setAttribute('srcset', rewritten)
   }
@@ -265,16 +289,22 @@ function rewriteDocument(
           continue
         if (attribute.value.startsWith('#'))
           continue
-        throw new Error('插件页面不能导航到外部或未注册地址')
+        throw new Error(t('plugins.frame.externalNavigation'))
       }
-      if (['action', 'formaction', 'ping', 'background'].includes(name) && attribute.value)
-        throw new Error(`插件页面不支持 ${name} 地址`)
+      if ([
+        'action',
+        'formaction',
+        'ping',
+        'background',
+      ].includes(name) && attribute.value) {
+        throw new Error(t('plugins.frame.pluginPageDoesNotSupportUrls', { name }))
+      }
       if (
         name !== 'style'
         && /\burl\s*\(/iu.test(attribute.value)
         && !/^url\(\s*#[\w.-]+\s*\)$/iu.test(attribute.value.trim())
       ) {
-        throw new Error(`插件页面属性不能引用外部资源：${name}`)
+        throw new Error(t('plugins.frame.externalAttribute', { name }))
       }
     }
   }
@@ -317,25 +347,27 @@ function rewriteCss(
     onParseError(_error, fallback) {
       // 条件表达式会先尝试不同语法；只有落入原始文本兜底才算解析失败。
       if (fallback)
-        throw new Error(`插件 CSS 语法不受支持：${ownerPath}`)
+        throw new Error(t('plugins.frame.unsupportedPluginCssSyntax', { ownerPath }))
     },
   })
   const imported = new WeakSet<object>()
   walk(tree, function (node) {
     // 选择器不加载资源，原样保留其转义；声明值则必须完整解析后再检查地址。
     if (node.type === 'Raw' && node !== this.rule?.prelude)
-      throw new Error(`插件 CSS 包含无法解析的内容：${ownerPath}`)
+      throw new Error(t('plugins.frame.invalidCss', { ownerPath }))
     if ((node.type === 'Atrule' || node.type === 'Function') && node.name.includes('\\'))
-      throw new Error(`插件 CSS 规则或函数名不能使用转义：${ownerPath}`)
+      throw new Error(t('plugins.frame.escapedCssIdentifier', { ownerPath }))
     if (node.type === 'Atrule' && node.name.toLowerCase() === 'import') {
       if (!allowImports)
-        throw new Error('内联 style 属性不能导入样式表')
-      const reference = node.prelude?.type === 'AtrulePrelude' ? node.prelude.children.first : null
+        throw new Error(t('plugins.frame.inlineStyleImport'))
+      const reference = node.prelude?.type === 'AtrulePrelude'
+        ? node.prelude.children.first
+        : null
       if (node.block || !reference || (reference.type !== 'String' && reference.type !== 'Url'))
-        throw new Error(`插件 @import 语法不受支持：${ownerPath}`)
+        throw new Error(t('plugins.frame.unsupportedPluginImportSyntax', { ownerPath }))
       const path = resolveResourceReference(ownerPath, reference.value, resources)
       if (contentType(resources.get(path)?.descriptor.contentType ?? '') !== 'text/css')
-        throw new Error(`插件 @import 目标不是 CSS：${path}`)
+        throw new Error(t('plugins.frame.pluginImportTargetIsNotCss', { path }))
       reference.value = ensureResourceUrl(path)
       imported.add(reference)
     }
@@ -364,13 +396,13 @@ function resolveResourceReference(
     || hasControlCharacter(reference)
     || /^[a-z][a-z\d+.-]*:/iu.test(reference)
   ) {
-    throw new Error(`插件资源地址不受支持：${rawReference}`)
+    throw new Error(t('plugins.frame.unsupportedPluginAssetUrl', { rawReference }))
   }
   const queryIndex = reference.indexOf('?')
   if (queryIndex >= 0)
-    throw new Error(`插件资源地址不支持查询参数：${rawReference}`)
+    throw new Error(t('plugins.frame.resourceQuery', { rawReference }))
   if (reference.includes('#'))
-    throw new Error(`插件资源地址不支持片段标识：${rawReference}`)
+    throw new Error(t('plugins.frame.resourceFragment', { rawReference }))
   const pathReference = reference
   const base = ownerPath.split('/').slice(0, -1)
   for (const segment of pathReference.split('/')) {
@@ -378,23 +410,23 @@ function resolveResourceReference(
       continue
     if (segment === '..') {
       if (base.length === 0)
-        throw new Error(`插件资源地址越过制品边界：${rawReference}`)
+        throw new Error(t('plugins.frame.resourceOutsideArtifact', { rawReference }))
       base.pop()
       continue
     }
     if (!PATH_SEGMENT.test(segment))
-      throw new Error(`插件资源路径片段无效：${rawReference}`)
+      throw new Error(t('plugins.frame.invalidPluginAssetPathSegment', { rawReference }))
     base.push(segment)
   }
   const path = base.join('/')
   if (!resources.has(path))
-    throw new Error(`插件页面引用了未注册资源：${path}`)
+    throw new Error(t('plugins.frame.unregisteredAsset', { path }))
   return path
 }
 
 function validateDeclaredPath(path: string) {
   if (!path || path.length > 512 || path.split('/').some(segment => !PATH_SEGMENT.test(segment)))
-    throw new Error(`插件注册了无效资源路径：${path}`)
+    throw new Error(t('plugins.frame.invalidResourcePath', { path }))
 }
 
 function contentType(value: string) {
@@ -406,7 +438,7 @@ function decodeText(body: ArrayBuffer, path: string) {
     return new TextDecoder('utf-8', { fatal: true }).decode(new Uint8Array(body))
   }
   catch {
-    throw new Error(`插件文本资源不是有效 UTF-8：${path}`)
+    throw new Error(t('plugins.frame.pluginTextAssetIsNotValidUtf', { path }))
   }
 }
 

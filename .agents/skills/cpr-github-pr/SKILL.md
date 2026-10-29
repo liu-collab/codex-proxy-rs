@@ -19,7 +19,7 @@ description: 准备、创建、更新或审查 GitHub PR，含回复讨论与处
 
 ## 按模式读取
 
-只加载当前模式，已有上下文不重读；长文档先定位标题再截取对应章节，不因链接存在而加载全文或所有 references
+先完成上述范围判断，再按当前动作与差异涉及的领域叠加下表。命中的流程引用完整读取，长文档读取指定章节；只复用已实际读取且仍适用的内容，单纯整理正文或回复不扩展为完整实现审查
 
 | 当前动作 | 读取与执行 |
 | --- | --- |
@@ -27,7 +27,7 @@ description: 准备、创建、更新或审查 GitHub PR，含回复讨论与处
 | 创建或更新 PR | [创建流程](references/create.md)、[PR 流程](../../../CONTRIBUTING.md#pr-流程)与[规则文件保护](../../../CONTRIBUTING.md#规则文件保护) |
 | 审查 PR | [审查流程](references/review.md)、[审查标准](../../../CONTRIBUTING.md#审查标准) |
 | 回复讨论或审查意见 | 目标评论、相关上下文与实际处理结果，按下方回复口吻答复；仅回复不加载创建或完整审查流程 |
-| 需要修改代码或文档 | 使用 [cpr-dev-guide](../cpr-dev-guide/SKILL.md)的对应分支，完成自审与验证 |
+| 实现自审、审查或修改代码与文档 | 执行 [cpr-dev-guide](../cpr-dev-guide/SKILL.md)的领域必读与对应检查，包括后端、插件、测试和 API 等命中项；只读审查同样执行，不能仅核对 PR 正文与 CI |
 | 含前端改动 | [前端流程](../cpr-dev-guide/references/frontend.md)，核对适用规范与当前实现的运行证据 |
 | 含文档改动 | [文档检查](../cpr-dev-guide/references/documentation.md) |
 

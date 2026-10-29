@@ -656,23 +656,19 @@ fn explicit_api_disable_and_non_responses_backend_should_remain_unsupported() {
 }
 
 #[test]
-fn list_discriminator_should_be_required_and_exact() {
+fn catalog_envelope_requires_list_discriminator_and_model_array() {
     for body in [
         br#"{"data":[{"id":"grok-4","model":"grok-4"}]}"#.as_slice(),
         br#"{"object":"collection","data":[{"id":"grok-4","model":"grok-4"}]}"#.as_slice(),
+        br#"{"object":"list"}"#.as_slice(),
+        br#"{"object":"list","data":null}"#.as_slice(),
+        br#"{"object":"list","data":{}}"#.as_slice(),
     ] {
         assert!(matches!(
             parse_grok_model_catalog(body, None),
             Err(GrokModelCatalogError::InvalidWire)
         ));
     }
-}
-
-#[test]
-fn legacy_models_shape_should_fail_the_entire_snapshot() {
-    let result = parse_grok_model_catalog(br#"{"object":"list","models":[{"id":"grok-4"}]}"#, None);
-
-    assert!(matches!(result, Err(GrokModelCatalogError::InvalidWire)));
 }
 
 #[test]

@@ -1,4 +1,6 @@
 import type { DashboardHealthStatus, DashboardHealthTimelinePoint } from '@/api'
+import { computed } from 'vue'
+import { t } from '@/i18n'
 import { formatInteger } from '@/utils/format'
 
 interface DashboardHealthStatusMeta {
@@ -8,52 +10,67 @@ interface DashboardHealthStatusMeta {
   valueClass: string
 }
 
-export const healthLegend = [
-  { status: 'no_data', label: '无有效样本' },
-  { status: 'unavailable', label: '不可达' },
-  { status: 'unstable', label: '不稳定' },
-  { status: 'low_sample', label: '低样本' },
-  { status: 'stable', label: '稳定' },
-] satisfies { status: DashboardHealthStatus, label: string }[]
+export const healthLegend = computed(() => ([
+  {
+    status: 'no_data',
+    label: t('usage.noValidSample'),
+  },
+  {
+    status: 'unavailable',
+    label: t('usage.notReachable'),
+  },
+  {
+    status: 'unstable',
+    label: t('usage.unstable'),
+  },
+  {
+    status: 'low_sample',
+    label: t('usage.lowSample'),
+  },
+  {
+    status: 'stable',
+    label: t('usage.stable'),
+  },
+] satisfies { status: DashboardHealthStatus, label: string }[]))
 
-export const healthStatusMeta: Record<DashboardHealthStatus, DashboardHealthStatusMeta> = {
+export const healthStatusMeta = computed<Record<DashboardHealthStatus, DashboardHealthStatusMeta>>(() => ({
   future: {
-    label: '未来',
+    label: t('usage.future'),
     cellClass: 'bg-cp-bg-container-disabled opacity-60',
     badgeClass: 'bg-cp-fill-tertiary text-cp-text-quaternary',
     valueClass: 'text-cp-text-quaternary',
   },
   no_data: {
-    label: '无有效样本',
+    label: t('usage.noValidSample'),
     cellClass: 'bg-cp-border',
     badgeClass: 'bg-cp-fill-tertiary text-cp-text-secondary',
     valueClass: 'text-cp-text-quaternary',
   },
   unavailable: {
-    label: '不可达',
+    label: t('usage.notReachable'),
     cellClass: 'bg-cp-error',
     badgeClass: 'bg-cp-error-container text-cp-error-on-container',
     valueClass: 'text-cp-error-text',
   },
   unstable: {
-    label: '不稳定',
+    label: t('usage.unstable'),
     cellClass: 'bg-cp-warning',
     badgeClass: 'bg-cp-warning-container text-cp-warning-on-container',
     valueClass: 'text-cp-warning-text',
   },
   low_sample: {
-    label: '低样本',
+    label: t('usage.lowSample'),
     cellClass: 'bg-cp-cyan-solid',
     badgeClass: 'bg-cp-cyan-container text-cp-cyan-on-container',
     valueClass: 'text-cp-cyan-text',
   },
   stable: {
-    label: '稳定',
+    label: t('usage.stable'),
     cellClass: 'bg-cp-success',
     badgeClass: 'bg-cp-success-container text-cp-success-on-container',
     valueClass: 'text-cp-success-text',
   },
-}
+}))
 
 export function healthServiceFailureCount(point: Pick<DashboardHealthTimelinePoint, 'failedRequests' | 'incompleteRequests'>) {
   return point.failedRequests + point.incompleteRequests

@@ -69,6 +69,7 @@ fn wire_profile() -> CodexWireProfileState {
         terminal: "catalog-contract".to_owned(),
         exact_user_agent: None,
         residency: None,
+        account_routing_override: None,
         verified_at: Utc
             .with_ymd_and_hms(2026, 7, 18, 0, 0, 0)
             .single()
@@ -1058,6 +1059,56 @@ async fn api_key_native_catalog_preserves_unknown_reasoning_and_background_entit
         original
     );
     upstream.verify().await;
+}
+
+#[tokio::test]
+async fn api_key_client_catalog_distinguishes_filtered_empty_from_fetch_failure() {
+    use gateway_core::account::AccountModelAccess;
+    use provider_openai::credential::ResponsesTransport;
+    for status in [200, 503] {
+        let upstream = MockServer::start().await;
+        let store = Arc::new(MemoryAccountStore::default());
+        store
+            .seed_api_key("acct_api", upstream.uri(), ResponsesTransport::Http)
+            .await;
+        store.set_model_access(
+            "acct_api",
+            AccountModelAccess::new(
+                gateway_core::account::AccountModelAccessMode::Allowlist,
+                vec!["logical-model".into()],
+            )
+            .unwrap(),
+        );
+        Mock::given(method("GET"))
+            .and(path("/models"))
+            .respond_with(
+                ResponseTemplate::new(status)
+                    .set_body_json(serde_json::json!({"data":[{"id":"wire-model"}]})),
+            )
+            .expect(1)
+            .mount(&upstream)
+            .await;
+        let service = service_with_catalog_cache(&store, upstream.uri(), catalog_cache());
+        let result = service
+            .client_model_catalog(
+                &client_scope(&[store.account("acct_api").unwrap()]),
+                "0.155.0",
+            )
+            .await;
+        if status == 200 {
+            assert!(
+                result
+                    .expect("success filtered by account policy")
+                    .is_empty()
+            );
+        } else {
+            assert!(
+                result.is_err(),
+                "fetch failure must not look like a successful empty catalog"
+            );
+        }
+        upstream.verify().await;
+    }
 }
 
 #[tokio::test]

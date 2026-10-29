@@ -1,6 +1,7 @@
 // @env node
 import type { ESLint, Rule } from 'eslint'
 import antfu from '@antfu/eslint-config'
+import vueI18n from '@intlify/eslint-plugin-vue-i18n'
 
 type LocatedRuleNode = Rule.Node & {
   loc: NonNullable<Rule.Node['loc']>
@@ -87,16 +88,48 @@ export default antfu(
     },
     rules: {
       'template-style/single-line-simple-interpolation': 'error',
-      'vue/html-closing-bracket-newline': ['error', {
-        singleline: 'never',
-        multiline: 'always',
-      }],
-      'vue/multiline-html-element-content-newline': ['error', {
-        ignores: ['pre', 'textarea'],
-        ignoreWhenEmpty: true,
-        allowEmptyLines: false,
-      }],
+      'vue/html-closing-bracket-newline': [
+        'error',
+        {
+          singleline: 'never',
+          multiline: 'always',
+        },
+      ],
+      'vue/multiline-html-element-content-newline': [
+        'error',
+        {
+          ignores: ['pre', 'textarea'],
+          ignoreWhenEmpty: true,
+          allowEmptyLines: false,
+        },
+      ],
       'vue/mustache-interpolation-spacing': ['error', 'always'],
+    },
+  },
+  ...vueI18n.configs.base,
+  {
+    settings: {
+      'vue-i18n': {
+        localeDir: {
+          pattern: './src/i18n/locales/*/*.json',
+          localeKey: 'path',
+          localePattern: /\/locales\/(?<locale>[^/]+)\//,
+        },
+        messageSyntaxVersion: '^11.0.0',
+      },
+    },
+    rules: {
+      '@intlify/vue-i18n/no-missing-keys': 'error',
+      '@intlify/vue-i18n/no-missing-keys-in-other-locales': 'error',
+      '@intlify/vue-i18n/no-duplicate-keys-in-locale': 'error',
+      '@intlify/vue-i18n/valid-message-syntax': 'error',
+      '@intlify/vue-i18n/valid-plural-forms': 'error',
+      '@intlify/vue-i18n/no-unused-keys': [
+        'error',
+        {
+          extensions: ['.ts', '.vue'],
+        },
+      ],
     },
   },
 )

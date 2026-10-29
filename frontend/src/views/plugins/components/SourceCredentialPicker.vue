@@ -2,7 +2,9 @@
 import type { PluginSourceCredential } from '@/api'
 
 import { ZCheckbox, ZIconButton } from '@codex-proxy/ui'
+
 import { Trash2 } from '@lucide/vue'
+import { useI18n } from 'vue-i18n'
 
 withDefaults(defineProps<{
   credentials: PluginSourceCredential[]
@@ -12,6 +14,9 @@ withDefaults(defineProps<{
 })
 
 defineEmits<{ delete: [credential: PluginSourceCredential] }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const selected = defineModel<string[]>({ required: true })
 function isSelected(id: string) {
   return selected.value.includes(id)
@@ -35,7 +40,7 @@ function toggle(id: string, checked: boolean) {
       <ZCheckbox
         :model-value="isSelected(credential.id)"
         :disabled="disabled"
-        :aria-label="`选择下载认证 ${credential.name}`"
+        :aria-label="t('plugins.credentials.selectDownloadCredentials', { name: credential.name })"
         @update:model-value="toggle(credential.id, $event)"
       />
       <span class="flex min-w-0 flex-1 items-center gap-3">
@@ -44,7 +49,7 @@ function toggle(id: string, checked: boolean) {
           {{ credential.origin }}{{ credential.pathPrefix }}
         </span>
       </span>
-      <ZIconButton size="small" :aria-label="`删除下载认证 ${credential.name}`" :disabled="disabled" @click="$emit('delete', credential)">
+      <ZIconButton size="small" :aria-label="t('plugins.credentials.deleteDownloadCredentials', { name: credential.name })" :disabled="disabled" @click="$emit('delete', credential)">
         <Trash2 class="size-3.5 text-cp-error" />
       </ZIconButton>
     </div>

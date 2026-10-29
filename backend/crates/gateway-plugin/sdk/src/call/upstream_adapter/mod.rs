@@ -9,6 +9,15 @@ mod codec;
 pub const REGISTER_METHOD: &str = "upstream_adapter.register";
 pub const EXECUTE_METHOD: &str = "upstream_adapter.execute";
 
+pub const HTTP_DO: &str = "host.upstream.http.do";
+pub const HTTP_DO_STREAM: &str = "host.upstream.http.do_stream";
+pub const HTTP_STREAM_READ: &str = "host.upstream.http.stream_read";
+pub const HTTP_STREAM_CLOSE: &str = "host.upstream.http.stream_close";
+pub const WEBSOCKET_OPEN: &str = "host.upstream.websocket.open";
+pub const WEBSOCKET_SEND: &str = "host.upstream.websocket.send";
+pub const WEBSOCKET_READ: &str = "host.upstream.websocket.read";
+pub const WEBSOCKET_CLOSE: &str = "host.upstream.websocket.close";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BuiltinProvider {
@@ -66,6 +75,8 @@ pub struct UpstreamAdapterDeclaration {
     /// 公开请求模型的匹配范围；空集合沿用功能绑定范围
     #[serde(default)]
     pub models: Vec<String>,
+    /// 显式上游账号范围，空集合匹配所有账号，不扩大请求的账号权限
+    pub account_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -177,6 +188,8 @@ pub enum UpstreamFailureKind {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct UpstreamFailure {
     pub kind: UpstreamFailureKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_type: Option<String>,
     pub status: Option<u16>,
     pub retry_after_ms: Option<u64>,
     pub message: String,

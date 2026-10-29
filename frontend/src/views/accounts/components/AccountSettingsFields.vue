@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { AccountGroupRef, AccountModelAccess } from '@/api'
+
 import { ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
+import { useI18n } from 'vue-i18n'
 import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
 import AccountModelAccessField from './AccountModelAccessField.vue'
 import AccountProxyField from './AccountProxyField.vue'
@@ -18,6 +20,8 @@ withDefaults(defineProps<{
   proxyError?: string
 }>(), { preserveProxy: true, showScheduling: true })
 
+const { t } = useI18n({ useScope: 'global' })
+
 const modelAccess = defineModel<AccountModelAccess | undefined>('modelAccess', { required: true })
 const enabled = defineModel<boolean>('enabled', { required: true })
 const concurrencyLimit = defineModel<string>('concurrencyLimit', { required: true })
@@ -31,40 +35,40 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
   <div class="grid gap-5">
     <AccountModelAccessField v-model="modelAccess" :account-id="accountId" :disabled="disabled" :allow-preserve="preserveModelAccess" />
     <div v-if="showScheduling" class="flex min-h-6 items-center justify-between gap-3">
-      <span class="text-cp leading-none font-medium text-cp-text-secondary">调度</span>
+      <span class="text-cp leading-none font-medium text-cp-text-secondary">{{ t('accounts.scheduling.scheduling') }}</span>
       <ZSwitch
         v-model="enabled"
-        aria-label="切换账号调度"
+        :aria-label="t('accounts.scheduling.switchAccountSchedule')"
         :disabled="disabled"
       />
     </div>
 
     <div class="grid gap-4 sm:grid-cols-2">
-      <ZFormItem label="并发限制">
+      <ZFormItem :label="t('accounts.scheduling.concurrencyLimit')">
         <ZInput
           v-model="concurrencyLimit"
-          aria-label="账号并发限制"
+          :aria-label="t('accounts.scheduling.accountConcurrencyLimit')"
           type="number"
           min="1"
           max="4294967295"
-          placeholder="留空使用默认值"
+          :placeholder="t('accounts.scheduling.defaultHint')"
           :disabled="disabled"
         />
       </ZFormItem>
-      <ZFormItem label="权重">
+      <ZFormItem :label="t('accounts.scheduling.weight')">
         <ZInput
           v-model="weight"
-          aria-label="账号调度权重"
+          :aria-label="t('accounts.scheduling.accountSchedulingWeight')"
           type="number"
           min="1"
           max="100"
-          placeholder="越高越优先，最大 100"
+          :placeholder="t('accounts.scheduling.weightHelp')"
           :disabled="disabled"
         />
       </ZFormItem>
     </div>
 
-    <ZFormItem label="所属分组">
+    <ZFormItem :label="t('accounts.scheduling.groupLabel')">
       <AccountGroupCheckboxGrid
         v-model="selectedGroupIds"
         :groups="groups"

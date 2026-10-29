@@ -338,6 +338,7 @@ impl CodexCredentialCatalogService {
             }
         }
         drop(catalogs);
+        let api_catalog_available = !api_catalogs.is_empty();
         // 完整对象优先于普通 ID；同类目录按账号顺序选来源，并保留上游条目顺序
         let (native, adapted): (Vec<_>, Vec<_>) = api_catalogs
             .into_values()
@@ -375,7 +376,7 @@ impl CodexCredentialCatalogService {
                 Err(error) => last_error = error,
             }
         }
-        if api_models.is_empty() {
+        if !api_catalog_available {
             Err(last_error)
         } else {
             Ok(api_models)

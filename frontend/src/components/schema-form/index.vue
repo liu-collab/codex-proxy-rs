@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { InputField } from './schema'
+
 import { ZForm, ZFormItem, ZIconButton, ZInput, ZPopover, ZSelect, ZTextarea } from '@codex-proxy/ui'
 import { Braces, Info, List } from '@lucide/vue'
 import { computed, nextTick, shallowRef, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { parseJsonObject } from '@/utils/data'
 import { inputFields } from './schema'
 
@@ -12,6 +14,9 @@ const props = defineProps<{
   maximumBytes?: number
   fieldErrors?: Record<string, string>
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const text = defineModel<string>({ required: true })
 const jsonMode = shallowRef(false)
 const root = useTemplateRef<HTMLElement>('root')
@@ -28,7 +33,9 @@ const incompatibleValue = computed(() => fields.value?.some((field) => {
     return !field.values.some(option => option === item)
   if (field.type === 'number' || field.type === 'integer')
     return typeof item !== 'number' && typeof item !== 'string'
-  return field.type === 'boolean' ? typeof item !== 'boolean' : typeof item !== 'string'
+  return field.type === 'boolean'
+    ? typeof item !== 'boolean'
+    : typeof item !== 'string'
 }) ?? false)
 const showJson = computed(() => jsonMode.value || fields.value === null || hasExtra.value || incompatibleValue.value || Boolean(error.value))
 const empty = computed(() => fields.value?.length === 0 && props.schema.additionalProperties === false && !showJson.value)
@@ -43,14 +50,34 @@ function fieldValue(field: InputField) {
 }
 
 function inputValue(key: string) {
-  return value.value && Object.hasOwn(value.value, key) ? value.value[key] : undefined
+  return value.value && Object.hasOwn(value.value, key)
+    ? value.value[key]
+    : undefined
 }
 
 function fieldOptions(field: InputField) {
   const options = field.values
-    ? field.values.map((item, index) => ({ value: String(index), label: String(item) }))
-    : [{ value: 'true', label: '是' }, { value: 'false', label: '否' }]
-  return [{ value: '', label: '未填写' }, ...options]
+    ? field.values.map((item, index) => ({
+        value: String(index),
+        label: String(item),
+      }))
+    : [
+        {
+          value: 'true',
+          label: t('common.values.yes'),
+        },
+        {
+          value: 'false',
+          label: t('common.values.no'),
+        },
+      ]
+  return [
+    {
+      value: '',
+      label: t('common.values.unspecified'),
+    },
+    ...options,
+  ]
 }
 
 function update(field: InputField, input: string) {
@@ -66,7 +93,9 @@ function update(field: InputField, input: string) {
   }
   else if (field.type === 'number' || field.type === 'integer') {
     // 不把尚未输入完整的数字静默替换成 0，保留原值供服务端校验。
-    next = Number.isFinite(Number(input)) ? Number(input) : input
+    next = Number.isFinite(Number(input))
+      ? Number(input)
+      : input
   }
   else {
     next = input
@@ -82,7 +111,9 @@ async function focusField(key?: string) {
   await nextTick()
 
   const control = editableField && !showJson.value
-    ? [...(root.value?.querySelectorAll<HTMLElement>('[data-schema-control]') ?? [])]
+    ? [
+        ...(root.value?.querySelectorAll<HTMLElement>('[data-schema-control]') ?? []),
+      ]
         .find(element => element.dataset.schemaControl === key)
     : root.value?.querySelector<HTMLElement>('[data-schema-json-control], textarea')
   control?.focus()
@@ -95,9 +126,9 @@ defineExpose({ focusField })
 <template>
   <div v-if="!empty" ref="root" class="grid gap-3">
     <ZForm v-if="showJson">
-      <ZFormItem label="输入内容" :error="error">
+      <ZFormItem :label="t('common.form.inputPlaceholder')" :error="error">
         <template #extra>
-          <ZIconButton v-if="fields !== null" aria-label="使用表单" size="small" variant="solid" :disabled="disabled || Boolean(error) || hasExtra || incompatibleValue" @click="jsonMode = false">
+          <ZIconButton v-if="fields !== null" :aria-label="t('common.form.useForm')" size="small" variant="solid" :disabled="disabled || Boolean(error) || hasExtra || incompatibleValue" @click="jsonMode = false">
             <List class="size-4" />
           </ZIconButton>
         </template>
@@ -115,7 +146,7 @@ defineExpose({ focusField })
         <template v-if="field.description" #label-extra>
           <ZPopover trigger="hover-click" placement="top-start">
             <template #reference>
-              <ZIconButton :aria-label="`${field.label}说明`" class="size-3.5!" :title="undefined">
+              <ZIconButton :aria-label="t('common.form.fieldHelp', { label: field.label })" class="size-3.5!" :title="undefined">
                 <Info class="size-3.5" />
               </ZIconButton>
             </template>
@@ -125,7 +156,7 @@ defineExpose({ focusField })
           </ZPopover>
         </template>
         <template v-if="index === 0" #extra>
-          <ZIconButton aria-label="编辑 JSON" size="small" variant="solid" :disabled="disabled" @click="jsonMode = true">
+          <ZIconButton :aria-label="t('common.form.editJson')" size="small" variant="solid" :disabled="disabled" @click="jsonMode = true">
             <Braces class="size-4" />
           </ZIconButton>
         </template>

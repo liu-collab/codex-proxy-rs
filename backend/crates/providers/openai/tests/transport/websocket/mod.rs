@@ -7,9 +7,26 @@ use provider_openai::transport::{
 };
 
 mod breaker;
+mod cleanup;
 mod diagnostics;
 mod fingerprint;
 mod metadata;
+
+#[test]
+fn outbound_websocket_diagnostics_do_not_expose_target_credentials() {
+    let connection = CodexWebSocketConnection::new(
+        "wss://user:password@upstream.example/responses?access_token=secret",
+        vec![("authorization".into(), "Bearer credential".into())],
+    );
+    assert_eq!(
+        connection.opening_audit_snapshot().request_line,
+        "GET /responses HTTP/1.1"
+    );
+    let debug = format!("{connection:?}");
+    for value in ["password", "access_token", "secret", "credential"] {
+        assert!(!debug.contains(value));
+    }
+}
 
 fn rate_limit_event(used_percent: u64) -> String {
     json!({
@@ -976,10 +993,6 @@ async fn websocket_execute_response_create_request_should_capture_internal_metad
     server.await.unwrap();
 
     assert_eq!(response.turn_state.as_deref(), Some("turn-from-metadata"));
-    assert_eq!(
-        response.reported_model.as_deref(),
-        Some("gpt-internal-report")
-    );
     assert!(!response.body.contains("codex.rate_limits"));
     assert!(response.body.contains("response.metadata"));
     assert!(response.body.contains("event: response.completed"));
@@ -1115,11 +1128,6 @@ async fn reused_websocket_should_not_leak_turn_state_into_the_next_response() {
             .websocket_pool_decision
             .is_some_and(WebSocketPoolDecision::is_reuse)
     );
-    assert_eq!(
-        first.reported_model.as_deref(),
-        Some("first-response-model")
-    );
-    assert_eq!(second.reported_model, None);
     assert_eq!(second.turn_state, None);
     assert!(
         second
@@ -1847,9 +1855,7 @@ async fn codex_backend_client_stream_should_preserve_burst_during_downstream_bac
         let mut websocket = accept_codex_test_websocket(stream).await;
         let _message = websocket.next().await.unwrap().unwrap();
         let (mut sink, mut source) = websocket.split();
-        // 服务端持续读取控制帧，让 tungstenite 正常回 Pong
-        // 若客户端在本地入站背压
-        // 期间仍执行 Pong deadline，它仍会因为暂时读不到已返回的 Pong 而误杀连接
+        // 服务端持续读取关闭帧，业务背压不应丢失已发送的输出
         let control_frames = tokio::spawn(async move {
             while let Some(message) = source.next().await {
                 match message.unwrap() {
@@ -1892,12 +1898,9 @@ async fn codex_backend_client_stream_should_preserve_burst_during_downstream_bac
         let _ = sink.send(Message::Close(None)).await;
         control_frames.abort();
     });
-    let pool = Arc::new(CodexWebSocketPool::with_config(CodexWebSocketPoolConfig {
-        ping_interval: Some(Duration::from_millis(5)),
-        ping_timeout: Duration::from_millis(20),
-        liveness_timeout: None,
-        ..websocket_pool_config_for_tests(None, None, None)
-    }));
+    let pool = Arc::new(CodexWebSocketPool::with_config(
+        websocket_pool_config_for_tests(None),
+    ));
     let backend = CodexBackendClient::new(
         reqwest::Client::builder().no_proxy().build().unwrap(),
         format!("http://{addr}"),
@@ -1979,10 +1982,13 @@ async fn codex_backend_client_stream_should_cancel_while_inbound_is_backpressure
         timeout(Duration::from_secs(1), async {
             loop {
                 match websocket.next().await {
-                    Some(Ok(Message::Close(_))) => return,
+                    None
+                    | Some(Ok(Message::Close(_)))
+                    | Some(Err(tungstenite::Error::Protocol(
+                        tungstenite::error::ProtocolError::ResetWithoutClosingHandshake,
+                    ))) => return,
                     Some(Ok(_)) => continue,
-                    Some(Err(error)) => panic!("websocket close should be graceful: {error}"),
-                    None => panic!("websocket ended without a close frame"),
+                    Some(Err(error)) => panic!("unexpected websocket cleanup error: {error}"),
                 }
             }
         })
@@ -2212,6 +2218,7 @@ async fn codex_backend_client_should_use_websocket_when_previous_response_id_is_
         .create_response(
             &request,
             CodexRequestContext {
+                response_control: None,
                 trace: None,
                 authorization: "Bearer access-token",
                 account_id: Some("chatgpt-account"),

@@ -13,9 +13,7 @@ export function useKeyUsage() {
   const refreshInterval = shallowRef('30')
   const overview = shallowRef<KeyUsageOverview>()
   const refreshing = shallowRef(false)
-  const recordsStale = shallowRef(false)
   const overviewRequest = useRequestState()
-  let queryGeneration = 0
   const rangeEnd = shallowRef(Date.now())
   const query = computed(() => {
     return {
@@ -26,17 +24,20 @@ export function useKeyUsage() {
   })
   const records = useStablePagedQuery({
     initialPageSize: 20,
-    load: (pagination, options) => getKeyUsageRecords({ ...query.value, ...pagination, kind: kind.value }, { ...options, silent: true }),
+    load: (pagination, options) => getKeyUsageRecords({
+      ...query.value,
+      ...pagination,
+      kind: kind.value,
+    }, options),
     onSuccess: () => {
-      recordsStale.value = false
       records.error.value = ''
     },
   })
 
-  async function loadOverview() {
+  async function loadOverview(silent = false) {
     const id = overviewRequest.start()
     try {
-      const result = await getKeyUsageOverview(query.value, { signal: overviewRequest.signal, silent: true })
+      const result = await getKeyUsageOverview(query.value, { signal: overviewRequest.signal, silent })
       if (overviewRequest.isCurrent(id))
         overview.value = result
     }
@@ -48,17 +49,16 @@ export function useKeyUsage() {
     }
   }
 
-  async function refresh() {
+  async function refresh(silent = false) {
     if (refreshing.value || overviewRequest.loading.value || records.loading.value)
       return
     refreshing.value = true
-    const generation = queryGeneration
     rangeEnd.value = Date.now()
     try {
-      const [, recordsOk] = await Promise.all([loadOverview(), records.execute(undefined, { silent: true })])
-      // 轮询被新筛选或翻页取代时，不把取消结果标成刷新失败。
-      if (generation === queryGeneration)
-        recordsStale.value = !recordsOk
+      await Promise.all([
+        loadOverview(silent),
+        records.execute(undefined, { silent }),
+      ])
     }
     finally {
       refreshing.value = false
@@ -66,7 +66,6 @@ export function useKeyUsage() {
   }
 
   watch([period, selectedModel], () => {
-    queryGeneration += 1
     rangeEnd.value = Date.now()
     overview.value = undefined
     void loadOverview()
@@ -74,12 +73,11 @@ export function useKeyUsage() {
   }, { immediate: true })
 
   watch(kind, () => {
-    queryGeneration += 1
     void records.reloadFromStart()
   })
 
   const visibility = useDocumentVisibility()
-  const poll = useTimeoutPoll(refresh, computed(() => Math.max(1, Number(refreshInterval.value)) * 1000))
+  const poll = useTimeoutPoll(() => refresh(true), computed(() => Math.max(1, Number(refreshInterval.value)) * 1000))
   watch([visibility, refreshInterval], ([visible, interval]) => {
     if (visible === 'visible' && interval !== '0')
       poll.resume()
@@ -88,12 +86,10 @@ export function useKeyUsage() {
   }, { immediate: true })
 
   function changePage(page: number) {
-    queryGeneration += 1
     void records.execute(page)
   }
 
   function changePageSize(size: number) {
-    queryGeneration += 1
     records.pageSize.value = size
     void records.reloadFromStart()
   }
@@ -105,9 +101,7 @@ export function useKeyUsage() {
     refreshInterval,
     overview,
     refreshing,
-    recordsStale,
     overviewLoading: overviewRequest.loading,
-    overviewError: overviewRequest.error,
     records,
     refresh,
     changePageSize,

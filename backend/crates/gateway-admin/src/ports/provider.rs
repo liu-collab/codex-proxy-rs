@@ -18,8 +18,9 @@ use crate::model::provider_credentials::{
     PrepareCredentialImport, PrepareCredentialRefresh, PrepareCredentialRotation,
     PreparedAuthorizationCommit, PreparedCredentialImport, PreparedCredentialRotation,
     ProviderExport, ProviderExportCredentialInput, ProviderModelCatalogDocument, ProviderModels,
-    ProviderProfileAvatar, ProviderProfileStatistics, ProviderQuota, ProviderQuotaRequest,
-    ProviderResetCreditResult, ProviderResetCredits, ProviderSubscription, explicit_plan_type,
+    ProviderProfileAvatar, ProviderProfileStatistics, ProviderQuota, ProviderQuotaReadRequest,
+    ProviderQuotaRequest, ProviderResetCreditResult, ProviderResetCredits, ProviderSubscription,
+    explicit_plan_type,
 };
 use crate::model::{
     provider_credentials::{ProviderDocument, ProviderQuotaWindow},
@@ -288,6 +289,25 @@ pub trait ProviderAdmin: Send + Sync {
         &self,
         request: ProviderQuotaRequest,
     ) -> Result<ProviderQuota, ProviderAdminError>;
+
+    /// 只读投影当前页额度，返回值与输入逐项对应，单个失败不影响其他账号
+    /// 没有批量存储能力的 Provider 继续使用原有单账号语义
+    async fn read_quotas(
+        &self,
+        requests: &[ProviderQuotaReadRequest<'_>],
+    ) -> Vec<Result<ProviderQuota, ProviderAdminError>> {
+        futures::future::join_all(requests.iter().map(|request| async {
+            let account_id = ProviderAccountId::new(request.account.id.clone())
+                .map_err(|_| ProviderAdminError::new(ProviderAdminErrorKind::Invalid))?;
+            self.quota(ProviderQuotaRequest {
+                account_id,
+                refresh: false,
+                rolling_usage: request.rolling_usage.cloned(),
+            })
+            .await
+        }))
+        .await
+    }
 
     /// 历史观测的协议字段仅由具体 Provider 解释；不支持时保留累计估算
     fn quota_forecast_observation(

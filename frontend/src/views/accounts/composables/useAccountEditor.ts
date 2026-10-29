@@ -1,10 +1,11 @@
 import type { Account, AccountModelAccess, ApiKeyConfiguration } from '@/api'
+import { computed, ref, shallowRef, watch } from 'vue'
 
-import { ZNotification } from '@codex-proxy/ui'
-import { ref, shallowRef, watch } from 'vue'
 import { getAccountDetail, updateAccount } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { accountModelAccessError } from '../utils/modelAccess'
 import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
 import { apiKeyAccountError, emptyApiKeyAccountForm, isOpenAiApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
@@ -27,34 +28,36 @@ export function useAccountEditor(options: {
   const saveAction = useAsyncAction()
   const saving = saveAction.loading
   const apiKey = ref(emptyApiKeyAccountForm())
-  const configurationRequest = useRequestState()
-  const configurationLoading = configurationRequest.loading
-  const configurationReady = shallowRef(false)
+  const configurationRequest = useRequestState(() => ZNotification.error({
+    message: t('accounts.editor.loadError'),
+  }))
   const savedConfiguration = shallowRef<ApiKeyConfiguration>()
-  const oauthTransport = shallowRef<ApiKeyConfiguration['transport']>('prefer_websocket')
-  const savedOAuthTransport = shallowRef<ApiKeyConfiguration['transport']>('prefer_websocket')
+  const oauthTransport = shallowRef<ApiKeyConfiguration['transport'] | ''>('')
+  const savedOAuthTransport = shallowRef<ApiKeyConfiguration['transport']>()
+  const configurationReady = computed(() => !!savedConfiguration.value || !!savedOAuthTransport.value)
 
   async function loadConfiguration(accountId: string) {
     const requestId = configurationRequest.start()
     try {
-      const detail = await getAccountDetail({ accountId }, { signal: configurationRequest.signal })
+      const detail = await getAccountDetail({ accountId }, { signal: configurationRequest.signal, silent: true })
       if (!configurationRequest.isCurrent(requestId))
         return
       if (isOpenAiOAuthAccount(detail.account)) {
         const transport = detail.credentialConfiguration?.transport
         if (transport !== 'http' && transport !== 'prefer_websocket')
-          throw new Error('该账号没有 OAuth 上游设置')
+          throw new Error(t('accounts.editor.oauthUnavailable'))
         oauthTransport.value = transport
         savedOAuthTransport.value = transport
-        configurationReady.value = true
         return
       }
       const configuration = parseApiKeyConfiguration(detail.credentialConfiguration)
       if (!configuration)
-        throw new Error('该账号没有 API Key 上游设置')
-      apiKey.value = { ...emptyApiKeyAccountForm(), ...configuration }
+        throw new Error(t('accounts.editor.apiKeyUnavailable'))
+      apiKey.value = {
+        ...emptyApiKeyAccountForm(),
+        ...configuration,
+      }
       savedConfiguration.value = configuration
-      configurationReady.value = true
     }
     catch (error) {
       configurationRequest.fail(requestId, error)
@@ -65,7 +68,7 @@ export function useAccountEditor(options: {
   }
 
   function open(account: Account) {
-    configurationRequest.invalidate()
+    clearCredentials()
     editingAccount.value = account
     notes.value = account.notes ?? ''
     proxyMode.value = 'preserve'
@@ -73,13 +76,11 @@ export function useAccountEditor(options: {
     schedulingEnabled.value = account.enabled
     concurrencyLimit.value = concurrencyLimitInput(account.concurrencyLimit)
     weight.value = String(account.weight)
-    modelAccess.value = { ...account.modelAccess, models: [...account.modelAccess.models] }
+    modelAccess.value = {
+      ...account.modelAccess,
+      models: [...account.modelAccess.models],
+    }
     selectedGroupIds.value = account.groups.map(group => group.id)
-    apiKey.value = emptyApiKeyAccountForm()
-    oauthTransport.value = 'prefer_websocket'
-    savedOAuthTransport.value = 'prefer_websocket'
-    savedConfiguration.value = undefined
-    configurationReady.value = false
     showEditModal.value = true
     if (isOpenAiApiKeyAccount(account) || isOpenAiOAuthAccount(account))
       void loadConfiguration(account.id)
@@ -91,7 +92,10 @@ export function useAccountEditor(options: {
       return
     const isApiKey = isOpenAiApiKeyAccount(editingAccount.value)
     const isOAuth = isOpenAiOAuthAccount(editingAccount.value)
-    if (isApiKey && !configurationReady.value)
+    const configuration = isApiKey && configurationReady.value
+      ? parseApiKeyConfiguration(apiKey.value)
+      : undefined
+    if (isApiKey && !configuration)
       return
     if (isApiKey) {
       const error = apiKeyAccountError(apiKey.value, true)
@@ -107,7 +111,9 @@ export function useAccountEditor(options: {
     }
     const scheduling = parseAccountSchedulingForm(concurrencyLimit.value, weight.value)
     if (proxyMode.value === 'proxy' && !proxyId.value.trim()) {
-      ZNotification.warning({ message: '请选择已通过测试的代理' })
+      ZNotification.warning({
+        message: t('accounts.batchEdit.proxyRequired'),
+      })
       return
     }
     if (!scheduling.valid) {
@@ -119,12 +125,18 @@ export function useAccountEditor(options: {
       const settings = {
         accountId,
         notes: notes.value,
-        outboundProxyId: proxyMode.value === 'preserve' ? undefined : proxyMode.value === 'direct' ? '' : proxyId.value.trim(),
+        outboundProxyId: proxyMode.value === 'preserve'
+          ? undefined
+          : proxyMode.value === 'direct'
+            ? ''
+            : proxyId.value.trim(),
         enabled: schedulingEnabled.value,
         concurrencyLimit: scheduling.values.concurrencyLimit,
         weight: scheduling.values.weight,
         modelAccess: modelAccess.value,
-        groupIds: [...new Set(selectedGroupIds.value)],
+        groupIds: [
+          ...new Set(selectedGroupIds.value),
+        ],
       }
       const connectionChanged = isApiKey && (
         apiKey.value.apiKey !== ''
@@ -133,15 +145,24 @@ export function useAccountEditor(options: {
       )
       await updateAccount({
         ...settings,
-        connection: connectionChanged
-          ? { baseUrl: apiKey.value.base_url.trim(), transport: apiKey.value.transport, apiKey: apiKey.value.apiKey || undefined }
-          : isOAuth && configurationReady.value && oauthTransport.value !== savedOAuthTransport.value
+        connection: connectionChanged && configuration
+          ? {
+              baseUrl: configuration.base_url.trim(),
+              transport: configuration.transport,
+              apiKey: apiKey.value.apiKey || undefined,
+            }
+          : isOAuth && configurationReady.value && oauthTransport.value && oauthTransport.value !== savedOAuthTransport.value
             ? { transport: oauthTransport.value }
             : undefined,
       })
       showEditModal.value = false
-      ZNotification.success({ message: '账号已更新' })
-      void Promise.allSettled([options.reloadAccounts(), options.reloadGroups()])
+      ZNotification.success({
+        message: t('accounts.editor.saved'),
+      })
+      void Promise.allSettled([
+        options.reloadAccounts(),
+        options.reloadGroups(),
+      ])
     })
   }
 
@@ -152,14 +173,18 @@ export function useAccountEditor(options: {
 
   function clearCredentials() {
     configurationRequest.invalidate()
-    apiKey.value = emptyApiKeyAccountForm()
+    apiKey.value = {
+      ...emptyApiKeyAccountForm(),
+      transport: '',
+    }
     savedConfiguration.value = undefined
+    oauthTransport.value = ''
+    savedOAuthTransport.value = undefined
   }
 
   return {
     apiKey,
     oauthTransport,
-    configurationLoading,
     configurationReady,
     showEditModal,
     editingAccount,

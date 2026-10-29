@@ -2,8 +2,10 @@
 import type { Account } from '@/api'
 
 import { useTableColumns, ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
+
 import { ChevronDown } from '@lucide/vue'
 import { ref, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import AccountGroupMarks from '@/components/AccountGroupMarks.vue'
 import LastUsedAtCell from '@/components/LastUsedAtCell.vue'
@@ -31,6 +33,8 @@ import { useAccountMutations } from './composables/useAccountMutations'
 import { useAccountsQuery } from './composables/useAccountsQuery'
 import { useAccountsTable } from './composables/useAccountsTable'
 import { accountColumns } from './constants'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const concurrencyAccount = shallowRef<Account | null>(null)
 const showConcurrency = shallowRef(false)
@@ -66,7 +70,10 @@ const {
 } = useAccountGroupCatalog()
 
 const importTasks = useAccountImportTasks({
-  reload: () => Promise.all([loadAccounts(), loadGroups()]),
+  reload: () => Promise.all([
+    loadAccounts(),
+    loadGroups(),
+  ]),
 })
 const {
   open: showImportTasks,
@@ -119,7 +126,10 @@ const {
   onImportTaskCreated: importTasks.created,
   accounts,
   selectedIds,
-  reload: () => Promise.all([loadAccounts(), loadGroups()]),
+  reload: () => Promise.all([
+    loadAccounts(),
+    loadGroups(),
+  ]),
   replaceAccount,
 })
 
@@ -179,7 +189,6 @@ const {
 const {
   apiKey: editingApiKey,
   oauthTransport: editingOAuthTransport,
-  configurationLoading,
   configurationReady,
   showEditModal,
   editingAccount,
@@ -204,9 +213,8 @@ const {
 <template>
   <div class="flex min-h-0 w-full flex-col xl:h-full xl:overflow-hidden">
     <ZPageHeader
-      class="h-17"
-      title="账号管理"
-      description="维护账号池，查看可用性、配额与使用状态"
+      :title="t('navigation.accounts')"
+      :description="t('accounts.page.description')"
     />
 
     <AccountOverviewCards :summary="accountSummary" />
@@ -255,14 +263,14 @@ const {
             :selected-row-keys="selectedRowKeys"
             :expanded-row-keys="expandedRowKeys"
             :sort="sort"
-            empty-text="暂无账号数据"
+            :empty-text="t('accounts.page.noAccountDataYet')"
             @sort-change="handleSortChange"
           >
             <template #expander="{ row }">
               <button
                 type="button"
                 class="inline-flex size-6 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent text-cp-text-secondary transition hover:bg-cp-bg-text-hover hover:text-cp-text"
-                :title="expandedAccountIds.has(row.id) ? '收起统计' : '展开统计'"
+                :title="expandedAccountIds.has(row.id) ? t('accounts.page.collapseStatistics') : t('accounts.page.expandStatistics')"
                 @click.stop="toggleExpanded(row.id)"
               >
                 <ChevronDown
@@ -276,7 +284,7 @@ const {
               <ZCheckbox
                 :model-value="allSelected"
                 :indeterminate="indeterminate"
-                aria-label="选择当前页账号"
+                :aria-label="t('accounts.page.selectAccountOnCurrentPage')"
                 @update:model-value="toggleAll"
               />
             </template>
@@ -284,7 +292,7 @@ const {
             <template #selection="{ row }">
               <ZCheckbox
                 :model-value="selectedIds.has(row.id)"
-                aria-label="选择账号"
+                :aria-label="t('accounts.page.selectAccount')"
                 @update:model-value="toggleSelection(row.id)"
               />
             </template>
@@ -307,6 +315,7 @@ const {
                 :error-message="row.errorMessage"
                 :rate-limit-recovery-display="row.quota.rateLimitRecoveryDisplay"
                 :rate-limit-reason="row.quota.rateLimitReason"
+                :protection-rules="row.quota.protectionRules"
                 :recovery-probe-required="row.quota.recoveryProbeRequired"
                 :next-refresh-at="row.nextRefreshAt"
                 :next-refresh-at-display="row.nextRefreshAtDisplay"
@@ -330,7 +339,7 @@ const {
             </template>
 
             <template #lastUsedAt="{ row }">
-              <LastUsedAtCell :value="row.usage.lastUsedAt" :display="row.usage.lastUsedAtDisplay" :full-display="row.usage.lastUsedAtFullDisplay" />
+              <LastUsedAtCell :value="row.usage.lastUsedAt" :full-display="row.usage.lastUsedAtFullDisplay" />
             </template>
 
             <template #actions="{ row }">
@@ -406,7 +415,6 @@ const {
       :stopping="stoppingImportTask"
       :error="importTaskError"
       @select="importTasks.select"
-      @refresh="importTasks.refresh"
       @stop="importTasks.stop"
       @after-leave="importTasks.refresh(true)"
       @view-accounts="showImportTasks = false; loadAccounts()"
@@ -440,7 +448,6 @@ const {
       v-model:proxy-mode="editingProxyMode"
       v-model:proxy-id="editingProxyId"
       v-model:selected-group-ids="editingGroupIds"
-      :configuration-loading="configurationLoading"
       :configuration-ready="configurationReady"
       :account="editingAccount"
       :groups="groups"
@@ -469,36 +476,32 @@ const {
 
     <ZConfirmDialog
       v-model="showDeleteModal"
-      title="确认删除"
-      description="删除后该账号将不再参与调度，此操作不可撤销"
+      :title="t('common.actions.delete')"
+      :description="t('accounts.page.deleteDescription')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="batchDeleting"
       @confirm="handleBatchDelete"
     >
       <p class="m-0">
-        确定要删除选中的 {{ deleteCount }} 个账号吗？此操作不可撤销
+        {{ t('accounts.page.batchDeleteDescription', { count: deleteCount }) }}
       </p>
     </ZConfirmDialog>
 
     <ZConfirmDialog
       v-model="showSingleDeleteModal"
-      title="删除账号"
-      description="删除后该账号将不再参与调度，此操作不可撤销"
+      :title="t('accounts.actions.deleteAccount')"
+      :description="t('accounts.page.deleteDescription')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="deletingAccount"
       @confirm="handleDelete"
     >
       <p class="m-0">
-        确定要删除
-        {{
-          pendingDeleteAccount?.email
-            || pendingDeleteAccount?.accountId
-            || pendingDeleteAccount?.id
-            || '该账号'
-        }}
-        吗？
+        {{ t('accounts.page.delete', { value: pendingDeleteAccount?.email
+          || pendingDeleteAccount?.accountId
+          || pendingDeleteAccount?.id
+          || t('accounts.page.thisAccount') }) }}
       </p>
     </ZConfirmDialog>
   </div>

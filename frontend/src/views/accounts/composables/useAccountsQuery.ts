@@ -4,13 +4,15 @@ import type { Account } from '@/api'
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { getAccounts } from '@/api'
 import { usePagedQuery } from '@/composables/usePagedQuery'
+import { useTableSort } from '@/composables/useTableSort'
+import { accountColumns } from '../constants'
 
 export function useAccountsQuery() {
   const searchQuery = shallowRef('')
   const providerQuery = shallowRef('')
   const statusQuery = shallowRef('')
   const groupQuery = shallowRef('')
-  const sort = shallowRef<TableSort>()
+  const sort = useTableSort(accountColumns, 'accounts')
   const accountSummary = shallowRef({
     total: 0,
     normal: 0,
@@ -60,7 +62,9 @@ export function useAccountsQuery() {
   async function replaceAccount(updated: Account) {
     // 先取消旧查询并应用接口返回的账号，避免旧响应覆盖最新行数据。
     query.invalidate()
-    query.items.value = query.items.value.map(account => account.id === updated.id ? updated : account)
+    query.items.value = query.items.value.map(account => account.id === updated.id
+      ? updated
+      : account)
 
     // 筛选、排序、概览和末页回退仍由回读校准，但不触发整表加载。
     if (!await query.execute({ background: true }))

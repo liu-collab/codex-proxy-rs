@@ -1,8 +1,9 @@
 import type { PluginRefreshContext } from '../utils/actions'
 import type { PluginArtifact } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { deletePluginArtifact } from '@/api'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { notifyPluginError } from '../utils/actions'
 
 export function usePluginArtifactActions({ refresh }: PluginRefreshContext) {
@@ -23,16 +24,24 @@ export function usePluginArtifactActions({ refresh }: PluginRefreshContext) {
     try {
       await deletePluginArtifact({ sha256: artifact.metadata.sha256 }, { silent: true })
       showArtifactDelete.value = false
-      ZNotification.success({ message: '插件制品已删除' })
+      ZNotification.success({
+        message: t('plugins.artifacts.pluginProductHasBeenDeleted'),
+      })
       await refresh(true)
     }
     catch (error) {
-      notifyPluginError('插件制品删除失败', error)
+      notifyPluginError(t('plugins.artifacts.pluginProductDeletionFailed'), error)
     }
     finally {
       busyDigest.value = ''
     }
   }
 
-  return { showArtifactDelete, pendingArtifact, busyDigest, requestArtifactDelete, confirmArtifactDelete }
+  return {
+    showArtifactDelete,
+    pendingArtifact,
+    busyDigest,
+    requestArtifactDelete,
+    confirmArtifactDelete,
+  }
 }

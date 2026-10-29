@@ -16,27 +16,49 @@ use gateway_admin::{
 use gateway_plugin_sdk::{Handshake, Stage, call::registration::Registration};
 use std::{sync::Arc, time::Duration};
 
+const PROCESS_PREPARATION_TIMEOUT: Duration = Duration::from_secs(30);
+
+#[derive(Debug)]
+pub(super) enum InstancePreparationError {
+    UnloadablePackage(crate::PackageError),
+    IncompatiblePackage(String),
+    Failed(AdminError),
+}
+
+impl InstancePreparationError {
+    pub(super) fn into_admin_error(self) -> AdminError {
+        match self {
+            Self::UnloadablePackage(error) => crate::package::inspection_error(error),
+            Self::IncompatiblePackage(reason) => {
+                AdminError::invalid(format!("插件版本不兼容：{reason}"))
+            }
+            Self::Failed(error) => error,
+        }
+    }
+}
+
+impl From<AdminError> for InstancePreparationError {
+    fn from(error: AdminError) -> Self {
+        Self::Failed(error)
+    }
+}
+
+struct StartedInstance {
+    instance: PluginInstance,
+    package: Arc<crate::PreparedPackage>,
+    callbacks: Arc<PluginCallbacks>,
+    prepared: PreparedInstance,
+}
+
 impl PluginRuntime {
-    pub(super) async fn prepare_instance(
+    async fn start_instance(
         &self,
         instance: PluginInstance,
         target_revision: Revision,
         request_body_limit: Option<usize>,
-    ) -> Result<Arc<PreparedInstance>, AdminError> {
-        let mut observer_entries = Vec::new();
-        let mut commands = Vec::new();
-        let mut management = Vec::new();
-        let mut policy_entries = Vec::new();
-        let mut authentication_entries = Vec::new();
+        allow_incompatible: bool,
+    ) -> Result<StartedInstance, InstancePreparationError> {
         let authorization_binding = instance_fingerprint(&instance)?;
-        if self.restart_circuit_is_open(&RestartIdentity::new(
-            instance.id.clone(),
-            authorization_binding.clone(),
-        )) {
-            return Err(AdminError::unavailable(
-                "插件实例连续异常退出，已暂停自动重启；请检查配置后重新启用",
-            ));
-        }
         let validation_slot = self
             .validators
             .clone()
@@ -61,46 +83,57 @@ impl PluginRuntime {
                         Some(&instance.artifact_sha256),
                         limits,
                     )
-                    .map_err(|_| AdminError::invalid("插件恢复包校验失败"))?,
+                    .map_err(InstancePreparationError::UnloadablePackage)?,
                 );
-                let (configuration, state_configuration) =
-                    super::super::configuration::validate(&instance, package.manifest(), &schemas)?;
-                crate::adapter::observer::validate_bindings(
-                    package.manifest(),
-                    &instance.bindings,
-                )?;
-                crate::adapter::policy::validate_bindings(package.manifest(), &instance.bindings)?;
-                crate::adapter::middleware::validate_bindings(
-                    package.manifest(),
-                    &instance.bindings,
-                )?;
-                crate::adapter::upstream_adapter::validate_bindings(
-                    package.manifest(),
-                    &instance.bindings,
-                )?;
-                crate::adapter::frontend_authentication::validate_bindings(
-                    package.manifest(),
-                    &instance.bindings,
-                )?;
+                package
+                    .manifest()
+                    .package_for_platform(std::env::consts::OS, std::env::consts::ARCH)
+                    .map_err(|error| InstancePreparationError::UnloadablePackage(error.into()))?;
                 let requirements = crate::package::compatibility_requirements(package.manifest())?;
-                if let Some(warning) =
+                if let Some(reason) =
                     crate::package::compatibility_warning(&requirements, &host_version)?
                 {
-                    tracing::warn!(
-                        instance_id = instance.id,
-                        warning,
-                        "插件版本未经宿主保证，尝试启动"
-                    );
+                    if !allow_incompatible {
+                        return Err(InstancePreparationError::IncompatiblePackage(reason));
+                    }
+                    tracing::warn!(instance_id = instance.id, reason, "手动尝试启动不兼容插件");
                 }
-                let package = Arc::new(
-                    package
-                        .prepare(&directory)
-                        .map_err(|_| AdminError::unavailable("插件制品准备失败"))?,
-                );
-                Ok((package, configuration, instance, state_configuration))
+                let manifest = package.manifest();
+                let (configuration, state_configuration) =
+                    super::super::configuration::validate(&instance, manifest, &schemas)?;
+                crate::adapter::observer::validate_bindings(manifest, &instance.bindings)?;
+                crate::adapter::policy::validate_bindings(manifest, &instance.bindings)?;
+                crate::adapter::middleware::validate_bindings(manifest, &instance.bindings)?;
+                crate::adapter::upstream_adapter::validate_bindings(manifest, &instance.bindings)?;
+                crate::adapter::frontend_authentication::validate_bindings(
+                    manifest,
+                    &instance.bindings,
+                )?;
+                let package =
+                    Arc::new(package.prepare(&directory).map_err(|error| match error {
+                        crate::PackageError::Manifest(_) => {
+                            InstancePreparationError::UnloadablePackage(error)
+                        }
+                        _ => AdminError::unavailable("插件制品准备失败").into(),
+                    })?);
+                Ok::<_, InstancePreparationError>((
+                    package,
+                    configuration,
+                    instance,
+                    state_configuration,
+                ))
             })
             .await
             .map_err(|_| AdminError::internal("插件校验任务失败"))??;
+        if self.restart_circuit_is_open(&RestartIdentity::new(
+            instance.id.clone(),
+            authorization_binding.clone(),
+        )) {
+            return Err(AdminError::unavailable(
+                "插件实例连续异常退出，已暂停自动重启；请检查配置后重新启用",
+            )
+            .into());
+        }
         let manifest = package.package().manifest().clone();
         let plugin_id = manifest
             .plugin_id()
@@ -109,7 +142,6 @@ impl PluginRuntime {
         crate::compatibility::report(&manifest, &instance_id)?;
         let restart_identity =
             RestartIdentity::new(instance_id.clone(), authorization_binding.clone());
-        let bindings = instance.bindings.clone();
         let owner = self
             .state
             .load_owner(
@@ -158,15 +190,16 @@ impl PluginRuntime {
             &manifest,
             self.log_slots.clone(),
             private_state.clone(),
-            PluginCallbackPorts::new(
-                self.service_ports.clone(),
-                self.http.clone(),
-                self.account_ports.clone(),
-                self.client_key_ports.clone(),
-                self.model_ports.clone(),
-                self.affinity_ports.clone(),
-                self.resource_ports.clone(),
-            ),
+            PluginCallbackPorts {
+                services: self.service_ports.clone(),
+                http: self.http.clone(),
+                accounts: self.account_ports.clone(),
+                keys: self.client_key_ports.clone(),
+                clients: self.client_identity_port.clone(),
+                models: self.model_ports.clone(),
+                affinity: self.affinity_ports.clone(),
+                resources: self.resource_ports.clone(),
+            },
             self.request_limits.clone(),
         )?;
         callbacks.registration_body_limit = request_body_limit;
@@ -181,23 +214,75 @@ impl PluginRuntime {
                 lifecycle,
             )
             .await
-            .map_err(|_| AdminError::unavailable("插件进程握手失败"))?,
+            .map_err(|error| match error {
+                crate::RpcError::Budget(gateway_plugin_sdk::CallBudgetError::Invalid {
+                    stage,
+                    milliseconds,
+                }) => AdminError::invalid(format!(
+                    "插件阶段 {stage:?} 的调用预算无效：{milliseconds} 毫秒"
+                )),
+                _ => AdminError::unavailable("插件进程握手失败"),
+            })?,
         );
-        let mut prepared = PreparedInstance {
+        let prepared = PreparedInstance {
             instance_id: instance_id.clone(),
             artifact_sha256: instance.artifact_sha256.clone(),
             revision: instance.revision,
-            session: session.clone(),
+            session,
             private_state: private_state.clone(),
             maintenance: manifest
                 .contributes
                 .contains_key(&gateway_plugin_sdk::Capability::Maintenance),
             contributions: PreparedContributions::default(),
         };
+        Ok(StartedInstance {
+            instance,
+            package,
+            callbacks,
+            prepared,
+        })
+    }
+
+    pub(super) async fn prepare_instance(
+        &self,
+        instance: PluginInstance,
+        target_revision: Revision,
+        request_body_limit: Option<usize>,
+        allow_incompatible: bool,
+    ) -> Result<Arc<PreparedInstance>, InstancePreparationError> {
+        // 启动控制期限只包住制品准备与握手，Ready 后每次注册使用协商预算
+        let StartedInstance {
+            instance,
+            package,
+            callbacks,
+            mut prepared,
+        } = tokio::time::timeout(
+            PROCESS_PREPARATION_TIMEOUT,
+            self.start_instance(
+                instance,
+                target_revision,
+                request_body_limit,
+                allow_incompatible,
+            ),
+        )
+        .await
+        .map_err(|_| AdminError::unavailable("插件启动超时"))??;
+        let session = &prepared.session;
+        let manifest = package.package().manifest();
+        let plugin_id = manifest
+            .plugin_id()
+            .map_err(|_| AdminError::invalid("插件身份无效"))?;
+        let instance_id = &instance.id;
+        let bindings = &instance.bindings;
+        let mut observer_entries = Vec::new();
+        let mut commands = Vec::new();
+        let mut management = Vec::new();
+        let mut policy_entries = Vec::new();
+        let mut authentication_entries = Vec::new();
         let registration = session
             .call(
                 "plugin.register",
-                session.context(Stage::Registration, Duration::from_secs(5)),
+                session.context(Stage::Registration, session.budget(Stage::Registration)),
                 serde_json::json!({}),
                 vec![],
             )
@@ -206,12 +291,12 @@ impl PluginRuntime {
         let descriptor: Registration = serde_json::from_value(registration.result)
             .map_err(|_| AdminError::invalid("插件注册结果无效"))?;
         if descriptor.contributes != manifest.contributes || !registration.payload.is_empty() {
-            return Err(AdminError::invalid("插件注册结果与清单不符"));
+            return Err(AdminError::invalid("插件注册结果与清单不符").into());
         }
         commands.extend(
             crate::adapter::command_line::prepare(
                 &instance,
-                &manifest,
+                manifest,
                 session.clone(),
                 callbacks.clone(),
             )
@@ -228,8 +313,8 @@ impl PluginRuntime {
             management.push(entry);
         }
         if let Some(entry) = crate::adapter::frontend_authentication::prepare_entry(
-            &manifest,
-            &bindings,
+            manifest,
+            bindings,
             session.clone(),
             callbacks.clone(),
         )
@@ -238,38 +323,39 @@ impl PluginRuntime {
             authentication_entries.push(entry);
         }
         if let Some(entry) = crate::adapter::observer::compile_entry(
-            &manifest,
+            manifest,
             &plugin_id,
-            &instance_id,
-            &bindings,
+            instance_id,
+            bindings,
             session.clone(),
             callbacks.clone(),
         )? {
             observer_entries.push(entry);
         }
         policy_entries.extend(crate::adapter::policy::compile_entries(
-            &manifest,
-            &instance_id,
-            &bindings,
+            manifest,
+            instance_id,
+            bindings,
             session.clone(),
             callbacks.clone(),
         )?);
         let middleware_entries = crate::adapter::middleware::compile_entries(
-            &manifest,
-            &instance_id,
-            &bindings,
+            manifest,
+            instance_id,
+            bindings,
             session.clone(),
             callbacks.clone(),
         )?;
-        let model_aliases =
-            crate::adapter::catalog::prepare(&manifest, &instance, &session).await?;
         let upstream_entries = crate::adapter::upstream_adapter::prepare(
-            &manifest,
+            manifest,
             &instance,
-            Arc::clone(&session),
+            Arc::clone(session),
             Arc::clone(&callbacks),
         )
         .await?;
+        let catalog =
+            crate::adapter::catalog::prepare(manifest, &instance, session, &upstream_entries)
+                .await?;
         prepared.contributions = PreparedContributions {
             observer_entries,
             commands,
@@ -278,7 +364,8 @@ impl PluginRuntime {
             middleware_entries,
             upstream_entries,
             authentication_entries,
-            model_aliases,
+            model_aliases: catalog.aliases,
+            models: catalog.models,
         };
         Ok(Arc::new(prepared))
     }

@@ -5,6 +5,7 @@ mod deadline;
 mod driver;
 mod lifecycle;
 mod registry;
+mod scheduling;
 
 use std::{
     future::pending,
@@ -58,6 +59,19 @@ impl PluginHandler for TestHandler {
         Box::pin(async move {
             match call.method.as_str() {
                 "echo" => Ok(CallReply::unary(call.params, call.payload)),
+                "budget" => {
+                    call.host
+                        .call("host.log", json!({}), vec![])
+                        .await
+                        .map_err(SessionError::into_plugin_fault)?;
+                    Ok(CallReply::unary(
+                        json!({
+                            "initial_ms": call.context.timeout_ms,
+                            "remaining_ms": call.host.remaining_budget().map(|value| value.as_millis()),
+                        }),
+                        vec![],
+                    ))
+                }
                 "key_facts" => {
                     let result = call
                         .host
@@ -139,6 +153,14 @@ impl PluginHandler for TestHandler {
                 "slow" => {
                     tokio::time::sleep(Duration::from_millis(80)).await;
                     Ok(CallReply::unary(call.params, call.payload))
+                }
+                "delayed_stream" => {
+                    let (sender, stream) = ResponseStream::channel(NonZeroUsize::new(1).unwrap());
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(80)).await;
+                        sender.send(b"done".to_vec()).await.unwrap();
+                    });
+                    Ok(CallReply::stream(json!({}), Vec::new(), stream))
                 }
                 "callback" | "next_callback" => {
                     let method = if call.method == "next_callback" {
@@ -263,7 +285,6 @@ async fn start_session_with_capacity<H: PluginHandler>(
             maximum_callbacks: 4,
             maximum_buffered_stream_chunks: 16,
             handshake_timeout: Duration::from_secs(1),
-            maximum_call_timeout: Duration::from_secs(2),
         },
     )
     .await
@@ -296,6 +317,7 @@ async fn start_configured_session<H: PluginHandler>(
             message: Message::Ready {
                 protocol_version: PROTOCOL_VERSION,
                 ref incarnation,
+                ..
             },
             ref payload,
         } if incarnation == "test-incarnation" && payload.is_empty()
@@ -308,7 +330,7 @@ fn middleware_contributions() -> Contributions {
         Capability::Middleware,
         ContributionDeclaration {
             id: "test.example.middleware".into(),
-            version: 5,
+            version: 6,
             stages: vec![Stage::Request],
             input_formats: vec!["openai".into()],
             output_formats: vec!["openai".into()],
@@ -453,10 +475,49 @@ async fn send_control(host: &mut HostPeer, message: Message) {
 }
 
 pub(super) async fn receive(host: &mut HostPeer) -> Frame {
-    tokio::time::timeout(Duration::from_secs(1), read_frame(&mut host.reader))
-        .await
-        .expect("plugin response timed out")
-        .expect("plugin response frame must be valid")
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let frame = read_frame(&mut host.reader).await?;
+            match frame.message {
+                Message::Suspend { .. } | Message::CallbackConsumed { .. } => {}
+                Message::Resume { id, epoch } => {
+                    send_control(host, Message::Resumed { id, epoch }).await;
+                }
+                _ => return Ok::<_, gateway_plugin_sdk::FrameError>(frame),
+            }
+        }
+    })
+    .await
+    .expect("plugin response timed out")
+    .expect("plugin response frame must be valid")
+}
+
+// 等待测试事件时仍推进恢复授权，且只在完整挂起帧边界返回，避免取消半帧读取
+pub(super) async fn wait_suspended(host: &mut HostPeer, event: &tokio::sync::Notify) {
+    let event = event.notified();
+    tokio::pin!(event);
+    loop {
+        let frame = tokio::time::timeout(Duration::from_secs(1), read_frame(&mut host.reader))
+            .await
+            .unwrap()
+            .unwrap();
+        match frame.message {
+            Message::Suspend { .. } => {
+                if std::future::poll_fn(|cx| {
+                    std::task::Poll::Ready(event.as_mut().poll(cx).is_ready())
+                })
+                .await
+                {
+                    return;
+                }
+            }
+            Message::Resume { id, epoch } => {
+                send_control(host, Message::Resumed { id, epoch }).await
+            }
+            Message::CallbackConsumed { .. } => {}
+            message => panic!("unexpected frame while waiting for suspension: {message:?}"),
+        }
+    }
 }
 
 pub(super) async fn shutdown(host: &mut HostPeer, task: JoinHandle<Result<(), SessionError>>) {

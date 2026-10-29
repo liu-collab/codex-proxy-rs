@@ -230,8 +230,11 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 | 全局请求位置 | “系统设置 → 上游配置 → 请求位置覆盖”；默认关闭，不从 YAML 导入 |
 | 代理位置 | “代理管理”；优先于全局位置，全局关闭时仍可独立生效 |
 
-位置覆盖只影响 OpenAI 请求中受支持的位置、日期与时区信息，不改变真实出口 IP、epoch 时间戳或系统时区。
-`openai.residency` 是独立的部署约束。身份与位置字段见 [运行设置 API](../docs/api.md#8-运行设置)。
+位置覆盖只影响 OpenAI 请求中受支持的位置与时区信息，不改变上下文日期、真实出口 IP、epoch 时间戳或系统时区。
+`openai.residency` 和 `openai.account_routing_override` 是独立于客户端身份的启动配置，
+分别指定 `x-openai-internal-codex-residency` 和 `x-openai-account-routing-override` 请求头。
+两项均为可选字符串，填写值原样发送，不校验地域或路由枚举；省略或设为 `null` 时删除对应的下游请求头且不补发。
+示例配置均填写 `us`，修改后重启应用生效。身份与位置字段见 [运行设置 API](../docs/api.md#8-运行设置)
 后台账号操作使用 Provider 自己的官方画像；发布资料刷新不改写用户选择或 `config.yaml`
 
 ### 批量维护代理
@@ -239,11 +242,11 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 在“代理管理 → 新增代理”切换到“批量”，每行粘贴一个完整代理 URL、`host:port` 或 `host:port:用户名:密码`，最多 100 条。
 完整 URL 使用各自协议，简写使用表单选择的协议；IPv6 主机使用方括号，简写中的密码可包含冒号。
 名称按前缀和输入顺序生成，请求位置继承全局设置。勾选“添加后测试”时，只测试本次成功添加的记录。
-添加和测试结果合并在一个列表内，条目较多时滚动查看
+添加和测试结果合并展示，便于区分保存失败和连接测试失败
 
 列表支持跨页选中，勾选代理后显示“批量测试”按钮，点击直接测试选中项。
-测试同时检测连通性和出口地区，地区列主行显示出口国旗、国家和城市，次行显示已配置的自定义请求位置。
-测试前读取并固定实际名单，同时执行两条，结果更新到列表。批量添加中的停止操作只阻止后续提交，已开始的请求仍会完成。
+测试同时检测连通性和出口地区；测试前固定实际名单，同时执行两条，结果更新到列表。
+批量添加中的停止操作只阻止后续提交，已开始的请求仍会完成。
 离开代理页面停止后续提交，批量进度不在刷新后保留，已保存代理和测试结果仍可在列表查询
 
 格式错误、重复或配置冲突不覆盖已有代理，也不阻止其他条目处理。
@@ -302,9 +305,10 @@ Responses 流式请求完成准入后，每 15 秒无输出会发送一次 SSE �
 `api.request_timeout_seconds` 默认 `null`，只控制 HTTP 路由返回响应前的等待，不是流式正文或 WebSocket 每轮执行的总时限。
 排队、插件显式执行期限与客户端断开的边界见 [请求期限](../docs/api.md#请求期限)
 
-OpenAI 上游池化 WebSocket 默认每 25 秒发送一次 Ping，发出后允许等待 30 秒；
-收到 Pong 或其他入站帧即解除本次心跳截止，持续无响应则以 `pong_timeout` 关闭连接。
-此策略也覆盖正在生成的请求，与等待下一条上游消息的 `stream_idle_timeout_ms` 分别计时
+OpenAI 上游 WebSocket 被动回应 Ping，不主动发送心跳；Pong 写入最多等待 5 秒。
+下游 Responses WebSocket 每 25 秒发送 Ping，第一条未响应的 Ping 发出后 30 秒没有 Pong 或其他有效入站帧即断开；
+后续 Ping 不延长这次截止，心跳入队及写入最多等待 5 秒。两段心跳各自处理，不跨 WS 转发或转换为 SSE 事件。
+心跳不重置上游业务消息的 `openai.ws_pool.stream_idle_timeout_ms`
 
 每条已保存代理可在管理端配置“上游 WS 连接上限”，默认留空、不限制连接数。
 预算限制单个 CPR 进程使用该代理的 OpenAI Responses 上游 WS 总数，关联账号共享，包含建连中、在途、空闲及非池化连接；直连不受影响。
@@ -313,7 +317,11 @@ OpenAI 上游池化 WebSocket 默认每 25 秒发送一次 Ping，发出后允�
 修改上限对后续请求生效，已存在的连接继续计数；调低上限不会强制中断在途或绑定下游 WS 的连接。
 预算仅覆盖宿主原生 OpenAI Responses 连接，插件自建连接及其他 HTTP/WS 流量仍需预留容量
 
-有容量时继续复用，连接总寿命仍由 `max_age_ms` 控制，默认 55 分钟，不设置固定空闲回收时间。
+未绑定活跃客户端 WS 的池化连接，归池后按 `openai.ws_pool.idle_timeout_ms` 计时，默认 `300000`（5 分钟，必须大于零）。
+Ping/Pong 不延长空闲期限；默认每 5 秒扫描，通常在空闲 300～305 秒开始回收，复用前也检查是否到期。
+关闭先停止复用，最多等待 1 秒发送 Close，随后终止并等待 socket 释放，容量在物理连接释放后才归还。
+仍绑定活跃客户端 WS 的连接不受空闲期限约束；客户端退出会释放仍归它所有的上游连接，重新绑定或切到 HTTP 时释放失去用途的旧连接。
+连接总寿命由 `openai.ws_pool.max_age_ms` 控制，默认 55 分钟；到期退出复用，不为清池打断正在生成的响应。
 满额时优先关闭同代理下最久未使用的普通空闲 WS；在途、建连中和绑定下游 WS 的连接不参与容量淘汰。
 没有可回收连接时等待容量，受原请求期限、客户端取消和连接池关闭约束；无显式请求期限时不会额外设置排队超时。
 被回收连接上的精确续接沿用既有客户端完整回放合同，可能多一次恢复往返
@@ -332,7 +340,7 @@ SSE 注释保活用于防止传输链路空闲断开，不会重置 Codex 等待
 
 管理端生成的 CC Switch 一键导入包含连接信息和当前 Key 的日／周额度查询，默认每 30 分钟刷新。
 查询地址和凭据随导入生成，在 CC Switch 中修改 Provider 的地址或 Key 后，需重新导入以同步用量查询。
-导入不包含下方模板的远程压缩、原生生图和 WebSocket 设置。需要这些设置时，使用下方配置直连 CPR，
+导入不包含下方模板的远程压缩、原生生图、WebSocket 和语音设置。需要这些设置时，使用下方配置直连 CPR，
 避免 CC Switch 切换或接管后重写 Provider 配置
 
 Linux/macOS 默认目录为 `~/.codex/`，Windows 为 `%USERPROFILE%\.codex\`；
@@ -348,25 +356,28 @@ model_provider = "OpenAI"
 model = "gpt-5.6-terra"
 model_reasoning_effort = "max"
 service_tier = "default"
+# 语音通话控制地址
+experimental_realtime_ws_base_url = "http://127.0.0.1:8080/v1"
 
 [model_providers.OpenAI]
 name = "OpenAI"
 base_url = "http://127.0.0.1:8080/v1"
+model_catalog_url = "http://127.0.0.1:8080/v1/models"
 wire_api = "responses"
 # provider 覆盖 base_url 时客户端默认不拉远端目录，必须显式声明目录地址；
 # 否则模型选择器只显示内置预置，并跳过思考强度选择步骤。
 model_catalog_url = "http://127.0.0.1:8080/v1/models"
 supports_websockets = false
 requires_openai_auth = false
-# 填写代理密钥，真实账号由服务端管理。
+# 代理密钥
 experimental_bearer_token = "<client-api-key>"
 
 [model_providers.OpenAI.capabilities]
-# Codex 0.162.0+ 显式启用 V2 远程压缩，不依赖 Provider 名称识别
+# V2 远程压缩
 remote_compaction = "v2"
 
 [model_providers.OpenAI.http_headers]
-# 供客户端识别服务端托管认证，本身不是密钥。
+# 服务端托管认证
 X-OpenAI-Actor-Authorization = "proxy-managed"
 
 [features]
@@ -379,6 +390,9 @@ api_key_model_discovery = true
 `OpenAI` 是自定义 Provider ID，大小写要与 `model_provider` 一致。合并配置时修改已有表，
 不要重复添加 `[features]` 或 Provider 表。更换模型时也要检查其支持的推理强度。
 密钥以明文保存，文件仅供本人读取，不要提交到 Git。接入代理不需要扩大命令沙箱的联网或文件权限
+
+`model_catalog_url` 指向同一网关的 `/v1/models`；更换网关地址时与 `base_url` 一起修改。
+该接口返回当前密钥可见的模型目录，具体格式见 [模型目录](../docs/api.md#模型目录)
 
 V2 远程压缩通过 Responses 接口发送 `compaction_trigger`，网关和上游需支持该协议。
 若 Provider ID 改为 `custom`，相应能力配置也要改到 `[model_providers.custom.capabilities]`
@@ -394,7 +408,7 @@ V2 远程压缩通过 Responses 接口发送 `compaction_trigger`，网关和上
 
 模板启用原生生图。Codex 可在任务需要图片时调用 `image_gen.imagegen`，
 再通过代理的 Images 接口生成或编辑图片；也可以在需求中明确要求生成并使用图片。
-需要支持该能力的客户端、支持图片输入的对话模型，以及有生图权限和额度的 OpenAI 账号。
+需要支持该能力的客户端、支持图片输入的对话模型，以及有生图权限和额度的 Codex 账号。
 代理不会增加上游权限，xAI 账号不能承接这些 Images 请求
 
 生图不要求开启 WebSocket。要启用客户端 WebSocket，把当前 Provider 的
@@ -402,8 +416,22 @@ V2 远程压缩通过 Responses 接口发送 `compaction_trigger`，网关和上
 
 客户端到代理、代理到上游是两段独立连接。客户端关闭 WebSocket 后，
 服务端仍可能用 WebSocket 访问上游；客户端开关不控制服务端连接池和 HTTP 回退策略。
-OpenAI OAuth 账号的上游传输方式默认 WS；固定为 SSE 的账号不承接必须依赖 WS 的预热及连接内续接。
+Codex OAuth 账号的上游传输方式默认 WS；固定为 SSE 的账号不承接必须依赖 WS 的预热及连接内续接。
 仅使用这类账号时，客户端保持 `supports_websockets = false`，避免先尝试 WS 再回退
+
+### 语音通话
+
+Codex 0.164.0 的 `/voice` 通过 Provider 的 `base_url` 创建通话，控制连接另用顶层
+`experimental_realtime_ws_base_url`，不会自动继承 Provider 地址。两者应指向同一网关的 `/v1`，
+使用相同的代理密钥，并确保反向代理允许 WebSocket Upgrade。此设置独立于 Responses 的
+`supports_websockets` 开关
+
+已有配置需把 `experimental_realtime_ws_base_url` 合并到第一个 TOML 表之前，修改后完全退出并重启
+Codex。创建通话成功后仍报 `realtime websocket handshake failed` 时，先检查客户端日志中的
+`connecting realtime websocket` 是否指向网关；若仍为 `api.openai.com`，说明控制连接未经过代理
+
+语音使用具备上游权限的 OAuth 账号，音频流由客户端与上游直接传输，路由与限制见
+[Codex Live 语音通话](../docs/api.md#codex-live-语音通话)
 
 ### 时区与客户端环境信息
 
@@ -458,6 +486,8 @@ metrics_exporter = "none"
 管理端重启、SIGTERM 和 SIGINT 使用同一关闭策略：停止接收新连接，不等待现有 HTTP、SSE、
 WebSocket 会话完成，进程退出时强制断开剩余连接。已入队的观测写入与后台清理保留
 `host.worker_shutdown_timeout_seconds`（默认 30 秒）的收尾预算；客户端在新进程就绪后重新连接
+
+管理端重启受理后，到进程退出期间，更新、回滚和再次重启均被拒绝；可继续查询更新状态
 
 Compose 的 `stop_grace_period` 为 75 秒，覆盖默认 30 秒后台收尾及进程清理余量。
 调大后台关闭预算时，也必须同步预留容器停止宽限期，否则 Docker 会在宽限期结束时 SIGKILL
@@ -625,6 +655,16 @@ CPR_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 docker compose -f deploy/compose.yaml build codex-proxy-rs
 ```
 
+### 错误保护配置升级
+
+使用 `accountAutoFreeze*` 运行参数的部署升级时，数据库迁移删除全部旧保护设置，不转换规则或继承参数。
+`accountErrorProtection` 与新安装使用相同默认值：关闭保护、规则为空，其余参数见[错误保护 API](../docs/api.md#账号错误保护)。
+需要保护时，在「系统设置 → 运行设置 → 错误保护」重新配置规则并启用，
+使用管理 API 的客户端须同步改用[新的设置对象](../docs/api.md#账号错误保护)，旧字段写入会被拒绝
+
+已有活动冻结保留当前冷却截止时间，保护关闭时到期解除，未冻结的旧计数不沿用。通用错误保护仅暂停账号调度，不再自动下调并发；
+已经保存的账号并发上限保持原值，需要恢复时在账号设置中手动调整
+
 ### 版本命名与升级规则
 
 管理端「系统更新」可临时选择通道检查更新，不保存选择，不会自动下载或安装。
@@ -653,8 +693,7 @@ exp 不进入正式版、alpha、beta 或 rc，普通实例也不能选择 Exp�
 其他通道的版本及发布说明，手动检查显示“当前没有可用更新”。检查失败单独报告，不能当作没有更新
 
 alpha、beta、rc、exp 在 GitHub 标记为 Pre-release，不覆盖 GitHub Latest 或镜像 `latest`。
-允许连续升级的发行线从首次发布起遵守[迁移冻结规则](../backend/migrations/README.md#冻结规则)，
-包括预发行到正式版的晋级；发版前验证对应升级路径，不能仅凭版本号认定数据库兼容
+升级前核对目标版本的数据库要求；可连续升级的发行线与约束见[迁移冻结规则](../backend/migrations/README.md#冻结规则)
 
 ### 管理端在线更新
 
@@ -719,10 +758,13 @@ Release 必须提供当前 OS/架构的 `codex-proxy-rs_<version>_<os>_<arch>.ta
 | `plugin-release-manifest.json` | 固定宿主版本、提交、平台与支持的插件合同；插件列表当前为空 |
 | 可执行文件同目录的 `plugins/official` | 随受信宿主发行物部署的只读目录，与二进制、Web 资源成套更新或恢复 |
 
-- 下载更新时校验发行身份，插件合同不兼容不阻止安装。点击重启时检查已安装目标版本，列出不兼容插件的名称和原因；确认后保留启用配置并重启，逐个尝试启动插件，版本警告持续显示
-- 回滚同样在重启前提示插件兼容风险，不因版本不匹配批量停用插件。更新或回滚期间的并发配置变更会阻止切换，文件替换失败或取消时恢复整组文件
+- 下载更新时校验发行身份，插件合同不兼容不阻止安装。点击重启时检查已安装目标版本，列出不兼容插件的名称和原因；确认后重启，不兼容实例保持未启动，启用配置、绑定、密钥和私有数据保留
+- 回滚同样在重启前提示插件兼容风险，启动时重新检查，不改写持久启用配置。更新或回滚期间的并发配置变更会阻止切换，文件替换失败或取消时恢复整组文件
 - 非空官方清单中的包经身份、平台和摘要校验后幂等导入；导入不确认信任、不创建配置、不启用，也不删除旧包。管理员确认信任后才执行默认配置流程；重复摘要保留首次安装出处
 - `sealed` 是构建封口标记，不是密码学签名。普通上传、URL 或 GitHub 安装不能获得 `builtin` 身份，独立教学示例也不例外
+
+宿主启动检查覆盖管理页更新、Docker 与手工替换二进制。不兼容实例不挂载任何能力或故障占位，其额外认证和拦截停止生效，宿主原生认证继续执行。
+宿主范围或能力版本不匹配时，可在插件页确认风险后尝试本次启动；清单、RPC、平台或包完整性错误不能绕过。具体操作见[插件故障处理](../docs/plugins.md#故障处理)
 
 部署须保留完整的二进制、Web 资源与官方插件目录；不要手动修改制品元数据或迁移 checksum 绕过校验。
 macOS arm64 提供构建产物；部署前需验证目标平台的插件运行与上游调用，不能只以打包成功判断可用
@@ -770,8 +812,8 @@ OpenAI 主动额度重置卡及消费结果由上游持有，不属于本地备�
 - 备份暂存目录为 `host.runtime_data_dir/backup-staging`；Compose 默认对应
   `/app/.runtime/data/backup-staging`，由 `.runtime/data` 卷持久化，权限 `0700`（仅 `cpr`
   用户可读写）。归档流式压缩，只暂存一份压缩文件；部署卷至少预留一个最大业务归档的空间
-- S3/R2 存储、Cron 计划、保留策略与备份记录都保存在 PostgreSQL（`backup_settings` /
-  `backup_records`），备份记录行在删除成功后硬删除，操作历史进入 `admin_audit_events`
+- S3/R2 存储、Cron 计划、保留策略与备份记录都保存在 PostgreSQL，备份记录在删除成功后移除。
+  人工创建和删除操作写入管理审计，自动保留清理不生成管理员操作审计
 - 手工备份的 `expiresInDays` 在创建时生成独立 `expires_at`；计划备份按当前 `retentionDays` 生成
   `expires_at`，并同时受 `retentionCount` 清理规则约束。到期只进入删除流程，不构成在线恢复点
 

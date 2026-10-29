@@ -6,6 +6,7 @@
 use std::time::Instant;
 
 use bytes::Bytes;
+use gateway_core::operation::ProviderHttpHeader;
 use gateway_protocol::openai::is_transport_managed_request_header;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
@@ -15,6 +16,7 @@ use super::{
         CodexTransportMetrics, elapsed_duration_millis, http_version_name, retry_after_seconds,
     },
     diagnostics::CodexUpstreamDiagnostics,
+    downstream::is_non_codex_request_header,
     endpoints::endpoint_url,
     headers::is_managed_identity_header,
     response_meta,
@@ -25,31 +27,57 @@ impl CodexBackendClient {
     pub(crate) fn live_request_headers(
         &self,
         context: CodexRequestContext<'_>,
-        extra_protocol_headers: &[(String, String)],
+        extra_protocol_headers: &[ProviderHttpHeader],
+        content_type: Option<&str>,
     ) -> CodexClientResult<HeaderMap> {
         let mut headers = self.model_request_headers(&self.profile.snapshot(), context)?;
-        for (name, value) in extra_protocol_headers {
-            let name = HeaderName::from_bytes(name.as_bytes())?;
+        for header in extra_protocol_headers {
+            let name = HeaderName::from_bytes(header.name().as_bytes())?;
             if is_managed_identity_header(name.as_str())
                 || is_transport_managed_request_header(name.as_str())
+                || is_non_codex_request_header(name.as_str())
+                // Live 不继承 Responses 的路由或连接续接状态
+                || matches!(name.as_str(), "x-codex-routing-hint" | "x-codex-turn-state" | "x-codex-turn-id")
             {
                 continue;
             }
-            headers.append(name, HeaderValue::from_str(value)?);
+            let value = if name == "x-codex-turn-metadata" {
+                // Live 没有 Responses 续接归属，保留 metadata 扩展前先清理原账号绑定信息
+                let Some(value) = context
+                    .installation_id
+                    .zip(std::str::from_utf8(header.value()).ok())
+                    .and_then(|(installation_id, raw)| {
+                        super::request::scope_turn_metadata(raw, installation_id, true)
+                    })
+                else {
+                    continue;
+                };
+                HeaderValue::from_str(&value)?
+            } else {
+                HeaderValue::from_bytes(header.value())?
+            };
+            headers.append(name, value);
         }
+        if let Some(content_type) = content_type {
+            headers.insert(
+                reqwest::header::CONTENT_TYPE,
+                HeaderValue::from_str(content_type)?,
+            );
+        }
+        self.append_middleware_headers(&mut headers)?;
+        super::correlation::scope_headers(&mut headers, context.installation_id);
         Ok(headers)
     }
 
     /// 向 Codex realtime calls 端点发送账号级 POST；请求与响应正文不经过 serde。
     ///
-    /// `extra_protocol_headers` 是客户端协议头经过允许清单过滤后的结果，
-    /// 仅追加业务语义字段，身份与画像不能覆盖账号基线
+    /// 业务扩展头保留多值字节，身份、环境和追踪边界由各端点共用的头组装处理
     pub(crate) async fn post_live_call(
         &self,
         endpoint_path: &'static str,
         query: Option<&str>,
         content_type: Option<&str>,
-        extra_protocol_headers: &[(String, String)],
+        extra_protocol_headers: &[ProviderHttpHeader],
         body: Bytes,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<CodexLiveCallResponse> {
@@ -67,7 +95,7 @@ impl CodexBackendClient {
         &self,
         url: String,
         content_type: Option<&str>,
-        extra_protocol_headers: &[(String, String)],
+        extra_protocol_headers: &[ProviderHttpHeader],
         body: Bytes,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<CodexLiveCallResponse> {
@@ -79,40 +107,41 @@ impl CodexBackendClient {
         &self,
         url: String,
         content_type: Option<&str>,
-        extra_protocol_headers: &[(String, String)],
+        extra_protocol_headers: &[ProviderHttpHeader],
         body: Bytes,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<CodexLiveCallResponse> {
-        let mut headers = self.live_request_headers(context, extra_protocol_headers)?;
-        headers.insert(
-            reqwest::header::CONTENT_TYPE,
-            reqwest::header::HeaderValue::from_str(content_type.unwrap_or("application/json"))?,
-        );
-        self.append_middleware_headers(&mut headers)?;
+        let headers = self.live_request_headers(
+            context,
+            extra_protocol_headers,
+            Some(content_type.unwrap_or("application/json")),
+        )?;
 
         let trace = context
             .trace
             .cloned()
             .unwrap_or_default()
             .exchange("http_json");
+        let outbound = self.prepare_http_request(url, headers, body).await?;
         trace.headers(
             "upstream.request.headers",
-            serde_json::json!({
-                "method": "POST", "endpoint": url,
-            }),
-            headers
+            serde_json::json!({"method": outbound.method().as_str(), "transport": "http_json"}),
+            outbound
+                .headers()
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.as_bytes())),
         );
-        trace.capture("upstream.request.body", &body);
-
+        trace.capture(
+            "upstream.request.body",
+            outbound
+                .body()
+                .and_then(reqwest::Body::as_bytes)
+                .unwrap_or_default(),
+        );
         let headers_started_at = Instant::now();
         let response = self
             .client
-            .post(url)
-            .headers(headers)
-            .body(body)
-            .send()
+            .execute(outbound)
             .await
             .map_err(CodexClientError::HttpJson)?;
         let upstream_headers_ms = elapsed_duration_millis(headers_started_at.elapsed());
@@ -144,7 +173,8 @@ impl CodexBackendClient {
             .await);
         }
 
-        let diagnostics = response_meta::diagnostics(Some(status.as_u16()), response.headers());
+        let diagnostics = response_meta::diagnostics(Some(status.as_u16()), response.headers())
+            .with_response_origin(Some(response.url().clone()));
         let set_cookie_headers = response_meta::set_cookie_headers(response.headers());
         let rate_limit_headers = response_meta::rate_limit_headers(response.headers());
         let retry_after_seconds = retry_after_seconds(response.headers(), None);
@@ -177,25 +207,21 @@ impl CodexBackendClient {
     }
 }
 
-/// 上游 2xx 响应中可回传客户端的头；`Location` 是客户端获知 call id 的合同。
-fn live_forwarded_headers(headers: &HeaderMap) -> Vec<(String, String)> {
-    const FORWARDABLE: [&str; 5] = [
-        "location",
-        "content-type",
-        "retry-after",
-        "x-request-id",
-        "openai-request-id",
-    ];
-    headers
-        .iter()
-        .filter(|(name, _)| FORWARDABLE.contains(&name.as_str()))
-        .filter_map(|(name, value)| {
-            value
-                .to_str()
-                .ok()
-                .map(|value| (name.as_str().to_owned(), value.to_owned()))
-        })
-        .collect()
+/// 共用响应隔离规则；原始正文的 Content-Type 由 Live adapter 单独保留
+fn live_forwarded_headers(headers: &HeaderMap) -> Vec<(String, Bytes)> {
+    let mut forwarded = response_meta::client_headers(headers);
+    forwarded.extend(
+        headers
+            .get_all(reqwest::header::CONTENT_TYPE)
+            .iter()
+            .map(|value| {
+                (
+                    "content-type".to_owned(),
+                    Bytes::copy_from_slice(value.as_bytes()),
+                )
+            }),
+    );
+    forwarded
 }
 
 /// Live 通话引导与 hangup 的账号级响应。
@@ -211,7 +237,7 @@ pub struct CodexLiveCallResponse {
     pub content_type: Option<String>,
     pub retry_after_seconds: Option<u64>,
     /// 可回传客户端的响应头子集。
-    pub forwarded_headers: Vec<(String, String)>,
+    pub forwarded_headers: Vec<(String, Bytes)>,
     pub set_cookie_headers: Vec<String>,
     pub rate_limit_headers: Vec<(String, String)>,
     pub diagnostics: CodexUpstreamDiagnostics,

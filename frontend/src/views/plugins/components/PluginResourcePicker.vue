@@ -1,24 +1,41 @@
 <script setup lang="ts">
-import { ZButton, ZEmpty, ZNotification, ZSelect } from '@codex-proxy/ui'
-import { CircleAlert, LoaderCircle } from '@lucide/vue'
+import { ZEmpty, ZSelect } from '@codex-proxy/ui'
+import { LoaderCircle } from '@lucide/vue'
+
 import { computed, onScopeDispose, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getAccountGroups, getApiKeys } from '@/api'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 const props = withDefaults(defineProps<{ kind: 'keys' | 'groups', disabled?: boolean, active?: boolean, maxCollapseTags?: number }>(), { active: true, maxCollapseTags: 1 })
+
+const { t } = useI18n({ useScope: 'global' })
+
 const selected = defineModel<string[]>({ required: true })
 const options = shallowRef<{ id: string, label: string, disabled: boolean }[]>([])
 const loading = shallowRef(false)
 const error = shallowRef('')
-const label = computed(() => props.kind === 'keys' ? '客户端 Key' : '账号分组')
+const label = computed(() => props.kind === 'keys'
+  ? t('plugins.bindings.clientKey')
+  : t('plugins.bindings.accountGrouping'))
 let controller: AbortController | undefined
 const choices = computed(() => {
   const known = new Set(options.value.map(option => option.id))
-  const unavailable = selected.value.filter(id => !known.has(id)).map(id => ({ id, label: `不可用 · ${id}`, disabled: true }))
-  return [...unavailable, ...options.value].map(option => ({
+  const unavailable = selected.value.filter(id => !known.has(id)).map(id => ({
+    id,
+    label: t('plugins.resources.unavailable', { id }),
+    disabled: true,
+  }))
+  return [
+    ...unavailable,
+    ...options.value,
+  ].map(option => ({
     value: option.id,
     label: option.label,
-    description: option.disabled ? '不可用' : undefined,
+    description: option.disabled
+      ? t('common.status.unavailable')
+      : undefined,
     // 已失效的绑定仍可取消，不能重新选入。
     disabled: option.disabled && !selected.value.includes(option.id),
   }))
@@ -65,7 +82,10 @@ async function load() {
       loading.value = false
   }
 }
-watch([() => props.kind, () => props.active], ([, active]) => {
+watch([
+  () => props.kind,
+  () => props.active,
+], ([, active]) => {
   controller?.abort()
   controller = undefined
   if (active)
@@ -83,29 +103,22 @@ onScopeDispose(() => controller?.abort())
     collapse-tags-tooltip
     :max-collapse-tags="maxCollapseTags"
     :filterable="choices.length > 6"
-    :loading="loading || Boolean(error)"
-    :disabled="disabled"
-    :aria-label="`${label}（可多选）`"
-    placeholder="不限（可多选）"
+    :loading="loading"
+    :disabled="disabled || Boolean(error)"
+    :aria-label="t('plugins.resources.multipleSelectionsAllowed', { label })"
+    :placeholder="t('plugins.resources.unlimitedPlaceholder')"
     class="w-full min-w-0"
   >
     <template #empty="{ search }">
-      <ZEmpty v-if="loading" title="正在加载…" size="small" surface="none" role="status">
+      <ZEmpty v-if="loading" :title="t('plugins.resources.loading')" size="small" surface="none" role="status">
         <template #icon>
           <LoaderCircle :size="18" class="animate-spin text-cp-text-quaternary motion-reduce:animate-none" />
         </template>
       </ZEmpty>
-      <ZEmpty v-else-if="error" title="加载失败" :description="`暂时无法获取${label}`" :icon="CircleAlert" size="small" surface="none" role="alert">
-        <template #action>
-          <ZButton size="small" :disabled="disabled" @click="load">
-            重试
-          </ZButton>
-        </template>
-      </ZEmpty>
       <ZEmpty
-        v-else
-        :title="search ? '没有匹配项' : `暂无${label}`"
-        :description="search ? undefined : `请先在${kind === 'keys' ? 'API 密钥' : '分组管理'}中创建`"
+        v-else-if="!error"
+        :title="search ? t('plugins.resources.noMatches') : t('plugins.resources.no', { label })"
+        :description="search ? undefined : t('plugins.resources.createOneInFirst', { value: kind === 'keys' ? t('navigation.apiKeys') : t('navigation.groups') })"
         size="small"
         surface="none"
         role="status"

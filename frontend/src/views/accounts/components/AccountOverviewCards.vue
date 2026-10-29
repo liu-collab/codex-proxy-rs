@@ -1,41 +1,45 @@
 <script setup lang="ts">
 import type { getAccounts } from '@/api'
-import { ZCard, ZMotionIcon } from '@codex-proxy/ui'
 
+import { ZCard, ZMotionIcon } from '@codex-proxy/ui'
 import { AlertTriangle, Gauge, ShieldCheck, Users } from '@lucide/vue'
+
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { formatInteger } from '@/utils/format'
 
 const props = defineProps<{
   summary: Awaited<ReturnType<typeof getAccounts>>['summary']
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const overviewItems = computed(() => [
   {
-    label: '总账号',
+    label: t('accounts.overview.totalAccounts'),
     value: formatInteger(props.summary.total),
-    caption: '账号池规模',
+    caption: t('accounts.overview.accountPoolSize'),
     tone: 'neutral',
     icon: Users,
   },
   {
-    label: '正常账号',
+    label: t('accounts.overview.availableAccounts'),
     value: formatInteger(props.summary.normal),
-    caption: '可参与调度',
+    caption: t('accounts.overview.availableHelp'),
     tone: 'success',
     icon: ShieldCheck,
   },
   {
-    label: '额度受限',
+    label: t('accounts.overview.quotaLimited'),
     value: formatInteger((props.summary.quotaExhausted ?? 0) + (props.summary.rateLimited ?? 0)),
-    caption: '等待额度恢复',
+    caption: t('accounts.overview.waitingForQuota'),
     tone: 'warning',
     icon: Gauge,
   },
   {
-    label: '待处理',
+    label: t('accounts.overview.pending'),
     value: formatInteger((props.summary.disabled ?? 0) + (props.summary.error ?? 0)),
-    caption: '已停用 / 错误',
+    caption: t('accounts.overview.disabledError'),
     tone: 'danger',
     icon: AlertTriangle,
   },

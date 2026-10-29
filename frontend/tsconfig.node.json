@@ -11,7 +11,8 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noEmit": true,
-    "verbatimModuleSyntax": true
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true
   },
   "include": ["vite.config.ts", "build/**/*.ts"]
 }

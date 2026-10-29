@@ -3,6 +3,8 @@ import { ZCard, ZForm, ZFormItem, ZIconButton, ZInput } from '@codex-proxy/ui'
 
 import { CircleHelp, MonitorUp, TerminalSquare } from '@lucide/vue'
 
+import { useI18n } from 'vue-i18n'
+
 defineOptions({ name: 'ClientVersionPolicyCard' })
 
 withDefaults(
@@ -22,6 +24,8 @@ const emit = defineEmits<{
   help: []
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const minCodexDesktopVersion = defineModel<string>('minCodexDesktopVersion', { required: true })
 const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required: true })
 </script>
@@ -30,9 +34,9 @@ const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required:
   <ZCard>
     <template #title>
       <span class="inline-flex items-center gap-1.5">
-        <span>客户端版本限制</span>
+        <span>{{ t('settings.clientVersion.clientVersionRestrictions') }}</span>
         <ZIconButton
-          aria-label="查看安装与升级说明"
+          :aria-label="t('settings.clientVersion.openGuide')"
           :title="undefined"
           class="size-6! hover:bg-transparent! active:bg-transparent!"
           @click="emit('help')"
@@ -44,16 +48,16 @@ const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required:
 
     <ZForm class="max-w-6xl sm:grid-cols-2">
       <ZFormItem
-        label="Codex Desktop 最低版本"
-        description="只检查桌面端应用版本，例如 26.825.51511"
+        :label="t('settings.clientVersion.codexDesktopMinimumVersion')"
+        :description="t('settings.clientVersion.onlyCheckDesktopVersionEG')"
         :error="desktopError"
       >
         <ZInput
           v-model="minCodexDesktopVersion"
-          aria-label="Codex Desktop 最低版本"
+          :aria-label="t('settings.clientVersion.codexDesktopMinimumVersion')"
           autocomplete="off"
           spellcheck="false"
-          placeholder="不限制"
+          :placeholder="t('common.values.unlimited')"
           :disabled="loading"
         >
           <template #prefix>
@@ -63,16 +67,16 @@ const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required:
       </ZFormItem>
 
       <ZFormItem
-        label="Codex CLI 最低版本"
-        description="只检查独立终端版本，例如 0.152.0"
+        :label="t('settings.clientVersion.codexCliMinimumVersion')"
+        :description="t('settings.clientVersion.minimumVersionHelp')"
         :error="cliError"
       >
         <ZInput
           v-model="minCodexCliVersion"
-          aria-label="Codex CLI 最低版本"
+          :aria-label="t('settings.clientVersion.codexCliMinimumVersion')"
           autocomplete="off"
           spellcheck="false"
-          placeholder="不限制"
+          :placeholder="t('common.values.unlimited')"
           :disabled="loading"
         >
           <template #prefix>

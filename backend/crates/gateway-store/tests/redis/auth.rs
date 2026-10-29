@@ -46,12 +46,7 @@ async fn client_session_should_use_fixed_ttl_without_storing_session_or_api_key_
     let key = &keys[0];
     assert!(!key.contains(session_id));
     assert!(!key.contains(raw_api_key));
-    let ttl = redis::cmd("PTTL")
-        .arg(key)
-        .query_async::<i64>(&mut connection)
-        .await
-        .expect("read client session ttl");
-    assert!((1..=60_000).contains(&ttl));
+    assert_session_expiry(&mut connection, key, session.expires_at).await;
     let payload = redis::cmd("GET")
         .arg(key)
         .query_async::<String>(&mut connection)
@@ -151,6 +146,27 @@ async fn auth_repository() -> Option<(RedisAuthStateRepository, ConnectionManage
     Some((repository, connection, full_namespace))
 }
 
+async fn assert_session_expiry(
+    connection: &mut ConnectionManager,
+    key: &str,
+    expires_at: chrono::DateTime<Utc>,
+) {
+    // PXAT 固定绝对到期时间；PTTL 使用 Redis 时钟，不能与客户端相对时长直接比较
+    let (stored_expiry, ttl): (i64, i64) = redis::pipe()
+        .cmd("PEXPIRETIME")
+        .arg(key)
+        .cmd("PTTL")
+        .arg(key)
+        .query_async(connection)
+        .await
+        .expect("read session expiry and ttl");
+    assert_eq!(stored_expiry, expires_at.timestamp_millis());
+    assert!(
+        ttl > 0,
+        "session must have a finite positive TTL, got {ttl}"
+    );
+}
+
 #[test]
 fn admin_auth_state_rejects_invalid_ttl_boundaries() {
     let session = AuthSessionRecord {
@@ -211,12 +227,7 @@ async fn admin_auth_state_keeps_fixed_ttl_and_opaque_keys() {
     assert_eq!(keys.len(), 1);
     for key in &keys {
         assert!(!key.contains(session_id));
-        let ttl = redis::cmd("PTTL")
-            .arg(key)
-            .query_async::<i64>(&mut connection)
-            .await
-            .expect("read key ttl");
-        assert!((1..=60_000).contains(&ttl));
+        assert_session_expiry(&mut connection, key, session.expires_at).await;
         let value = redis::cmd("GET")
             .arg(key)
             .query_async::<String>(&mut connection)
@@ -396,12 +407,12 @@ async fn redis_retains_refresh_after_access_expiry_but_never_resurrects_expired_
         .query_async(&mut connection)
         .await
         .unwrap();
-    let ttl: i64 = redis::cmd("PTTL")
-        .arg(&keys[0])
-        .query_async(&mut connection)
-        .await
-        .unwrap();
-    assert!((240_000..=300_000).contains(&ttl));
+    assert_session_expiry(
+        &mut connection,
+        &keys[0],
+        original.renewal.as_ref().unwrap().expires_at,
+    )
+    .await;
     assert_eq!(
         repository.load_session("expiry-race").await.unwrap(),
         Some(original.clone())
@@ -415,12 +426,12 @@ async fn redis_retains_refresh_after_access_expiry_but_never_resurrects_expired_
             .unwrap(),
         Some(replacement.clone())
     );
-    let ttl: i64 = redis::cmd("PTTL")
-        .arg(&keys[0])
-        .query_async(&mut connection)
-        .await
-        .unwrap();
-    assert!((300_000..=360_000).contains(&ttl));
+    assert_session_expiry(
+        &mut connection,
+        &keys[0],
+        replacement.renewal.as_ref().unwrap().expires_at,
+    )
+    .await;
     redis::cmd("PEXPIRE")
         .arg(&keys[0])
         .arg(1)

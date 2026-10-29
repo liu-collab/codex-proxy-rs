@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PluginUpdateSelection } from '../composables/usePluginUpdateCheck'
+
 import type { PluginInstallMode, PluginInstallSelection } from '../utils/model'
 import type {
   CreatePluginSourceCredentialRequest,
@@ -11,14 +12,16 @@ import type {
   VerifiedPluginArtifact,
   VerifyRemotePluginRequest,
 } from '@/api'
-
 import { Github } from '@boxicons/vue'
-import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput, ZNotification, ZSegmented, ZTag } from '@codex-proxy/ui'
 
+import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput, ZSegmented, ZTag } from '@codex-proxy/ui'
 import { CheckCircle2, Download, FileArchive, Link, PackageOpen } from '@lucide/vue'
 import { useEventListener, useSessionStorage } from '@vueuse/core'
+
 import { isEqual } from 'es-toolkit'
 import { computed, nextTick, reactive, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { formatPluginFileSize, normalizePluginRepository, pluginInstallSelectionKey } from '../utils/model'
 import { selectPluginReleaseAsset } from '../utils/updates'
 import PluginAssetPicker from './PluginAssetPicker.vue'
@@ -54,6 +57,8 @@ const emit = defineEmits<{
   deleteCredential: [credential: PluginSourceCredential]
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const open = defineModel<boolean>({ required: true })
 const uploadFile = shallowRef<File | null>(null)
 const urlForm = reactive({
@@ -83,13 +88,19 @@ const pendingAuthentication = shallowRef(false)
 const credentialDraft = shallowRef<CreatePluginSourceCredentialRequest | null>(null)
 const submitting = shallowRef(false)
 const authenticationIncomplete = computed(() => pendingAuthentication.value && !credentialDraft.value)
-const modeOptions = [
-  { label: '上传包', value: 'upload', icon: FileArchive },
+const modeOptions = computed(() => ([
+  {
+    label: t('plugins.installation.uploadPackage'),
+    value: 'upload',
+    icon: FileArchive,
+  },
   { label: 'URL', value: 'url', icon: Link },
   { label: 'GitHub', value: 'github', icon: Github },
-]
+]))
 const busy = computed(() => submitting.value || props.saving || props.querying || props.verifying || props.savingCredential)
-const connectionForm = computed(() => props.mode === 'url' ? urlForm : githubForm)
+const connectionForm = computed(() => props.mode === 'url'
+  ? urlForm
+  : githubForm)
 
 function changeMode(value: string) {
   if (busy.value || (value !== 'upload' && value !== 'url' && value !== 'github'))
@@ -100,7 +111,9 @@ const releaseAssets = computed(() => (props.release?.assets ?? []).filter(asset 
 const digestPattern = /^[a-f0-9]{64}$/
 const digestError = computed(() => {
   const digest = connectionForm.value.sha256.trim().toLowerCase()
-  return digest && !digestPattern.test(digest) ? '请输入 64 位十六进制摘要' : ''
+  return digest && !digestPattern.test(digest)
+    ? t('plugins.installation.enterDigitHexadecimalDigest')
+    : ''
 })
 const remoteRequest = computed<VerifyRemotePluginRequest | null>(() => {
   if (digestError.value)
@@ -125,11 +138,22 @@ const remoteRequest = computed<VerifyRemotePluginRequest | null>(() => {
     expectedPluginId: props.updateSource?.pluginId ?? null,
     credentialIds: [...githubForm.credentialIds],
     outboundProxyId: githubForm.outboundProxyId || null,
-    location: { kind: 'github', repository: release.repository, tag: release.tag, asset: githubForm.asset, allow_prerelease: release.prerelease, sha256: sha256 || null },
+    location: {
+      kind: 'github',
+      repository: release.repository,
+      tag: release.tag,
+      asset: githubForm.asset,
+      allow_prerelease: release.prerelease,
+      sha256: sha256 || null,
+    },
   }
 })
-const selection = computed(() => props.mode === 'upload' ? uploadFile.value : remoteRequest.value)
-const requestKey = computed(() => selection.value ? pluginInstallSelectionKey(selection.value) : null)
+const selection = computed(() => props.mode === 'upload'
+  ? uploadFile.value
+  : remoteRequest.value)
+const requestKey = computed(() => selection.value
+  ? pluginInstallSelectionKey(selection.value)
+  : null)
 const verified = computed<VerifiedPluginArtifact | null>(() => {
   if (props.acceptanceArtifact) {
     return {
@@ -144,7 +168,9 @@ const verified = computed<VerifiedPluginArtifact | null>(() => {
 const previousArtifact = computed(() => props.installedArtifacts
   .filter(artifact => artifact.acceptedAt && artifact.metadata.pluginId === verified.value?.metadata.pluginId)
   .sort((left, right) => right.acceptedAt!.localeCompare(left.acceptedAt!))[0])
-const installationLabel = computed(() => previousArtifact.value ? '安装新版本' : '安装')
+const installationLabel = computed(() => previousArtifact.value
+  ? t('plugins.installation.installNewVersion')
+  : t('plugins.details.installation'))
 const sourceDraft = computed<PluginUpdateSourceBinding | null>(() => {
   const previous = props.updateSource
   if (!previous)
@@ -152,13 +178,23 @@ const sourceDraft = computed<PluginUpdateSourceBinding | null>(() => {
   const source = props.mode === 'upload'
     ? { kind: 'upload' as const }
     : props.mode === 'url'
-      ? { kind: 'url' as const, url: urlForm.url.trim() }
-      : { kind: 'github' as const, repository: githubRepository() }
+      ? {
+          kind: 'url' as const,
+          url: urlForm.url.trim(),
+        }
+      : {
+          kind: 'github' as const,
+          repository: githubRepository(),
+        }
   return {
     pluginId: previous.pluginId,
     source,
-    policy: isEqual(source, previous.source) ? previous.policy : { kind: 'manual' },
-    outboundProxyId: props.mode === 'upload' ? null : connectionForm.value.outboundProxyId || null,
+    policy: isEqual(source, previous.source)
+      ? previous.policy
+      : { kind: 'manual' },
+    outboundProxyId: props.mode === 'upload'
+      ? null
+      : connectionForm.value.outboundProxyId || null,
   }
 })
 const sourceChanged = computed(() => sourceDraft.value !== null && !isEqual(sourceDraft.value, { ...props.updateSource, outboundProxyId: props.updateSource?.outboundProxyId ?? null }))
@@ -197,7 +233,9 @@ async function verifySelected() {
 }
 
 function reset() {
-  activeDraftKey = props.acceptanceArtifact || props.updateSource ? null : 'install'
+  activeDraftKey = props.acceptanceArtifact || props.updateSource
+    ? null
+    : 'install'
   uploadFile.value = null
   Object.assign(urlForm, {
     url: '',
@@ -246,13 +284,19 @@ function reset() {
     }
     githubForm.repository = source.source.repository
     githubForm.outboundProxyId = source.outboundProxyId ?? ''
-    githubForm.tag = source.policy.kind === 'pinned' ? source.policy.tag : ''
+    githubForm.tag = source.policy.kind === 'pinned'
+      ? source.policy.tag
+      : ''
     githubForm.allowPrerelease = source.policy.kind === 'pinned' && source.policy.allow_prerelease
   }
   const draft = activeDraftKey ? drafts.value[activeDraftKey] : null
   if (draft) {
-    Object.assign(urlForm, draft.url, { credentialIds: draft.url.credentialIds.filter(id => props.credentials.some(credential => credential.id === id)) })
-    Object.assign(githubForm, draft.github, { credentialIds: draft.github.credentialIds.filter(id => props.credentials.some(credential => credential.id === id)) })
+    Object.assign(urlForm, draft.url, {
+      credentialIds: draft.url.credentialIds.filter(id => props.credentials.some(credential => credential.id === id)),
+    })
+    Object.assign(githubForm, draft.github, {
+      credentialIds: draft.github.credentialIds.filter(id => props.credentials.some(credential => credential.id === id)),
+    })
     emit('changeMode', draft.mode)
   }
   // 明确选择的检查结果优先于旧草稿，仍需重新校验包并确认信任来源。
@@ -289,8 +333,14 @@ function rememberDraft() {
     ...drafts.value,
     [activeDraftKey]: {
       mode: props.mode,
-      url: { ...urlForm, credentialIds: [...urlForm.credentialIds] },
-      github: { ...github, credentialIds: [...github.credentialIds] },
+      url: {
+        ...urlForm,
+        credentialIds: [...urlForm.credentialIds],
+      },
+      github: {
+        ...github,
+        credentialIds: [...github.credentialIds],
+      },
     },
   }
 }
@@ -302,7 +352,9 @@ useEventListener('pagehide', () => {
 function chooseFile(event: Event) {
   const file = (event.target as HTMLInputElement).files?.[0] ?? null
   if (file && file.size > 32 * 1024 * 1024) {
-    ZNotification.warning({ message: '插件包不能超过 32 MiB' })
+    ZNotification.warning({
+      message: t('plugins.installation.pluginPackageCannotExceedMib'),
+    })
     uploadFile.value = null
     ;(event.target as HTMLInputElement).value = ''
     return
@@ -316,7 +368,9 @@ function installSelected() {
     return
   }
   if (!selection.value || !verified.value) {
-    ZNotification.warning({ message: '请先校验当前选择的插件包' })
+    ZNotification.warning({
+      message: t('plugins.installation.verificationRequired'),
+    })
     return
   }
   emit('install', selection.value)
@@ -332,11 +386,15 @@ async function queryRelease() {
   const repository = githubRepository()
   const tag = githubForm.tag.trim()
   if (!/^[-\w.]+\/[-\w.]+$/.test(repository)) {
-    ZNotification.warning({ message: '请输入 GitHub 仓库链接或 owner/repo' })
+    ZNotification.warning({
+      message: t('plugins.installation.githubRepositoryRequired'),
+    })
     return
   }
   if (githubForm.allowPrerelease && !tag) {
-    ZNotification.warning({ message: '查询预发行版需要明确填写 tag' })
+    ZNotification.warning({
+      message: t('plugins.installation.prereleaseTagRequired'),
+    })
     return
   }
   submitting.value = true
@@ -405,7 +463,9 @@ watch(
   () => props.release,
   async (release) => {
     const previous = props.installedArtifacts.find(artifact => artifact.metadata.pluginId === props.updateSource?.pluginId)
-    githubForm.asset = release ? selectPluginReleaseAsset(release, previous)?.name ?? '' : ''
+    githubForm.asset = release
+      ? selectPluginReleaseAsset(release, previous)?.name ?? ''
+      : ''
     if (githubForm.asset) {
       await nextTick()
       await verifySelected()
@@ -417,8 +477,8 @@ watch(
 <template>
   <ZDialog
     v-model="open"
-    :title="updateSource ? '更新插件' : '安装插件'"
-    :description="acceptanceArtifact ? '确认来源与版本后安装' : updateSource ? '检查设置兼容性后切换版本' : '支持本地插件包、URL 与 GitHub'"
+    :title="updateSource ? t('plugins.installation.updatePlugin') : t('plugins.installation.installPlugin')"
+    :description="acceptanceArtifact ? t('plugins.installation.installDescription') : updateSource ? t('plugins.installation.switchDescription') : t('plugins.installation.sourceHelp')"
     width="36rem"
     :show-close="!busy" :close-on-click-modal="!busy" :close-on-press-escape="!busy"
     @closed="clearCredentials"
@@ -428,12 +488,12 @@ watch(
       :model-value="mode"
       :options="modeOptions"
       :disabled="busy"
-      aria-label="安装方式"
+      :aria-label="t('plugins.installation.installationMethod')"
       class="mb-5 w-full"
       @update:model-value="changeMode"
     />
     <ZForm v-if="!verified && mode === 'upload'">
-      <ZFormItem label="插件包" required>
+      <ZFormItem :label="t('plugins.assets.packageLabel')" required>
         <!-- 原生文件输入放在样式化上传区内，保留键盘与读屏语义。 -->
         <!-- eslint-disable-next-line vue-a11y/label-has-for -->
         <label
@@ -441,16 +501,16 @@ watch(
         >
           <FileArchive class="size-5 shrink-0 text-cp-text-secondary" aria-hidden="true" />
           <span class="grid min-w-0 flex-1 gap-1">
-            <span class="truncate text-cp-sm font-emphasis text-cp-text">{{ uploadFile?.name ?? '选择插件包' }}</span>
-            <span class="text-cp-xs text-cp-text-secondary">{{ uploadFile ? formatPluginFileSize(uploadFile.size) : 'tar.gz / tgz，最大 32 MiB' }}</span>
+            <span class="truncate text-cp-sm font-emphasis text-cp-text">{{ uploadFile?.name ?? t('plugins.assets.selectPluginPackage') }}</span>
+            <span class="text-cp-xs text-cp-text-secondary">{{ uploadFile ? formatPluginFileSize(uploadFile.size) : t('plugins.installation.tarGzTgzMaxMib') }}</span>
           </span>
-          <span class="shrink-0 text-cp-xs text-cp-primary-text">{{ uploadFile ? '更换' : '浏览文件' }}</span>
+          <span class="shrink-0 text-cp-xs text-cp-primary-text">{{ uploadFile ? t('plugins.installation.replace') : t('plugins.installation.browseFiles') }}</span>
           <input
             type="file"
             accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
             class="sr-only"
             :disabled="busy"
-            aria-label="选择插件包"
+            :aria-label="t('plugins.assets.selectPluginPackage')"
             @change="chooseFile"
           >
         </label>
@@ -458,33 +518,33 @@ watch(
     </ZForm>
 
     <ZForm v-else-if="!verified && mode === 'url'" class="grid gap-4">
-      <ZFormItem label="下载 URL" required>
+      <ZFormItem :label="t('plugins.installation.downloadUrl')" required>
         <template #label-extra>
-          <PluginHelpPopover label="下载地址说明">
-            仅支持 HTTPS，本机回环地址可使用 HTTP
+          <PluginHelpPopover :label="t('plugins.installation.downloadAddressDescription')">
+            {{ t('plugins.installation.urlHelp') }}
           </PluginHelpPopover>
         </template>
-        <ZInput v-model="urlForm.url" :disabled="busy" aria-label="下载 URL" placeholder="https://downloads.example.org/plugin.tar.gz" />
+        <ZInput v-model="urlForm.url" :disabled="busy" :aria-label="t('plugins.installation.downloadUrl')" placeholder="https://downloads.example.org/plugin.tar.gz" />
       </ZFormItem>
     </ZForm>
 
     <ZForm v-else-if="!verified" class="grid gap-4">
-      <ZFormItem label="GitHub 仓库" required>
-        <ZInput v-model="githubForm.repository" :disabled="busy" aria-label="GitHub 仓库" placeholder="仓库链接或 owner/repo">
+      <ZFormItem :label="t('plugins.installation.githubRepository')" required>
+        <ZInput v-model="githubForm.repository" :disabled="busy" :aria-label="t('plugins.installation.githubRepository')" :placeholder="t('plugins.installation.repositoryLinkOrOwnerRepo')">
           <template #prefix>
             <Github class="size-4" />
           </template>
         </ZInput>
       </ZFormItem>
-      <ZFormItem label="版本标签">
+      <ZFormItem :label="t('plugins.installation.tagLabel')">
         <template #label-extra>
-          <PluginHelpPopover label="版本标签说明">
-            留空查询最新稳定版，查询预发行版时必须指定标签
+          <PluginHelpPopover :label="t('plugins.installation.tagHelpTitle')">
+            {{ t('plugins.installation.tagHelp') }}
           </PluginHelpPopover>
         </template>
-        <ZInput v-model="githubForm.tag" :disabled="busy" aria-label="版本标签" placeholder="留空查最新稳定版" />
+        <ZInput v-model="githubForm.tag" :disabled="busy" :aria-label="t('plugins.installation.tagLabel')" :placeholder="t('plugins.installation.tagPlaceholder')" />
       </ZFormItem>
-      <ZCheckbox v-model="githubForm.allowPrerelease" label="允许查询预发行版" :disabled="busy" />
+      <ZCheckbox v-model="githubForm.allowPrerelease" :label="t('plugins.installation.allowPrereleaseLabel')" :disabled="busy" />
     </ZForm>
 
     <div v-if="!verified && mode !== 'upload'" class="mt-4 grid gap-4">
@@ -500,13 +560,13 @@ watch(
         @delete-credential="$emit('deleteCredential', $event)"
       />
       <div class="grid items-end gap-4 sm:grid-cols-2">
-        <ZFormItem label="校验摘要">
+        <ZFormItem :label="t('plugins.installation.verificationSummary')">
           <template #label-extra>
-            <PluginHelpPopover label="校验摘要说明">
-              可选，填写发布者提供的 64 位 SHA-256 十六进制摘要，用于核对下载内容
+            <PluginHelpPopover :label="t('plugins.installation.digestHelpTitle')">
+              {{ t('plugins.installation.digestHelp') }}
             </PluginHelpPopover>
           </template>
-          <ZInput v-model="connectionForm.sha256" :disabled="busy" :aria-invalid="Boolean(digestError)" maxlength="64" aria-label="SHA-256 校验摘要" placeholder="可选，SHA-256" class="font-mono [&_input::placeholder]:font-normal" />
+          <ZInput v-model="connectionForm.sha256" :disabled="busy" :aria-invalid="Boolean(digestError)" maxlength="64" :aria-label="t('plugins.installation.shaChecksum')" :placeholder="t('plugins.installation.optionalSha')" class="font-mono [&_input::placeholder]:font-normal" />
         </ZFormItem>
         <PluginSourceProxyField v-model="connectionForm.outboundProxyId" :disabled="busy" />
       </div>
@@ -514,21 +574,21 @@ watch(
 
     <section v-if="!verified && mode === 'github' && release" class="mt-4 grid gap-3">
       <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <span class="text-cp-sm text-cp-text-secondary">已找到版本</span>
+        <span class="text-cp-sm text-cp-text-secondary">{{ t('plugins.installation.versionFound') }}</span>
         <strong class="min-w-0 wrap-break-word text-cp-sm font-emphasis text-cp-text">{{ release.tag }}</strong>
         <ZTag v-if="release.prerelease" type="warning">
-          预发行版
+          {{ t('plugins.installation.preRelease') }}
         </ZTag>
       </div>
-      <ZFormItem v-if="releaseAssets.length > 1" label="插件包" required>
+      <ZFormItem v-if="releaseAssets.length > 1" :label="t('plugins.assets.packageLabel')" required>
         <PluginAssetPicker v-model="githubForm.asset" :assets="releaseAssets" :disabled="busy" />
       </ZFormItem>
       <p v-else class="m-0 break-all text-cp-sm text-cp-text-secondary">
-        {{ githubForm.asset || '此版本没有 tar.gz 或 tgz 插件包' }}
+        {{ githubForm.asset || t('plugins.installation.thereIsNoTarGzOrTgz') }}
       </p>
     </section>
 
-    <section v-if="verified" aria-label="待安装插件" class="rounded-cp bg-cp-fill-alter p-4">
+    <section v-if="verified" :aria-label="t('plugins.installation.pendingTitle')" class="rounded-cp bg-cp-fill-alter p-4">
       <div class="flex items-start gap-3">
         <div class="flex size-10 shrink-0 items-center justify-center rounded-cp bg-cp-bg-container text-cp-text-secondary">
           <PackageOpen class="size-5" aria-hidden="true" />
@@ -541,7 +601,7 @@ watch(
             <ZTag>{{ verified.metadata.version }}</ZTag>
             <span role="status" class="ml-auto inline-flex shrink-0 items-center gap-1 text-cp-xs text-cp-success-text">
               <CheckCircle2 class="size-3.5" aria-hidden="true" />
-              解析完成
+              {{ t('plugins.installation.parsingCompleted') }}
             </span>
           </div>
           <p class="mt-1 mb-0 break-all font-mono text-cp-xs text-cp-text-secondary" :title="`SHA-256 ${verified.metadata.sha256}`">
@@ -551,13 +611,13 @@ watch(
       </div>
       <dl class="mt-3 mb-0 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 text-cp-xs leading-relaxed">
         <dt class="text-cp-text-secondary">
-          发布者
+          {{ t('plugins.installation.publisher') }}
         </dt>
         <dd class="m-0 min-w-0 wrap-break-word">
           {{ verified.metadata.publisher }}
         </dd>
         <dt class="text-cp-text-secondary">
-          适用平台
+          {{ t('plugins.installation.applicablePlatforms') }}
         </dt>
         <dd class="m-0 flex min-w-0 flex-wrap gap-1.5">
           <ZTag v-for="platform in verified.metadata.platforms" :key="platform" size="small">
@@ -566,28 +626,28 @@ watch(
         </dd>
       </dl>
       <p class="mt-4 mb-0 text-cp-xs leading-relaxed text-cp-text-secondary">
-        插件可访问全部网关数据与配置，安装前请确认来源可信
+        {{ t('plugins.installation.trustNotice') }}
       </p>
       <div v-if="previousArtifact" class="mt-2 flex items-center gap-1.5 text-cp-xs text-cp-text-secondary">
-        <span>安装后确认切换到新版本</span>
-        <PluginHelpPopover label="安装新版本说明">
-          沿用设置并补充新版本默认值，需要调整时会打开设置，已使用版本保留恢复设置
+        <span>{{ t('plugins.installation.activateAfterInstall') }}</span>
+        <PluginHelpPopover :label="t('plugins.installation.installNewVersionInstructions')">
+          {{ t('plugins.installation.configurationHelp') }}
         </PluginHelpPopover>
       </div>
     </section>
 
     <template #footer>
       <ZButton v-if="verified && !acceptanceArtifact" variant="text" :disabled="busy" class="mr-auto" @click="$emit('resetVerification')">
-        返回
+        {{ t('common.actions.back') }}
       </ZButton>
       <ZButton v-if="!verified && mode === 'github' && release" :disabled="busy || authenticationIncomplete" @click="queryRelease">
-        重新查询
+        {{ t('plugins.installation.queryAgain') }}
       </ZButton>
       <ZButton :disabled="busy" @click="open = false">
-        取消
+        {{ t('common.actions.cancel') }}
       </ZButton>
       <ZButton v-if="mode === 'github' && !release" type="primary" :loading="submitting || querying" :disabled="busy || authenticationIncomplete || !githubForm.repository.trim()" @click="queryRelease">
-        {{ querying ? '正在查询版本' : sourceChanged ? '保存来源并继续' : '下一步' }}
+        {{ querying ? t('plugins.installation.queryingVersion') : sourceChanged ? t('plugins.installation.saveSourceAndContinue') : t('common.actions.next') }}
       </ZButton>
       <ZButton
         v-else-if="!verified"
@@ -596,7 +656,7 @@ watch(
         :disabled="!selection || busy || authenticationIncomplete"
         @click="verifySelected"
       >
-        {{ verifying ? '正在解析插件包' : sourceChanged ? '保存来源并继续' : '下一步' }}
+        {{ verifying ? t('plugins.installation.parsingPluginPackage') : sourceChanged ? t('plugins.installation.saveSourceAndContinue') : t('common.actions.next') }}
       </ZButton>
       <ZButton v-if="verified" type="primary" :loading="saving" :disabled="busy || pendingAuthentication" @click="installSelected">
         <template #icon>

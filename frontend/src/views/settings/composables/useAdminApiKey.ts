@@ -1,13 +1,14 @@
-import { ZNotification } from '@codex-proxy/ui'
-
 import { reactive, shallowRef } from 'vue'
 import {
   deleteAdminApiKey,
   getAdminApiKeyStatus,
   regenerateAdminApiKey,
 } from '@/api'
+
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useCopyText } from '@/composables/useCopyText'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 
 export function useAdminApiKey() {
   const loading = shallowRef(true)
@@ -40,7 +41,11 @@ export function useAdminApiKey() {
         const wasEnabled = status.exists
         generatedKey.value = (await regenerateAdminApiKey()).key
         status.exists = true
-        ZNotification.success({ message: wasEnabled ? '管理员 API Key 已更新' : '管理员 API Key 已生成' })
+        ZNotification.success({
+          message: wasEnabled
+            ? t('settings.adminApiKey.adminApiKeyUpdated')
+            : t('settings.adminApiKey.generated'),
+        })
       },
     )
   }
@@ -55,13 +60,18 @@ export function useAdminApiKey() {
         status.exists = false
         generatedKey.value = ''
         showDeleteModal.value = false
-        ZNotification.success({ message: '管理员 API Key 已删除' })
+        ZNotification.success({
+          message: t('settings.adminApiKey.adminApiKeyDeleted'),
+        })
       },
     )
   }
 
   async function copyGeneratedKey() {
-    await copyText(generatedKey.value, { successText: '已复制', errorFromException: true })
+    await copyText(generatedKey.value, {
+      successText: t('common.feedback.copied'),
+      errorFromException: true,
+    })
   }
 
   return {

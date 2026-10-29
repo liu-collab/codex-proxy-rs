@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable } from '@codex-proxy/ui'
+
 import { ImageOff, Zap, ZapOff } from '@lucide/vue'
+import { useI18n } from 'vue-i18n'
 import { usePageSelection } from '@/composables/usePageSelection'
 import AccountGroupActions from './components/AccountGroupActions.vue'
 import AccountGroupFilters from './components/AccountGroupFilters.vue'
@@ -9,12 +11,13 @@ import AccountGroupMetricsCell from './components/AccountGroupMetricsCell.vue'
 import { useAccountGroups } from './composables/useAccountGroups'
 import { accountGroupColumns } from './constants'
 
+const { t } = useI18n({ useScope: 'global' })
+
 const {
   groups,
   loading,
   pagination,
   searchQuery,
-  statusQuery,
   showFormModal,
   showDeleteModal,
   showBatchDeleteModal,
@@ -50,9 +53,8 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
 <template>
   <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
     <ZPageHeader
-      class="h-17"
-      title="分组管理"
-      description="将账号归类管理，并为每个 API 密钥指定可使用的账号"
+      :title="t('navigation.groups')"
+      :description="t('groups.page.description')"
     />
 
     <ZCard
@@ -61,7 +63,6 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
       <template #header>
         <AccountGroupFilters
           v-model:search="searchQuery"
-          v-model:status="statusQuery"
           :batch-deleting="batchDeleting"
           :selected-count="selectedIds.size"
           @create="openCreate"
@@ -77,20 +78,20 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
             :data="groups"
             :loading="loading"
             :selected-row-keys="selectedRowKeys"
-            empty-text="暂无分组，请点击创建分组创建"
+            :empty-text="t('groups.page.empty')"
           >
             <template #header-selection>
               <ZCheckbox
                 :model-value="allSelected"
                 :indeterminate="indeterminate"
-                aria-label="选择当前页分组"
+                :aria-label="t('groups.page.selectCurrentPageGroup')"
                 @update:model-value="toggleAll"
               />
             </template>
             <template #selection="{ row }">
               <ZCheckbox
                 :model-value="selectedIds.has(row.id)"
-                aria-label="选择分组"
+                :aria-label="t('groups.page.selectGroup')"
                 @update:model-value="toggleSelection(row.id)"
               />
             </template>
@@ -106,9 +107,9 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
                     :class="row.fastMode === 'enabled'
                       ? 'bg-cp-warning-container text-cp-warning-on-container'
                       : 'bg-cp-fill-tertiary text-cp-text-tertiary'"
-                    :title="row.fastMode === 'enabled' ? 'Fast 已开启' : 'Fast 已关闭'"
+                    :title="row.fastMode === 'enabled' ? t('groups.page.fastModeIsOn') : t('groups.page.fastModeIsOff')"
                     role="img"
-                    :aria-label="row.fastMode === 'enabled' ? 'Fast 已开启' : 'Fast 已关闭'"
+                    :aria-label="row.fastMode === 'enabled' ? t('groups.page.fastModeIsOn') : t('groups.page.fastModeIsOff')"
                   >
                     <Zap v-if="row.fastMode === 'enabled'" class="size-3" stroke-width="2.2" aria-hidden="true" />
                     <ZapOff v-else class="size-3" stroke-width="2.2" aria-hidden="true" />
@@ -116,9 +117,9 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
                   <span
                     v-if="!row.allowImageGeneration"
                     class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-cp-fill-tertiary text-cp-text-tertiary"
-                    title="生图已关闭"
+                    :title="t('groups.page.imageGenerationDisabled')"
                     role="img"
-                    aria-label="生图已关闭"
+                    :aria-label="t('groups.page.imageGenerationDisabled')"
                   >
                     <ImageOff class="size-3" stroke-width="2.2" aria-hidden="true" />
                   </span>
@@ -134,7 +135,7 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
                 class="mx-auto block size-4 rounded-sm"
                 :style="{ backgroundColor: row.color }"
                 :title="row.color"
-                :aria-label="`分组颜色 ${row.color}`"
+                :aria-label="t('groups.page.colorLabel', { color: row.color })"
               />
             </template>
 
@@ -145,7 +146,7 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
                   ? 'bg-cp-success-container text-cp-success-on-container'
                   : 'bg-cp-fill-tertiary text-cp-text-quaternary'"
               >
-                {{ row.enabled ? '已启用' : '已禁用' }}
+                {{ row.enabled ? t('common.status.enabled') : t('common.status.disabled') }}
               </span>
             </template>
 
@@ -192,48 +193,48 @@ const { allSelected, indeterminate, selectedRowKeys, toggleSelection, toggleAll 
 
     <ZConfirmDialog
       v-model="showBatchDeleteModal"
-      title="确认删除"
-      description="删除后这些分组将立即失效，此操作不可撤销"
+      :title="t('common.actions.delete')"
+      :description="t('groups.page.batchDeleteWarning')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="batchDeleting"
       @confirm="confirmBatchDelete"
     >
       <p class="m-0">
-        确定删除选中的 {{ deleteCount }} 个分组吗？账号本身不会被删除
+        {{ t('groups.page.batchDeleteDescription', { count: deleteCount }) }}
       </p>
     </ZConfirmDialog>
 
     <ZConfirmDialog
       v-model="showDisableModal"
-      title="禁用账号分组"
-      description="禁用后，使用该分组的 API 密钥将无法再使用其中的账号"
-      confirm-text="确认禁用"
+      :title="t('groups.page.disableAccountGrouping')"
+      :description="t('groups.page.disableDescription')"
+      :confirm-text="t('groups.page.confirmDisable')"
       :loading="disabling"
       @confirm="confirmDisable"
     >
       <p class="m-0">
-        确定禁用“{{ pendingDisableGroup?.name }}”吗？
+        {{ t('groups.page.disable', { name: pendingDisableGroup?.name }) }}
       </p>
       <p v-if="referencedKeyNames.length > 0" class="mt-2 mb-0 text-cp-warning-text">
-        将影响 {{ referencedKeyNames.length }} 个 API 密钥：{{ referencedKeyNames.join('、') }}
+        {{ t('groups.page.affectedApiKeys', { count: referencedKeyNames.length, value: referencedKeyNames.join('、') }) }}
       </p>
       <p v-else-if="pendingDisableGroup?.clientKeyCount" class="mt-2 mb-0 text-cp-warning-text">
-        将影响 {{ pendingDisableGroup.clientKeyCount }} 个 API 密钥
+        {{ t('groups.page.affectedKeys', { count: pendingDisableGroup.clientKeyCount }) }}
       </p>
     </ZConfirmDialog>
 
     <ZConfirmDialog
       v-model="showDeleteModal"
-      title="删除账号分组"
-      description="删除后该分组将立即失效，此操作不可撤销"
+      :title="t('groups.page.deleteAccountGroup')"
+      :description="t('groups.page.deleteWarning')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="deleting"
       @confirm="confirmDelete"
     >
       <p class="m-0">
-        确定删除“{{ pendingDeleteGroup?.name || '该分组' }}”吗？账号本身不会被删除
+        {{ t('groups.page.deleteAccountsWillBeKept', { name: pendingDeleteGroup?.name || t('groups.page.unnamedGroup') }) }}
       </p>
     </ZConfirmDialog>
   </div>

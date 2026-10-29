@@ -276,6 +276,17 @@ const PRICING_RULES: &[PricingRule] = &[
             .with_long_fast(80_000, 300_000, 4_000)
             .with_long_ultrafast(240_000, 900_000, 12_000),
     },
+    // https://developers.openai.com/api/docs/models/gpt-6.1-terra，核验日期 2026-10-27
+    PricingRule {
+        model: "gpt-6.1-terra",
+        pricing: ModelPricing::new(10_000, 50_000, 500)
+            .with_cache_write(125)
+            .with_flex(5_000, 25_000, 250)
+            .with_fast(20_000, 100_000, 1_000)
+            .with_long(20_000, 75_000, 1_000)
+            .with_long_flex(10_000, 37_500, 500)
+            .with_long_fast(40_000, 150_000, 2_000),
+    },
     // https://developers.openai.com/api/docs/models/gpt-6-sol，核验日期 2026-09-24
     PricingRule {
         model: "gpt-6-sol",
@@ -905,7 +916,7 @@ fn reasoning_model(model: &str) -> bool {
     model.starts_with("gpt-5")
         || matches!(
             model,
-            "gpt-6-astra" | "gpt-6.1-sol" | "gpt-6-sol" | "gpt-6-luna"
+            "gpt-6-astra" | "gpt-6.1-sol" | "gpt-6.1-terra" | "gpt-6-sol" | "gpt-6-luna"
         )
         || model.starts_with("o1")
         || model.starts_with("o3")

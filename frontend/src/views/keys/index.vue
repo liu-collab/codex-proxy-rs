@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import type { ApiKey } from '@/api'
-import { ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable } from '@codex-proxy/ui'
 
+import { ZCard, ZCheckbox, ZConfirmDialog, ZPageHeader, ZPagination, ZTable } from '@codex-proxy/ui'
 import { ref, shallowRef, watch } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import ApiKeyConfigModal from '@/components/ApiKeyConfigModal.vue'
+import ClientImportModal from '@/components/ClientImportModal.vue'
 import LastUsedAtCell from '@/components/LastUsedAtCell.vue'
 import { useAccountGroupCatalog } from '@/composables/useAccountGroupCatalog'
 import { usePageSelection } from '@/composables/usePageSelection'
@@ -22,6 +25,8 @@ import { useApiKeyMutations } from './composables/useApiKeyMutations'
 import { useApiKeysQuery } from './composables/useApiKeysQuery'
 import { useApiKeyUse } from './composables/useApiKeyUse'
 import { apiKeyColumns } from './constants'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const selectedIds = ref<Set<string>>(new Set())
 const showBudgetResetModal = shallowRef(false)
@@ -54,15 +59,18 @@ const {
   selectedUseKey,
   showCreatedKeyModal,
   createdKey,
-  revealingKeyIds,
+  showImportKeyModal,
+  selectedImportKey,
+  revealingKeys,
   openAiBaseUrl,
   showCreatedKey,
   clearCreatedKey,
   copyToClipboard,
   copyApiKey,
-  importCreatedKeyToCcs,
+  importCreatedKey,
   openUseKeyModal,
-  importToCcs,
+  openImportKeyModal,
+  importSelectedKey,
 } = useApiKeyUse()
 
 const {
@@ -106,9 +114,8 @@ watch(
 <template>
   <div class="flex h-full min-h-0 w-full flex-col overflow-hidden">
     <ZPageHeader
-      class="h-17"
-      title="API 密钥"
-      description="创建和管理 API 密钥，并设置每个密钥可以使用的账号"
+      :title="t('navigation.apiKeys')"
+      :description="t('keys.page.description')"
     />
 
     <ZCard
@@ -133,21 +140,21 @@ watch(
             :loading="loading"
             :selected-row-keys="selectedRowKeys"
             :sort="sort"
-            empty-text="暂无 API Key"
+            :empty-text="t('keys.page.noApiKeyYet')"
             @sort-change="handleSortChange"
           >
             <template #header-selection>
               <ZCheckbox
                 :model-value="allSelected"
                 :indeterminate="indeterminate"
-                aria-label="选择当前页密钥"
+                :aria-label="t('keys.page.selectCurrentPageKey')"
                 @update:model-value="toggleAll"
               />
             </template>
             <template #selection="{ row }">
               <ZCheckbox
                 :model-value="selectedIds.has(row.id)"
-                aria-label="选择密钥"
+                :aria-label="t('keys.page.selectKey')"
                 @update:model-value="toggleSelection(row.id)"
               />
             </template>
@@ -157,7 +164,8 @@ watch(
             <template #prefix="{ row }">
               <ApiKeyPrefixCell
                 :prefix="row.prefix"
-                :revealing="revealingKeyIds.has(row.id)"
+                :revealing="revealingKeys.has(row.id)"
+                :copying="revealingKeys.get(row.id) === 'copy'"
                 @copy="copyApiKey(row)"
               />
             </template>
@@ -168,17 +176,17 @@ watch(
               <ApiKeyBudgetCell :api-key="row" />
             </template>
             <template #limits="{ row }">
-              <dl class="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs tabular-nums">
+              <dl class="m-0 grid grid-cols-[max-content_max-content] gap-x-2 gap-y-1 text-xs tabular-nums">
                 <dt class="text-right text-cp-text-tertiary">
-                  并发
+                  {{ t('keys.page.concurrency') }}
                 </dt>
-                <dd class="m-0 truncate text-cp-text" :title="String(row.maxConcurrency || '∞')">
+                <dd class="m-0 whitespace-nowrap text-cp-text">
                   {{ row.maxConcurrency || '∞' }}
                 </dd>
                 <dt class="text-right text-cp-text-tertiary">
                   RPM
                 </dt>
-                <dd class="m-0 truncate text-cp-text" :title="String(row.requestsPerMinute || '∞')">
+                <dd class="m-0 whitespace-nowrap text-cp-text">
                   {{ row.requestsPerMinute || '∞' }}
                 </dd>
               </dl>
@@ -187,18 +195,19 @@ watch(
               <ApiKeyStatusBadge :api-key="row" />
             </template>
             <template #lastUsedAt="{ row }">
-              <LastUsedAtCell :value="row.lastUsedAt" :display="row.lastUsedAtDisplay" :full-display="row.lastUsedAtFullDisplay" />
+              <LastUsedAtCell :value="row.lastUsedAt" :full-display="row.lastUsedAtFullDisplay" />
             </template>
             <template #actions="{ row }">
               <ApiKeyActions
                 :api-key="row"
                 :deleting="deletingKey"
-                :revealing="revealingKeyIds.has(row.id)"
+                :revealing="revealingKeys.has(row.id)"
+                :configuring="revealingKeys.get(row.id) === 'use'"
                 :updating-status="updatingStatusKeyIds.has(row.id)"
                 @edit="openEdit"
                 @reset-budget="openBudgetReset"
                 @delete="requestDeleteKey"
-                @import-ccs="importToCcs"
+                @import-client="openImportKeyModal"
                 @toggle="handleToggleStatus"
                 @use="openUseKeyModal"
               />
@@ -229,7 +238,7 @@ watch(
       v-model="showCreatedKeyModal"
       :created-key="createdKey"
       @copy="copyToClipboard"
-      @import-ccs="importCreatedKeyToCcs"
+      @import-client="importCreatedKey"
       @after-leave="clearCreatedKey"
     />
 
@@ -247,44 +256,50 @@ watch(
       @after-leave="selectedUseKey = null"
     />
 
+    <ClientImportModal
+      v-model="showImportKeyModal"
+      @select="importSelectedKey"
+      @after-leave="selectedImportKey = null"
+    />
+
     <ZConfirmDialog
       v-model="showAllAccountsConfirm"
-      title="授予全部账号权限"
-      description="保存后，该密钥可以使用所有账号"
-      confirm-text="确认授予全部账号"
+      :title="t('keys.scope.allAccounts.title')"
+      :description="t('keys.scope.allAccounts.summary')"
+      :confirm-text="t('keys.scope.allAccounts.confirm')"
       :loading="savingKey"
       @confirm="confirmAllAccountsScope"
     >
       <p class="m-0">
-        该密钥可以使用所有账号，包括以后新增和未分组的账号
+        {{ t('keys.scope.allAccounts.description') }}
       </p>
     </ZConfirmDialog>
 
     <ZConfirmDialog
       v-model="showDeleteModal"
-      title="确认删除"
-      description="删除后这些 API Key 将立即失效，此操作不可撤销"
+      :title="t('common.actions.delete')"
+      :description="t('keys.page.batchDeleteWarning')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="batchDeleting"
       @confirm="handleBatchDelete"
     >
       <p class="m-0">
-        确定删除选中的 {{ deleteCount }} 个 API Key 吗？
+        {{ t('keys.page.batchDeleteDescription', { count: deleteCount }) }}
       </p>
     </ZConfirmDialog>
 
     <ZConfirmDialog
       v-model="showSingleDeleteModal"
-      title="删除 API Key"
-      description="删除后该 API Key 将立即失效，此操作不可撤销"
+      :title="t('keys.page.deleteApiKey')"
+      :description="t('keys.page.deleteWarning')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="deletingKey"
       @confirm="handleDelete"
     >
       <p class="m-0">
-        确定删除 {{ pendingDeleteKey?.name || pendingDeleteKey?.prefix || '该 API Key' }} 吗？
+        {{ t('keys.page.delete', { name: pendingDeleteKey?.name || pendingDeleteKey?.prefix || t('keys.page.apiKey') }) }}
       </p>
     </ZConfirmDialog>
   </div>

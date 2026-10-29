@@ -34,14 +34,6 @@ pub(crate) const MAX_LIVE_BODY_BYTES: usize = 16 * 1024 * 1024;
 pub(crate) const LIVE_CALLS_ENDPOINT: &str = "realtime-calls";
 /// realtime calls 的官方查询参数；上游按 `architecture=avas` 返回 WebRTC answer。
 pub(crate) const LIVE_CALLS_QUERY: &str = "intent=quicksilver&architecture=avas";
-/// 客户端协议头允许清单；语音会话语义字段，转发给上游引导请求。
-pub(crate) const LIVE_PROTOCOL_HEADERS: [&str; 5] = [
-    "openai-alpha",
-    "x-session-id",
-    "session-id",
-    "thread-id",
-    "openai-safety-identifier",
-];
 
 pub(crate) fn router() -> Router<crate::ApiState> {
     Router::new()
@@ -136,22 +128,12 @@ pub(crate) fn realtime_unsupported_response(capability: &str) -> Response {
     .into_response()
 }
 
-/// 请求侧协议头过滤；语音语义字段按允许清单转发，其余一律不透传。
+/// 共用 OpenAI 入站头边界；Content-Type 由正文适配结果单独提供
 pub(crate) fn filter_protocol_headers(headers: &HeaderMap) -> Vec<ProviderHttpHeader> {
-    LIVE_PROTOCOL_HEADERS
-        .iter()
-        .flat_map(|name| {
-            headers
-                .get_all(*name)
-                .into_iter()
-                .map(|value| (*name, value))
-        })
-        .filter_map(|(name, value)| {
-            let value = value.to_str().ok()?;
-            Some(ProviderHttpHeader::new(
-                name,
-                Bytes::copy_from_slice(value.as_bytes()),
-            ))
+    super::responses::passthrough_request_headers(headers)
+        .filter(|(name, _)| *name != header::CONTENT_TYPE)
+        .map(|(name, value)| {
+            ProviderHttpHeader::new(name.as_str(), Bytes::copy_from_slice(value.as_bytes()))
         })
         .collect()
 }
@@ -281,20 +263,20 @@ pub(crate) fn encode_call_request(
         .map_err(|_| invalid("Codex live call request is invalid"))
 }
 
-/// 响应头白名单；`Location` 是客户端获知 call id 的合同。
+/// 共用响应身份与传输边界；Live 原始正文另保留上游 Content-Type
 pub(crate) fn live_forwarded_response_headers(
     headers: &[ProviderResponseHeader],
 ) -> Vec<(HeaderName, HeaderValue)> {
-    const FORWARDABLE: [&str; 5] = [
-        "location",
-        "content-type",
-        "retry-after",
-        "x-request-id",
-        "openai-request-id",
-    ];
+    let connection_options = super::responses::response_connection_options(headers);
     headers
         .iter()
-        .filter(|header| FORWARDABLE.contains(&header.name()))
+        .filter(|header| {
+            header.name().eq_ignore_ascii_case("content-type")
+                || super::responses::response_header_is_forwardable(
+                    header.name(),
+                    &connection_options,
+                )
+        })
         .filter_map(|header| {
             Some((
                 HeaderName::from_bytes(header.name().as_bytes()).ok()?,

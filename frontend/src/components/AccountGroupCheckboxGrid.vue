@@ -3,6 +3,8 @@ import type { AccountGroupRef } from '@/api'
 
 import { ZCheckbox } from '@codex-proxy/ui'
 
+import { useI18n } from 'vue-i18n'
+
 withDefaults(
   defineProps<{
     groups: AccountGroupRef[]
@@ -14,6 +16,8 @@ withDefaults(
     disabled: false,
   },
 )
+
+const { t } = useI18n({ useScope: 'global' })
 
 const selectedGroupIds = defineModel<string[]>({ required: true })
 
@@ -42,10 +46,10 @@ function updateGroup(groupId: string, selected: boolean) {
           @update:model-value="updateGroup(group.id, $event)"
         />
       </span>
-      <span v-if="!group.enabled" class="shrink-0 text-cp-xs font-emphasis text-cp-text-quaternary"> 已禁用 </span>
+      <span v-if="!group.enabled" class="shrink-0 text-cp-xs font-emphasis text-cp-text-quaternary"> {{ t('common.status.disabled') }} </span>
     </div>
   </div>
   <p v-else class="m-0 rounded-cp bg-cp-fill-quaternary px-3.5 py-3 text-cp-sm font-emphasis text-cp-text-secondary">
-    {{ loading ? '正在加载分组...' : '暂无分组，请先在分组管理中创建' }}
+    {{ loading ? t('groups.selector.loading') : t('groups.selector.empty') }}
   </p>
 </template>

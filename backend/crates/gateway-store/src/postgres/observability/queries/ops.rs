@@ -285,7 +285,7 @@ fn push_request_error_predicates(
         statement.push_bind(i32::from(status));
     }
     if let Some(search) = &filter.search {
-        push_prefix_search(
+        push_contains_search(
             statement,
             &[
                 "mr.id",
@@ -331,7 +331,7 @@ fn push_ops_event_predicates(
         statement.push_bind(i32::from(status));
     }
     if let Some(search) = &filter.search {
-        push_prefix_search(
+        push_contains_search(
             statement,
             &[
                 "oe.id",
@@ -375,8 +375,8 @@ fn push_response_id_filter(
     }
 }
 
-fn push_prefix_search(statement: &mut QueryBuilder<Postgres>, columns: &[&str], value: &str) {
-    let pattern = literal_prefix_pattern(value);
+fn push_contains_search(statement: &mut QueryBuilder<Postgres>, columns: &[&str], value: &str) {
+    let pattern = literal_contains_pattern(value);
     statement.push(" and (");
     for (index, column) in columns.iter().enumerate() {
         if index > 0 {

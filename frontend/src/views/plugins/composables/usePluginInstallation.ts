@@ -2,11 +2,12 @@ import type { InstalledPlugin } from '../utils/catalog'
 import type { PluginInstallMode, PluginInstallSelection } from '../utils/model'
 import type { PluginUpdateSelection } from './usePluginUpdateCheck'
 import type { PluginArtifact, PluginArtifactMutationResponse, PluginInstance, PluginRelease, PluginUpdateSourceBinding, QueryPluginReleaseRequest, VerifiedPluginArtifact } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { isEqual } from 'es-toolkit'
 import { onScopeDispose, shallowRef, watch } from 'vue'
 import { acceptPluginArtifact, getPluginUpdateSources, installRemotePlugin, queryPluginRelease, updatePluginSource, uploadPluginArtifact, verifyRemotePlugin, verifyUploadedPlugin } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { notifyPluginError } from '../utils/actions'
 import { pluginInstallSelectionKey } from '../utils/model'
 
@@ -24,7 +25,7 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
   const release = shallowRef<PluginRelease | null>(null)
   const action = useAsyncAction({
     errorText: false,
-    onError: error => notifyPluginError('插件安装失败', error),
+    onError: error => notifyPluginError(t('plugins.installation.pluginInstallationFailed'), error),
   })
   const installing = action.loading
   const queryingRelease = shallowRef(false)
@@ -57,7 +58,9 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
   function openVersionInstall(plugin: InstalledPlugin) {
     const source = plugin.source
     if (!source || source.source.kind === 'builtin') {
-      ZNotification.warning({ message: '此插件没有可用的安装来源' })
+      ZNotification.warning({
+        message: t('plugins.installation.noSource'),
+      })
       return
     }
     openInstall(source.source.kind)
@@ -86,12 +89,14 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
     const result = await action.run(async () => {
       const current = (await getPluginUpdateSources({ silent: true })).find(value => value.pluginId === source.pluginId)
       if (!isEqual(current, previous))
-        throw new Error('安装来源已变更，请关闭后重新打开')
+        throw new Error(t('plugins.installation.sourceChanged'))
       await updatePluginSource(source, { silent: true })
       updateSource.value = source
       onSourceSaved(source)
       return true
-    }, { onError: error => notifyPluginError('安装来源保存失败', error) })
+    }, {
+      onError: error => notifyPluginError(t('plugins.installation.sourceSaveFailed'), error),
+    })
     return result === true
   }
 
@@ -115,7 +120,7 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
     }
     catch (error) {
       if (releaseController === controller)
-        notifyPluginError('GitHub Release 查询失败', error)
+        notifyPluginError(t('plugins.installation.githubReleaseQueryFailed'), error)
     }
     finally {
       if (releaseController === controller) {
@@ -128,7 +133,9 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
   async function installArtifact(request: PluginInstallSelection) {
     const verified = verifiedArtifact.value
     if (!verified || verified.requestKey !== pluginInstallSelectionKey(request)) {
-      ZNotification.warning({ message: '请先校验当前选择的插件包' })
+      ZNotification.warning({
+        message: t('plugins.installation.verificationRequired'),
+      })
       return
     }
     const result = await action.run(async () => {
@@ -149,7 +156,13 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
     if (!result)
       return
     showInstall.value = false
-    ZNotification.success({ message: result.configurationRequired ? '插件已安装，请补充必要配置' : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装' })
+    ZNotification.success({
+      message: result.configurationRequired
+        ? t('plugins.installation.installedNeedsConfiguration')
+        : result.defaultInstanceId
+          ? t('plugins.installation.preparing')
+          : t('plugins.installation.pluginVersionInstalled'),
+    })
     await onInstalled(result)
   }
 
@@ -160,7 +173,7 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
     const completed = await action.run(async () => {
       const latest = (await getPluginUpdateSources({ silent: true })).find(value => value.pluginId === binding.pluginId)
       if (!isEqual(binding, latest))
-        throw new Error('安装来源已变更，请重新检查更新')
+        throw new Error(t('plugins.installation.updateSourceChanged'))
       const { pluginId, version, sha256 } = artifact.metadata
       const result = await installRemotePlugin({
         pluginId,
@@ -172,20 +185,30 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
       // 使用检查时的实例 revision，避免下载期间的设置变更被升级覆盖。
       await onInstalled(result, instance)
       return true
-    }, { onError: error => notifyPluginError('插件升级失败', error) })
+    }, {
+      onError: error => notifyPluginError(t('plugins.installation.pluginUpgradeFailed'), error),
+    })
     return completed === true
   }
 
   async function acceptArtifact(artifact: PluginArtifact) {
     if (acceptanceArtifact.value?.metadata.sha256 !== artifact.metadata.sha256) {
-      ZNotification.warning({ message: '请选择待安装的插件版本' })
+      ZNotification.warning({
+        message: t('plugins.installation.versionRequired'),
+      })
       return
     }
     const result = await action.run(() => acceptPluginArtifact({ sha256: artifact.metadata.sha256 }, { silent: true }))
     if (!result)
       return
     showInstall.value = false
-    ZNotification.success({ message: result.configurationRequired ? '插件已安装，请补充必要配置' : result.defaultInstanceId ? '插件已安装，正在准备' : '插件版本已安装' })
+    ZNotification.success({
+      message: result.configurationRequired
+        ? t('plugins.installation.installedNeedsConfiguration')
+        : result.defaultInstanceId
+          ? t('plugins.installation.preparing')
+          : t('plugins.installation.pluginVersionInstalled'),
+    })
     await onInstalled(result)
   }
 
@@ -207,13 +230,17 @@ export function usePluginInstallation({ onInstalled, onSourceSaved }: Installati
         ? await verifyUploadedPlugin(request, options)
         : await verifyRemotePlugin(request, options)
       if (updateSource.value && artifact.metadata.pluginId !== updateSource.value.pluginId)
-        throw new Error('插件包与当前插件不符，请重新选择')
-      if (verificationController === controller)
-        verifiedArtifact.value = { requestKey: pluginInstallSelectionKey(request), artifact }
+        throw new Error(t('plugins.installation.packageMismatch'))
+      if (verificationController === controller) {
+        verifiedArtifact.value = {
+          requestKey: pluginInstallSelectionKey(request),
+          artifact,
+        }
+      }
     }
     catch (error) {
       if (verificationController === controller)
-        notifyPluginError('插件包校验失败', error)
+        notifyPluginError(t('plugins.installation.verificationFailed'), error)
     }
     finally {
       if (verificationController === controller) {

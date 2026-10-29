@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { DashboardTrendKind } from '@/api/modules/dashboard'
-import { shallowRef } from 'vue'
+
+import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import DashboardContent from '@/views/dashboard/components/DashboardContent.vue'
 import {
@@ -10,15 +12,17 @@ import {
 
 import { themeDashboardSummary } from '../fixtures/dashboard'
 
-const snapshot = dashboardSnapshotView(themeDashboardSummary)
-const trend = dashboardTrendView(themeDashboardSummary.trend)
+const { t } = useI18n({ useScope: 'global' })
+
+const snapshot = computed(() => dashboardSnapshotView(themeDashboardSummary.value))
+const trend = computed(() => dashboardTrendView(themeDashboardSummary.value.trend))
 const trendKind = shallowRef<DashboardTrendKind>('usage')
 </script>
 
 <template>
   <DashboardContent
     v-model:trend-kind="trendKind"
-    last-refreshed-at="刚刚更新"
+    :last-refreshed-at="t('appearance.preview.dashboard.justUpdated')"
     :metrics="snapshot.metrics"
     :analytics="snapshot.analytics"
     :trend-points="trend.points"

@@ -1,0 +1,141 @@
+{
+  "common": {
+    "errors": {
+      "canceled": "請求已取消",
+      "timeout": "請求超時，請稍後重試",
+      "network": "網絡連接失敗，請檢查網絡後重試",
+      "invalidParameters": "請求參數不合法",
+      "signInRequired": "需要登錄",
+      "forbidden": "沒有權限執行此操作",
+      "notFound": "請求的接口不存在",
+      "conflict": "資源狀態衝突，請刷新後重試",
+      "payloadTooLarge": "請求內容過大",
+      "unsupportedFormat": "請求格式不受支持",
+      "invalidContent": "請求內容不合法",
+      "rateLimited": "請求過於頻繁，請稍後重試",
+      "internal": "服務內部錯誤",
+      "upstreamFailure": "上游服務請求失敗",
+      "unavailable": "服務暫不可用，請稍後重試",
+      "upstreamTimeout": "上游服務響應超時",
+      "http": "請求失敗（HTTP {status}）",
+      "request": "請求失敗",
+      "responseTooLarge": "響應內容超過大小限制",
+      "unsupportedResponse": "服務返回了不受支持的響應",
+      "sessionExpired": "登錄已失效，請重新登錄",
+      "operation": "操作失敗",
+      "copy": "複製失敗",
+      "malformedJson": "請求體不是合法 JSON",
+      "invalidTimeRange": "時間範圍不合法",
+      "invalidCredentials": "登錄憑據錯誤",
+      "invalidAdminApiKey": "管理 API密鑰無效",
+      "tooManyLoginAttempts": "登錄嘗試過多，請稍後重試",
+      "upstreamResultUnknown": "上游執行結果未知，請刷新狀態後再決定是否重試"
+    },
+    "status": {
+      "disabled": "已禁用",
+      "disabledName": "{name}（已禁用）",
+      "success": "成功",
+      "error": "異常",
+      "pending": "等待中",
+      "failed": "失敗",
+      "healthy": "正常",
+      "all": "全部狀態",
+      "available": "可用",
+      "unavailable": "不可用",
+      "enabled": "已啓用",
+      "loading": "加載中",
+      "running": "執行中",
+      "completed": "已完成",
+      "rateLimited": "限流"
+    },
+    "actions": {
+      "copy": "複製",
+      "close": "關閉",
+      "cancel": "取消",
+      "previous": "上一步",
+      "reset": "重置",
+      "back": "返回",
+      "delete": "確認刪除",
+      "create": "創建",
+      "enable": "啓用",
+      "next": "下一步",
+      "confirm": "確定",
+      "refresh": "刷新",
+      "save": "保存"
+    },
+    "providers": {
+      "all": "全部平臺",
+      "filter": "按平臺篩選",
+      "unknown": "未知平臺",
+      "customAuth": "自定義認證 · {normalized}",
+      "unknownAuth": "未知認證類型"
+    },
+    "location": {
+      "resolving": "正在解析出口位置",
+      "detect": "解析出口位置並填入表單",
+      "countryCode": "國家代碼",
+      "countryCodePlaceholder": "請輸入兩位國家代碼",
+      "region": "地區",
+      "regionPlaceholder": "請輸入地區",
+      "city": "城市",
+      "cityPlaceholder": "請輸入城市",
+      "timeZone": "IANA 時區",
+      "timeZonePlaceholder": "請輸入 IANA 時區",
+      "required": "請填寫兩位國家代碼、地區、城市和 IANA 時區"
+    },
+    "values": {
+      "yes": "是",
+      "no": "否",
+      "unspecified": "未填寫",
+      "all": "全部",
+      "unknown": "未知",
+      "unlimited": "不限",
+      "default": "默認",
+      "on": "開啓",
+      "none": "無",
+      "off": "關閉"
+    },
+    "form": {
+      "inputPlaceholder": "輸入內容",
+      "useForm": "使用表單",
+      "fieldHelp": "{label}說明",
+      "editJson": "編輯 JSON"
+    },
+    "fields": {
+      "actions": "操作",
+      "notes": "備註",
+      "status": "狀態",
+      "color": "顏色",
+      "updatedAt": "更新時間",
+      "name": "名稱",
+      "createdAt": "創建時間",
+      "baseUrl": "基礎 URL",
+      "apiKey": "API密鑰",
+      "build": "構建"
+    },
+    "language": "界面語言",
+    "validation": {
+      "invalidJson": "請輸入有效的 JSON 對象",
+      "jsonObject": "輸入必須是 JSON 對象",
+      "sizeLimit": "輸入不能超過 {value} KiB"
+    },
+    "feedback": {
+      "deleted": "刪除成功",
+      "copied": "已複製"
+    },
+    "time": {
+      "justNow": "剛剛",
+      "minutesAgo": "{count} 分鐘前",
+      "hoursAgo": "{count} 小時前",
+      "daysAgo": "{count} 天前"
+    },
+    "units": {
+      "tokens": "Token"
+    },
+    "sizes": {
+      "small": "小",
+      "medium": "中",
+      "large": "大"
+    }
+  }
+}

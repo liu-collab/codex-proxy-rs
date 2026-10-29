@@ -1,23 +1,39 @@
 <script setup lang="ts">
 import type { AccountProfileActivityInsights, AccountProfileInvocation } from '@/api'
+
 import { Package } from '@lucide/vue'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
-import { formatInteger } from '@/utils/format'
+import { formatInteger, numberLocale } from '@/utils/format'
 
 const props = defineProps<{
   insights: AccountProfileActivityInsights
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const insightRows = computed(() => [
-  { label: '快速模式', value: formatPercent(props.insights.fastModePercent) },
   {
-    label: '最常用的推理强度',
+    label: t('accounts.profile.activity.quickMode'),
+    value: formatPercent(props.insights.fastModePercent),
+  },
+  {
+    label: t('accounts.profile.activity.reasoningEffort'),
     value: formatReasoning(props.insights.reasoningEffort, props.insights.reasoningEffortPercent),
   },
-  { label: '已探索的技能', value: formatNumber(props.insights.skillsExplored) },
-  { label: '使用的技能总数', value: formatNumber(props.insights.totalSkillsUsed) },
-  { label: '聊天总数', value: formatNumber(props.insights.totalThreads) },
+  {
+    label: t('accounts.profile.activity.exploredSkills'),
+    value: formatNumber(props.insights.skillsExplored),
+  },
+  {
+    label: t('accounts.profile.activity.totalNumberOfSkillsUsed'),
+    value: formatNumber(props.insights.totalSkillsUsed),
+  },
+  {
+    label: t('accounts.profile.activity.totalNumberOfChats'),
+    value: formatNumber(props.insights.totalThreads),
+  },
 ])
 const invocations = computed(() =>
   (props.insights.invocations ?? [])
@@ -26,19 +42,23 @@ const invocations = computed(() =>
 )
 
 function formatNumber(value: number | null) {
-  return value === null ? '—' : formatInteger(value)
+  return value === null
+    ? '—'
+    : formatInteger(value)
 }
 
 function formatPercent(value: number | null) {
   if (value === null)
     return '—'
-  return `${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(value)}%`
+  return `${new Intl.NumberFormat(numberLocale(), { maximumFractionDigits: 1 }).format(value)}%`
 }
 
 function formatReasoning(effort: string | null, percent: number | null) {
   if (!effort)
     return '—'
-  return percent === null ? effort : `${effort} · ${formatPercent(percent)}`
+  return percent === null
+    ? effort
+    : `${effort} · ${formatPercent(percent)}`
 }
 
 function invocationView(invocation: AccountProfileInvocation) {
@@ -58,7 +78,7 @@ function invocationView(invocation: AccountProfileInvocation) {
   <section class="grid gap-8 sm:grid-cols-2 sm:gap-12" aria-labelledby="profile-activity-insights-title">
     <div>
       <h3 id="profile-activity-insights-title" class="m-0 text-cp-lg font-heavy text-cp-text">
-        活动洞察
+        {{ t('accounts.profile.activity.activityInsights') }}
       </h3>
       <dl class="mt-4 mb-0 grid gap-3.5">
         <div
@@ -78,7 +98,7 @@ function invocationView(invocation: AccountProfileInvocation) {
 
     <div>
       <h3 class="m-0 text-cp-lg font-heavy text-cp-text">
-        最常用的插件与技能
+        {{ t('accounts.profile.activity.pluginsAndSkills') }}
       </h3>
       <ol v-if="invocations.length > 0" class="mt-3 mb-0 grid list-none gap-1.5 p-0">
         <li
@@ -91,12 +111,12 @@ function invocationView(invocation: AccountProfileInvocation) {
           </span>
           <span class="truncate text-cp font-bold text-cp-text">{{ invocation.name }}</span>
           <span class="font-mono text-cp-sm font-semibold tabular-nums text-cp-text-secondary">
-            {{ formatInteger(invocation.count) }} 次运行
+            {{ t('accounts.profile.activity.runs', { count: formatInteger(invocation.count) }) }}
           </span>
         </li>
       </ol>
       <p v-else class="mt-4 mb-0 text-cp-sm font-semibold text-cp-text-quaternary">
-        暂无插件或技能调用记录
+        {{ t('accounts.profile.activity.noToolCalls') }}
       </p>
     </div>
   </section>

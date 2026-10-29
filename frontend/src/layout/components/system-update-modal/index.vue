@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { SystemRestartPlan, SystemUpdateChannel, SystemUpdateDetail } from '@/api'
-import { ZButton, ZConfirmDialog, ZDialog, ZMarkdown, ZNotification, ZPopover, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
 
+import { ZButton, ZConfirmDialog, ZDialog, ZMarkdown, ZPopover, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
 import {
   ArrowUpCircle,
   Circle,
@@ -15,14 +15,19 @@ import {
   TriangleAlert,
 } from '@lucide/vue'
 import { storeToRefs } from 'pinia'
+
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { checkSystemRestart } from '@/api'
 import { normalizeSystemVersion, useSystemUpdateStore } from '@/stores/modules/system-update'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import {
   resolveSystemUpdateLogClasses,
   resolveSystemUpdatePresentation,
 } from './presenter'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const open = defineModel<boolean>({ default: false })
 
@@ -82,16 +87,37 @@ const updateLogRows = computed(() =>
   })),
 )
 
-const channelLabels = {
-  stable: { label: 'Stable · 正式', description: '仅正式版本' },
-  rc: { label: 'RC · 候选', description: '包含 RC 和正式版本' },
-  beta: { label: 'Beta · 测试', description: '包含 Beta、RC 和正式版本' },
-  alpha: { label: 'Alpha · 早期', description: '包含所有常规预发布和正式版本' },
-  exp: { label: 'Exp · 实验', description: '仅当前实验线' },
-}
+const channelLabels = computed(() => ({
+  stable: {
+    label: t('systemUpdate.channels.stable.label'),
+    description: t('systemUpdate.channels.stable.description'),
+  },
+  rc: {
+    label: t('systemUpdate.channels.rc.label'),
+    description: t('systemUpdate.channels.rc.description'),
+  },
+  beta: {
+    label: t('systemUpdate.channels.beta.label'),
+    description: t('systemUpdate.channels.beta.description'),
+  },
+  alpha: {
+    label: t('systemUpdate.channels.alpha.label'),
+    description: t('systemUpdate.channels.alpha.description'),
+  },
+  exp: {
+    label: t('systemUpdate.channels.experimental.label'),
+    description: t('systemUpdate.channels.experimental.description'),
+  },
+}))
 const channelOptions = computed(() => availableChannels.value.map(value => ({
   value,
-  label: { stable: 'Stable', rc: 'RC', beta: 'Beta', alpha: 'Alpha', exp: 'Exp' }[value],
+  label: {
+    stable: 'Stable',
+    rc: 'RC',
+    beta: 'Beta',
+    alpha: 'Alpha',
+    exp: 'Exp',
+  }[value],
 })))
 
 async function handleChannelChange(value: string) {
@@ -128,7 +154,11 @@ async function handleCheckUpdates(force = true) {
       ZNotification.error({ message: data.warning })
       return
     }
-    ZNotification.success({ message: data?.hasUpdate ? '发现可用更新' : '当前没有可用更新' })
+    ZNotification.success({
+      message: data?.hasUpdate
+        ? t('systemUpdate.feedback.available')
+        : t('systemUpdate.feedback.noUpdates'),
+    })
   }
   catch {}
 }
@@ -146,12 +176,16 @@ async function handleUpdateRequest() {
       return
     }
     if (!data?.hasUpdate || !canUpdate.value) {
-      ZNotification.success({ message: '当前没有可用更新' })
+      ZNotification.success({
+        message: t('systemUpdate.feedback.noUpdates'),
+      })
       return
     }
     const remoteTargetVersion = normalizeSystemVersion(data.latestVersion)
     if (!remoteTargetVersion) {
-      ZNotification.error({ message: '远端目标版本为空' })
+      ZNotification.error({
+        message: t('systemUpdate.errors.remoteTargetMissing'),
+      })
       return
     }
     if (previousTargetVersion && previousTargetVersion !== remoteTargetVersion) {
@@ -172,7 +206,9 @@ async function runConfirmedUpdate(targetVersion: string, channel: SystemUpdateCh
   try {
     const result = await updateNow(targetVersion, channel)
     if (result) {
-      ZNotification.success({ message: '更新已开始' })
+      ZNotification.success({
+        message: t('systemUpdate.feedback.started'),
+      })
     }
   }
   catch {}
@@ -195,7 +231,7 @@ async function handleRestart() {
   checkingRestart.value = true
   try {
     if (!updateInfo.value)
-      throw new Error('请等待系统更新信息加载完成')
+      throw new Error(t('systemUpdate.errors.infoPending'))
     restartPlan.value = await checkSystemRestart()
     if (restartPlan.value.incompatiblePlugins.length) {
       restartConfirmOpen.value = true
@@ -204,7 +240,9 @@ async function handleRestart() {
     await restartNow(restartPlan.value)
   }
   catch (error: unknown) {
-    ZNotification.error({ message: errorMessage(error, '重启前检查失败') })
+    ZNotification.error({
+      message: errorMessage(error, t('systemUpdate.errors.preRestartCheck')),
+    })
   }
   finally {
     checkingRestart.value = false
@@ -220,7 +258,9 @@ async function handleConfirmRestart() {
   }
   catch (error: unknown) {
     restartConfirmOpen.value = false
-    ZNotification.error({ message: errorMessage(error, '重启失败，请重新检查') })
+    ZNotification.error({
+      message: errorMessage(error, t('systemUpdate.errors.restart')),
+    })
   }
 }
 
@@ -245,8 +285,8 @@ watch(
 <template>
   <ZDialog
     v-model="open"
-    title="系统更新"
-    description="检查版本、查看发布说明并执行在线更新"
+    :title="t('systemUpdate.title')"
+    :description="t('systemUpdate.description')"
     type="success"
     width="48rem"
     :show-close="!restarting" :close-on-click-modal="!restarting" :close-on-press-escape="!restarting"
@@ -263,7 +303,7 @@ watch(
               Codex Proxy RS
             </p>
             <p class="mt-2 mb-0 text-lg leading-none font-heavy text-cp-text">
-              应用包更新
+              {{ t('systemUpdate.application') }}
             </p>
           </div>
           <span
@@ -297,7 +337,7 @@ watch(
                 :class="{ invisible: checking || changingChannel }"
                 class="inline-flex shrink-0 items-center gap-1 text-cp-xs leading-none font-bold text-cp-link transition-colors hover:text-cp-link-hover"
               >
-                发布页
+                {{ t('systemUpdate.releasePage') }}
                 <ExternalLink class="size-3" />
               </a>
             </div>
@@ -308,7 +348,7 @@ watch(
               <ZSkeleton
                 v-if="loading || ((checking || changingChannel) && item.key === 'latest')"
                 class="h-full w-20 max-w-full"
-                aria-label="正在检查版本"
+                :aria-label="t('systemUpdate.status.checkingVersion')"
               />
               <template v-else>
                 {{ item.value }}
@@ -332,16 +372,16 @@ watch(
               <template #icon>
                 <History class="size-3.5" />
               </template>
-              上次操作失败
+              {{ t('systemUpdate.status.lastFailed') }}
             </ZButton>
           </template>
           <div class="grid w-80 max-w-[calc(100vw-2rem)] gap-2 p-3 text-cp-sm">
             <div v-if="lastFailedOperation.targetVersion || lastFailedOperation.finishedAt" class="flex flex-wrap gap-x-3 gap-y-1 text-cp-xs text-cp-text-quaternary">
-              <span v-if="lastFailedOperation.targetVersion">目标版本 v{{ lastFailedOperation.targetVersion }}</span>
+              <span v-if="lastFailedOperation.targetVersion">{{ t('systemUpdate.targetVersion', { version: lastFailedOperation.targetVersion }) }}</span>
               <span v-if="lastFailedOperation.finishedAt">{{ lastFailedOperation.finishedAtDisplay }}</span>
             </div>
             <p class="m-0 wrap-anywhere text-cp-text-secondary">
-              {{ lastFailedOperation.error || lastFailedOperation.message || '操作失败' }}
+              {{ lastFailedOperation.error || lastFailedOperation.message || t('common.errors.operation') }}
             </p>
           </div>
         </ZPopover>
@@ -353,7 +393,7 @@ watch(
       >
         <div class="flex items-center justify-between gap-3">
           <p class="m-0 text-cp font-heavy text-cp-text">
-            发布说明
+            {{ t('systemUpdate.releaseNotes') }}
           </p>
           <span class="font-mono text-cp-xs font-emphasis text-cp-text-quaternary">
             <ZSkeleton v-if="releaseNotesLoading" shape="text" class="w-14" aria-hidden="true" />
@@ -386,7 +426,7 @@ watch(
           <div class="flex min-w-0 items-center gap-2">
             <Terminal class="size-4 shrink-0 text-cp-success" />
             <p class="m-0 text-cp leading-none font-heavy text-cp-text">
-              更新进度
+              {{ t('systemUpdate.progress') }}
             </p>
           </div>
           <span
@@ -429,19 +469,19 @@ watch(
 
     <template #footer>
       <div class="mr-auto flex min-w-0 basis-full items-center gap-2 sm:basis-auto">
-        <ZSkeleton v-if="loading" class="h-8 w-52" aria-label="正在读取运行通道" />
+        <ZSkeleton v-if="loading" class="h-8 w-52" :aria-label="t('systemUpdate.channels.loading')" />
         <ZSegmented
           v-else
           :model-value="selectedChannel"
           :options="channelOptions"
-          aria-label="更新通道"
+          :aria-label="t('systemUpdate.channels.label')"
           size="small"
           :disabled="!canChangeChannel || preparingUpdate || updateConfirmOpen"
           @update:model-value="handleChannelChange"
         />
         <ZPopover placement="top-start">
           <template #reference>
-            <ZButton variant="text" size="small" square aria-label="更新通道说明">
+            <ZButton variant="text" size="small" square :aria-label="t('systemUpdate.channels.help')">
               <CircleHelp class="size-4" />
             </ZButton>
           </template>
@@ -451,7 +491,7 @@ watch(
               · {{ channelLabels[channel].description }}
             </p>
             <p class="m-0 text-cp-text-quaternary">
-              选择仅用于本次检查，重新打开时按运行版本选择通道，不会自动安装或降级
+              {{ t('systemUpdate.channels.description') }}
             </p>
           </div>
         </ZPopover>
@@ -467,7 +507,7 @@ watch(
         <template #icon>
           <RefreshCw class="size-3.5" />
         </template>
-        检查更新
+        {{ t('systemUpdate.actions.check') }}
       </ZButton>
       <ZButton
         v-if="needRestart"
@@ -491,25 +531,25 @@ watch(
         <template #icon>
           <Download class="size-4" />
         </template>
-        {{ updating ? '更新中' : '下载并更新' }}
+        {{ updating ? t('systemUpdate.status.updating') : t('systemUpdate.actions.install') }}
       </ZButton>
     </template>
   </ZDialog>
 
   <ZConfirmDialog
     v-model="restartConfirmOpen"
-    title="插件兼容性提醒"
-    description="重启后保留启用配置，逐个尝试启动插件"
-    confirm-text="继续重启"
+    :title="t('systemUpdate.plugins.title')"
+    :description="t('systemUpdate.plugins.description')"
+    :confirm-text="t('systemUpdate.actions.continueRestart')"
     :loading="restarting"
     @confirm="handleConfirmRestart"
   >
     <div class="grid gap-4">
       <div v-if="restartPlan?.targetVersion" class="flex items-center justify-between gap-3 text-cp-sm">
-        <span class="text-cp-text-secondary">重启后版本</span>
+        <span class="text-cp-text-secondary">{{ t('systemUpdate.versionAfterRestart') }}</span>
         <span class="font-mono font-emphasis text-cp-text">v{{ restartPlan.targetVersion }}</span>
       </div>
-      <ul class="m-0 max-h-64 list-none overflow-y-auto p-0" aria-label="不兼容插件">
+      <ul class="m-0 max-h-64 list-none overflow-y-auto p-0" :aria-label="t('systemUpdate.plugins.incompatible')">
         <li v-for="plugin in restartPlan?.incompatiblePlugins" :key="plugin.instanceId" class="flex items-start gap-3 py-3 first:pt-0 last:pb-0">
           <TriangleAlert class="mt-0.5 size-4 shrink-0 text-cp-warning" aria-hidden="true" />
           <div class="grid min-w-0 gap-1">
@@ -518,14 +558,17 @@ watch(
           </div>
         </li>
       </ul>
+      <p class="m-0 rounded-cp bg-cp-fill-quaternary px-3 py-2.5 text-cp-sm leading-relaxed font-normal text-cp-text-secondary">
+        {{ t('systemUpdate.plugins.requestErrorHelp') }}
+      </p>
     </div>
   </ZConfirmDialog>
 
   <ZConfirmDialog
     v-model="updateConfirmOpen"
-    title="发现新的更新版本"
-    description="所选通道的最新版本已变化"
-    confirm-text="确认更新"
+    :title="t('systemUpdate.confirmation.newerVersion')"
+    :description="t('systemUpdate.confirmation.channelChanged')"
+    :confirm-text="t('systemUpdate.confirmation.title')"
     :loading="updating"
     :confirm-disabled="!updateConfirmInfo?.latestVersion"
     @confirm="handleConfirmUpdate"
@@ -548,7 +591,7 @@ watch(
         </div>
       </div>
       <p class="m-0 text-cp-sm leading-relaxed font-emphasis text-cp-text-quaternary">
-        点击确认后弹窗会关闭，并按远端最新目标版本开始更新
+        {{ t('systemUpdate.confirmation.description') }}
       </p>
     </div>
   </ZConfirmDialog>

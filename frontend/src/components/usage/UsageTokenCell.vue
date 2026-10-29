@@ -4,6 +4,8 @@ import type { UsageListRecord } from '@/api'
 import { Archive, ArrowDown, ArrowUp } from '@lucide/vue'
 
 import { computed } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import { usageTokenDetails } from '@/components/usage/shared/presenter'
 import UsageDetailPopover from '@/components/usage/UsageDetailPopover.vue'
 
@@ -11,13 +13,30 @@ const props = defineProps<{
   record: Pick<UsageListRecord, 'tokenDetails'>
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const tokenDetails = computed(() => usageTokenDetails(props.record.tokenDetails))
 const tokenItems = computed(() => [
-  { label: '输入 Token', value: tokenDetails.value.inputTokensDisplay },
-  { label: '输出 Token', value: tokenDetails.value.outputTokensDisplay },
-  { label: '缓存读取 Token', value: tokenDetails.value.cachedInputTokensDisplay },
-  { label: '缓存写入 Token', value: tokenDetails.value.cacheWriteInputTokensDisplay },
-  { label: '推理 Token', value: tokenDetails.value.reasoningOutputTokensDisplay },
+  {
+    label: t('usage.tokens.enterToken'),
+    value: tokenDetails.value.inputTokensDisplay,
+  },
+  {
+    label: t('usage.tokens.outputToken'),
+    value: tokenDetails.value.outputTokensDisplay,
+  },
+  {
+    label: t('usage.tokens.cacheReadTokens'),
+    value: tokenDetails.value.cachedInputTokensDisplay,
+  },
+  {
+    label: t('usage.tokens.cacheWriteTokens'),
+    value: tokenDetails.value.cacheWriteInputTokensDisplay,
+  },
+  {
+    label: t('usage.tokens.reasoningToken'),
+    value: tokenDetails.value.reasoningOutputTokensDisplay,
+  },
 ])
 </script>
 
@@ -40,7 +59,7 @@ const tokenItems = computed(() => [
       </span>
     </div>
 
-    <UsageDetailPopover title="Token 明细" trigger-label="查看 Token 明细">
+    <UsageDetailPopover :title="t('usage.tokens.tokenDetails')" :trigger-label="t('usage.tokens.viewTokenDetails')">
       <div class="grid gap-1.5 text-cp-text-secondary">
         <div v-for="item in tokenItems" :key="item.label" class="flex justify-between gap-4">
           <span class="whitespace-nowrap">{{ item.label }}</span>
@@ -50,7 +69,7 @@ const tokenItems = computed(() => [
         </div>
       </div>
       <div class="mt-1 flex justify-between border-t border-cp-split pt-2">
-        <span class="whitespace-nowrap text-cp-text-secondary">总 Token</span>
+        <span class="whitespace-nowrap text-cp-text-secondary">{{ t('usage.tokens.totalTokens') }}</span>
         <span class="whitespace-nowrap font-mono font-heavy text-cp-info-text">
           {{ tokenDetails.totalTokensDisplay }}
         </span>

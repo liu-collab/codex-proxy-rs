@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
+
 import { ZButton } from '@codex-proxy/ui'
 import { Grid2X2, Slash } from '@lucide/vue'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   capacity: Account['capacity']
@@ -10,17 +12,19 @@ const props = defineProps<{
 
 defineEmits<{ showDetails: [] }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const full = computed(() => props.capacity.usedSlots !== null
   && props.capacity.totalSlots !== null
   && props.capacity.usedSlots >= props.capacity.totalSlots)
-const label = computed(() => `账号并发占用 ${props.capacity.usedSlots ?? '未知'}，上限 ${props.capacity.totalSlots ?? '不限'}`)
+const label = computed(() => t('accounts.capacity.concurrentRequestsLimit', { value: props.capacity.usedSlots ?? t('common.values.unknown'), value2: props.capacity.totalSlots ?? t('common.values.unlimited') }))
 </script>
 
 <template>
   <ZButton
     variant="text" size="small" :type="full ? 'warning' : 'default'"
-    :aria-label="`${label}，查看并发明细`"
-    :title="`${label}，查看明细`"
+    :aria-label="t('accounts.capacity.viewConcurrencyDetails', { label })"
+    :title="t('accounts.capacity.viewDetails', { label })"
     class="relative top-0.75 -m-0.5 h-auto! px-0.5! py-0.5! whitespace-nowrap font-mono text-[9px]! font-normal! tabular-nums hover:bg-cp-bg-text-hover!"
     @click.stop="$emit('showDetails')"
   >

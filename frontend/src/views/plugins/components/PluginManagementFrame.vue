@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { PluginManagementPage, PluginManagementView } from '@/api'
-import { ZButton, ZEmpty } from '@codex-proxy/ui'
-import { RotateCw } from '@lucide/vue'
+
 import { useEventListener, useResizeObserver } from '@vueuse/core'
 import { computed, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
 import { useThemeStore } from '@/stores/modules/theme'
@@ -21,7 +20,7 @@ const themeStore = useThemeStore()
 const containerRef = useTemplateRef<HTMLDivElement>('container')
 const iframeRef = useTemplateRef<HTMLIFrameElement>('iframe')
 const viewportHeight = shallowRef(0)
-const { srcdoc, loading, loadError, contentHeight, frameKey, loadPage, handleFrameLoad, pushLayout, pushTheme } = usePluginFrameSession({
+const { srcdoc, loading, loadError, contentHeight, frameKey, handleFrameLoad, pushLayout, pushTheme } = usePluginFrameSession({
   view: () => props.view,
   page: () => props.page,
   iframe: iframeRef,
@@ -60,18 +59,8 @@ onMounted(pushLayout)
     <div v-if="!loadError && (loading || !frameReady)" class="absolute inset-0 z-10 flex bg-cp-bg-layout">
       <PluginPageLoading />
     </div>
-    <ZEmpty v-if="loadError" title="插件页面无法加载" :description="loadError" class="min-h-0 flex-1 content-center" surface="none" role="alert">
-      <template #action>
-        <ZButton size="small" @click="loadPage">
-          <template #icon>
-            <RotateCw class="size-3.5" />
-          </template>
-          重试
-        </ZButton>
-      </template>
-    </ZEmpty>
     <iframe
-      v-else-if="srcdoc"
+      v-if="srcdoc && !loadError"
       ref="iframe"
       :key="frameKey"
       :srcdoc="srcdoc"

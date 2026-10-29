@@ -84,6 +84,7 @@ pub struct PluginInstanceMutation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginInstanceRuntimeStatus {
     Disabled,
+    Unknown,
     AwaitingPublication,
     Preparing,
     Running,
@@ -108,6 +109,21 @@ pub struct PluginInstanceRuntime {
     pub actual_artifact_sha256: Option<String>,
     pub failure: Option<PluginInstanceRuntimeFailure>,
     pub draining_revisions: Vec<u64>,
+    pub load: Option<PluginInstanceRuntimeLoad>,
+}
+
+/// 当前发布会话的资源占用采样，计数可以重叠且不构成原子快照
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginInstanceRuntimeLoad {
+    /// 总在途名额，包含排队、取消确认和仍由响应流持有的调用
+    pub active_calls: usize,
+    pub executing_calls: usize,
+    pub queued_calls: usize,
+    pub resuming_calls: usize,
+    /// 包含已返回但尚未由插件消费的回调结果
+    pub pending_callbacks: usize,
+    /// 已交付首结果但尚未收到 End 的流
+    pub active_streams: usize,
 }
 
 /// 可继续运行的旧接口提示，与无法启用的兼容性错误分开
@@ -136,6 +152,8 @@ pub struct PluginInstanceView {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ConfigurePluginInstance {
+    /// 只随本次启动请求传递，不写入实例配置
+    pub compatibility_confirmation: Option<PluginCompatibilityConfirmation>,
     /// 创建草稿固定一个 UUID，重试复用同一配置，不能作为编辑已有配置的入口
     pub creation_id: Option<String>,
     /// 编辑时检查用户看到的配置版本，避免覆盖另一窗口已经保存的内容
@@ -157,6 +175,16 @@ pub struct ConfigurePluginInstance {
 pub struct PluginInstanceReplacement {
     pub id: String,
     pub expected_revision: u64,
+}
+
+/// 管理员确认的宿主、实例配置与目标包；不构成永久兼容豁免
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PluginCompatibilityConfirmation {
+    pub host_fingerprint: String,
+    pub instance_id: String,
+    pub instance_revision: u64,
+    pub artifact_sha256: String,
 }
 
 /// 恢复已安装旧版本的配置快照，并重新通过目标版本校验
@@ -196,6 +224,9 @@ pub struct PluginVersionConfiguration {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginVersionPlan {
+    pub compatibility_warning: Option<String>,
+    pub compatibility_confirmation: Option<PluginCompatibilityConfirmation>,
+    pub load_error: Option<String>,
     pub instance_revision: u64,
     pub artifact_sha256: String,
     pub configuration: serde_json::Value,

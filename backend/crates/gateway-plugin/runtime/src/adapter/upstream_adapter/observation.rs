@@ -47,12 +47,6 @@ pub(super) fn merge(
             .try_with_service_tier(value)
             .map_err(|source| invalid(sent).with_source(source))?;
     }
-    if let Some(value) = update.upstream_response_model {
-        current = current.with_upstream_response_model_if_valid(&value);
-        if current.upstream_response_model() != Some(value.trim()) {
-            return Err(invalid(sent));
-        }
-    }
     if !update.client_headers.is_empty() {
         current = current.with_client_headers(
             update

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ArrowInDownSquareHalf } from '@boxicons/vue'
-import { ZCheckbox, ZConfirmDialog, ZIconButton, ZPageHeader, ZScrollbar, ZSegmented } from '@codex-proxy/ui'
+
+import { ZCheckbox, ZConfirmDialog, ZIconButton, ZPageHeader, ZSegmented } from '@codex-proxy/ui'
 
 import { PackageOpen, PanelsTopLeft, RefreshCw } from '@lucide/vue'
-import { shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import { usePluginManagement } from '../composables/usePluginManagement'
 import PluginCatalogPanel from './PluginCatalogPanel.vue'
 import PluginConfigurationModal from './PluginConfigurationModal.vue'
@@ -15,33 +18,40 @@ import PluginInstallModal from './PluginInstallModal.vue'
 import PluginRollbackModal from './PluginRollbackModal.vue'
 import PluginUpdateCheckModal from './PluginUpdateCheckModal.vue'
 
+const { t } = useI18n({ useScope: 'global' })
+
 const activeTab = shallowRef<'artifacts' | 'extensions'>('artifacts')
 const management = usePluginManagement()
 
-const tabOptions = [
-  { label: '已安装', value: 'artifacts', icon: PackageOpen },
-  { label: '扩展页', value: 'extensions', icon: PanelsTopLeft },
-]
+const tabOptions = computed(() => ([
+  {
+    label: t('plugins.management.installed'),
+    value: 'artifacts',
+    icon: PackageOpen,
+  },
+  {
+    label: t('plugins.management.extensions'),
+    value: 'extensions',
+    icon: PanelsTopLeft,
+  },
+]))
 </script>
 
 <template>
   <div class="flex h-[calc(100dvh-2rem)] min-h-0 w-full flex-none! flex-col gap-3 overflow-hidden min-[961px]:h-[calc(100dvh-3rem)]">
-    <ZPageHeader title="插件管理" description="管理插件、版本和扩展页面" />
+    <ZPageHeader :title="t('navigation.plugins')" :description="t('plugins.management.description')" />
 
     <div class="flex shrink-0 items-start gap-3">
-      <ZScrollbar horizontal :vertical="false" height="var(--cp-control-height)" class="min-w-0">
-        <ZSegmented
-          v-model="activeTab"
-          :options="tabOptions"
-          aria-label="插件管理分区"
-          class="w-44"
-        />
-      </ZScrollbar>
+      <ZSegmented
+        v-model="activeTab"
+        :options="tabOptions"
+        :aria-label="t('plugins.management.tabsLabel')"
+      />
       <div class="flex shrink-0 items-center gap-1">
-        <ZIconButton aria-label="安装插件" variant="solid" @click="management.openInstall('upload')">
+        <ZIconButton :aria-label="t('plugins.installation.installPlugin')" variant="solid" @click="management.openInstall('upload')">
           <ArrowInDownSquareHalf pack="filled" class="size-5" />
         </ZIconButton>
-        <ZIconButton aria-label="刷新插件" variant="solid" :loading="management.loading.value" @click="management.refresh()">
+        <ZIconButton :aria-label="t('plugins.management.refresh')" variant="solid" :loading="management.loading.value" @click="management.refresh()">
           <template #loading>
             <RefreshCw class="size-4.5 animate-spin motion-reduce:animate-none" />
           </template>
@@ -134,9 +144,9 @@ const tabOptions = [
 
     <ZConfirmDialog
       v-model="management.showVersionSwitch.value"
-      title="切换插件版本"
-      description="切换前会检查目标版本设置，失败时保留当前版本"
-      confirm-text="确认切换"
+      :title="t('plugins.management.switchPluginVersion')"
+      :description="t('plugins.management.switchHelp')"
+      :confirm-text="t('plugins.enable.confirmSwitch')"
       :loading="Boolean(management.busyInstanceId.value)"
       @confirm="management.confirmVersionSwitch"
     >
@@ -159,31 +169,33 @@ const tabOptions = [
     <PluginEnableModal
       v-model="management.showEnableConfirmation.value"
       :request="management.pendingEnable.value?.request"
+      :compatibility-warning="management.pendingEnable.value?.compatibilityWarning"
       :metadata="management.pendingEnable.value?.artifact.metadata"
       :replacements="management.pendingEnable.value?.replacements ?? []"
       :saving="management.savingInstance.value"
       @confirm="management.confirmInstanceEnable"
+      @closed="management.pendingEnable.value = null"
     />
 
     <ZConfirmDialog
       v-model="management.showArtifactDelete.value"
-      title="删除插件版本"
-      description="使用中的版本不可删除，删除版本也会清除对应的恢复设置"
+      :title="t('plugins.management.deletePluginVersion')"
+      :description="t('plugins.management.deleteVersionHelp')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="Boolean(management.busyDigest.value)"
       @confirm="management.confirmArtifactDelete"
     >
       <div class="flex min-w-0 items-center gap-2 text-cp-sm font-normal">
         <p class="m-0 min-w-0 wrap-anywhere">
-          删除 {{ management.pendingArtifact.value?.metadata.displayName }} {{ management.pendingArtifact.value?.metadata.version }}？
+          {{ t('plugins.management.delete', { displayName: management.pendingArtifact.value?.metadata.displayName, version: management.pendingArtifact.value?.metadata.version }) }}
         </p>
-        <PluginHelpPopover label="版本删除详情">
+        <PluginHelpPopover :label="t('plugins.management.versionDeletionDetails')">
           <p class="m-0">
-            被配置或运行中的调用引用时不能删除，不会自动停用其他配置
+            {{ t('plugins.management.deleteVersionInUse') }}
           </p>
           <p class="m-0">
-            只清理此版本独用的下载认证，删除最后一个版本时同时清理来源规则，共享认证与代理不受影响
+            {{ t('plugins.management.deleteVersionCleanupHelp') }}
           </p>
           <p class="m-0">
             SHA-256
@@ -194,16 +206,16 @@ const tabOptions = [
         </PluginHelpPopover>
       </div>
       <p class="mt-3 mb-0 text-cp-xs font-normal text-cp-text-secondary">
-        同时清理独用下载认证，最后一版还会清理来源
+        {{ t('plugins.management.deleteVersionCleanupLabel') }}
       </p>
     </ZConfirmDialog>
 
     <ZConfirmDialog
       v-model="management.showInstanceDelete.value"
-      title="删除插件配置"
-      description="配置、密钥与私有数据将永久删除"
+      :title="t('plugins.management.deletePluginConfiguration')"
+      :description="t('plugins.management.deleteConfigurationWarning')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="Boolean(management.busyInstanceId.value)"
       @confirm="management.confirmInstanceDelete"
     >
@@ -212,24 +224,24 @@ const tabOptions = [
           {{ management.pendingDeleteInstance.value?.name }}
         </p>
         <p class="m-0 text-cp-xs">
-          无法恢复，已安装版本与其他配置不受影响
+          {{ t('plugins.management.deleteConfigurationHelp') }}
         </p>
       </div>
     </ZConfirmDialog>
 
     <ZConfirmDialog
       v-model="management.uninstall.open.value"
-      title="卸载插件"
-      description="删除全部版本、配置、密钥与私有数据"
+      :title="t('plugins.details.uninstallPlugin')"
+      :description="t('plugins.management.uninstallWarning')"
       destructive
-      confirm-text="确认卸载"
+      :confirm-text="t('plugins.management.confirmUninstall')"
       :loading="management.uninstall.busy.value"
       :confirm-disabled="!management.uninstall.acknowledged.value"
       @confirm="management.uninstall.confirm"
     >
       <div class="grid gap-3 text-cp-sm font-normal">
         <p class="m-0 wrap-anywhere">
-          {{ management.uninstall.pending.value?.artifact.metadata.displayName }} · {{ management.uninstall.pending.value?.artifacts.length }} 个版本
+          {{ t('plugins.management.versionCount', { displayName: management.uninstall.pending.value?.artifact.metadata.displayName, count: management.uninstall.pending.value?.artifacts.length }) }}
         </p>
         <ul v-if="management.uninstall.pending.value?.configurations.length" class="m-0 max-h-40 space-y-1 overflow-y-auto pl-4">
           <li v-for="instance in management.uninstall.pending.value.configurations" :key="instance.id" class="wrap-anywhere">
@@ -237,17 +249,17 @@ const tabOptions = [
           </li>
         </ul>
         <div class="flex items-center gap-1.5 text-cp-xs text-cp-text-secondary">
-          <span>同时清理来源与独用下载认证</span>
-          <PluginHelpPopover label="卸载清理说明">
+          <span>{{ t('plugins.management.uninstallCleanupLabel') }}</span>
+          <PluginHelpPopover :label="t('plugins.management.uninstallCleanupInstructions')">
             <p class="m-0">
-              只清理被卸载版本使用且不再被其他版本引用的下载认证，不删除共享认证、代理或审计记录
+              {{ t('plugins.management.uninstallCleanupHelp') }}
             </p>
             <p class="m-0">
-              暂时不用可停用配置，无需卸载
+              {{ t('plugins.management.disableInsteadHelp') }}
             </p>
           </PluginHelpPopover>
         </div>
-        <ZCheckbox v-model="management.uninstall.acknowledged.value" label="确认永久删除，无法恢复" :disabled="management.uninstall.busy.value" />
+        <ZCheckbox v-model="management.uninstall.acknowledged.value" :label="t('plugins.management.permanentDeleteLabel')" :disabled="management.uninstall.busy.value" />
         <p v-if="management.uninstall.progress.value" role="status" class="m-0 text-cp-xs text-cp-text-secondary">
           {{ management.uninstall.progress.value }}
         </p>
@@ -256,10 +268,10 @@ const tabOptions = [
 
     <ZConfirmDialog
       v-model="management.showCredentialDelete.value"
-      title="删除下载认证"
-      description="仍被使用时不可删除，删除后无法恢复"
+      :title="t('plugins.management.deleteDownloadCredentials')"
+      :description="t('plugins.management.itCannotBeDeletedWhileItIs')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="Boolean(management.busyCredentialId.value)"
       @confirm="management.confirmCredentialDelete"
     >

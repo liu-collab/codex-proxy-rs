@@ -75,7 +75,8 @@ impl Provider for NativeProvider {
         let model = candidate.upstream_model().cloned().ok_or_else(|| {
             ProviderError::new(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
         })?;
-        let adapter = context.upstream_adapter(candidate.provider(), &model)?;
+        let adapter =
+            context.upstream_adapter_for_account(candidate.provider(), &model, &account)?;
         let metadata = ProviderCallMetadata::new(
             candidate.provider().clone(),
             model,

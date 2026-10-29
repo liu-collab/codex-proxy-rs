@@ -1,4 +1,4 @@
-//! 验证中间件 Fast 三态设置与不兼容插件的实例故障隔离
+//! 验证中间件 Fast 三态设置与运行时故障隔离
 
 use super::*;
 use gateway_core::{policy::ClientPolicy, routing::request_settings::RequestSettings};
@@ -138,19 +138,18 @@ async fn middleware_preserves_three_state_fast_and_sources() {
 }
 
 #[tokio::test]
-async fn unsupported_contract_starts_and_response_errors_do_not_stop_the_instance() {
+async fn middleware_failures_preserve_healthy_instances_and_host_availability() {
     use gateway_admin::{
         model::plugins::instances::PluginInstanceRuntimeStatus,
         ports::plugins::PluginRuntimeDiagnostics as _,
     };
     for failure in ["invalid_head", "crash", "business_error"] {
-        let mut declaration = crate::support::contribution(
+        let declaration = crate::support::contribution(
             Capability::Middleware,
             vec![Stage::Request],
             vec!["openai".into()],
             vec!["openai".into()],
         );
-        declaration.1.version = 2;
         let (cache, store, runtime) =
             super::super::setup_with_contributions(Contributions::from([declaration])).await;
         {
@@ -173,7 +172,7 @@ async fn unsupported_contract_starts_and_response_errors_do_not_stop_the_instanc
             snapshot.instances.push(healthy);
         }
         let generation = prepare(&runtime).await;
-        assert!(generation.is_ready(), "版本警告允许随宿主启动");
+        assert!(generation.is_ready(), "兼容插件应完成启动");
         let plan = runtime
             .execution_registry()
             .middleware(&generation)

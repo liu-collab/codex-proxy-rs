@@ -1,0 +1,112 @@
+{
+  "keys": {
+    "configuration": {
+      "description": "保存或合并下方配置后重启 Codex",
+      "platform": "配置平台",
+      "toggleWebSocket": "切换 WebSocket 配置",
+      "importTo": "导入到",
+      "selectImportTool": "选择要导入的工具",
+      "ccSwitchDescription": "管理和切换 AI 客户端配置",
+      "viewOnGitHub": "在 GitHub 查看 {name}",
+      "copiedToClipboard": "已复制到剪贴板",
+      "fullApiKeyNotAvailable": "完整 API密钥不可用",
+      "title": "使用密钥"
+    },
+    "actions": {
+      "editKey": "编辑密钥",
+      "useKey": "使用密钥",
+      "moreActions": "更多操作",
+      "resetUsedCredit": "重置用量",
+      "disableKey": "停用",
+      "enableKey": "启用",
+      "deleteKey": "删除",
+      "deletedApiKeyDeletedApiKeys": "已删除 {count} 个 API密钥",
+      "configure": "配置"
+    },
+    "day": "日",
+    "dailyUsage": "日用量",
+    "week": "周",
+    "weeklyUsage": "周用量",
+    "viewUsageAndCostsFor": "查看 {name} 的费用用量",
+    "costDetailsTitle": "费用详情（USD）",
+    "confirmNextTime": "下次使用时确定",
+    "budgetReset": {
+      "dailyQuota": "日额度",
+      "weeklyQuota": "周额度",
+      "keyQuotaReset": "已重置密钥额度",
+      "description": "清零所选周期的已用金额，下次使用时重新确定重置日期",
+      "targetKey": "目标密钥",
+      "resetScope": "重置范围",
+      "currentlyUsed": "当前已用",
+      "afterReset": "重置后",
+      "remainUnchanged": "保持不变",
+      "confirmReset": "确认重置"
+    },
+    "created": {
+      "apiKeyCreated": "API密钥已创建",
+      "description": "复制密钥，或导入到客户端",
+      "accessNotice": "该密钥具有网关访问权限，请仅发送给可信调用方",
+      "iHaveSaved": "我已保存"
+    },
+    "filters": {
+      "apiKeyFilteringAndOperations": "API密钥筛选与操作",
+      "searchPlaceholder": "搜索名称或标签",
+      "searchLabel": "搜索 API密钥名称或标签",
+      "deleteSelected": "删除 ({count})",
+      "createApiKey": "创建 API密钥"
+    },
+    "editor": {
+      "description": "配置密钥信息、分组与使用限制",
+      "namePlaceholder": "例如：生产环境",
+      "labelOptional": "标签（可选）",
+      "forExampleBackendService": "例如：后端服务",
+      "customKeyOptional": "自定义 API密钥（可选）",
+      "keyPlaceholder": "留空自动生成",
+      "upstreamIdentity": "上游身份",
+      "dailyLimit": "日限额",
+      "dailyLimitUsd": "日限额（USD）",
+      "weeklyLimit": "周限额",
+      "weeklyLimitUsd": "周限额（USD）",
+      "maximumConcurrency": "最大并发",
+      "requestsPerMinuteRpm": "每分钟请求数（RPM）",
+      "updated": "API密钥已更新",
+      "created": "API密钥已创建",
+      "validation": {
+        "amount": "{label}必须是非负金额，最多 10 位小数",
+        "integer": "{label}必须是非负整数"
+      },
+      "enterApiKeyName": "请输入 API密钥名称",
+      "invalidKey": "自定义 API密钥只能包含 HTTP 可传输的可见字符，不能包含空格或换行",
+      "requestsPerMinute": "每分钟请求数"
+    },
+    "fields": {
+      "copyFullKey": "复制完整密钥",
+      "allAccounts": "全部账号",
+      "keyPrefix": "密钥前缀",
+      "quotaUsage": "额度使用",
+      "requestLimits": "请求限制",
+      "lastUsed": "最后使用"
+    },
+    "page": {
+      "description": "管理 API密钥及账号访问范围",
+      "noApiKeyYet": "暂无 API密钥",
+      "selectCurrentPageKey": "选择当前页密钥",
+      "selectKey": "选择密钥",
+      "concurrency": "并发",
+      "batchDeleteWarning": "删除后这些 API密钥将立即失效，此操作不可撤销",
+      "batchDeleteDescription": "确定删除选中的 {count} 个 API密钥吗？",
+      "deleteApiKey": "删除 API密钥",
+      "deleteWarning": "删除后该 API密钥将立即失效，此操作不可撤销",
+      "apiKey": "该 API密钥",
+      "delete": "确定删除 {name} 吗？"
+    },
+    "scope": {
+      "allAccounts": {
+        "title": "允许访问全部账号",
+        "summary": "保存后，此密钥可访问全部账号",
+        "confirm": "允许访问",
+        "description": "此密钥可访问全部账号，包括未分组和以后新增的账号"
+      }
+    }
+  }
+}

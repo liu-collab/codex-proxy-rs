@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { Account, AccountResetCredit } from '@/api'
-import { ZButton, ZDialog, ZEmpty, ZIconButton, ZTag } from '@codex-proxy/ui'
 
+import { ZButton, ZDialog, ZEmpty, ZIconButton, ZTag } from '@codex-proxy/ui'
 import { AlertTriangle, RefreshCw, TicketCheck } from '@lucide/vue'
+
 import { computed, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAccountResetCredits } from '../../composables/useAccountResetCredits'
 import AccountQuotaCredits from './Credits.vue'
 import ResetCreditAutomation from './ResetCreditAutomation.vue'
@@ -16,6 +18,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   consumed: [accountId: string]
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 const panelOpen = shallowRef(false)
 const confirmation = shallowRef<{ credit?: AccountResetCredit, ambiguous: boolean } | null>(null)
@@ -47,36 +51,45 @@ const {
 
 const modalTitle = computed(() => {
   if (!confirmation.value)
-    return '额度重置'
-  return confirmation.value.ambiguous ? '确认上次重置' : '确认重置额度'
+    return t('accounts.quotaReset.limitReset')
+  return confirmation.value.ambiguous
+    ? t('accounts.quotaReset.confirmLastReset')
+    : t('accounts.quotaReset.confirmResetAmount')
 })
 const triggerLabel = computed(() => {
   if (ambiguous.value)
-    return '查看主动重置卡，有一项操作待确认'
+    return t('accounts.quotaReset.pendingAction')
   if (loadError.value) {
     return hasSnapshot.value
-      ? `查看主动重置卡，查询失败，最近查询 ${availableCount.value} 张可用`
-      : '查看主动重置卡，查询失败'
+      ? t('accounts.quotaReset.queryFailedWithCount', { count: availableCount.value })
+      : t('accounts.quotaReset.queryFailedLabel')
   }
-  return hasSnapshot.value ? `查看主动重置卡，最近查询 ${availableCount.value} 张可用` : '查看主动重置卡'
+  return hasSnapshot.value
+    ? t('accounts.quotaReset.availableCount', { count: availableCount.value })
+    : t('accounts.quotaReset.viewCredits')
 })
 const showTriggerCount = computed(() => hasSnapshot.value && availableCount.value > 0)
 const confirmCreditTitle = computed(() => confirmation.value?.credit
   ? creditTitle(confirmation.value.credit)
-  : '使用一次重置（由上游选择）')
+  : t('accounts.quotaReset.useResetSelectedByUpstream'))
 const creditItems = computed(() => availableCredits.value.map(credit => ({
   id: credit.id,
   title: creditTitle(credit),
-  expiry: credit.expiresAtDisplay ? `将于 ${credit.expiresAtDisplay} 到期` : '有效期由上游决定',
+  expiry: credit.expiresAtDisplay
+    ? t('accounts.quotaReset.expires', { expiresAtDisplay: credit.expiresAtDisplay })
+    : t('accounts.quotaReset.expiryHelp'),
 })))
 const showCountOnlyAction = computed(() => !loadError.value
   && hasSnapshot.value
   && availableCount.value > 0
   && creditItems.value.length === 0)
 const countLabel = computed(() => {
-  if (!hasSnapshot.value)
-    return loading.value ? '查询中' : '待查询'
-  return `可用 ${availableCount.value} 次`
+  if (!hasSnapshot.value) {
+    return loading.value
+      ? t('accounts.quotaReset.querying')
+      : t('accounts.quotaReset.toBeQueried')
+  }
+  return t('accounts.quotaReset.usesAvailable', { count: availableCount.value })
 })
 
 watch(panelOpen, (isOpen) => {
@@ -90,12 +103,15 @@ watch(panelOpen, (isOpen) => {
 })
 
 watch(showConfirm, (confirming) => {
-  if (panelOpen.value)
-    confirmation.value = confirming ? { credit: consumptionCredit.value, ambiguous: ambiguous.value } : null
+  if (panelOpen.value) {
+    confirmation.value = confirming
+      ? { credit: consumptionCredit.value, ambiguous: ambiguous.value }
+      : null
+  }
 })
 
 function creditTitle(credit: AccountResetCredit | undefined) {
-  return credit?.title?.trim() || '用量重置'
+  return credit?.title?.trim() || t('accounts.quotaReset.usageReset')
 }
 
 function handleRequestConsume(creditId: string) {
@@ -132,7 +148,7 @@ function handleRequestConsume(creditId: string) {
     <div v-if="confirmation" class="grid gap-3">
       <section class="rounded-cp bg-cp-fill-quaternary px-4 py-3.5">
         <p class="m-0 text-cp-xs font-heavy text-cp-text-quaternary">
-          本次使用
+          {{ t('accounts.quotaReset.thisTimeUse') }}
         </p>
         <p class="mt-1.5 mb-0 text-cp-lg leading-snug font-heavy text-cp-text">
           {{ confirmCreditTitle }}
@@ -141,13 +157,13 @@ function handleRequestConsume(creditId: string) {
           v-if="confirmation.credit"
           class="mt-1 mb-0 font-mono text-[10px] leading-normal font-emphasis text-cp-text-quaternary"
         >
-          {{ confirmation.credit.expiresAtDisplay ? `将于 ${confirmation.credit.expiresAtDisplay} 到期` : '有效期由上游决定' }}
+          {{ confirmation.credit.expiresAtDisplay ? t('accounts.quotaReset.expires', { expiresAtDisplay: confirmation.credit.expiresAtDisplay }) : t('accounts.quotaReset.expiryHelp') }}
         </p>
       </section>
     </div>
 
     <div v-else class="grid gap-4">
-      <section class="overflow-hidden rounded-cp bg-cp-fill-quaternary" aria-label="当前额度">
+      <section class="overflow-hidden rounded-cp bg-cp-fill-quaternary" :aria-label="t('accounts.quotaReset.currentQuota')">
         <UsageLimits :windows="account.quota.windows" />
         <AccountQuotaCredits :credits="account.quota.credits" />
       </section>
@@ -158,28 +174,28 @@ function handleRequestConsume(creditId: string) {
         <AlertTriangle class="mt-0.5 size-4 shrink-0 text-cp-warning-on-container" />
         <div class="min-w-0 flex-1">
           <p class="m-0 text-cp-sm font-heavy text-cp-warning-on-container">
-            上次操作结果待确认
+            {{ t('accounts.quotaReset.operationUnconfirmed') }}
           </p>
           <p class="mt-1 mb-0 text-cp-xs leading-normal font-emphasis text-cp-text-secondary">
-            请继续确认上次重置结果
+            {{ t('accounts.quotaReset.confirmPrevious') }}
           </p>
         </div>
         <ZButton size="small" type="primary" variant="plain" :disabled="loading || consuming || !canRequestConsume" @click="requestConsume">
-          继续确认
+          {{ t('accounts.quotaReset.continueToConfirm') }}
         </ZButton>
       </section>
 
-      <section class="grid gap-3" aria-label="可用重置卡">
+      <section class="grid gap-3" :aria-label="t('accounts.quotaReset.availableResetCards')">
         <div class="flex items-center gap-2">
           <h3 class="m-0 min-w-0 flex-1 text-cp-sm font-heavy text-cp-text">
-            可用重置卡
+            {{ t('accounts.quotaReset.availableResetCards') }}
           </h3>
           <ZTag size="small" :type="hasSnapshot && availableCount > 0 ? 'success' : 'default'" role="status">
             {{ countLabel }}
           </ZTag>
           <ZIconButton
             size="small"
-            aria-label="刷新主动重置卡"
+            :aria-label="t('accounts.quotaReset.refreshCredits')"
             :loading="loading"
             :disabled="loading || consuming"
             @click="loadCredits"
@@ -191,14 +207,13 @@ function handleRequestConsume(creditId: string) {
           </ZIconButton>
         </div>
 
-        <div :aria-busy="loading || consuming">
-          <ZEmpty v-if="loadError" title="重置卡加载失败" description="请刷新重试" size="small" surface="none" role="alert" />
+        <div v-if="!loadError" :aria-busy="loading || consuming">
           <p
-            v-else-if="loading && !hasSnapshot"
+            v-if="loading && !hasSnapshot"
             class="m-0 px-4 py-4 text-cp-xs font-emphasis text-cp-text-secondary"
             role="status"
           >
-            正在查询可用重置次数…
+            {{ t('accounts.quotaReset.queryingAvailableResetTimes') }}
           </p>
           <ul v-else-if="creditItems.length" class="m-0 grid list-none gap-2 p-0">
             <li
@@ -218,10 +233,10 @@ function handleRequestConsume(creditId: string) {
                 size="small"
                 type="primary"
                 :disabled="!account.capabilities.consumeResetCredit || loading || consuming || ambiguous || availableCount <= 0"
-                :aria-label="`使用重置：${credit.title}，${credit.expiry}`"
+                :aria-label="t('accounts.quotaReset.useResetCredit', { title: credit.title, expiry: credit.expiry })"
                 @click="handleRequestConsume(credit.id)"
               >
-                使用重置
+                {{ t('accounts.quotaReset.useReset') }}
               </ZButton>
             </li>
           </ul>
@@ -231,7 +246,7 @@ function handleRequestConsume(creditId: string) {
             :icon="TicketCheck"
             size="small"
             surface="none"
-            title="暂无可用重置卡"
+            :title="t('accounts.quotaReset.noResetCardAvailableYet')"
           />
         </div>
       </section>
@@ -240,10 +255,10 @@ function handleRequestConsume(creditId: string) {
     <template v-if="confirmation || showCountOnlyAction" #footer>
       <template v-if="confirmation">
         <ZButton :disabled="consuming" @click="cancelConsume">
-          返回
+          {{ t('common.actions.back') }}
         </ZButton>
         <ZButton type="primary" :loading="consuming" :disabled="loading || !canRequestConsume" @click="confirmConsume">
-          {{ confirmation.ambiguous ? '再次确认' : '确认重置' }}
+          {{ confirmation.ambiguous ? t('accounts.quotaReset.confirmAgain') : t('accounts.quotaReset.confirmReset') }}
         </ZButton>
       </template>
       <ZButton
@@ -253,7 +268,7 @@ function handleRequestConsume(creditId: string) {
         :disabled="loading || consuming || ambiguous || !canRequestConsume"
         @click="requestConsume"
       >
-        使用一次重置（由上游选择）
+        {{ t('accounts.quotaReset.useResetSelectedByUpstream') }}
       </ZButton>
     </template>
   </ZDialog>

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import type { TableColumnSize } from '@codex-proxy/ui'
+
 import type { getUsageRecordInsightsDiagnostics } from '@/api'
 import { defineTableColumns, ZCard, ZEmpty, ZSegmented, ZTable } from '@codex-proxy/ui'
-
 import { CornerDownRight } from '@lucide/vue'
+
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import { formatLocalizedCompactNumber as formatCompactNumber, formatDuration, formatPercent, formatUsd } from '@/utils/format'
-
-type Diagnostics = Omit<Awaited<ReturnType<typeof getUsageRecordInsightsDiagnostics>>, 'analytics'>
 
 const props = withDefaults(
   defineProps<{
@@ -20,20 +20,42 @@ const props = withDefaults(
   },
 )
 
+const { t } = useI18n({ useScope: 'global' })
+
+type Diagnostics = Omit<Awaited<ReturnType<typeof getUsageRecordInsightsDiagnostics>>, 'analytics'>
+
 const dimension = defineModel('dimension', { type: String, required: true })
 
-const dimensionOptions = [
-  { label: '模型', value: 'model' },
-  { label: '账号', value: 'account' },
-  { label: '密钥', value: 'apiKey' },
-  { label: '上游', value: 'provider' },
-  { label: '传输', value: 'transport' },
-  { label: '错误', value: 'failureClass' },
-]
+const dimensionOptions = computed(() => ([
+  {
+    label: t('usage.fields.model'),
+    value: 'model',
+  },
+  {
+    label: t('accounts.account'),
+    value: 'account',
+  },
+  {
+    label: t('usage.diagnostics.key'),
+    value: 'apiKey',
+  },
+  {
+    label: t('usage.fields.upstream'),
+    value: 'provider',
+  },
+  {
+    label: t('usage.diagnostics.transport'),
+    value: 'transport',
+  },
+  {
+    label: t('usage.filters.error'),
+    value: 'failureClass',
+  },
+]))
 
 const resultDimension = computed(() => props.diagnostics.dimension || dimension.value)
 const resultDimensionLabel = computed(
-  () => dimensionOptions.find(option => option.value === resultDimension.value)?.label ?? '维度',
+  () => dimensionOptions.value.find(option => option.value === resultDimension.value)?.label ?? t('usage.diagnostics.dimensions'),
 )
 
 const dimensionNameSizes: Record<string, TableColumnSize> = {
@@ -48,31 +70,42 @@ const dimensionNameSizes: Record<string, TableColumnSize> = {
 const diagnosticColumns = computed(() => defineTableColumns<DiagnosticDisplayItem>([
   {
     key: 'nameDisplay',
-    label: '维度',
+    label: t('usage.diagnostics.dimensions'),
     kind: 'custom',
     size: dimensionNameSizes[resultDimension.value] ?? 'xl',
   },
   ...(resultDimension.value === 'account'
     ? defineTableColumns<DiagnosticDisplayItem>([
-        { key: 'accountPlanType', label: '订阅', kind: 'status', size: 'sm', fixedWidth: true },
+        {
+          key: 'accountPlanType',
+          label: t('usage.fields.subscription'),
+          kind: 'status',
+          size: 'sm',
+          fixedWidth: true,
+        },
       ])
     : []),
   {
     key: 'requestCount',
-    label: '请求',
+    label: t('usage.diagnostics.request'),
     kind: 'numeric',
     size: 'xs',
   },
   {
     key: 'errorCount',
-    label: '失败',
+    label: t('common.status.failed'),
     kind: 'numeric',
     size: 'xs',
   },
-  { key: 'firstTokenP95Ms', label: '性能', kind: 'numeric', size: 'lg' },
+  {
+    key: 'firstTokenP95Ms',
+    label: t('usage.diagnostics.performance'),
+    kind: 'numeric',
+    size: 'lg',
+  },
   {
     key: 'estimatedCost',
-    label: '费用',
+    label: t('usage.fields.cost'),
     kind: 'numeric',
     size: 'sm',
   },
@@ -91,9 +124,11 @@ const displayItems = computed<DiagnosticDisplayItem[]>(() =>
 const hasData = computed(() => !props.loading && displayItems.value.length > 0)
 
 function diagnosticNameDisplay(name: string) {
-  const raw = name.trim() || '未知'
+  const raw = name.trim() || t('common.values.unknown')
   const full
-    = resultDimension.value === 'transport' ? ({ websocket: 'WS', http_sse: 'SSE' }[raw] ?? raw) : raw
+    = resultDimension.value === 'transport'
+      ? ({ websocket: 'WS', http_sse: 'SSE' }[raw] ?? raw)
+      : raw
   if (resultDimension.value !== 'model' && resultDimension.value !== 'account') {
     return { primary: full, secondary: '', full }
   }
@@ -110,18 +145,19 @@ function diagnosticNameDisplay(name: string) {
 <template>
   <ZCard
     as="article"
-    title="热点诊断"
-    :description="`按${resultDimensionLabel}聚合`"
+    :title="t('usage.diagnostics.title')"
+    :description="t('usage.diagnostics.groupBy', { resultDimensionLabel })"
     class="max-h-105 min-w-0 w-full xl:h-full"
   >
     <template #actions>
-      <ZSegmented
-        v-model="dimension"
-        aria-label="诊断维度"
-        :options="dimensionOptions"
-        :disabled="loading"
-        class="w-full min-w-0 lg:w-80"
-      />
+      <div class="flex justify-end">
+        <ZSegmented
+          v-model="dimension"
+          :aria-label="t('usage.diagnostics.diagnosticDimension')"
+          :options="dimensionOptions"
+          :disabled="loading"
+        />
+      </div>
     </template>
 
     <template #body>
@@ -133,7 +169,7 @@ function diagnosticNameDisplay(name: string) {
         :data="displayItems"
         size="small"
         row-key="key"
-        empty-text="暂无诊断数据"
+        :empty-text="t('usage.diagnostics.noDiagnosticDataYet')"
       >
         <template #header-nameDisplay>
           {{ resultDimensionLabel }}
@@ -175,7 +211,7 @@ function diagnosticNameDisplay(name: string) {
         <template #requestCount="{ row }">
           <span
             class="grid justify-items-end gap-1 font-mono leading-none tabular-nums"
-            :title="`成功 ${formatCompactNumber(row.successCount)}`"
+            :title="t('usage.diagnostics.successful', { count: formatCompactNumber(row.successCount) })"
           >
             <strong class="font-bold text-cp-text">
               {{ formatCompactNumber(row.requestCount) }}
@@ -190,8 +226,8 @@ function diagnosticNameDisplay(name: string) {
           <strong
             class="font-mono font-bold tabular-nums"
             :class="row.errorCount > 0 ? 'text-cp-error-text' : 'text-cp-text-quaternary'"
-            :aria-label="`失败 ${formatCompactNumber(row.errorCount)} 次`"
-            :title="`失败率 ${formatPercent(row.errorRate)}`"
+            :aria-label="t('usage.diagnostics.failed', { count: formatCompactNumber(row.errorCount) })"
+            :title="t('usage.diagnostics.failureRate', { rate: formatPercent(row.errorRate) })"
           >
             {{ formatCompactNumber(row.errorCount) }}
           </strong>
@@ -200,7 +236,7 @@ function diagnosticNameDisplay(name: string) {
         <template #firstTokenP95Ms="{ row }">
           <div
             class="grid justify-items-end gap-1 font-mono leading-none tabular-nums"
-            :title="`重试率 ${formatPercent(row.retryRate)}`"
+            :title="t('usage.diagnostics.retryRate', { rate: formatPercent(row.retryRate) })"
           >
             <span class="inline-flex items-baseline gap-1.5">
               <small class="text-[10px] font-emphasis text-cp-text-quaternary">TTFT</small>
@@ -211,7 +247,7 @@ function diagnosticNameDisplay(name: string) {
             <small class="flex items-center gap-2 text-[10px] font-emphasis text-cp-text-quaternary">
               <span>P95 {{ formatDuration(row.latencyP95Ms) }}</span>
               <span :class="row.retryCount > 0 ? 'text-cp-orange-text' : undefined">
-                重试 {{ formatCompactNumber(row.retryCount) }}
+                {{ t('usage.diagnostics.retries', { count: formatCompactNumber(row.retryCount) }) }}
               </span>
             </small>
           </div>
@@ -227,8 +263,7 @@ function diagnosticNameDisplay(name: string) {
         v-else
         size="small"
         surface="none"
-        :title="loading ? '正在加载热点诊断数据' : '暂无诊断数据'"
-        description="当前范围没有可诊断的请求记录"
+        :title="loading ? t('usage.diagnostics.loading') : t('usage.diagnostics.empty')"
         class="h-full min-h-40 place-content-center"
       />
     </template>

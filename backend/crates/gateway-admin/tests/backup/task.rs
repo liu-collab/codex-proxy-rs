@@ -32,7 +32,7 @@ async fn backup_task_runs_full_dump_upload_verify_pipeline() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(seed.clone())
+        .insert_backup_record(seed.clone(), &system_context())
         .await
         .expect("insert queued");
 
@@ -73,7 +73,7 @@ async fn backup_task_marks_failed_when_dump_port_fails() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(seed.clone())
+        .insert_backup_record(seed.clone(), &system_context())
         .await
         .expect("insert queued");
 
@@ -105,7 +105,7 @@ async fn backup_task_marks_failed_with_the_upload_error() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(seed.clone())
+        .insert_backup_record(seed.clone(), &system_context())
         .await
         .expect("insert queued");
 
@@ -138,7 +138,7 @@ async fn backup_task_recovery_marks_failed_with_the_upload_error() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(seed.clone())
+        .insert_backup_record(seed.clone(), &system_context())
         .await
         .expect("insert queued");
     let cancellation = CancellationToken::new();
@@ -185,14 +185,14 @@ async fn retention_cleans_expired_scheduled_backups() {
         expires_at: None,
     };
     repository
-        .insert_backup_record(old_seed.clone())
+        .insert_backup_record(old_seed.clone(), &system_context())
         .await
         .expect("insert old");
     // 旧备份 40 天前完成（释放活跃名额），再插入新备份
     let now = Utc::now();
     repository.set_completed(&backup_id("old"), now - Duration::days(40));
     repository
-        .insert_backup_record(new_seed.clone())
+        .insert_backup_record(new_seed.clone(), &system_context())
         .await
         .expect("insert new");
     // 新备份 1 天前完成
@@ -279,7 +279,10 @@ async fn completed_recovery_removes_staging_for_dumping_and_uploading_tasks() {
             object_key: "recovery.dump".to_owned(),
             expires_at: None,
         };
-        repository.insert_backup_record(seed.clone()).await.unwrap();
+        repository
+            .insert_backup_record(seed.clone(), &system_context())
+            .await
+            .unwrap();
         let artifact = dump
             .dump(DumpRequest {
                 backup_id: seed.id.clone(),
@@ -344,7 +347,10 @@ async fn manual_backup_preserves_primary_and_final_delete_failures() {
             object_key: "codex/cleanup-failure.dump".into(),
             expires_at: expiring.then(|| Utc::now() + Duration::hours(1)),
         };
-        repository.insert_backup_record(seed.clone()).await.unwrap();
+        repository
+            .insert_backup_record(seed.clone(), &system_context())
+            .await
+            .unwrap();
         let task = BackupTask::new(repository.clone(), dump.clone(), store.clone());
         task.run_cycle(&CancellationToken::new()).await.unwrap();
         let records = repository.all_records();

@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use gateway_core::diagnostics::{TraceContext, body_fingerprint};
+use gateway_core::diagnostics::{MAX_TRACE_SNAPSHOT_BYTES, TraceContext, body_fingerprint};
 use gateway_core::error::{ProviderDiagnostic, ProviderError, ProviderErrorKind, RawUpstreamError};
 use gateway_core::upstream::UpstreamSendState;
 use serde_json::json;
@@ -14,6 +14,95 @@ use tracing::{
     field::{Field, Visit},
     span::{Attributes, Id, Record},
 };
+
+#[test]
+fn critical_evidence_survives_stream_pressure_and_preserves_stage_coverage() {
+    let trace = TraceContext::new("req_evidence").attempt(2);
+    trace.record(
+        "request.routed",
+        json!({"accountPolicy": {"maxAccountRotations": 3}}),
+    );
+    let evidence = json!({"hashes": "a".repeat(6000)});
+    trace.record_evidence("provider.request.input", evidence.clone());
+    trace.record(
+        "retry.decided",
+        json!({"phase": "execute", "retryable": true}),
+    );
+    for index in 0..500 {
+        trace.record(
+            "stream.sample",
+            json!({"index": index, "detail": "x".repeat(2000)}),
+        );
+    }
+    let snapshot = trace.snapshot().unwrap();
+    let events = snapshot["events"].as_array().unwrap();
+    assert_eq!(snapshot["stageCounts"]["stream.sample"], 500);
+    assert!(events.iter().any(|event| event["stage"] == "retry.decided"));
+    assert!(
+        events
+            .iter()
+            .any(|event| event["stage"] == "provider.request.input"
+                && event["data"] == evidence
+                && event["attemptIndex"] == 2)
+    );
+    assert_eq!(snapshot["droppedEvidenceEvents"], 0);
+    assert!(snapshot["droppedEvents"].as_u64().unwrap() > 0);
+    assert!(snapshot.to_string().len() <= MAX_TRACE_SNAPSHOT_BYTES);
+}
+
+#[test]
+fn critical_evidence_has_an_independent_bound_and_reports_its_own_loss() {
+    let trace = TraceContext::new("req_evidence_budget");
+    for index in 0..100 {
+        trace.record_evidence(
+            "test.evidence",
+            json!({"index": index, "data": "f".repeat(6000)}),
+        );
+    }
+    let snapshot = trace.snapshot().unwrap();
+    let events = snapshot["events"].as_array().unwrap();
+    assert_eq!(events.last().unwrap()["data"]["index"], 99);
+    assert!(snapshot["droppedEvidenceEvents"].as_u64().unwrap() > 0);
+    assert_eq!(snapshot["stageCounts"]["test.evidence"], 100);
+    assert_eq!(
+        events.len() as u64 + snapshot["droppedEvents"].as_u64().unwrap(),
+        100
+    );
+    assert!(snapshot.to_string().len() <= MAX_TRACE_SNAPSHOT_BYTES);
+}
+
+#[test]
+fn snapshot_budget_includes_stage_coverage_and_event_envelopes() {
+    let trace = TraceContext::new("req_snapshot_budget");
+    trace.record("request.routed", json!({"scope": "all"}));
+    for index in 0..10 {
+        trace.record_evidence(
+            "provider.request.input",
+            json!({"index": index, "hashes": "a".repeat(6000)}),
+        );
+    }
+    for index in 0..64 {
+        let stage = Box::leak(format!("stage.{index}.{}", "x".repeat(512)).into_boxed_str());
+        trace.record(stage, json!({"detail": "x".repeat(2000)}));
+    }
+    trace.record("request.finished", json!({"outcome": "succeeded"}));
+    let snapshot = trace.snapshot().unwrap();
+    let events = snapshot["events"].as_array().unwrap();
+    assert!(snapshot.to_string().len() <= MAX_TRACE_SNAPSHOT_BYTES);
+    assert_eq!(events.first().unwrap()["stage"], "request.routed");
+    assert_eq!(events.last().unwrap()["stage"], "request.finished");
+    assert_eq!(snapshot["droppedEvidenceEvents"], 0);
+    assert!(snapshot["droppedEvents"].as_u64().unwrap() > 0);
+    let retained: u64 = events
+        .iter()
+        .map(|event| event["count"].as_u64().unwrap())
+        .sum();
+    assert_eq!(
+        retained + snapshot["droppedEvents"].as_u64().unwrap(),
+        snapshot["totalEvents"]
+    );
+    assert_eq!(trace.snapshot(), Some(snapshot));
+}
 
 #[test]
 fn bounded_history_preserves_start_failure_and_final_result() {

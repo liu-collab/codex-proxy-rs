@@ -1,6 +1,8 @@
 # 用量维护与计价
 
-`call::services::usage` 提供请求明细、聚合统计和 Token 费用试算。插件通过 `call.host.service::<Operation>(input)` 调用，沿用公开服务的权限与调用期限
+[返回 SDK](../README.md) · [公开服务](capabilities.md#公开服务)
+
+`call::services::usage` 提供请求明细、聚合统计和 Token 费用试算。插件通过 `call.host.service::<Operation>(input)` 调用，沿用公开服务的调用身份、期限与取消约束
 
 ## 基础操作
 

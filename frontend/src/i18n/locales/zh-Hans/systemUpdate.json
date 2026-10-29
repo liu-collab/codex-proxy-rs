@@ -1,0 +1,110 @@
+{
+  "systemUpdate": {
+    "channels": {
+      "stable": {
+        "label": "Stable · 正式",
+        "description": "仅正式版本"
+      },
+      "rc": {
+        "label": "RC · 候选",
+        "description": "包含 RC 和正式版本"
+      },
+      "beta": {
+        "label": "Beta · 测试",
+        "description": "包含 Beta、RC 和正式版本"
+      },
+      "alpha": {
+        "label": "Alpha · 早期",
+        "description": "包含所有常规预发布和正式版本"
+      },
+      "experimental": {
+        "label": "Exp · 实验",
+        "description": "仅当前实验线"
+      },
+      "loading": "正在读取运行通道",
+      "label": "更新通道",
+      "help": "更新通道说明",
+      "description": "选择仅用于本次检查，重新打开时按运行版本选择通道，不会自动安装或降级"
+    },
+    "feedback": {
+      "available": "发现可用更新",
+      "noUpdates": "当前没有可用更新",
+      "started": "更新已开始"
+    },
+    "errors": {
+      "remoteTargetMissing": "远端目标版本为空",
+      "infoPending": "请等待系统更新信息加载完成",
+      "preRestartCheck": "重启前检查失败",
+      "restart": "重启失败，请重新检查",
+      "unconfirmed": "尚未确认更新任务，请检查状态后重试",
+      "updateFailed": "更新失败",
+      "startTimeout": "服务未在预期时间内启动 v{version}",
+      "activationTargetMissing": "缺少待生效的目标版本"
+    },
+    "title": "系统更新",
+    "description": "检查版本、查看发布说明并执行在线更新",
+    "application": "应用包更新",
+    "releasePage": "发布页",
+    "status": {
+      "checkingVersion": "正在检查版本",
+      "lastFailed": "上次操作失败",
+      "updating": "更新中",
+      "restarting": "重启中",
+      "checking": "检查中",
+      "restartRequired": "待重启",
+      "available": "有可用更新",
+      "upToDate": "无可用更新",
+      "notChecked": "未检查",
+      "retrying": "暂时无法确认更新状态，正在重试",
+      "confirmingStart": "正在确认更新是否已开始"
+    },
+    "targetVersion": "目标版本 v{version}",
+    "releaseNotes": "发布说明",
+    "progress": "更新进度",
+    "actions": {
+      "check": "检查更新",
+      "install": "下载并更新",
+      "continueRestart": "继续重启",
+      "restart": "立即重启"
+    },
+    "plugins": {
+      "title": "插件兼容性提醒",
+      "description": "重启后，不兼容插件将保持未启动",
+      "incompatible": "不兼容插件",
+      "requestErrorHelp": "配置和数据保留，可在插件页尝试启动"
+    },
+    "versionAfterRestart": "重启后版本",
+    "confirmation": {
+      "newerVersion": "发现新的更新版本",
+      "channelChanged": "所选通道的最新版本已变化",
+      "title": "确认更新",
+      "description": "点击确认后弹窗会关闭，并按远端最新目标版本开始更新"
+    },
+    "logs": {
+      "live": "实时",
+      "disconnectedState": "断开",
+      "waiting": "待连接",
+      "disconnected": "更新日志连接中断",
+      "parseFailed": "更新日志解析失败",
+      "unsupported": "当前浏览器不支持实时更新日志",
+      "timeout": "更新日志连接超时"
+    },
+    "currentVersion": "当前版本",
+    "latestVersion": "通道最新",
+    "build": "构建",
+    "deployment": "部署",
+    "displayedTarget": "已显示目标",
+    "remoteTarget": "远端最新目标",
+    "buildTypes": {
+      "release": "正式构建",
+      "source": "源码构建",
+      "dev": "开发构建",
+      "experimental": "实验构建"
+    },
+    "deploymentModes": {
+      "docker": "Docker",
+      "binary": "二进制",
+      "source": "源码运行"
+    }
+  }
+}

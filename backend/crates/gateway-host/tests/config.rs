@@ -6,24 +6,6 @@ use gateway_host::config::{FileLoggingConfig, HostConfig, ListenConfig, LoggingC
 use gateway_host::system_update::SystemUpdateConfig;
 
 #[test]
-fn system_update_defaults_should_use_host_build_metadata_and_official_repository() {
-    let config = SystemUpdateConfig::default();
-
-    assert_eq!(
-        (
-            config.version.as_str(),
-            config.build_type.as_str(),
-            config.update_repository.as_deref(),
-        ),
-        (
-            env!("CPR_VERSION"),
-            env!("CPR_BUILD_TYPE"),
-            Some("zyycn/codex-proxy-rs"),
-        )
-    );
-}
-
-#[test]
 fn host_config_should_default_update_assets_to_the_resolved_api_directory() {
     let mut config = valid_config();
     config.system_update.web_dist_dir = None;

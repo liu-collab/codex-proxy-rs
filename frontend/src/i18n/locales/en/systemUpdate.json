@@ -1,0 +1,110 @@
+{
+  "systemUpdate": {
+    "channels": {
+      "stable": {
+        "label": "Stable",
+        "description": "Stable releases only"
+      },
+      "rc": {
+        "label": "RC",
+        "description": "RC and stable releases"
+      },
+      "beta": {
+        "label": "Beta",
+        "description": "Beta, RC, and stable releases"
+      },
+      "alpha": {
+        "label": "Alpha",
+        "description": "All regular prereleases and stable releases"
+      },
+      "experimental": {
+        "label": "Experimental",
+        "description": "Current experimental release line only"
+      },
+      "loading": "Loading the current release channel",
+      "label": "Update channel",
+      "help": "About update channels",
+      "description": "This selection applies to the current check only, reopening uses the installed version's channel and does not install or downgrade automatically"
+    },
+    "feedback": {
+      "available": "Update available",
+      "noUpdates": "No updates available",
+      "started": "Update has started"
+    },
+    "errors": {
+      "remoteTargetMissing": "No remote target version was returned",
+      "infoPending": "Wait for update information to finish loading",
+      "preRestartCheck": "Pre-restart check failed",
+      "restart": "Restart failed, please check again",
+      "unconfirmed": "Update task has not been confirmed, check its status and try again",
+      "updateFailed": "Update failed",
+      "startTimeout": "Service v{version} did not start within the expected time",
+      "activationTargetMissing": "No target version is pending activation"
+    },
+    "title": "System update",
+    "description": "Check versions, read release notes, and install updates",
+    "application": "Application updates",
+    "releasePage": "Release page",
+    "status": {
+      "checkingVersion": "Checking for updates",
+      "lastFailed": "Last operation failed",
+      "updating": "Updating",
+      "restarting": "Restarting",
+      "checking": "Checking",
+      "restartRequired": "Restart required",
+      "available": "Update available",
+      "upToDate": "No updates available",
+      "notChecked": "Not checked",
+      "retrying": "Update status is temporarily unavailable, retrying",
+      "confirmingStart": "Checking whether the update has started"
+    },
+    "targetVersion": "Target version v{version}",
+    "releaseNotes": "Release notes",
+    "progress": "Update progress",
+    "actions": {
+      "check": "Check for updates",
+      "install": "Download and update",
+      "continueRestart": "Continue restart",
+      "restart": "Restart now"
+    },
+    "plugins": {
+      "title": "Plugin compatibility notice",
+      "description": "Incompatible plugins will remain stopped",
+      "incompatible": "Incompatible plugins",
+      "requestErrorHelp": "Data and settings are kept, retry from the plugins page"
+    },
+    "versionAfterRestart": "Version after restart",
+    "confirmation": {
+      "newerVersion": "A newer update is available",
+      "channelChanged": "The latest version of the selected channel has changed",
+      "title": "Confirm update",
+      "description": "Confirm to close this dialog and update to the latest remote target version"
+    },
+    "logs": {
+      "live": "Live",
+      "disconnectedState": "Disconnected",
+      "waiting": "Waiting to connect",
+      "disconnected": "Update log connection lost",
+      "parseFailed": "Failed to parse update logs",
+      "unsupported": "This browser does not support live update logs",
+      "timeout": "Update log connection timed out"
+    },
+    "currentVersion": "Current version",
+    "latestVersion": "Latest in channel",
+    "build": "Build",
+    "deployment": "Deployment",
+    "displayedTarget": "Displayed target",
+    "remoteTarget": "Latest remote target",
+    "buildTypes": {
+      "release": "Release build",
+      "source": "Source build",
+      "dev": "Development build",
+      "experimental": "Experimental build"
+    },
+    "deploymentModes": {
+      "docker": "Docker",
+      "binary": "Binary",
+      "source": "From source"
+    }
+  }
+}

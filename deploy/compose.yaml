@@ -11,7 +11,7 @@ services:
     extends:
       file: config.yaml
       service: postgres-credentials
-    image: postgres:18-bookworm@sha256:d9c83446333daec3f0588cc709adb80c26090b7f9f0f7ec8d43c243385d79818
+    image: postgres:18-bookworm@sha256:bbf83594798e144bff365a9c191c5d779f181fb3135902064ab8ff11918020fc
     restart: unless-stopped
     command:
       - postgres
@@ -45,7 +45,7 @@ services:
     extends:
       file: config.yaml
       service: redis-credentials
-    image: redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+    image: redis:8-alpine@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
     restart: unless-stopped
     volumes:
       - type: bind

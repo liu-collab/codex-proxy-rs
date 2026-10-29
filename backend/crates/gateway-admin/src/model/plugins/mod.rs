@@ -62,6 +62,48 @@ impl PluginHostCompatibility {
             .iter()
             .any(|entry| entry.capability == capability && entry.versions.contains(&version))
     }
+
+    /// 启动和升级预检共用比较规则，只检查插件声明的能力
+    #[must_use]
+    pub fn incompatibilities(
+        &self,
+        requirements: &PluginCompatibilityRequirements,
+        host: &semver::Version,
+    ) -> Vec<String> {
+        let mut reasons = Vec::new();
+        if !self
+            .manifest_schema_versions
+            .contains(&requirements.manifest_schema_version)
+        {
+            reasons.push(format!(
+                "清单 v{} 不在宿主支持范围内",
+                requirements.manifest_schema_version
+            ));
+        }
+        if !self
+            .protocol_versions
+            .contains(&requirements.protocol_version)
+        {
+            reasons.push(format!(
+                "RPC v{} 不在宿主支持范围内",
+                requirements.protocol_version
+            ));
+        }
+        if !semver::VersionReq::parse(&requirements.host_version)
+            .is_ok_and(|range| range.matches(host))
+        {
+            reasons.push(format!(
+                "插件声明的宿主范围为 {}，当前为 {host}",
+                requirements.host_version
+            ));
+        }
+        for (capability, version) in &requirements.capabilities {
+            if !self.supports_capability(capability, *version) {
+                reasons.push(format!("{capability} v{version} 不在宿主支持范围内"));
+            }
+        }
+        reasons
+    }
 }
 
 fn valid_versions(versions: &[u32]) -> bool {

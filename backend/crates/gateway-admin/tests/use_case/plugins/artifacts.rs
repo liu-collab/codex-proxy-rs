@@ -39,6 +39,7 @@ struct FixtureData {
     artifact: InstalledPluginArtifact,
     snapshot: PluginInstanceSnapshot,
     saves: usize,
+    compatibility_warning: Option<String>,
     publications: Vec<u64>,
 }
 
@@ -61,6 +62,7 @@ impl Fixture {
                     instances: existing.into_iter().collect(),
                 },
                 saves: 0,
+                compatibility_warning: None,
                 publications: Vec::new(),
             }),
         })
@@ -89,6 +91,14 @@ impl SnapshotControl for Fixture {
 
 #[async_trait]
 impl gateway_admin::ports::plugins::PluginPackageInspector for Fixture {
+    async fn compatibility_warning(
+        &self,
+        _: Arc<[u8]>,
+        _: String,
+    ) -> Result<Option<String>, AdminError> {
+        Ok(self.data.lock().unwrap().compatibility_warning.clone())
+    }
+
     async fn inspect(
         &self,
         archive: Arc<[u8]>,
@@ -487,4 +497,21 @@ fn context() -> MutationContext {
 
 fn store_error(kind: AdminStoreErrorKind) -> AdminStoreError {
     AdminStoreError::new(kind, "plugin", "install fixture")
+}
+
+#[tokio::test]
+async fn installing_an_incompatible_package_keeps_the_default_instance_stopped() {
+    let fixture = Fixture::new(metadata(true), None);
+    fixture.data.lock().unwrap().compatibility_warning = Some("宿主范围不匹配".into());
+    let result = fixture
+        .service()
+        .accept_artifact(DIGEST, &context())
+        .await
+        .unwrap();
+    assert!(!result.configuration_required);
+    let data = fixture.data.lock().unwrap();
+    assert_eq!(data.snapshot.instances.len(), 1);
+    assert!(!data.snapshot.instances[0].enabled);
+    assert!(!data.snapshot.instances[0].bindings.is_empty());
+    assert!(data.artifact.accepted_at.is_some());
 }

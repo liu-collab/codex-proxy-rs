@@ -19,7 +19,7 @@ use crate::{
 };
 
 use super::{
-    completed_usage_fact_predicate, push_completed_usage_fact_filter,
+    completed_usage_fact_predicate, literal_contains_pattern, push_completed_usage_fact_filter,
     push_unrecovered_request_filter,
 };
 

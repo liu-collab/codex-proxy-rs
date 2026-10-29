@@ -25,6 +25,11 @@ impl CodexBackendClient {
         image_turn_id: Option<&str>,
         context: CodexRequestContext<'_>,
     ) -> CodexClientResult<CodexBackendJsonResponse> {
+        let body = if endpoint_path == super::endpoints::CODEX_ALPHA_SEARCH_PATH {
+            super::correlation::scope_search_body(body, context.installation_id)
+        } else {
+            body
+        };
         // Provider 端点以 Codex 路径标识；API Key 在自己的 API 前缀下使用对应相对路径
         let endpoint_path = if self.protocol == super::client::OpenAiUpstreamProtocol::ResponsesApi
         {
@@ -49,6 +54,7 @@ impl CodexBackendClient {
             context.turn_metadata,
         );
         self.append_middleware_headers(&mut headers)?;
+        super::correlation::scope_headers(&mut headers, context.installation_id);
         let body = if self.privacy.is_some() {
             let mut value: serde_json::Value =
                 serde_json::from_slice(&body).map_err(CodexClientError::RequestBodyEncode)?;
@@ -70,23 +76,28 @@ impl CodexBackendClient {
             .cloned()
             .unwrap_or_default()
             .exchange("http_json");
+        let outbound = self
+            .prepare_http_request(endpoint_url(&self.base_url, endpoint_path), headers, body)
+            .await?;
         trace.headers(
             "upstream.request.headers",
-            serde_json::json!({
-                "method": "POST", "endpoint": endpoint_path,
-            }),
-            headers
+            serde_json::json!({"method": outbound.method().as_str(), "transport": "http_json"}),
+            outbound
+                .headers()
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.as_bytes())),
         );
-        trace.capture("upstream.request.body", &body);
+        trace.capture(
+            "upstream.request.body",
+            outbound
+                .body()
+                .and_then(reqwest::Body::as_bytes)
+                .unwrap_or_default(),
+        );
         let headers_started_at = Instant::now();
         let response = self
             .client
-            .post(endpoint_url(&self.base_url, endpoint_path))
-            .headers(headers)
-            .body(body)
-            .send()
+            .execute(outbound)
             .await
             .map_err(CodexClientError::HttpJson)?;
         let upstream_headers_ms = elapsed_duration_millis(headers_started_at.elapsed());
@@ -118,7 +129,8 @@ impl CodexBackendClient {
             .await);
         }
 
-        let diagnostics = response_meta::diagnostics(Some(status.as_u16()), response.headers());
+        let diagnostics = response_meta::diagnostics(Some(status.as_u16()), response.headers())
+            .with_response_origin(Some(response.url().clone()));
         let set_cookie_headers = response_meta::set_cookie_headers(response.headers());
         let rate_limit_headers = response_meta::rate_limit_headers(response.headers());
         let response_metadata = response_meta::response_metadata(response.headers());

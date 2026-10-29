@@ -29,16 +29,42 @@ impl HttpCallbacks<'_> {
         self.request_limits.body_bytes(self.call)
     }
 
+    pub(super) async fn account(
+        &self,
+        accounts: &super::accounts::PluginAccounts,
+        params: serde_json::Value,
+        payload: Vec<u8>,
+    ) -> Result<RpcReply, PluginFault> {
+        let request: wire::AccountHttpRequest = decode(params)?;
+        let maximum_body_bytes = self.body_limit(&payload)?;
+        let proxy = accounts
+            .http_proxy(request.account_id, request.credential_revision)
+            .await?;
+        self.send(
+            HttpRequest {
+                method: request.request.method,
+                url: request.request.url,
+                headers: request.request.headers,
+                body: payload,
+                maximum_body_bytes,
+            },
+            true,
+            None,
+            proxy.as_ref(),
+        )
+        .await
+    }
+
     pub(super) async fn send(
         &self,
         request: HttpRequest,
         streaming: bool,
         upstream_purpose: Option<gateway_plugin_sdk::call::upstream_adapter::UpstreamPathPurpose>,
+        proxy: Option<&gateway_core::account::OutboundProxy>,
     ) -> Result<RpcReply, PluginFault> {
         let Self {
             client,
             network,
-            scope,
             call,
             maximum_payload,
             ..
@@ -48,13 +74,12 @@ impl HttpCallbacks<'_> {
         }
         let timeout = call.timeout()?;
         let attempt = call.start_upstream(upstream_purpose)?;
-        let response = client
-            .open(request, scope.proxy.as_ref(), network, timeout)
-            .await;
-        attempt.finish(
+        let response = client.open(request, proxy, network, timeout).await;
+        attempt.finish_http(
             response
                 .as_ref()
                 .map_or_else(|error| error.send_state, |_| UpstreamSendState::Sent),
+            response.as_ref().ok().map(|response| response.status),
         );
         let response = response.map_err(http_error)?;
         let mut body = response.body;
@@ -115,7 +140,7 @@ impl HttpCallbacks<'_> {
     ) -> Result<RpcReply, PluginFault> {
         let call = self.call;
         match method {
-            "host.http.do" | "host.http.do_stream" => {
+            wire::HTTP_DO | wire::HTTP_DO_STREAM => {
                 let request: wire::HttpRequest = decode(params)?;
                 self.send(
                     HttpRequest {
@@ -125,12 +150,13 @@ impl HttpCallbacks<'_> {
                         maximum_body_bytes: self.body_limit(&payload)?,
                         body: payload,
                     },
-                    method == "host.http.do_stream",
+                    method == wire::HTTP_DO_STREAM,
                     None,
+                    self.scope.proxy.as_ref(),
                 )
                 .await
             }
-            "host.http.stream_read" => {
+            wire::HTTP_STREAM_READ => {
                 if !payload.is_empty() {
                     return Err(invalid());
                 }
@@ -174,7 +200,7 @@ impl HttpCallbacks<'_> {
                     payload: chunk.map_or_else(Vec::new, |chunk| chunk.to_vec()),
                 })
             }
-            "host.http.stream_close" => {
+            wire::HTTP_STREAM_CLOSE => {
                 if !payload.is_empty() {
                     return Err(invalid());
                 }

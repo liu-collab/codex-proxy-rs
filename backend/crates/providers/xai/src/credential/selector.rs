@@ -141,6 +141,24 @@ impl GrokAccountSessionSelector {
                     })
                     .collect()
             };
+            let accounts = accounts
+                .into_iter()
+                .filter(|account| {
+                    request.upstream_context.as_ref().is_none_or(|context| {
+                        context
+                            .upstream_adapter_for_account(
+                                &self.provider_kind,
+                                request.upstream_model(),
+                                account.id(),
+                            )
+                            .is_ok_and(|adapter| {
+                                adapter.map_or(!request.adapter_required, |adapter| {
+                                    adapter.supports_authentication(account.authentication_kind())
+                                })
+                            })
+                    })
+                })
+                .collect::<Vec<_>>();
             let catalog_eligible = if diagnostic {
                 accounts
             } else {
@@ -459,9 +477,9 @@ impl GrokAccountSessionSelector {
             accounts.iter().zip(account_reads).zip(model_reads)
         {
             if let Ok(Some(cooldown)) = account_read
-                && cooldown.until() > now
+                && cooldown.scheduling_state().is_active(now)
             {
-                // 账号级限流冷却跨凭据轮换保留：上游限流不因本地凭据更换解除
+                // 账号级冷却按 Core 判断有效性，等待探测的保护到期后仍阻止调度
                 insert_runtime_cooldown(
                     &mut cooled,
                     account.id(),

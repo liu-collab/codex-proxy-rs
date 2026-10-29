@@ -1,8 +1,12 @@
 //! 验证订阅查询的账号绑定、安全投影与未知状态保留
 
-use super::{CodexBackendClient, CodexRequestContext, test_wire_profile};
+use super::{CodexBackendClient, CodexRequestContext, read_http_request, test_wire_profile};
 use serde_json::json;
 use std::time::Duration;
+use tokio::{
+    io::AsyncWriteExt as _,
+    net::{TcpListener, TcpStream},
+};
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{header, method, path, query_param},
@@ -71,7 +75,6 @@ async fn subscription_failures_are_unknown_without_retry() {
             .set_body_json(json!({"active_until":"invalid","will_renew":false})),
         ResponseTemplate::new(200).set_body_json(json!({"will_renew":true})),
         ResponseTemplate::new(200).set_body_string("x".repeat(65537)),
-        ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(6)),
     ] {
         let server = MockServer::start().await;
         let official_server = MockServer::start().await;
@@ -96,6 +99,54 @@ async fn subscription_failures_are_unknown_without_retry() {
                 .is_none()
         );
     }
+}
+
+#[tokio::test]
+async fn subscription_timeout_is_unknown_without_retry() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let official_server = MockServer::start().await;
+    let test_client = client(&format!("http://{}", listener.local_addr().unwrap()))
+        .with_official_base_url(official_server.uri());
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let mut request = tokio::spawn(async move {
+        started_tx.send(tokio::time::Instant::now()).unwrap();
+        test_client
+            .fetch_subscription(
+                CodexRequestContext::auxiliary("Bearer fixture", Some("account"), "req", None),
+                "account",
+            )
+            .await
+    });
+    let _stream = accept_subscription_request(&listener).await;
+    let started = started_rx.await.unwrap();
+
+    // 连接已建立且上游已收到请求后才暂停时钟，避免虚拟时间抢跑网络 I/O
+    tokio::time::pause();
+    assert!(
+        tokio::time::timeout_at(started + Duration::from_secs(4), &mut request)
+            .await
+            .is_err(),
+        "the five-second budget is still available"
+    );
+    let result = tokio::time::timeout_at(started + Duration::from_millis(5_100), request)
+        .await
+        .expect("subscription must stop at its five-second deadline")
+        .unwrap();
+    assert!(result.is_none());
+    tokio::time::resume();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(1), listener.accept())
+            .await
+            .is_err(),
+        "timeout must not retry the custom endpoint"
+    );
+    assert!(
+        official_server
+            .received_requests()
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -218,32 +269,51 @@ async fn subscription_official_not_found_should_not_repeat_the_request() {
 
 #[tokio::test]
 async fn subscription_fallback_should_share_the_five_second_budget() {
-    let custom_server = MockServer::start().await;
-    let official_server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(404).set_delay(Duration::from_secs(3)))
-        .expect(1)
-        .mount(&custom_server)
-        .await;
-    Mock::given(method("GET"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_json(json!({"active_until": "2026-10-01T00:00:00Z"}))
-                .set_delay(Duration::from_secs(3)),
-        )
-        .expect(1)
-        .mount(&official_server)
-        .await;
+    let custom_server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let official_server = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let test_client = client(&format!("http://{}", custom_server.local_addr().unwrap()))
+        .with_official_base_url(format!("http://{}", official_server.local_addr().unwrap()));
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let mut request = tokio::spawn(async move {
+        started_tx.send(tokio::time::Instant::now()).unwrap();
+        test_client
+            .fetch_subscription(
+                CodexRequestContext::auxiliary("Bearer fixture", Some("account"), "req", None),
+                "account",
+            )
+            .await
+    });
+    let mut custom_stream = accept_subscription_request(&custom_server).await;
+    let started = started_rx.await.unwrap();
+    tokio::time::pause();
+    assert!(
+        tokio::time::timeout_at(started + Duration::from_secs(3), &mut request)
+            .await
+            .is_err()
+    );
 
-    let test_client = client(&custom_server.uri()).with_official_base_url(official_server.uri());
-    let result = tokio::time::timeout(
-        Duration::from_secs(6),
-        test_client.fetch_subscription(
-            CodexRequestContext::auxiliary("Bearer fixture", Some("account"), "req", None),
-            "account",
-        ),
-    )
-    .await
-    .expect("the original request and fallback must share a five-second deadline");
+    // 404 之后恢复真实时钟完成第二次连接，回退请求收到后仍等待同一总期限
+    tokio::time::resume();
+    custom_stream
+        .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let _official_stream = accept_subscription_request(&official_server).await;
+    tokio::time::pause();
+    let result = tokio::time::timeout_at(started + Duration::from_millis(5_100), request)
+        .await
+        .expect("the original request and fallback must share a five-second deadline")
+        .unwrap();
     assert!(result.is_none());
+}
+
+async fn accept_subscription_request(listener: &TcpListener) -> TcpStream {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let request = read_http_request(&mut stream).await;
+        assert!(request.starts_with("GET /backend-api/subscriptions?account_id=account "));
+        stream
+    })
+    .await
+    .expect("subscription request must reach its endpoint")
 }

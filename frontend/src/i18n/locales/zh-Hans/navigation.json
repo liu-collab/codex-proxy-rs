@@ -1,0 +1,30 @@
+{
+  "navigation": {
+    "overview": "概览",
+    "accounts": "账号管理",
+    "proxies": "代理管理",
+    "groups": "分组管理",
+    "apiKeys": "API密钥",
+    "usage": "分析统计",
+    "plugins": "插件",
+    "appearance": "主题设置",
+    "settings": "系统设置",
+    "update": {
+      "available": "发现新版本，打开系统更新",
+      "open": "打开系统更新"
+    },
+    "switchLanguage": "切换语言（{value}）",
+    "languageLoadFailed": "语言加载失败，请刷新重试",
+    "mainLabel": "主导航",
+    "pluginsLabel": "插件导航",
+    "pluginManagement": "插件管理",
+    "online": "在线",
+    "sidebar": {
+      "close": "关闭侧边栏",
+      "expand": "展开侧边栏",
+      "collapse": "收缩侧边栏",
+      "open": "打开侧边栏"
+    },
+    "missingEntryPoint": "未配置 {role} 身份的默认入口"
+  }
+}

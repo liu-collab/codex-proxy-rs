@@ -1,0 +1,77 @@
+{
+  "groups": {
+    "selector": {
+      "loading": "正在加載分組",
+      "empty": "暫無分組，請先在分組管理中創建"
+    },
+    "actions": {
+      "editGroup": "編輯分組",
+      "disableGroup": "禁用分組",
+      "enableGroup": "啓用分組",
+      "deleteGroup": "刪除分組",
+      "enterGroupName": "請輸入分組名稱",
+      "selectValidGroupingColor": "請選擇有效的分組顏色",
+      "updated": "分組已更新",
+      "created": "分組已創建",
+      "disabled": "分組已禁用",
+      "enabled": "分組已啓用",
+      "groupDeleted": "分組已刪除",
+      "deletedGroupDeletedGroups": "已刪除 {count} 個分組",
+      "partialDeletion": "已刪除 {count} 個分組，其餘未刪除：{value}",
+      "batchDeletionFailed": "批量刪除失敗"
+    },
+    "filters": {
+      "searchAccountGroup": "搜索賬號分組",
+      "searchGroupName": "搜索分組名稱",
+      "deleteSelected": "刪除 ({count})",
+      "createGroup": "創建分組"
+    },
+    "editor": {
+      "editDescription": "修改分組信息和請求權限",
+      "createDescription": "創建後，可在賬號管理中將賬號加入這個分組",
+      "groupName": "分組名稱",
+      "forExampleProductionAccount": "例如：生產賬號",
+      "groupColor": "分組顏色",
+      "selectGroupColor": "選擇分組顏色",
+      "fastMode": "快速模式",
+      "imageGeneration": "圖像生成",
+      "descriptionOptional": "描述（可選）",
+      "groupDescription": "分組描述",
+      "describePurposeOfThisGroup": "說明這個分組的用途",
+      "saveGroup": "保存分組"
+    },
+    "metrics": {
+      "restricted": "受限",
+      "total": "總數",
+      "concurrency": "併發",
+      "today": "今日",
+      "cumulative": "累計"
+    },
+    "group": "分組",
+    "fields": {
+      "capacity": "容量"
+    },
+    "page": {
+      "description": "將賬號歸類管理，併爲每個 API密鑰指定可使用的賬號",
+      "empty": "暫無分組",
+      "selectCurrentPageGroup": "選擇當前頁分組",
+      "selectGroup": "選擇分組",
+      "fastModeIsOn": "Fast 已開啓",
+      "fastModeIsOff": "Fast 已關閉",
+      "imageGenerationDisabled": "生圖已關閉",
+      "colorLabel": "分組顏色 {color}",
+      "batchDeleteWarning": "刪除後這些分組將立即失效，此操作不可撤銷",
+      "batchDeleteDescription": "確定刪除選中的 {count} 個分組嗎？賬號本身不會被刪除",
+      "disableAccountGrouping": "禁用賬號分組",
+      "disableDescription": "禁用後，使用該分組的 API密鑰將無法再使用其中的賬號",
+      "confirmDisable": "確認禁用",
+      "disable": "確定禁用“{name}”嗎？",
+      "affectedApiKeys": "將影響 {count} 個 API密鑰：{value}",
+      "affectedKeys": "將影響 {count} 個 API密鑰",
+      "deleteAccountGroup": "刪除賬號分組",
+      "deleteWarning": "刪除後該分組將立即失效，此操作不可撤銷",
+      "unnamedGroup": "該分組",
+      "deleteAccountsWillBeKept": "確定刪除“{name}”嗎？賬號本身不會被刪除"
+    }
+  }
+}

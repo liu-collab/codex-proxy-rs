@@ -1,6 +1,7 @@
 //! OpenAI 凭据合同测试入口，以及凭据编码、持久化与选号约束测试
 
 mod capacity;
+mod cooldown_reads;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
@@ -23,9 +24,7 @@ use gateway_core::engine::{
 };
 use gateway_core::lifecycle::CancellationToken;
 use gateway_core::policy::ClientApiKeyId;
-use gateway_core::provider_ports::{
-    ProviderCooldownPort, ProviderLeasePort, ProviderSessionAffinityKey,
-};
+use gateway_core::provider_ports::{ProviderCooldownPort, ProviderSessionAffinityKey};
 use gateway_core::routing::{
     ClientRoutingScope, FrozenAccountScope, ProviderKind, RuntimeAccount, RuntimeAccountDirectory,
 };
@@ -227,6 +226,7 @@ fn selector_with_runtime(
         terminal: "selector-contract".to_owned(),
         exact_user_agent: None,
         residency: None,
+        account_routing_override: None,
         verified_at: chrono::Utc::now(),
     });
     let http = reqwest::Client::builder().build().expect("HTTP client");
@@ -236,7 +236,6 @@ fn selector_with_runtime(
         http,
         OFFICIAL_CODEX_BASE_URL.to_owned(),
         cooldowns,
-        Arc::clone(&leases) as Arc<dyn ProviderLeasePort>,
         crate::support::runtime_policy(),
     ));
     CodexCredentialSelector::new(

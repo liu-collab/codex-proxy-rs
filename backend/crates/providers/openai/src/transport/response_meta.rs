@@ -11,8 +11,6 @@ use super::diagnostics::CodexUpstreamDiagnostics;
 /// Codex Responses 上游响应元数据
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct CodexResponseMetadata {
-    /// 上游实际选用的模型
-    pub effective_model: Option<String>,
     /// 模型目录版本
     pub models_etag: Option<String>,
     /// 上游是否声明响应包含 reasoning
@@ -25,7 +23,6 @@ impl fmt::Debug for CodexResponseMetadata {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("CodexResponseMetadata")
-            .field("effective_model", &self.effective_model)
             .field("models_etag", &self.models_etag)
             .field("reasoning_included", &self.reasoning_included)
             .field("client_header_count", &self.client_headers.len())
@@ -119,35 +116,10 @@ fn observe_typed_response_header(metadata: &mut CodexResponseMetadata, name: &st
         return;
     }
     match name.trim().to_ascii_lowercase().as_str() {
-        "openai-model" | "x-openai-model" => {
-            metadata.effective_model =
-                gateway_protocol::openai::events::observed_model_name(value).map(str::to_owned)
-        }
         "x-models-etag" => metadata.models_etag = Some(value.to_string()),
         "x-reasoning-included" => metadata.reasoning_included = true,
         _ => {}
     }
-}
-
-/// 与官方 Codex 一致，优先读取 response.headers，再读取 WS metadata 的顶层 headers
-pub(super) fn reported_model_from_event(value: &serde_json::Value) -> Option<&str> {
-    [value.pointer("/response/headers"), value.get("headers")]
-        .into_iter()
-        .flatten()
-        .filter_map(serde_json::Value::as_object)
-        .find_map(|headers| {
-            headers.iter().find_map(|(name, value)| {
-                if !name.eq_ignore_ascii_case("openai-model")
-                    && !name.eq_ignore_ascii_case("x-openai-model")
-                {
-                    return None;
-                }
-                value
-                    .as_str()
-                    .or_else(|| value.as_array()?.first()?.as_str())
-                    .and_then(gateway_protocol::openai::events::observed_model_name)
-            })
-        })
 }
 
 fn filter_client_headers(

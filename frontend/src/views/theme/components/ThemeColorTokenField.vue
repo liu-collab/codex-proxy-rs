@@ -2,7 +2,9 @@
 import { ZColorPicker, ZIconButton } from '@codex-proxy/ui'
 
 import { themeTokenAllowsAlpha } from '@codex-proxy/ui/theme'
+
 import { RotateCcw } from '@lucide/vue'
+import { useI18n } from 'vue-i18n'
 
 withDefaults(defineProps<{
   label: string
@@ -21,6 +23,8 @@ const emit = defineEmits<{
   change: [value: string]
   reset: []
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 </script>
 
 <template>
@@ -29,7 +33,7 @@ const emit = defineEmits<{
       <div class="flex flex-wrap items-center gap-2">
         <strong class="text-cp-sm font-bold text-cp-text">{{ label }}</strong>
         <span v-if="overridden" class="rounded-full bg-cp-primary-container px-1.5 py-0.5 text-[9px] font-heavy text-cp-primary-on-container">
-          已修改
+          {{ t('appearance.color.modified') }}
         </span>
       </div>
       <code class="mt-1 block truncate font-mono text-[10px] text-cp-text-quaternary">{{ token }}</code>
@@ -47,13 +51,13 @@ const emit = defineEmits<{
         :model-value="value"
         :presets="presets"
         :allow-alpha="themeTokenAllowsAlpha(token)"
-        :aria-label="`编辑 ${label}`"
+        :aria-label="t('appearance.color.edit', { label })"
         @update:model-value="emit('change', $event)"
       />
       <span class="min-w-17 font-mono text-[10px] tabular-nums text-cp-text-secondary">{{ value }}</span>
       <ZIconButton
         v-if="overridden"
-        aria-label="恢复派生值"
+        :aria-label="t('appearance.color.restoreDerivedValue')"
         size="small"
         @click="emit('reset')"
       >

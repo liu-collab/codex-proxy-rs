@@ -1,12 +1,26 @@
 <script setup lang="ts">
-import { ZButton, ZInput, ZNotification, ZPageHeader, ZScrollbar, ZSegmented } from '@codex-proxy/ui'
+import { ZButton, ZInput, ZPageHeader, ZScrollbar, ZSegmented, ZSkeleton } from '@codex-proxy/ui'
+import { Check, Eye, Pencil, RotateCcw, Save, Search, Undo2 } from '@lucide/vue'
 
-import { Check, RotateCcw, Save, Search, Undo2 } from '@lucide/vue'
+import { computed, defineAsyncComponent, shallowRef } from 'vue'
+
+import { useI18n } from 'vue-i18n'
+
+import { notification as ZNotification } from '@/utils/notification'
 
 import { useThemeEditor } from '../composables/useThemeEditor'
 import ThemeComponentTokenPanel from './ThemeComponentTokenPanel.vue'
-import ThemeEditorPreview from './ThemeEditorPreview.vue'
 import ThemeGlobalTokenPanel from './ThemeGlobalTokenPanel.vue'
+
+const ThemeEditorPreview = defineAsyncComponent({
+  loader: () => import('./ThemeEditorPreview.vue'),
+  loadingComponent: ZSkeleton,
+  delay: 200,
+  timeout: 30000,
+})
+
+const { t } = useI18n({ useScope: 'global' })
+const mobilePreviewOpen = shallowRef(false)
 
 const {
   draft,
@@ -35,67 +49,87 @@ const {
   save,
 } = useThemeEditor()
 
-const scopeOptions = [
-  { label: '全局', value: 'global' },
-  { label: '组件', value: 'component' },
-]
+const scopeOptions = computed(() => ([
+  {
+    label: t('appearance.settings.global'),
+    value: 'global',
+  },
+  {
+    label: t('appearance.settings.components'),
+    value: 'component',
+  },
+]))
 
 function switchScope(value: string) {
-  scope.value = value === 'component' ? 'component' : 'global'
+  scope.value = value === 'component'
+    ? 'component'
+    : 'global'
+  mobilePreviewOpen.value = false
 }
 
 function saveTheme(event: MouseEvent) {
   if (!save(event)) {
-    ZNotification.error({ message: '主题设置无效，请检查编辑值' })
+    ZNotification.error({
+      message: t('appearance.settings.invalidTheme'),
+    })
     return
   }
-  ZNotification.success({ message: '主题已保存并应用' })
+  ZNotification.success({
+    message: t('appearance.settings.themeSavedAndApplied'),
+  })
 }
 </script>
 
 <template>
-  <div class="flex min-h-0 w-full flex-col">
-    <ZPageHeader class="xl:h-17" title="主题设置">
+  <div class="@container flex min-h-0 min-w-0 w-full flex-col">
+    <ZPageHeader :title="t('navigation.appearance')">
       <template #description>
         <span class="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <span>自定义当前浏览器中的管理端配色与界面风格</span>
+          <span>{{ t('appearance.settings.description') }}</span>
           <span
             class="inline-flex items-center gap-1.5 text-cp-sm font-heavy"
             :class="dirty ? 'text-cp-primary-text' : 'text-cp-text-tertiary'"
           >
             <span class="size-1.5 rounded-full bg-current" />
-            {{ dirty ? `${modificationCount} 处修改待应用` : '已同步' }}
+            {{ dirty ? t('appearance.settings.pendingChanges', { count: modificationCount }) : t('appearance.settings.synced') }}
           </span>
         </span>
       </template>
 
       <template #actions>
-        <div class="flex flex-wrap items-center justify-end gap-2">
+        <div class="flex max-w-[100cqw] flex-wrap items-center justify-end gap-2">
           <ZSegmented
             :model-value="scope"
-            aria-label="主题编辑层级"
+            :aria-label="t('appearance.settings.themeEditingLevel')"
             :options="scopeOptions"
             size="small"
             @update:model-value="switchScope"
           />
+          <ZButton size="small" class="min-[768px]:hidden" @click="mobilePreviewOpen = !mobilePreviewOpen">
+            <template #icon>
+              <Pencil v-if="mobilePreviewOpen" class="size-3.5" />
+              <Eye v-else class="size-3.5" />
+            </template>
+            {{ mobilePreviewOpen ? t('appearance.preview.edit') : t('appearance.preview.open') }}
+          </ZButton>
           <ZButton size="small" variant="text" :disabled="!dirty" @click="resetDraft">
             <template #icon>
               <Undo2 class="size-3.5" />
             </template>
-            撤销草稿
+            {{ t('appearance.settings.undoDraft') }}
           </ZButton>
           <ZButton size="small" @click="restoreDefaults">
             <template #icon>
               <RotateCcw class="size-3.5" />
             </template>
-            恢复默认
+            {{ t('appearance.settings.restoreDefault') }}
           </ZButton>
           <ZButton size="small" type="primary" :disabled="!dirty" @click="saveTheme">
             <template #icon>
               <Save v-if="dirty" class="size-3.5" />
               <Check v-else class="size-3.5" />
             </template>
-            {{ dirty ? '保存并应用' : '已保存' }}
+            {{ dirty ? t('appearance.settings.saveAndApply') : t('appearance.settings.saved') }}
           </ZButton>
         </div>
       </template>
@@ -103,20 +137,21 @@ function saveTheme(event: MouseEvent) {
 
     <section
       class="theme-workbench isolate mt-5 overflow-hidden rounded-cp-card bg-cp-bg-layout shadow-cp-card xl:flex xl:min-h-0 xl:flex-1 xl:flex-col"
-      aria-label="主题编辑器"
+      :aria-label="t('appearance.settings.themeEditor')"
     >
       <div
         class="theme-workbench-body grid min-h-180 gap-3 xl:min-h-0 xl:flex-1 xl:overflow-hidden xl:grid-cols-[370px_minmax(0,1fr)]"
       >
         <aside
-          class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-cp-lg bg-cp-bg-container pt-3 pr-0 pb-3 pl-3 shadow-cp-secondary"
-          aria-label="主题 Token 编辑面板"
+          class="h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden rounded-cp-lg bg-cp-bg-container pt-3 pr-0 pb-3 pl-3 shadow-cp-secondary min-[768px]:grid"
+          :class="mobilePreviewOpen ? 'hidden' : 'grid'"
+          :aria-label="t('appearance.settings.themeTokenEditingPanel')"
         >
           <ZInput
             v-model="query"
-            class="mr-3"
-            aria-label="搜索 Token"
-            placeholder="搜索 Seed、Alias 或 Component Token"
+            class="pr-3"
+            :aria-label="t('appearance.settings.searchToken')"
+            :placeholder="t('appearance.settings.searchPlaceholder')"
           >
             <template #prefix>
               <Search class="size-4" />
@@ -153,7 +188,7 @@ function saveTheme(event: MouseEvent) {
           </ZScrollbar>
         </aside>
 
-        <div class="hidden min-h-0 min-[768px]:block">
+        <div class="min-h-0 min-[768px]:block" :class="mobilePreviewOpen ? 'block' : 'hidden'">
           <ThemeEditorPreview v-model="preview" class="h-full" :theme="previewTheme" :style="previewStyle" />
         </div>
       </div>

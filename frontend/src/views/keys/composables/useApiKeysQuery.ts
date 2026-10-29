@@ -4,17 +4,21 @@ import type { ApiKey } from '@/api'
 import { computed, onMounted, shallowRef, watch } from 'vue'
 import { getApiKeys } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
+import { useTableSort } from '@/composables/useTableSort'
+import { apiKeyColumns } from '../constants'
 
 export function useApiKeysQuery() {
   const searchQuery = shallowRef('')
-  const sort = shallowRef<TableSort>()
+  const sort = useTableSort(apiKeyColumns, 'api-keys')
   const page = shallowRef(1)
   const pageSize = shallowRef(20)
   const total = shallowRef(0)
   const apiKeys = shallowRef<ApiKey[]>([])
   const request = useRequestState()
   const { loading } = request
-  const cursors = new Map<number, string | undefined>([[1, undefined]])
+  const cursors = new Map<number, string | undefined>([
+    [1, undefined],
+  ])
 
   const apiKeyPagination = computed(() => ({
     currentPage: page.value,
@@ -29,8 +33,12 @@ export function useApiKeysQuery() {
   }
 
   function knownPageBefore(targetPage: number) {
-    return [...cursors.keys()].reduce(
-      (known, candidate) => (candidate <= targetPage && candidate > known ? candidate : known),
+    return [
+      ...cursors.keys(),
+    ].reduce(
+      (known, candidate) => (candidate <= targetPage && candidate > known
+        ? candidate
+        : known),
       1,
     )
   }

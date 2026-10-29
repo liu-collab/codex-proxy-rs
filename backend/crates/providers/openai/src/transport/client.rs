@@ -195,6 +195,8 @@ impl fmt::Debug for CodexClientVisibleUpstreamResponse {
 /// Codex 上游 HTTP 客户端错误
 #[derive(Error)]
 pub enum CodexClientError {
+    #[error("outbound request preparation failed")]
+    Outbound(Box<gateway_core::error::ProviderError>),
     #[error("privacy policy rejected the request: {0}")]
     Privacy(#[from] gateway_core::settings::privacy::PrivacyError),
     #[error("connection recovery budget exhausted")]
@@ -224,7 +226,6 @@ pub enum CodexClientError {
     /// 请求头值无效
     #[error("invalid request header value: {0}")]
     InvalidHeaderValue(#[from] reqwest::header::InvalidHeaderValue),
-    /// 中间件业务头试图覆盖 Provider 已构造的受管头
     /// SSE 响应解析失败
     #[error("invalid upstream SSE response: {0}")]
     InvalidSse(#[from] SseError),
@@ -278,6 +279,7 @@ pub enum CodexClientError {
 impl fmt::Debug for CodexClientError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Outbound(_) => formatter.write_str("CodexClientError::Outbound([REDACTED])"),
             Self::ConnectionBudgetExhausted => {
                 formatter.write_str("CodexClientError::ConnectionBudgetExhausted")
             }
@@ -348,7 +350,8 @@ impl CodexClientError {
             Self::Upstream { transport, .. } | Self::ErrorBodyRead { transport, .. } => {
                 Some(*transport)
             }
-            Self::Privacy(_)
+            Self::Outbound(_)
+            | Self::Privacy(_)
             | Self::ConnectionBudgetExhausted
             | Self::CustomCa(_)
             | Self::InvalidHeaderName(_)
@@ -461,6 +464,8 @@ impl<'a> CodexAccountSelectionTelemetry<'a> {
 /// 单次 Codex 上游请求的上下文
 #[derive(Clone, Copy)]
 pub struct CodexRequestContext<'a> {
+    /// 本次根执行的控制与下游连接生命周期，不由共享 HTTP client 持有
+    pub response_control: Option<&'a gateway_core::engine::response_control::ResponseControl>,
     /// 显式传递的请求诊断上下文，跨连接任务共享
     pub trace: Option<&'a gateway_core::diagnostics::TraceContext>,
     /// Provider 已构造并脱敏持有的完整 Authorization 值
@@ -509,6 +514,7 @@ impl<'a> CodexRequestContext<'a> {
     ) -> Self {
         Self {
             trace: None,
+            response_control: None,
             authorization,
             account_id,
             request_id,
@@ -532,6 +538,15 @@ impl<'a> CodexRequestContext<'a> {
     #[must_use]
     pub const fn with_trace(mut self, trace: &'a gateway_core::diagnostics::TraceContext) -> Self {
         self.trace = Some(trace);
+        self
+    }
+
+    #[must_use]
+    pub fn with_response_control(
+        mut self,
+        control: Option<&'a gateway_core::engine::response_control::ResponseControl>,
+    ) -> Self {
+        self.response_control = control;
         self
     }
 }
@@ -686,7 +701,6 @@ pub struct CodexBackendClient {
         gateway_core::lifecycle::CancellationToken,
     )>,
     pub(super) timezone: gateway_core::time::DeploymentTimeZone,
-    pub(super) response_control: Option<gateway_core::engine::response_control::ResponseControl>,
     pub(super) connection_budget: Option<gateway_core::engine::connection::ConnectionBudget>,
     pub(super) client: Client,
     pub(super) direct_client: Client,
@@ -700,6 +714,7 @@ pub struct CodexBackendClient {
     pub(super) outbound_proxy: Option<gateway_core::account::OutboundProxy>,
     pub(super) egress_key: String,
     pub(super) middleware_headers: Vec<MiddlewareHeader>,
+    pub(super) outbound_middleware: Option<gateway_core::engine::middleware::outbound::Pipeline>,
 }
 
 impl CodexBackendClient {
@@ -709,14 +724,6 @@ impl CodexBackendClient {
         timezone: gateway_core::time::DeploymentTimeZone,
     ) -> Self {
         self.timezone = timezone;
-        self
-    }
-
-    pub(crate) fn with_response_control(
-        mut self,
-        control: Option<gateway_core::engine::response_control::ResponseControl>,
-    ) -> Self {
-        self.response_control = control;
         self
     }
 
@@ -961,7 +968,8 @@ pub(super) async fn http_json_upstream_error(
 ) -> CodexClientError {
     let status = response.status();
     let headers = response.headers();
-    let diagnostics = super::response_meta::diagnostics(Some(status.as_u16()), headers);
+    let diagnostics = super::response_meta::diagnostics(Some(status.as_u16()), headers)
+        .with_response_origin(Some(response.url().clone()));
     let set_cookie_headers = super::response_meta::set_cookie_headers(headers);
     let rate_limit_headers = super::response_meta::rate_limit_headers(headers);
     let retry_after_seconds = retry_after_seconds(headers, None);

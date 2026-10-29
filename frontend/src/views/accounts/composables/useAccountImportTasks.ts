@@ -2,6 +2,8 @@ import type { AccountImportTask, AccountImportTaskDetail } from '@/api'
 import { computed, onMounted, onScopeDispose, shallowRef, watch } from 'vue'
 import { getAccountImportTask, getAccountImportTasks, stopAccountImportTask } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 export function useAccountImportTasks(options: { reload: () => Promise<unknown> }) {
@@ -59,8 +61,12 @@ export function useAccountImportTasks(options: { reload: () => Promise<unknown> 
       error.value = ''
     }
     catch (cause) {
-      if (!current.signal.aborted)
-        error.value = errorMessage(cause, '进度读取失败，请重试')
+      if (!current.signal.aborted) {
+        const message = errorMessage(cause, t('accounts.importTasks.progressReadingFailedTryAgain'))
+        if (open.value && (!background || error.value !== message))
+          ZNotification.error({ message, deduplicate: true })
+        error.value = message
+      }
     }
     finally {
       if (!current.signal.aborted && !disposed) {
@@ -79,7 +85,10 @@ export function useAccountImportTasks(options: { reload: () => Promise<unknown> 
   }
 
   function created(task: AccountImportTask, reveal = true) {
-    tasks.value = [task, ...tasks.value.filter(entry => entry.taskId !== task.taskId)]
+    tasks.value = [
+      task,
+      ...tasks.value.filter(entry => entry.taskId !== task.taskId),
+    ]
     selectedId.value = task.taskId
     detail.value = null
     if (open.value || !reveal)
@@ -116,5 +125,18 @@ export function useAccountImportTasks(options: { reload: () => Promise<unknown> 
     clearTimeout(timer)
   })
 
-  return { open, tasks, detail, selectedId, error, loading, activeCount, stopping: stopAction.loading, select, created, refresh, stop }
+  return {
+    open,
+    tasks,
+    detail,
+    selectedId,
+    error,
+    loading,
+    activeCount,
+    stopping: stopAction.loading,
+    select,
+    created,
+    refresh,
+    stop,
+  }
 }

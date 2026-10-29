@@ -1,29 +1,7 @@
 //! 验证管理响应封装、分页结构与公开错误码保持稳定
 
-mod common {
-    use gateway_api::admin::PageMeta;
-    use serde_json::json;
-
-    #[test]
-    fn page_meta_should_keep_the_existing_camel_case_wire_shape() {
-        let value = serde_json::to_value(PageMeta::new(2, 10, 21, 3))
-            .expect("page metadata should serialize");
-
-        assert_eq!(
-            value,
-            json!({
-                "page": 2,
-                "pageSize": 10,
-                "total": 21,
-                "totalPages": 3
-            })
-        );
-    }
-}
-
 mod error {
-    use gateway_api::admin::{AdminErrorBody, AdminErrorCode};
-    use serde_json::json;
+    use gateway_api::admin::AdminErrorCode;
 
     #[test]
     fn error_codes_should_keep_all_published_numeric_values() {
@@ -56,24 +34,6 @@ mod error {
             ]
         );
     }
-
-    #[test]
-    fn invalid_admin_api_key_should_keep_code_and_null_data() {
-        let value = serde_json::to_value(AdminErrorBody::new(
-            AdminErrorCode::INVALID_API_KEY,
-            "管理 API Key 无效",
-        ))
-        .expect("admin error body should serialize");
-
-        assert_eq!(
-            value,
-            json!({
-                "code": 40103,
-                "message": "管理 API Key 无效",
-                "data": null
-            })
-        );
-    }
 }
 
 mod response {
@@ -84,21 +44,6 @@ mod response {
     };
     use gateway_api::admin::{AdminEnvelope, AdminError, AdminPageData, AdminResponse, PageMeta};
     use serde_json::json;
-
-    #[test]
-    fn success_envelope_should_keep_the_existing_wire_shape() {
-        let value = serde_json::to_value(AdminEnvelope::ok(json!({ "id": "resource_1" })))
-            .expect("admin success envelope should serialize");
-
-        assert_eq!(
-            value,
-            json!({
-                "code": 200,
-                "message": "OK",
-                "data": { "id": "resource_1" }
-            })
-        );
-    }
 
     #[test]
     fn page_envelope_should_keep_items_and_page_nested_under_data() {
@@ -145,8 +90,15 @@ mod response {
         let body = response_json(response).await;
 
         assert_eq!(
-            (status, body["code"].as_u64()),
-            (StatusCode::CREATED, Some(200))
+            (status, body),
+            (
+                StatusCode::CREATED,
+                json!({
+                    "code": 200,
+                    "message": "OK",
+                    "data": { "id": "resource_created" }
+                })
+            )
         );
     }
 

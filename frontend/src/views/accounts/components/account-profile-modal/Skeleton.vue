@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { ZSkeleton } from '@codex-proxy/ui'
+
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({ useScope: 'global' })
 </script>
 
 <template>
   <div class="grid gap-8 sm:gap-10" role="status" aria-live="polite" aria-busy="true">
-    <span class="sr-only">正在加载累计活动</span>
+    <span class="sr-only">{{ t('accounts.profile.loadingCumulativeActivity') }}</span>
 
     <section class="grid min-w-0 gap-4 overflow-hidden">
       <div class="flex items-center justify-between">

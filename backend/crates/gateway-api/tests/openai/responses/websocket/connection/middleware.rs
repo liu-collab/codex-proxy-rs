@@ -442,8 +442,17 @@ async fn input_plugin_runs_while_a_real_socket_write_is_blocked() {
     let (trace, mut socket, server) =
         start_active_response_with_middleware(Some(frozen), "/custom/websocket").await;
     trace.release_terminal.notify_one();
-    // 客户端不读取 64 MiB 输出，真实 TCP 写入将受接收窗口背压
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    // 仅窥视帧头以确认写入开始，不消费 64 MiB 输出，保留真实 TCP 接收窗口背压
+    let MaybeTlsStream::Plain(transport) = socket.get_ref() else {
+        panic!("test server must use plain TCP")
+    };
+    let mut frame_header = [0; 1];
+    let received = tokio::time::timeout(Duration::from_secs(2), transport.peek(&mut frame_header))
+        .await
+        .expect("terminal output must start")
+        .expect("peek terminal frame");
+    assert_eq!(received, 1);
+    assert_eq!(frame_header[0] & 0x0f, 2);
     assert!(!trace.finalized.load(Ordering::SeqCst));
     socket
         .send(ClientMessage::Text("signal".into()))

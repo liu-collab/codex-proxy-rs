@@ -189,7 +189,6 @@ async fn facts_are_readable_without_replacing_or_duplicating_the_original_execut
             .with_status_code(200)
             .with_request_id(OpaqueUpstreamValue::new("response-request-id"))
             .with_service_tier_if_valid("priority")
-            .with_upstream_response_model_if_valid("returned-model")
             .with_client_headers(vec![ProviderResponseHeader::new(
                 "set-cookie",
                 Bytes::from_static(b"fixture=secret"),

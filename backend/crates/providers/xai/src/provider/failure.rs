@@ -547,6 +547,13 @@ pub(super) fn map_transport_error_with_state(
         kind,
         forced_send_state.unwrap_or_else(|| error.send_state()),
     );
+    if kind == ProviderErrorKind::InvalidRequest && error.send_state() == UpstreamSendState::NotSent
+    {
+        mapped = mapped.with_retry_prohibited();
+    }
+    if let Some(fields) = error.upstream_failure_fields() {
+        mapped = mapped.with_upstream_failure_fields(fields.clone());
+    }
     if let Some(status) = error.status() {
         mapped = mapped.with_status(status);
         if allow_explicit_replay

@@ -2,7 +2,9 @@
 import type { Account, AccountProfileStatisticsResponse } from '@/api'
 
 import { UserRound } from '@lucide/vue'
+
 import { computed, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { accountProfileAvatarUrl } from '@/api'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
@@ -13,11 +15,15 @@ const props = defineProps<{
   profile: AccountProfileStatisticsResponse | null
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const imageFailed = shallowRef(false)
 const displayName = computed(
-  () => props.profile?.displayName || props.profile?.username || props.account.email || props.account.name || '账号用户',
+  () => props.profile?.displayName || props.profile?.username || props.account.email || props.account.name || t('accounts.profile.accountUser'),
 )
-const username = computed(() => (props.profile?.username ? `@${props.profile?.username.replace(/^@/, '')}` : null))
+const username = computed(() => (props.profile?.username
+  ? `@${props.profile?.username.replace(/^@/, '')}`
+  : null))
 const accountIdentity = computed(() => props.account.email?.trim() || props.account.accountId?.trim())
 const initial = computed(() => Array.from(displayName.value.trim())[0]?.toUpperCase() || null)
 const avatarToneClass = computed(() =>
@@ -25,7 +31,9 @@ const avatarToneClass = computed(() =>
 )
 const avatarUrl = computed(() => {
   const sourceUrl = props.profile?.imageUrl?.trim()
-  return props.account.capabilities.avatar && sourceUrl ? accountProfileAvatarUrl(props.account.id, sourceUrl) : null
+  return props.account.capabilities.avatar && sourceUrl
+    ? accountProfileAvatarUrl(props.account.id, sourceUrl)
+    : null
 })
 watch(
   avatarUrl,
@@ -48,7 +56,7 @@ watch(
         <img
           v-if="avatarUrl && !imageFailed"
           :src="avatarUrl"
-          :alt="`${displayName} 的头像`"
+          :alt="t('accounts.profile.avatarFor', { displayName })"
           class="size-full object-cover"
           referrerpolicy="no-referrer"
           @error="imageFailed = true"

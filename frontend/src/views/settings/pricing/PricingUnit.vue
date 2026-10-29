@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { ZIconButton, ZPopover } from '@codex-proxy/ui'
+
 import { Info } from '@lucide/vue'
 import { shallowRef, useId } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const infoOpen = shallowRef(false)
 const infoId = useId()
@@ -12,7 +16,7 @@ const infoId = useId()
     <template #reference>
       <ZIconButton
         size="small"
-        aria-label="价格单位：美元 / 百万 Token，查看定价说明"
+        :aria-label="t('settings.pricing.unitHelp')"
         :title="undefined"
         class="hover:bg-transparent! active:bg-transparent!"
         :aria-expanded="infoOpen"
@@ -23,13 +27,13 @@ const infoId = useId()
     </template>
     <div :id="infoId" class="grid w-72 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
       <p class="m-0 font-emphasis text-cp-text">
-        单价单位：USD / 1M Tokens
+        {{ t('settings.pricing.unitPriceUnitUsdMTokens') }}
       </p>
       <p class="m-0">
-        人工覆盖优先于同步价目，再继承内置价格，仅影响本地估算与金额限额
+        {{ t('settings.pricing.priorityHelp') }}
       </p>
       <p class="m-0">
-        表中为标准档生效价，图像模型显示图像 Token 价格，划线为来源价，其他档位在编辑中查看
+        {{ t('settings.pricing.tableHelp') }}
       </p>
     </div>
   </ZPopover>

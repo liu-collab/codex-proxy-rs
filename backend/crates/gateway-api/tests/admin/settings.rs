@@ -65,13 +65,7 @@ fn update_body() -> Value {
         "usageRetentionDays": 31,
         "opsEventRetentionDays": 31,
         "auditRetentionDays": 91,
-        "accountAutoFreezeEnabled": true,
-        "accountAutoFreezeThreshold": 12,
-        "accountAutoFreezeWindowSeconds": 600,
-        "accountAutoFreezeDurationSeconds": 7200,
-        "accountAutoFreezeProbeEnabled": true,
-        "accountAutoFreezeProbeModel": null,
-        "accountAutoFreezeAdaptiveConcurrency": true,
+        "accountErrorProtection": gateway_core::account::AccountErrorProtection::default(),
         "accountWarmupEnabled": false,
         "accountWarmupScheduleTime": "08:00",
         "accountWarmupModel": null,
@@ -182,6 +176,87 @@ fn privacy_policy_is_required_and_rejects_unknown_contract_fields() {
     assert!(serde_json::from_value::<UpdateRuntimeSettingsRequest>(missing).is_err());
     let mut unknown = update_body();
     unknown["codexPrivacyPolicy"]["unknownField"] = json!(true);
+    assert!(serde_json::from_value::<UpdateRuntimeSettingsRequest>(unknown).is_err());
+}
+
+#[tokio::test]
+async fn error_protection_rules_round_trip_and_invalid_policy_does_not_replace_them() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let mut body = update_body();
+    let policy = json!({
+        "enabled": true,
+        "rules": [{
+            "id": "custom-rejection", "name": "自定义上游拒绝",
+            "conditions": [
+                {"field": "provider", "operator": "equals", "values": ["openai", "xai"], "ignoreCase": false},
+                {"field": "code", "operator": "equals", "values": ["custom_vendor_rejection", null], "ignoreCase": true},
+                {"field": "message", "operator": "contains", "values": ["please pause"], "ignoreCase": false}
+            ]
+        }],
+        "threshold": 3, "windowSeconds": 120, "durationSeconds": 300,
+        "probeEnabled": false, "probeModel": null
+    });
+    body["accountErrorProtection"] = policy.clone();
+    let response = app(fixture.state())
+        .oneshot(request(
+            Method::POST,
+            "/api/admin/settings/update",
+            Some(body.clone()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let saved = response_json(response).await;
+    assert_eq!(saved["data"]["accountErrorProtection"], policy);
+    body["configRevision"] = saved["data"]["configRevision"].clone();
+
+    let mut invalid_policies = Vec::new();
+    let mut empty = policy.clone();
+    empty["rules"] = json!([]);
+    invalid_policies.push(empty);
+    let mut provider_only = policy.clone();
+    provider_only["rules"][0]["conditions"] = json!([
+        {"field": "provider", "operator": "equals", "values": ["openai"], "ignoreCase": false}
+    ]);
+    invalid_policies.push(provider_only);
+    let mut empty_contains = policy.clone();
+    empty_contains["rules"][0]["conditions"][2]["values"] = json!(["  "]);
+    invalid_policies.push(empty_contains);
+    for invalid in invalid_policies {
+        body["accountErrorProtection"] = invalid;
+        let response = app(fixture.state())
+            .oneshot(request(
+                Method::POST,
+                "/api/admin/settings/update",
+                Some(body.clone()),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    }
+    let response = app(fixture.state())
+        .oneshot(request(Method::GET, "/api/admin/settings", None))
+        .await
+        .unwrap();
+    let loaded = response_json(response).await;
+    assert_eq!(loaded["data"]["accountErrorProtection"], policy);
+    assert_eq!(
+        loaded["data"]["configRevision"],
+        saved["data"]["configRevision"]
+    );
+}
+
+#[test]
+fn error_protection_requires_an_explicit_policy_in_settings_replacement() {
+    let mut missing = update_body();
+    missing
+        .as_object_mut()
+        .unwrap()
+        .remove("accountErrorProtection");
+    assert!(serde_json::from_value::<UpdateRuntimeSettingsRequest>(missing).is_err());
+    let mut unknown = update_body();
+    unknown["accountErrorProtection"]["unknownField"] = json!(true);
     assert!(serde_json::from_value::<UpdateRuntimeSettingsRequest>(unknown).is_err());
 }
 
@@ -400,13 +475,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             usage_retention_days: 31,
             ops_event_retention_days: 31,
             audit_retention_days: 91,
-            account_auto_freeze_enabled: true,
-            account_auto_freeze_threshold: 12,
-            account_auto_freeze_window_seconds: 600,
-            account_auto_freeze_duration_seconds: 7_200,
-            account_auto_freeze_probe_enabled: true,
-            account_auto_freeze_probe_model: None,
-            account_auto_freeze_adaptive_concurrency: true,
+            account_error_protection: Default::default(),
             account_warmup_enabled: false,
             account_warmup_schedule_time: "08:00".to_owned(),
             account_warmup_model: None,
@@ -453,13 +522,7 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
             "usageRetentionDays": 31,
             "opsEventRetentionDays": 31,
             "auditRetentionDays": 91,
-            "accountAutoFreezeEnabled": true,
-            "accountAutoFreezeThreshold": 12,
-            "accountAutoFreezeWindowSeconds": 600,
-            "accountAutoFreezeDurationSeconds": 7200,
-                "accountAutoFreezeProbeEnabled": true,
-                "accountAutoFreezeProbeModel": null,
-                "accountAutoFreezeAdaptiveConcurrency": true,
+            "accountErrorProtection": gateway_core::account::AccountErrorProtection::default(),
                 "accountWarmupEnabled": false,
                 "accountWarmupScheduleTime": "08:00",
                 "accountWarmupModel": null,
@@ -472,16 +535,15 @@ fn settings_response_should_cover_the_full_runtime_settings_contract() {
 }
 
 #[test]
-fn settings_service_contract_stays_flat_and_rejects_unknown_fields() {
+fn settings_service_contract_flattens_values_and_rejects_unknown_fields() {
     use gateway_admin::model::settings::{ReplaceRuntimeSettings, RuntimeSettings};
 
     let current = super::test_runtime_settings();
-    assert_eq!(
-        serde_json::from_slice::<RuntimeSettings>(&serde_json::to_vec(&current).unwrap()).unwrap(),
-        current
-    );
     let mut record = serde_json::to_value(&current).unwrap();
-    assert!(record.get("values").is_none());
+    assert_eq!(
+        record["refresh_margin_seconds"],
+        current.values.refresh_margin_seconds
+    );
     assert_eq!(
         serde_json::from_value::<RuntimeSettings>(record.clone()).unwrap(),
         current
@@ -490,13 +552,11 @@ fn settings_service_contract_stays_flat_and_rejects_unknown_fields() {
     assert!(serde_json::from_value::<RuntimeSettings>(record).is_err());
 
     let command = ReplaceRuntimeSettings::from(current);
-    assert_eq!(
-        serde_json::from_slice::<ReplaceRuntimeSettings>(&serde_json::to_vec(&command).unwrap())
-            .unwrap(),
-        command
-    );
     let mut wire = serde_json::to_value(&command).unwrap();
-    assert!(wire.get("values").is_none());
+    assert_eq!(
+        wire["refresh_margin_seconds"],
+        command.values.refresh_margin_seconds
+    );
     assert_eq!(
         serde_json::from_value::<ReplaceRuntimeSettings>(wire.clone()).unwrap(),
         command
@@ -1430,10 +1490,10 @@ async fn guardian_reservation_round_trips_and_rejects_invalid_values() {
 
 #[tokio::test]
 async fn account_affinity_and_rotation_budget_round_trip_and_reject_invalid_values() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let mut body = update_body();
     for (mode, rotations, ttl) in [("relaxed", 0, 1), ("preferred", 3, 24), ("strict", 31, 720)] {
-        let fixture = AdminTestFixture::new().await;
-        fixture.auth.insert_session("valid-session");
-        let mut body = update_body();
         body["openaiAccountAffinity"] = json!(mode);
         body["maxAccountRotations"] = json!(rotations);
         body["openaiSessionAffinityTtlHours"] = json!(ttl);
@@ -1441,7 +1501,7 @@ async fn account_affinity_and_rotation_budget_round_trip_and_reject_invalid_valu
             .oneshot(request(
                 Method::POST,
                 "/api/admin/settings/update",
-                Some(body),
+                Some(body.clone()),
             ))
             .await
             .unwrap();
@@ -1450,7 +1510,9 @@ async fn account_affinity_and_rotation_budget_round_trip_and_reject_invalid_valu
         assert_eq!(response["data"]["openaiAccountAffinity"], mode);
         assert_eq!(response["data"]["maxAccountRotations"], rotations);
         assert_eq!(response["data"]["openaiSessionAffinityTtlHours"], ttl);
+        body["configRevision"] = response["data"]["configRevision"].clone();
     }
+    let saved = fixture.settings.settings.lock().unwrap().clone();
     // 类型错误沿用 AdminJson 的 422，合法类型越界由字段校验返回 400
     for (field, value, expected_status) in [
         (
@@ -1485,20 +1547,19 @@ async fn account_affinity_and_rotation_budget_round_trip_and_reject_invalid_valu
             StatusCode::UNPROCESSABLE_ENTITY,
         ),
     ] {
-        let fixture = AdminTestFixture::new().await;
-        fixture.auth.insert_session("valid-session");
-        let mut body = update_body();
-        body[field] = value;
+        let mut invalid = body.clone();
+        invalid[field] = value;
         let response = app(fixture.state())
             .oneshot(request(
                 Method::POST,
                 "/api/admin/settings/update",
-                Some(body),
+                Some(invalid),
             ))
             .await
             .unwrap();
         assert_eq!(response.status(), expected_status, "{field}");
     }
+    assert_eq!(*fixture.settings.settings.lock().unwrap(), saved);
 }
 
 #[test]

@@ -3,6 +3,8 @@ import { ZButton, ZInput } from '@codex-proxy/ui'
 
 import { Plus, Search, Trash2 } from '@lucide/vue'
 
+import { useI18n } from 'vue-i18n'
+
 defineProps<{
   batchDeleting: boolean
   selectedCount: number
@@ -13,6 +15,8 @@ const emit = defineEmits<{
   deleteSelected: []
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const search = defineModel<string>('search', { required: true })
 </script>
 
@@ -20,17 +24,17 @@ const search = defineModel<string>('search', { required: true })
   <div
     class="flex w-full flex-wrap items-center gap-3"
     role="group"
-    aria-label="API Key 筛选与操作"
+    :aria-label="t('keys.filters.apiKeyFilteringAndOperations')"
   >
     <div class="min-w-0 flex-1 md:w-96 md:flex-none">
-      <ZInput v-model="search" placeholder="搜索名称或标签" aria-label="搜索 API Key 名称或标签" class="w-full">
+      <ZInput v-model="search" :placeholder="t('keys.filters.searchPlaceholder')" :aria-label="t('keys.filters.searchLabel')" class="w-full">
         <template #prefix>
           <Search class="size-4.5 text-cp-text-tertiary" />
         </template>
       </ZInput>
     </div>
 
-    <div class="flex shrink-0 items-center justify-end gap-2 md:ml-auto">
+    <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 md:ml-auto">
       <ZButton
         v-if="selectedCount > 0"
         type="danger" variant="plain"
@@ -40,13 +44,13 @@ const search = defineModel<string>('search', { required: true })
         <template #icon>
           <Trash2 class="size-4" />
         </template>
-        删除选中 ({{ selectedCount }})
+        {{ t('keys.filters.deleteSelected', { count: selectedCount }) }}
       </ZButton>
       <ZButton type="primary" @click="emit('create')">
         <template #icon>
           <Plus class="size-4" />
         </template>
-        创建 API Key
+        {{ t('common.actions.create') }}
       </ZButton>
     </div>
   </div>

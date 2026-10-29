@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     PluginUpstreamAdapter,
-    event::{DecodedEvent, EventDecodeError, EventDecoder},
+    event::{DecodedEvent, EventDecoder},
     failure::{fault_error, invalid, rpc_error},
 };
 use crate::{
@@ -75,12 +75,34 @@ pub(super) fn execute(
         let result = state.next().await;
         match result {
             Ok(event) => Ok(Some((event, state))),
-            Err(error) => Err(state.invocation.account.record_failure(error).await),
+            Err(error) => {
+                let error = state.finish_error(error);
+                Err(state.invocation.account.record_failure(error).await)
+            }
         }
     }))
 }
 
 impl Execution {
+    fn finish_error(&mut self, mut error: ProviderError) -> ProviderError {
+        if let Some(active) = self.active.take() {
+            let managed = Arc::clone(&active.managed);
+            // RpcStream 析构同步撤销回调并封存未完成发送，证明不能早于这一步
+            drop(active);
+            if error.kind() == ProviderErrorKind::RateLimited
+                && error.upstream_status() == Some(429)
+                && error.send_state() == UpstreamSendState::Sent
+                && managed.send_state.get() == UpstreamSendState::Sent
+                && managed.replay.rejected_once()
+                && !self.decoder.replay_blocked
+                && !self.invocation.context.cancellation().is_cancelled()
+            {
+                error = error.with_replay_safe();
+            }
+        }
+        error
+    }
+
     async fn next(&mut self) -> Result<gateway_core::event::ProviderEvent, ProviderError> {
         if self.active.is_none() {
             self.active = Some(self.begin().await?);
@@ -94,27 +116,15 @@ impl Execution {
             biased;
             () = cancellation.cancelled() => return Err(ProviderError::new(ProviderErrorKind::Cancelled, active.managed.send_state.get())),
             result = active.stream.next() => result.map_err(|error| rpc_error(error, active.managed.send_state.get()))?,
-        }.ok_or_else(|| {
-            self.adapter.session.invalid_response(Stage::Upstream);
-            invalid(active.managed.send_state.get())
-        })?;
-        let mut decoded = self
-            .decoder
-            .decode(
-                &chunk,
-                &self.adapter.declaration.protocol,
-                self.adapter.declaration.transport.as_str(),
-                self.invocation.account.as_ref(),
-                active.managed.send_state.get(),
-                self.invocation.context.timing_started_at(),
-            )
-            .map_err(|error| match error {
-                EventDecodeError::Invalid(error) => {
-                    self.adapter.session.invalid_response(Stage::Upstream);
-                    error
-                }
-                EventDecodeError::Upstream(error) => error,
-            })?;
+        }.ok_or_else(|| invalid(active.managed.send_state.get()))?;
+        let mut decoded = self.decoder.decode(
+            &chunk,
+            &self.adapter.declaration.protocol,
+            self.adapter.declaration.transport.as_str(),
+            self.invocation.account.as_ref(),
+            active.managed.send_state.get(),
+            self.invocation.context.timing_started_at(),
+        )?;
         if self.decoder.completed {
             // 先确认 RPC 正常终结，再发布唯一 Completed；否则 Core 不会继续 poll 尾部错误
             let terminal = async {
@@ -124,7 +134,6 @@ impl Execution {
                     result = active.stream.next() => result.map_err(|error| rpc_error(error, active.managed.send_state.get()))?,
                 };
                 if tail.is_some() {
-                    self.adapter.session.invalid_response(Stage::Upstream);
                     return Err(invalid(active.managed.send_state.get()));
                 }
                 self.decoder.finish(active.managed.send_state.get())?;
@@ -165,6 +174,11 @@ impl Execution {
         if invocation.operation.protocol() != declaration.protocol
             || invocation.metadata.provider().as_str() != declaration.provider.as_str()
             || invocation.metadata.provider_account_id() != invocation.account.account_id()
+            || (!declaration.account_ids.is_empty()
+                && !declaration
+                    .account_ids
+                    .iter()
+                    .any(|id| id == invocation.account.account_id().as_str()))
             || !declaration
                 .authentication_kinds
                 .iter()
@@ -175,7 +189,7 @@ impl Execution {
         let timeout = invocation
             .context
             .deadline()
-            .bounded(self.adapter.session.maximum_call_timeout());
+            .bounded(self.adapter.session.budget(Stage::Upstream));
         if timeout.is_zero() || invocation.context.cancellation().is_cancelled() {
             return Err(ProviderError::new(
                 ProviderErrorKind::Cancelled,

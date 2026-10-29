@@ -1,6 +1,6 @@
 interface:
   display_name: "cpr-dev-guide"
-  short_description: "前后端开发、排障与审查入口，按任务和文件匹配规范并验证"
-  default_prompt: "使用 $cpr-dev-guide 按请求和实际文件匹配前后端规范，读取命中项后完成已授权的开发或审查，并自审、验证和报告结果。"
+  short_description: "开发、排障与审查入口，按行为影响匹配领域边界并验证实现"
+  default_prompt: "使用 $cpr-dev-guide 按请求、行为影响和实际文件匹配领域必读规范，读完职责边界再确定方案，完成已授权的开发或审查、自审与验证。"
 policy:
   allow_implicit_invocation: true

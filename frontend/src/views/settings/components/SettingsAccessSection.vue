@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ZConfirmDialog } from '@codex-proxy/ui'
+
 import { onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAdminApiKey } from '../composables/useAdminApiKey'
 import AdminApiKeyCard from './AdminApiKeyCard.vue'
 import AdminPasswordCard from './AdminPasswordCard.vue'
@@ -13,6 +15,8 @@ defineProps<{
   desktopError: string
   cliError: string
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 const minCodexDesktopVersion = defineModel<string>('minCodexDesktopVersion', { required: true })
 const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required: true })
@@ -49,7 +53,7 @@ onMounted(loadStatus)
       @copy="copyGeneratedKey"
     />
 
-    <fieldset :disabled="disabled" class="m-0 grid min-w-0 gap-5 border-0 p-0" aria-label="访问限制">
+    <fieldset :disabled="disabled" class="m-0 grid min-w-0 gap-5 border-0 p-0" :aria-label="t('settings.access.accessRestrictions')">
       <ClientVersionSettings
         v-model:min-codex-desktop-version="minCodexDesktopVersion"
         v-model:min-codex-cli-version="minCodexCliVersion"
@@ -62,15 +66,15 @@ onMounted(loadStatus)
 
     <ZConfirmDialog
       v-model="showDeleteModal"
-      title="删除管理员 API Key"
-      description="删除后外部系统将无法继续使用该 Key 调用管理接口"
+      :title="t('settings.access.deleteAdminApiKey')"
+      :description="t('settings.access.deleteKeyDescription')"
       destructive
-      confirm-text="确认删除"
+      :confirm-text="t('common.actions.delete')"
       :loading="deleting"
       @confirm="remove"
     >
       <p class="m-0">
-        确定要删除当前管理员 API Key 吗？此操作会立即生效
+        {{ t('settings.access.areYouSureYouWantToDelete') }}
       </p>
     </ZConfirmDialog>
   </div>

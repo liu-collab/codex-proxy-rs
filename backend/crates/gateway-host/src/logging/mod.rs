@@ -166,11 +166,20 @@ pub fn initialize_logging(
             .with_span_list(true)
             .with_filter(request_dump_file_filter)
     });
+    // 空 layer 会让禁用 target 的 enabled! 探测遗留过滤状态，影响后续事件
+    let layers: Vec<
+        Box<dyn tracing_subscriber::Layer<tracing_subscriber::Registry> + Send + Sync>,
+    > = [
+        stdout_layer.map(|layer| layer.boxed()),
+        file_layer.map(|layer| layer.boxed()),
+        recovery_file_layer.map(|layer| layer.boxed()),
+        request_dump_file_layer.map(|layer| layer.boxed()),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     tracing_subscriber::registry()
-        .with(stdout_layer)
-        .with(file_layer)
-        .with(recovery_file_layer)
-        .with(request_dump_file_layer)
+        .with(layers)
         .try_init()
         .map_err(|_| LogError::AlreadyInitialized)?;
     Ok(LogGuard {

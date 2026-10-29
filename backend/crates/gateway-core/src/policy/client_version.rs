@@ -100,7 +100,8 @@ impl CodexClientMinVersions {
                 min: min.clone(),
             });
         };
-        if current < min {
+        // 最低版本按 SemVer 优先级比较，构建元数据不影响准入
+        if current.0.cmp_precedence(&min.0).is_lt() {
             return Err(ClientVersionRejection::TooOld {
                 kind,
                 current: current.clone(),

@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { OutboundProxyRecord } from '@/api'
+
 import { ZIconButton, ZMenuItem, ZPopover } from '@codex-proxy/ui'
 import { MoreHorizontal, Pencil, Power, Trash2, Wifi } from '@lucide/vue'
+import { useI18n } from 'vue-i18n'
 
 defineProps<{
   proxy: OutboundProxyRecord
@@ -16,19 +18,21 @@ const emit = defineEmits<{
   toggle: [proxy: OutboundProxyRecord]
   delete: [proxy: OutboundProxyRecord]
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 </script>
 
 <template>
   <div class="flex items-center gap-0.5">
-    <ZIconButton size="small" aria-label="测试代理" :loading="testing && !batchTesting" :disabled="batchTesting || testing || updating" @click="emit('test', proxy)">
+    <ZIconButton size="small" :aria-label="t('proxies.actions.test')" :loading="testing && !batchTesting" :disabled="batchTesting || testing || updating" @click="emit('test', proxy)">
       <Wifi class="size-3.5 text-cp-link" />
     </ZIconButton>
-    <ZIconButton size="small" aria-label="编辑代理" :disabled="testing || updating" @click="emit('edit', proxy)">
+    <ZIconButton size="small" :aria-label="t('proxies.actions.edit')" :disabled="testing || updating" @click="emit('edit', proxy)">
       <Pencil class="size-3.5 text-cp-link" />
     </ZIconButton>
     <ZPopover placement="bottom-end">
       <template #reference="{ open }">
-        <ZIconButton size="small" :aria-label="`${proxy.name} 的更多操作`" :pressed="open" :disabled="testing || updating" :loading="updating">
+        <ZIconButton size="small" :aria-label="t('proxies.actions.moreActionsFor', { name: proxy.name })" :pressed="open" :disabled="testing || updating" :loading="updating">
           <MoreHorizontal class="size-4" />
         </ZIconButton>
       </template>
@@ -38,13 +42,13 @@ const emit = defineEmits<{
             <template #icon>
               <Power class="size-3.5" :class="proxy.enabled ? 'text-cp-warning' : 'text-cp-success'" />
             </template>
-            {{ proxy.enabled ? '禁用代理' : '启用代理' }}
+            {{ proxy.enabled ? t('proxies.actions.disableProxy') : t('proxies.actions.enableProxy') }}
           </ZMenuItem>
           <ZMenuItem type="danger" :disabled="testing || updating" @click="(close(), emit('delete', proxy))">
             <template #icon>
               <Trash2 class="size-3.5" />
             </template>
-            删除代理
+            {{ t('proxies.actions.deleteProxy') }}
           </ZMenuItem>
         </div>
       </template>

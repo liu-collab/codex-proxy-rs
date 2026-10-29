@@ -1,12 +1,13 @@
 import type { AccountResetCredit } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, shallowReactive, shallowRef, watch } from 'vue'
-
 import {
   consumeAccountResetCredit,
   getAccountResetCredits,
 } from '@/api'
 import { ApiError } from '@/api/request'
+
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, generateRequestId } from '@/utils/operation'
 
 interface PendingResetCreditOperation {
@@ -189,14 +190,16 @@ export function useAccountResetCredits(options: {
         || (result.code === 'already_redeemed' && operation.hasTransportFailure)
       target.pendingOperation = null
       if (!confirmed) {
-        ZNotification.error({ message: resetResultMessage(result.code) })
+        ZNotification.error({
+          message: resetResultMessage(result.code),
+        })
         await loadSessionCredits(target, true)
         return false
       }
 
       const successMessage = result.code === 'already_redeemed'
-        ? '上次重置已完成'
-        : '额度已重置'
+        ? t('accounts.quotaReset.lastResetCompleted')
+        : t('accounts.quotaReset.resetSuccess')
       // 消费已确认就结束交互，账号页负责额度回读，避免收起展开行后丢失更新。
       if (session.value === target)
         showConfirm.value = false
@@ -212,11 +215,16 @@ export function useAccountResetCredits(options: {
           ...operation,
           hasTransportFailure: true,
         }
-        ZNotification.warning({ message: '消费结果暂不确定，重试会复用同一个请求标识', ...({ duration: 5000 }) })
+        ZNotification.warning({
+          message: t('accounts.quotaReset.resultUnknown'),
+          ...({ duration: 5000 }),
+        })
       }
       else {
         target.pendingOperation = null
-        ZNotification.error({ message: errorMessage(error, '额度重置失败') })
+        ZNotification.error({
+          message: errorMessage(error, t('accounts.quotaReset.quotaResetFailed')),
+        })
         await loadSessionCredits(target, true)
       }
       return false
@@ -277,12 +285,12 @@ function isAmbiguousConsumeError(error: unknown) {
 function resetResultMessage(code: string) {
   switch (code) {
     case 'already_redeemed':
-      return '该重置操作已被处理，请先刷新重置卡列表'
+      return t('accounts.quotaReset.alreadyProcessed')
     case 'no_credit':
-      return '当前没有可用的主动重置卡'
+      return t('accounts.quotaReset.noCredits')
     case 'nothing_to_reset':
-      return '当前额度窗口不需要重置'
+      return t('accounts.quotaReset.resetNotNeeded')
     default:
-      return `上游未执行额度重置：${code}`
+      return t('accounts.quotaReset.upstreamDeclined', { code })
   }
 }

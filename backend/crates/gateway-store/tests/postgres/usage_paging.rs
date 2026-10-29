@@ -10,6 +10,8 @@ use super::{TestDatabase, analytics::seed, observability_repository};
 
 #[tokio::test]
 async fn projected_page_counts_correct_pending_moves_deletions_and_model_or() {
+    use gateway_admin::model::observability::UsageRecordStatus;
+
     let Some(database) = TestDatabase::create("usage_projected_pages").await else {
         return;
     };
@@ -35,10 +37,10 @@ async fn projected_page_counts_correct_pending_moves_deletions_and_model_or() {
                 .execute(&database.pool)
                 .await
                 .unwrap();
-            sqlx::query("update model_requests set outcome='failed' where id='projected_21'")
-                .execute(&database.pool)
-                .await
-                .unwrap();
+            sqlx::query("update model_requests set outcome='failed',upstream_model_id='model_b',recovery_request_id='projected_22',recovered_at=$1,recovery_attempt_count=1,request_observation_json=jsonb_set(request_observation_json,'{recovery}',jsonb_build_object('retryDelayMs',0,'totalLatencyMs',1)) where id='projected_21'")
+                .bind(start + TimeDelta::minutes(22)).execute(&database.pool).await.unwrap();
+            sqlx::query("update model_requests set outcome=case id when 'projected_23' then 'running' when 'projected_24' then 'cancelled' else 'incomplete' end,completed_at=case when id='projected_23' then null else completed_at end,requested_model_id=case when id in ('projected_24','projected_25') then null else requested_model_id end,upstream_model_id=case when id='projected_25' then 'model_b' else upstream_model_id end where id in ('projected_23','projected_24','projected_25')")
+                .execute(&database.pool).await.unwrap();
             seed(
                 &database.pool,
                 "projected_new",
@@ -56,37 +58,39 @@ async fn projected_page_counts_correct_pending_moves_deletions_and_model_or() {
             )
             .unwrap();
             for model in [None, Some("model_a"), Some("model_b")] {
-                // 真值只读取实际源版本，不依赖被测汇总或分页辅助函数
-                let expected:Vec<String> = sqlx::query_scalar("select id from model_requests where started_at >= $1 and started_at < $2 and outcome='succeeded' and ($3::text is null or requested_model_id=$3 or upstream_model_id=$3) order by started_at desc,id desc")
-                    .bind(range.start).bind(range.end).bind(model).fetch_all(&database.pool).await.unwrap();
-                for current_page in [1, 3, 6, 8] {
-                    let page = repository
-                        .list_usage_records(UsageRecordQuery {
-                            status: Default::default(),
-                            range,
-                            filter: UsageRecordFilter {
-                                client_api_key_ref: Some("key_analytics".to_owned()),
-                                model: model.map(str::to_owned),
-                                ..Default::default()
-                            },
-                            current_page,
-                            page_size: ObservabilityPageSize::new(7).unwrap(),
-                        })
-                        .await
-                        .unwrap();
-                    assert_eq!(
-                        page.total,
-                        expected.len() as u64,
-                        "stage={stage}, edge={edge}, model={model:?}"
-                    );
-                    assert_eq!(
-                        page.items.iter().map(|row| &row.id).collect::<Vec<_>>(),
-                        expected
-                            .iter()
-                            .skip((current_page as usize - 1) * 7)
-                            .take(7)
-                            .collect::<Vec<_>>()
-                    );
+                for status in [UsageRecordStatus::Success, UsageRecordStatus::All] {
+                    // 夹具中成功记录均已交付；真值只读源版本，不依赖投影或分页辅助函数
+                    let expected:Vec<String> = sqlx::query_scalar("select id from model_requests where started_at >= $1 and started_at < $2 and ($4::bool or outcome='succeeded') and ($3::text is null or requested_model_id=$3 or upstream_model_id=$3) order by started_at desc,id desc")
+                        .bind(range.start).bind(range.end).bind(model).bind(status == UsageRecordStatus::All).fetch_all(&database.pool).await.unwrap();
+                    for current_page in [1, 3, 6, 8] {
+                        let page = repository
+                            .list_usage_records(UsageRecordQuery {
+                                status,
+                                range,
+                                filter: UsageRecordFilter {
+                                    client_api_key_ref: Some("key_analytics".to_owned()),
+                                    model: model.map(str::to_owned),
+                                    ..Default::default()
+                                },
+                                current_page,
+                                page_size: ObservabilityPageSize::new(7).unwrap(),
+                            })
+                            .await
+                            .unwrap();
+                        assert_eq!(
+                            page.total,
+                            expected.len() as u64,
+                            "stage={stage}, edge={edge}, model={model:?}, status={status:?}"
+                        );
+                        assert_eq!(
+                            page.items.iter().map(|row| &row.id).collect::<Vec<_>>(),
+                            expected
+                                .iter()
+                                .skip((current_page as usize - 1) * 7)
+                                .take(7)
+                                .collect::<Vec<_>>()
+                        );
+                    }
                 }
             }
         }
@@ -279,6 +283,258 @@ async fn ops_pages_merge_sources_across_minutes_with_stable_ties() {
                 .map(|(_, id)| id)
                 .collect::<Vec<_>>(),
             "page={current_page}",
+        );
+    }
+    database.close().await;
+}
+
+#[tokio::test]
+async fn all_status_counts_keep_filters_delivery_rules_and_time_boundaries() {
+    use gateway_admin::model::observability::UsageRecordStatus;
+
+    let Some(database) = TestDatabase::create("usage_all_counts").await else {
+        return;
+    };
+    let start = chrono::DateTime::parse_from_rfc3339("2026-09-01T10:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    for (id, seconds, outcome) in [
+        ("count_success", 0, "succeeded"),
+        ("count_failed", 10, "failed"),
+        ("count_running", 60, "running"),
+        ("count_cancelled", 70, "cancelled"),
+        ("count_incomplete", 120, "incomplete"),
+        ("count_success_ws", 130, "succeeded"),
+        ("count_prewarm", 140, "succeeded"),
+        ("count_uncommitted", 145, "succeeded"),
+        ("count_before", -1, "failed"),
+        ("count_end", 180, "failed"),
+    ] {
+        seed(&database.pool, id, start + TimeDelta::seconds(seconds), &[]).await;
+        sqlx::query("update model_requests set outcome=$2,provider_kind='openai',completed_at=case when $2='running' then null else completed_at end,input_tokens=case when $2='succeeded' then input_tokens else null end,output_tokens=case when $2='succeeded' then output_tokens else null end,total_tokens=case when $2='succeeded' then total_tokens else null end where id=$1")
+            .bind(id).bind(outcome).execute(&database.pool).await.unwrap();
+    }
+    sqlx::query("update model_requests set recovery_request_id='count_success',recovered_at=$1,recovery_attempt_count=1,request_observation_json=jsonb_set(request_observation_json,'{recovery}',jsonb_build_object('retryDelayMs',1000,'totalLatencyMs',2000)) where id='count_failed'")
+        .bind(start + TimeDelta::minutes(2)).execute(&database.pool).await.unwrap();
+    sqlx::query("update model_requests set upstream_model_id='model_a' where id='count_failed'")
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    sqlx::query("update model_requests set requested_model_id=null,upstream_model_id='model_b' where id='count_incomplete'")
+        .execute(&database.pool).await.unwrap();
+    sqlx::query("update model_requests set client_api_key_ref='key_other',requested_model_id='model_b' where id='count_running'")
+        .execute(&database.pool).await.unwrap();
+    sqlx::query("update model_requests set client_transport='websocket',client_status_code=null,requested_model_id='model_b' where id='count_success_ws'")
+        .execute(&database.pool).await.unwrap();
+    sqlx::query("update model_requests set request_kind='prewarm' where id='count_prewarm'")
+        .execute(&database.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "update model_requests set downstream_committed_at=null where id='count_uncommitted'",
+    )
+    .execute(&database.pool)
+    .await
+    .unwrap();
+    // 恢复错误仍属于列表；尚未投影的源记录也必须参与精确计数
+    let repo = observability_repository(&database.pool);
+    let range = ObservabilityRange::new(start, start + TimeDelta::minutes(3)).unwrap();
+    let all = vec![
+        "count_success_ws",
+        "count_incomplete",
+        "count_cancelled",
+        "count_running",
+        "count_failed",
+        "count_success",
+    ];
+    let model_a = vec!["count_cancelled", "count_failed", "count_success"];
+    for (filter, expected) in [
+        (UsageRecordFilter::default(), all.clone()),
+        (
+            UsageRecordFilter {
+                search: Some("model_".into()),
+                ..Default::default()
+            },
+            all,
+        ),
+        (
+            UsageRecordFilter {
+                client_api_key_ref: Some("key_analytics".into()),
+                ..Default::default()
+            },
+            vec![
+                "count_success_ws",
+                "count_incomplete",
+                "count_cancelled",
+                "count_failed",
+                "count_success",
+            ],
+        ),
+        (
+            UsageRecordFilter {
+                model: Some("model_a".into()),
+                ..Default::default()
+            },
+            model_a.clone(),
+        ),
+        (
+            UsageRecordFilter {
+                provider_kind: Some("openai".into()),
+                model: Some("model_a".into()),
+                ..Default::default()
+            },
+            model_a.clone(),
+        ),
+        (
+            UsageRecordFilter {
+                provider_kind: Some("other".into()),
+                model: Some("model_a".into()),
+                ..Default::default()
+            },
+            vec![],
+        ),
+        (
+            UsageRecordFilter {
+                provider_kind: Some("openai".into()),
+                model: Some("model_a".into()),
+                outcome: Some("failed".into()),
+                ..Default::default()
+            },
+            vec!["count_failed"],
+        ),
+        (
+            UsageRecordFilter {
+                search: Some("model_a".into()),
+                ..Default::default()
+            },
+            model_a,
+        ),
+        (
+            UsageRecordFilter {
+                search: Some("no_such_model".into()),
+                ..Default::default()
+            },
+            vec![],
+        ),
+        (
+            UsageRecordFilter {
+                model: Some("model_b".into()),
+                ..Default::default()
+            },
+            vec!["count_success_ws", "count_incomplete", "count_running"],
+        ),
+        (
+            UsageRecordFilter {
+                provider_kind: Some("openai".into()),
+                model: Some("model_b".into()),
+                ..Default::default()
+            },
+            vec!["count_success_ws", "count_incomplete", "count_running"],
+        ),
+        (
+            UsageRecordFilter {
+                outcome: Some("failed".into()),
+                ..Default::default()
+            },
+            vec!["count_failed"],
+        ),
+        (
+            UsageRecordFilter {
+                request_id: Some("count_failed".into()),
+                ..Default::default()
+            },
+            vec!["count_failed"],
+        ),
+        (
+            UsageRecordFilter {
+                transport: Some("websocket".into()),
+                ..Default::default()
+            },
+            vec!["count_success_ws"],
+        ),
+        (
+            UsageRecordFilter {
+                provider_kind: Some("other".into()),
+                ..Default::default()
+            },
+            vec![],
+        ),
+    ] {
+        for status in [UsageRecordStatus::All, UsageRecordStatus::Error] {
+            let expected = expected
+                .iter()
+                .copied()
+                .filter(|id| {
+                    status == UsageRecordStatus::All
+                        || ["count_failed", "count_incomplete"].contains(id)
+                })
+                .collect::<Vec<_>>();
+            let mut actual = Vec::new();
+            for current_page in 1..=4 {
+                let page = repo
+                    .list_usage_records(UsageRecordQuery {
+                        status,
+                        range,
+                        filter: filter.clone(),
+                        current_page,
+                        page_size: ObservabilityPageSize::new(2).unwrap(),
+                    })
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    page.total,
+                    expected.len() as u64,
+                    "{status:?} {filter:?} page {current_page}"
+                );
+                actual.extend(page.items.into_iter().map(|item| item.id));
+            }
+            assert_eq!(actual, expected, "{status:?} {filter:?}");
+        }
+    }
+    super::drain_analytics(&database.pool).await;
+    // 聚合已经发布，但跨维筛选仍走源表；已恢复错误不能因汇总不包含它而漏计
+    let page = repo
+        .list_usage_records(UsageRecordQuery {
+            status: UsageRecordStatus::All,
+            range,
+            filter: UsageRecordFilter {
+                client_api_key_ref: Some("key_analytics".into()),
+                transport: Some("http_sse".into()),
+                model: Some("model_a".into()),
+                ..Default::default()
+            },
+            current_page: 2,
+            page_size: ObservabilityPageSize::new(2).unwrap(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(page.total, 3);
+    assert_eq!(page.items[0].id, "count_success");
+    // 发布成功聚合后，供应方与模型仍共同限制源表非成功记录
+    for (provider, total, expected) in [("openai", 3, vec!["count_success"]), ("other", 0, vec![])]
+    {
+        let page = repo
+            .list_usage_records(UsageRecordQuery {
+                status: UsageRecordStatus::All,
+                range,
+                filter: UsageRecordFilter {
+                    provider_kind: Some(provider.into()),
+                    model: Some("model_a".into()),
+                    ..Default::default()
+                },
+                current_page: 2,
+                page_size: ObservabilityPageSize::new(2).unwrap(),
+            })
+            .await
+            .unwrap();
+        assert_eq!(page.total, total, "{provider}");
+        assert_eq!(
+            page.items
+                .into_iter()
+                .map(|item| item.id)
+                .collect::<Vec<_>>(),
+            expected,
+            "{provider}",
         );
     }
     database.close().await;

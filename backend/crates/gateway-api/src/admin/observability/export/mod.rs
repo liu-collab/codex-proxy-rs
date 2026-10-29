@@ -13,6 +13,7 @@ use super::{
 };
 use crate::{auth::SessionState, time::TimePresenter};
 
+mod archive;
 mod privacy;
 
 #[derive(Deserialize)]
@@ -46,24 +47,41 @@ where
         .await
         .map_err(map_service_error)?;
     let time = TimePresenter::new(state.admin_services().timezone());
+    let id = match &bundle.target {
+        DiagnosticTarget::Request(id) | DiagnosticTarget::Operation(id) => id,
+    };
+    let suffix = id
+        .chars()
+        .take(128)
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let disposition = format!("attachment; filename=cpr-diagnostics-{suffix}.zip");
     let document = privacy::redact(document(bundle, time));
-    let body = serde_json::to_vec_pretty(&document).map_err(|_| {
-        map_service_error(gateway_admin::model::AdminError::internal(
-            "诊断文件生成失败",
-        ))
-    })?;
+    let body = tokio::task::spawn_blocking(move || archive::build(&document))
+        .await
+        .map_err(archive_error)?
+        .map_err(archive_error)?;
     Ok((
         [
-            (header::CONTENT_TYPE, "application/json; charset=utf-8"),
-            (
-                header::CONTENT_DISPOSITION,
-                "attachment; filename=diagnostics.json",
-            ),
-            (header::CACHE_CONTROL, "private, no-store"),
-            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::CONTENT_TYPE, "application/zip".to_owned()),
+            (header::CONTENT_DISPOSITION, disposition),
+            (header::CACHE_CONTROL, "private, no-store".to_owned()),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_owned()),
         ],
         body,
     ))
+}
+
+fn archive_error(source: impl Into<gateway_core::error::ErrorSource>) -> AdminError {
+    map_service_error(
+        gateway_admin::model::AdminError::internal("诊断文件生成失败").with_source(source),
+    )
 }
 
 fn document(bundle: DiagnosticBundle, time: TimePresenter) -> Value {
@@ -101,6 +119,7 @@ fn document(bundle: DiagnosticBundle, time: TimePresenter) -> Value {
     }).collect::<Vec<_>>();
     json!({
         "schemaVersion": 5,
+        "exportTruncated": false,
         "source": "gateway.diagnostics",
         "exportPolicy": "support_credentials_redacted",
         "target": target,

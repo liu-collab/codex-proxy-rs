@@ -294,7 +294,7 @@ impl PgObservabilityRepository {
                 "load usage insights snapshot",
                 |mut connection| async move {
                     let mut snapshot = analytics::AnalyticsSnapshot::new(&mut connection).await?;
-                    let (mut overview, trend, costs) = snapshot
+                    let (mut overview, trend, costs, concurrency) = snapshot
                         .insights(range, &filter, granularity, self.timezone)
                         .await?;
                     overview.analytics = snapshot.metadata();
@@ -303,6 +303,7 @@ impl PgObservabilityRepository {
                         overview: admin_usage_overview(overview),
                         trend: trend.into_iter().map(admin_request_metric_point).collect(),
                         costs,
+                        concurrency,
                     })
                 },
             )
@@ -355,16 +356,16 @@ impl PgObservabilityRepository {
         &self,
         range: ObservabilityRange,
         filter: UsageRecordFilter,
-    ) -> StoreResult<UsageOverview> {
+    ) -> StoreResult<UsageSummaryObservation> {
         self.query_budget
             .run(
                 &self.pool,
                 "load usage analytics",
                 |mut connection| async move {
                     let mut snapshot = analytics::AnalyticsSnapshot::new(&mut connection).await?;
-                    let overview = snapshot.overview(range, &filter).await?;
+                    let summary = snapshot.summary(range, &filter).await?;
                     snapshot.finish().await?;
-                    Ok(overview)
+                    Ok(summary)
                 },
             )
             .await
@@ -536,8 +537,8 @@ impl AdminObservabilityStore for PgAdminObservabilityStore {
         &self,
         range: admin_observability::TimeRange,
         filter: admin_observability::UsageFilter,
-    ) -> AdminStoreResult<admin_observability::UsageOverview> {
-        let overview = self
+    ) -> AdminStoreResult<admin_observability::UsageSummaryObservation> {
+        let summary = self
             .repository
             .usage_summary(
                 store_range(range).map_err(observability_error)?,
@@ -545,7 +546,12 @@ impl AdminObservabilityStore for PgAdminObservabilityStore {
             )
             .await
             .map_err(observability_error)?;
-        Ok(admin_usage_overview(overview))
+        Ok(admin_observability::UsageSummaryObservation {
+            analytics: summary.analytics,
+            range: admin_range(summary.range),
+            requests: summary.requests,
+            attempts: admin_attempt_metrics(summary.attempts),
+        })
     }
 
     async fn usage_diagnostics(

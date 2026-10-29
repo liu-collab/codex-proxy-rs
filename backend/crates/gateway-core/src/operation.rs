@@ -830,12 +830,8 @@ impl ProviderHttpRequest {
             && headers
                 .iter()
                 .try_fold(0_usize, |total, header| {
-                    let valid_name = !header.name.is_empty()
-                        && header.name.len() <= 128
-                        && header
-                            .name
-                            .bytes()
-                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-');
+                    let valid_name = header.name.len() <= 128
+                        && http::HeaderName::from_bytes(header.name.as_bytes()).is_ok();
                     let valid_value = header.value.len() <= 8 * 1024
                         && !header
                             .value

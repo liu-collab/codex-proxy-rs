@@ -11,9 +11,10 @@ pub(crate) struct CommandStoreWriters {
     pub(crate) execution: postgres::ExecutionObservationWriter<postgres::PgExecutionStore>,
     pub(crate) client_key_usage: postgres::PgClientApiKeyUsageWriter,
     pub(crate) admission_release: redis::ClientAdmissionReleaseWriter,
+    pub(crate) budget: postgres::ClientBudgetWriter,
 }
 
-/// 短生命周期 CLI 只运行数据面必需的三个写泵，不注册恢复、保留或维护 Worker
+/// 短生命周期 CLI 只运行数据面必需的四个写泵，不注册恢复、保留或维护 Worker
 pub struct CommandStoreDrain {
     cancellation: gateway_core::lifecycle::CancellationToken,
     tasks: Vec<tokio::task::JoinHandle<Result<(), WorkerTaskError>>>,
@@ -31,12 +32,14 @@ impl CommandStoreWriters {
             execution,
             client_key_usage,
             admission_release,
+            budget,
         } = self;
         let execution_idle = execution.idle();
         let tasks = vec![
             spawn_command_writer(execution, cancellation.child_token()),
             spawn_command_writer(client_key_usage, cancellation.child_token()),
             spawn_command_writer(admission_release, cancellation.child_token()),
+            spawn_command_writer(budget, cancellation.child_token()),
         ];
         CommandStoreDrain {
             cancellation,
@@ -101,6 +104,7 @@ pub(crate) fn store_worker_contributions(
     execution_writer: postgres::ExecutionObservationWriter<postgres::PgExecutionStore>,
     client_key_usage_writer: postgres::PgClientApiKeyUsageWriter,
     admission_release_writer: redis::ClientAdmissionReleaseWriter,
+    budget_writer: postgres::ClientBudgetWriter,
 ) -> StoreResult<Vec<WorkerContribution>> {
     let stale_id = WorkerId::try_new(WorkerKind::StaleModelRequestRecovery, "postgres")
         .map_err(worker_definition_error)?;
@@ -111,10 +115,22 @@ pub(crate) fn store_worker_contributions(
             .map_err(worker_definition_error)?;
     let admission_flush_id = WorkerId::try_new(WorkerKind::OpsFlush, "redis_admission")
         .map_err(worker_definition_error)?;
+    let budget_flush_id = WorkerId::try_new(WorkerKind::OpsFlush, "postgres_client_budget")
+        .map_err(worker_definition_error)?;
     let ops_flush_restart =
         DaemonRestartPolicy::try_new(Duration::from_secs(1), Duration::from_secs(60))
             .map_err(worker_definition_error)?;
     Ok(vec![
+        WorkerContribution::Registration(
+            WorkerRegistration::try_new(
+                budget_flush_id,
+                WorkerRunnable::Daemon {
+                    restart: ops_flush_restart,
+                    task: Box::new(budget_writer),
+                },
+            )
+            .map_err(worker_definition_error)?,
+        ),
         WorkerContribution::Registration(scheduled_worker(
             stale_id,
             Duration::from_secs(30),

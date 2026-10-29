@@ -1,10 +1,11 @@
 import type { Ref } from 'vue'
 import type { PluginRefreshContext } from '../utils/actions'
 import type { CreatePluginSourceCredentialRequest, PluginSourceCredential } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef } from 'vue'
 import { createPluginSourceCredential, deletePluginSourceCredential } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { notifyPluginError } from '../utils/actions'
 
 interface CredentialContext extends PluginRefreshContext {
@@ -14,7 +15,7 @@ interface CredentialContext extends PluginRefreshContext {
 export function usePluginCredentials({ credentials, refresh }: CredentialContext) {
   const action = useAsyncAction({
     errorText: false,
-    onError: error => notifyPluginError('下载认证保存失败', error),
+    onError: error => notifyPluginError(t('plugins.credentials.saveDownloadCredentialsFailed'), error),
   })
   const savingCredential = action.loading
   const showCredentialDelete = shallowRef(false)
@@ -42,16 +43,26 @@ export function usePluginCredentials({ credentials, refresh }: CredentialContext
     try {
       await deletePluginSourceCredential({ id: credential.id }, { silent: true })
       showCredentialDelete.value = false
-      ZNotification.success({ message: '来源凭据已删除' })
+      ZNotification.success({
+        message: t('plugins.credentials.sourceCredentialsDeleted'),
+      })
       await refresh(true)
     }
     catch (error) {
-      notifyPluginError('来源凭据删除失败', error)
+      notifyPluginError(t('plugins.credentials.deleteFailed'), error)
     }
     finally {
       busyCredentialId.value = ''
     }
   }
 
-  return { savingCredential, showCredentialDelete, pendingCredential, busyCredentialId, saveCredential, requestCredentialDelete, confirmCredentialDelete }
+  return {
+    savingCredential,
+    showCredentialDelete,
+    pendingCredential,
+    busyCredentialId,
+    saveCredential,
+    requestCredentialDelete,
+    confirmCredentialDelete,
+  }
 }

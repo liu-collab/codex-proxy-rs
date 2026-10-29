@@ -2,7 +2,9 @@
 
 use chrono::{DateTime, Utc};
 
-use super::observability::{DecimalAmount, RequestMetricPoint, UsageOverview};
+use super::observability::{
+    DecimalAmount, RequestMetricPoint, UsageConcurrencyPoint, UsageOverview,
+};
 
 /// 数据可见性状态，不以缺失投影冒充零统计
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -57,9 +59,10 @@ pub struct UsageProjectedCostPoint {
 }
 
 /// 同一数据库快照内的完整洞察输入
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct UsageInsightsObservation {
     pub overview: UsageOverview,
     pub trend: Vec<RequestMetricPoint>,
     pub costs: Vec<UsageProjectedCostPoint>,
+    pub concurrency: Vec<UsageConcurrencyPoint>,
 }

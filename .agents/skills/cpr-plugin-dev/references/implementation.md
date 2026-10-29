@@ -1,12 +1,12 @@
 # 清单与处理器实现
 
-仅在编写或排查插件清单、Rust 处理器时读取，涉及 Rust 时使用[开发入口](../../cpr-dev-guide/SKILL.md)的 Rust 分支
-选择能力时只读 SDK 的[能力与方法](../../../../backend/crates/gateway-plugin/sdk/docs/capabilities.md#能力与方法)及所需能力章节
+开发、排查或审查插件清单、Rust 处理器时完整读取，先完成[插件入口](../SKILL.md#先读职责边界)的边界判断，涉及 Rust 时执行[开发入口](../../cpr-dev-guide/SKILL.md)的 Rust 分支
+使用能力前读取 SDK 的[能力与方法](../../../../backend/crates/gateway-plugin/sdk/docs/capabilities.md#能力与方法)及所用能力章节，已有实现的修复与审查也核对合同
 
 ## 清单与处理器
 
 - `publisher` 与机器短名 `name` 派生插件 ID，`displayName` 用于展示；复制示例后同时调整扩展项 ID 与注册结果
-- `contributes` 每种能力最多一项，普通贡献项可省略派生 ID、能力版本和固定阶段；中间件必须声明版本 `4` 并显式选择阶段，上游适配器必须声明版本 `2`。自定义完整扩展项 ID 属于自己的插件命名空间，运行注册与规范化清单一致
+- `contributes` 每种能力最多一项，派生 ID 和固定阶段可省略；能力版本与中间件阶段按[扩展项简写](../../../../backend/crates/gateway-plugin/sdk/docs/manifest.md#扩展项简写)声明。自定义完整扩展项 ID 属于自己的插件命名空间，运行注册与规范化清单一致
 - 作者清单用 `Manifest::from_author_slice` 规范化，不手写 `package`、固定阶段或重复注册；CLI 生成平台、协议与资源摘要，版本范围不能使用全版本通配
 - 安装后宿主会按 `configurationSchema` 准备默认配置，配置完整即可启用；默认绑定的空范围不限制请求。需要业务参数时声明真实必填项，通过 `secretFields` 声明敏感字段，不依赖用户再走一遍自建安装向导
 - Rust 插件只依赖公开 `gateway-plugin-sdk`；需要异步会话辅助时开启 `io`，使用 `PluginSession` 管理握手、回调关联、流控、取消和关闭

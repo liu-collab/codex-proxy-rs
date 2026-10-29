@@ -1,7 +1,7 @@
-//! 按 Key 串行检查限额，并幂等累计已取得的 USD 费用
+//! 读取 Key 预算快照，并按 Key 幂等累计已取得的 USD 费用
 
 use gateway_admin::model::audit::MutationAuditOperation;
-use std::{collections::BTreeMap, sync::Mutex, time::Duration};
+use std::{collections::BTreeMap, time::Duration};
 
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
@@ -129,7 +129,6 @@ async fn reset_client_key_budget_in_transaction(
 pub struct PgClientBudgetStore {
     timezone: gateway_core::time::DeploymentTimeZone,
     pool: PgPool,
-    retry: Mutex<BTreeMap<String, ClientBudgetCharge>>,
 }
 
 impl PgClientBudgetStore {
@@ -138,7 +137,6 @@ impl PgClientBudgetStore {
         Self {
             timezone: Default::default(),
             pool,
-            retry: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -148,88 +146,103 @@ impl PgClientBudgetStore {
         self
     }
 
-    async fn admit_inner(&self, key_id: ClientApiKeyId) -> Result<(), GatewayError> {
-        // 短暂存储故障后按原金额重试；进程退出丢失的费用不转成人工核账或阻断 Key
-        let retries = self
-            .retry
-            .lock()
-            .map_err(|_| unavailable())?
-            .values()
-            .filter(|charge| charge.key_id == key_id)
-            .cloned()
+    pub(super) async fn admit_with_pending(
+        &self,
+        key_id: ClientApiKeyId,
+        pending: &[ClientBudgetCharge],
+    ) -> Result<(), GatewayError> {
+        // 同一语句快照同时读取窗口和已落库请求，避免提交与队列移除之间重复计算费用
+        // 普通准入只读，不等待后台结算持有的 Key 行锁
+        let ids = pending
+            .iter()
+            .map(|charge| charge.request_id.as_str())
             .collect::<Vec<_>>();
-        for charge in retries {
-            self.settle(charge)
-                .await
-                .map_err(|source| unavailable().with_source(source))?;
-        }
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|source| unavailable().with_source(source))?;
         let row = sqlx::query(
-            "select daily_limit_usd::text, weekly_limit_usd::text, enabled
-            from client_api_keys where id = $1 for update",
+            "select k.enabled, k.daily_limit_usd::text, k.weekly_limit_usd::text,
+                w.daily_start, w.daily_end, w.weekly_start, w.weekly_end,
+                coalesce(w.daily_used_usd, 0)::text as daily_used,
+                coalesce(w.weekly_used_usd, 0)::text as weekly_used,
+                case when k.daily_limit_usd = 0 and k.weekly_limit_usd = 0 then array[]::text[]
+                    else array(select request_id from client_api_key_charge_events where request_id = any($2))
+                end as persisted
+            from client_api_keys k left join client_api_key_budget_windows w on w.client_api_key_id = k.id
+            where k.id = $1",
         )
-        .bind(key_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await
+        .bind(key_id.as_str()).bind(ids).fetch_optional(&self.pool).await
         .map_err(|source| unavailable().with_source(source))?
-        .ok_or_else(|| {
-            GatewayError::new(
-                GatewayErrorKind::Unauthorized,
-                "client API key no longer exists",
-            )
-        })?;
+        .ok_or_else(|| GatewayError::new(GatewayErrorKind::Unauthorized, "client API key no longer exists"))?;
         if !row.get::<bool, _>("enabled") {
             return Err(GatewayError::new(
                 GatewayErrorKind::PolicyDenied,
                 "client API key is disabled",
             ));
         }
+        let parse = |field: &str| -> Result<Decimal, GatewayError> {
+            row.get::<String, _>(field)
+                .parse()
+                .map_err(|source| unavailable().with_source(source))
+        };
         let limits = ClientBudgetLimits {
-            daily_usd: row
-                .get::<String, _>("daily_limit_usd")
-                .parse()
-                .map_err(|source| unavailable().with_source(source))?,
-            weekly_usd: row
-                .get::<String, _>("weekly_limit_usd")
-                .parse()
-                .map_err(|source| unavailable().with_source(source))?,
+            daily_usd: parse("daily_limit_usd")?,
+            weekly_usd: parse("weekly_limit_usd")?,
         };
         let now = Utc::now();
-        advance_windows(&mut tx, key_id.as_str(), now, now, self.timezone)
-            .await
-            .map_err(|source| unavailable().with_source(source))?;
+        let day = self.timezone.day_start(now).ok_or_else(unavailable)?;
+        let window = |start: &str, end: &str, used: &str, days| -> Result<_, GatewayError> {
+            let start = row.get::<Option<DateTime<Utc>>, _>(start);
+            let end = row.get::<Option<DateTime<Utc>>, _>(end);
+            let reopen = end.is_none_or(|end| end <= now);
+            if reopen {
+                Ok((
+                    day.max(start.unwrap_or(day)).max(end.unwrap_or(day)),
+                    self.timezone
+                        .days_after(now, days)
+                        .ok_or_else(unavailable)?,
+                    Decimal::ZERO,
+                    true,
+                ))
+            } else {
+                Ok((
+                    start.ok_or_else(unavailable)?,
+                    end.ok_or_else(unavailable)?,
+                    parse(used)?,
+                    false,
+                ))
+            }
+        };
+        let (daily_start, daily_end, mut daily, open_daily) =
+            window("daily_start", "daily_end", "daily_used", 1)?;
+        let (weekly_start, weekly_end, mut weekly, open_weekly) =
+            window("weekly_start", "weekly_end", "weekly_used", 7)?;
         if limits.is_limited() {
-            let window = sqlx::query(
-                "select daily_used_usd::text, weekly_used_usd::text, daily_end, weekly_end
-                from client_api_key_budget_windows where client_api_key_id = $1",
-            )
-            .bind(key_id.as_str())
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(|source| unavailable().with_source(source))?;
-            let daily: Decimal = window
-                .get::<String, _>("daily_used_usd")
-                .parse()
-                .map_err(|source| unavailable().with_source(source))?;
-            let weekly: Decimal = window
-                .get::<String, _>("weekly_used_usd")
-                .parse()
-                .map_err(|source| unavailable().with_source(source))?;
+            let persisted = row
+                .get::<Vec<String>, _>("persisted")
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>();
+            for charge in pending {
+                if persisted.contains(charge.request_id.as_str()) {
+                    continue;
+                }
+                let completed_at = DateTime::<Utc>::from(charge.completed_at);
+                if completed_at >= daily_start && completed_at < daily_end {
+                    daily = daily
+                        .checked_add(charge.amount_usd)
+                        .ok_or_else(unavailable)?;
+                }
+                if completed_at >= weekly_start && completed_at < weekly_end {
+                    weekly = weekly
+                        .checked_add(charge.amount_usd)
+                        .ok_or_else(unavailable)?;
+                }
+            }
             let daily_exceeded = limits.daily_usd != Decimal::ZERO && daily >= limits.daily_usd;
             let weekly_exceeded = limits.weekly_usd != Decimal::ZERO && weekly >= limits.weekly_usd;
             if daily_exceeded || weekly_exceeded {
-                let daily_end: DateTime<Utc> = window.get("daily_end");
-                let weekly_end: DateTime<Utc> = window.get("weekly_end");
                 let reset = if weekly_exceeded {
                     weekly_end
                 } else {
                     daily_end
                 };
-                let retry = (reset - now).to_std().unwrap_or(Duration::from_secs(1));
                 return Err(GatewayError::new(
                     GatewayErrorKind::RateLimited,
                     "client API key budget is exhausted",
@@ -239,30 +252,59 @@ impl PgClientBudgetStore {
                 } else {
                     "key_daily_budget_exceeded"
                 })
-                .with_retry_after(retry));
+                .with_retry_after((reset - now).to_std().unwrap_or(Duration::from_secs(1))));
             }
         }
-        tx.commit()
-            .await
-            .map_err(|source| unavailable().with_source(source))
+        // 首次使用或窗口到期才写入；与重置、结算保持相同锁序
+        if open_daily || open_weekly {
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .map_err(|source| unavailable().with_source(source))?;
+            sqlx::query("select id from client_api_keys where id = $1 for update")
+                .bind(key_id.as_str())
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(|source| unavailable().with_source(source))?
+                .ok_or_else(|| {
+                    GatewayError::new(
+                        GatewayErrorKind::Unauthorized,
+                        "client API key no longer exists",
+                    )
+                })?;
+            advance_windows(&mut tx, key_id.as_str(), now, now, self.timezone)
+                .await
+                .map_err(|source| unavailable().with_source(source))?;
+            tx.commit()
+                .await
+                .map_err(|source| unavailable().with_source(source))?;
+        }
+        Ok(())
     }
 
-    async fn settle_inner(&self, charge: &ClientBudgetCharge) -> Result<(), ClientBudgetError> {
+    pub(super) async fn settle_charges(
+        &self,
+        charges: &[ClientBudgetCharge],
+    ) -> Result<(), ClientBudgetError> {
+        let Some(first) = charges.first() else {
+            return Ok(());
+        };
         let mut tx = self
             .pool
             .begin()
             .await
             .map_err(|source| ClientBudgetError(Some(source.into())))?;
-        // 与准入统一先锁 Key，再写窗口和费用，串行化同一 Key 的并发结算
+        // 与窗口开启和重置统一先锁 Key，再写窗口和费用
         let key = sqlx::query_scalar::<_, String>(
             "select id from client_api_keys where id = $1 for update",
         )
-        .bind(charge.key_id.as_str())
+        .bind(first.key_id.as_str())
         .fetch_optional(&mut *tx)
         .await
         .map_err(|source| ClientBudgetError(Some(source.into())))?;
         let Some(key) = key else { return Ok(()) }; // 删除 Key 时也会删除其费用记录
-        settle_in_transaction(&mut tx, &key, charge, self.timezone)
+        settle_in_transaction(&mut tx, &key, charges, self.timezone)
             .await
             .map_err(|source| ClientBudgetError(Some(source.into())))?;
         tx.commit()
@@ -274,58 +316,65 @@ impl PgClientBudgetStore {
 async fn settle_in_transaction(
     tx: &mut Transaction<'_, Postgres>,
     key: &str,
-    charge: &ClientBudgetCharge,
+    charges: &[ClientBudgetCharge],
     timezone: gateway_core::time::DeploymentTimeZone,
 ) -> Result<(), sqlx::Error> {
-    let completed_at = DateTime::<Utc>::from(charge.completed_at);
-    // 仅在请求结束时写入费用；请求 ID 冲突时不重复累计
-    let changed = sqlx::query(
+    let ids = charges
+        .iter()
+        .map(|charge| charge.request_id.as_str())
+        .collect::<Vec<_>>();
+    let amounts = charges
+        .iter()
+        .map(|charge| charge.amount_usd.canonical())
+        .collect::<Vec<_>>();
+    let times = charges
+        .iter()
+        .map(|charge| DateTime::<Utc>::from(charge.completed_at))
+        .collect::<Vec<_>>();
+    // 同一 Key 的小批次共用事务，只累计本次真正插入的事件
+    let inserted = sqlx::query(
         "insert into client_api_key_charge_events (request_id, client_api_key_id, amount_usd, completed_at)
-            values ($1, $2, $3::text::numeric, $4)
-            on conflict (request_id) do nothing",
+            select request_id, $1, amount::numeric, completed_at
+            from unnest($2::text[], $3::text[], $4::timestamptz[]) as charges(request_id, amount, completed_at)
+            on conflict (request_id) do nothing returning amount_usd::text as amount, completed_at",
+    ).bind(key).bind(ids).bind(amounts).bind(times).fetch_all(&mut **tx).await?;
+    let amounts = inserted
+        .iter()
+        .map(|row| row.get::<String, _>("amount"))
+        .collect::<Vec<_>>();
+    let times = inserted
+        .iter()
+        .map(|row| row.get::<DateTime<Utc>, _>("completed_at"))
+        .collect::<Vec<_>>();
+    let Some(latest) = times.iter().max().copied() else {
+        return Ok(());
+    };
+    advance_windows(tx, key, Utc::now(), latest, timezone).await?;
+    sqlx::query(
+        "update client_api_key_budget_windows w set
+        daily_used_usd = daily_used_usd + coalesce((select sum(amount::numeric)
+            from unnest($2::text[], $3::timestamptz[]) as charges(amount, completed_at)
+            where completed_at >= w.daily_start and completed_at < w.daily_end), 0),
+        weekly_used_usd = weekly_used_usd + coalesce((select sum(amount::numeric)
+            from unnest($2::text[], $3::timestamptz[]) as charges(amount, completed_at)
+            where completed_at >= w.weekly_start and completed_at < w.weekly_end), 0)
+        where client_api_key_id = $1",
     )
-    .bind(charge.request_id.as_str())
     .bind(key)
-    .bind(charge.amount_usd.canonical())
-    .bind(completed_at)
+    .bind(amounts)
+    .bind(times)
     .execute(&mut **tx)
-    .await?
-    .rows_affected();
-    if changed == 1 {
-        advance_windows(tx, key, Utc::now(), completed_at, timezone).await?;
-        sqlx::query("update client_api_key_budget_windows set
-                daily_used_usd = daily_used_usd + case when $3 >= daily_start and $3 < daily_end then $2::text::numeric else 0 end,
-                weekly_used_usd = weekly_used_usd + case when $3 >= weekly_start and $3 < weekly_end then $2::text::numeric else 0 end
-                where client_api_key_id = $1")
-                .bind(key).bind(charge.amount_usd.canonical()).bind(completed_at)
-                .execute(&mut **tx).await?;
-    }
+    .await?;
     Ok(())
 }
 
 impl ClientBudgetPort for PgClientBudgetStore {
     fn admit(&self, key_id: ClientApiKeyId) -> BoxFuture<'_, Result<(), GatewayError>> {
-        Box::pin(async move { self.admit_inner(key_id).await })
+        Box::pin(async move { self.admit_with_pending(key_id, &[]).await })
     }
 
     fn settle(&self, charge: ClientBudgetCharge) -> BoxFuture<'_, Result<(), ClientBudgetError>> {
-        Box::pin(async move {
-            let result = self.settle_inner(&charge).await;
-            // 重试缓存的锁异常不能覆盖已捕获的账本失败
-            let mut retry = self.retry.lock().map_err(|_| {
-                result
-                    .as_ref()
-                    .err()
-                    .cloned()
-                    .unwrap_or(ClientBudgetError(None))
-            })?;
-            if result.is_err() {
-                retry.insert(charge.request_id.as_str().to_owned(), charge);
-            } else {
-                retry.remove(charge.request_id.as_str());
-            }
-            result
-        })
+        Box::pin(async move { self.settle_charges(std::slice::from_ref(&charge)).await })
     }
 }
 
@@ -346,7 +395,7 @@ async fn advance_windows(
     let weekly_end = timezone
         .days_after(now, 7)
         .ok_or_else(|| sqlx::Error::Protocol("invalid budget week end".to_owned()))?;
-    // Key 行锁仍串行化准入和结算；未滚动的窗口无需产生新元组与 WAL
+    // 调用方持有 Key 行锁；未滚动的窗口无需产生新元组与 WAL
     sqlx::query("insert into client_api_key_budget_windows
         (client_api_key_id, daily_start, daily_end, weekly_start, weekly_end)
         select $1, $4, $5, $4, $6
@@ -426,7 +475,7 @@ pub(super) async fn load_client_key_budgets(
     Ok(())
 }
 
-fn unavailable() -> GatewayError {
+pub(super) fn unavailable() -> GatewayError {
     GatewayError::new(
         GatewayErrorKind::ProviderInfrastructureUnavailable,
         "client budget service is temporarily unavailable",

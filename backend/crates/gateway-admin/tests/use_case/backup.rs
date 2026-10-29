@@ -38,9 +38,12 @@ async fn backup_service_creates_downloads_and_deletes_with_audit() {
     assert_eq!(created.status, BackupStatus::Queued);
     assert!(created.object_key.starts_with("codex/"));
     assert!(
-        auth.audit_actions()
+        repository
+            .audit_events()
             .iter()
-            .any(|action| action == "backup.created")
+            .any(|event| event.action == "backup.created"
+                && event.entity_ref == created.id
+                && event.request_id.as_deref() == Some(system_context().request_id.as_str()))
     );
 
     // 下载地址要求 completed 记录
@@ -65,9 +68,12 @@ async fn backup_service_creates_downloads_and_deletes_with_audit() {
         .expect("delete backup");
     assert_eq!(deleting.status, BackupStatus::Deleting);
     assert!(
-        auth.audit_actions()
+        repository
+            .audit_events()
             .iter()
-            .any(|action| action == "backup.delete_requested")
+            .any(|event| event.action == "backup.delete_requested"
+                && event.entity_ref == created.id
+                && event.changed_fields == ["status"])
     );
 }
 

@@ -29,7 +29,7 @@ defineProps<{
       </button>
     </template>
 
-    <div class="grid w-60 gap-2 p-3 text-cp-sm leading-none">
+    <div class="grid w-max min-w-60 max-w-[calc(100vw-2rem)] gap-2 p-3 text-cp-sm leading-none">
       <p v-if="title" class="m-0 font-heavy text-cp-text">
         {{ title }}
       </p>

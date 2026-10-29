@@ -142,7 +142,7 @@ where
 pub(crate) async fn usage_records_summary<S>(
     _auth: AdminAuth,
     State(state): State<S>,
-    AdminQuery(query): AdminQuery<UsageQuery>,
+    AdminQuery(query): AdminQuery<UsageAnalyticsQuery>,
 ) -> Result<impl IntoResponse, AdminError>
 where
     S: SessionState + Send + Sync,
@@ -155,7 +155,10 @@ where
         state.admin_services().timezone(),
     )
     .map_err(map_wire_error)?;
-    let filter = analytics_filter(&query).map_err(map_wire_error)?;
+    let filter = domain::UsageFilter {
+        provider_kind: non_empty(query.provider),
+        ..Default::default()
+    };
     let result = state
         .admin_services()
         .observability()
@@ -174,7 +177,7 @@ where
 pub(crate) async fn usage_insights_overview<S>(
     _auth: AdminAuth,
     State(state): State<S>,
-    AdminQuery(query): AdminQuery<UsageQuery>,
+    AdminQuery(query): AdminQuery<UsageAnalyticsQuery>,
 ) -> Result<impl IntoResponse, AdminError>
 where
     S: SessionState + Send + Sync,
@@ -188,7 +191,10 @@ where
         state.admin_services().timezone(),
     )
     .map_err(map_wire_error)?;
-    let filter = analytics_filter(&query).map_err(map_wire_error)?;
+    let filter = domain::UsageFilter {
+        provider_kind: non_empty(query.provider),
+        ..Default::default()
+    };
     let result = state
         .admin_services()
         .observability()

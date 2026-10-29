@@ -30,7 +30,7 @@ use crate::model::{
         DashboardObservation, DashboardQuery, DiagnosticDimension, DiagnosticsObservation,
         Granularity, OpsErrorPage, OpsErrorQuery, RequestMetricPoint, TimeRange,
         UsageBillingProjection, UsageCalculatedBillingFact, UsageDetail, UsageFilter,
-        UsageInsightsObservation, UsageOverview, UsagePage, UsageQuery,
+        UsageInsightsObservation, UsagePage, UsageQuery, UsageSummaryObservation,
     },
     provider_credentials::{
         AuthorizationCommit, CredentialDetails, CredentialImportCommit, CredentialImportResult,
@@ -209,14 +209,6 @@ pub trait AccountStore:
         context: &MutationContext,
     ) -> AdminStoreResult<AccountUpdateResult>;
 
-    /// 在事务内按最新启用状态、账号上限和全局默认值判断，只降低并发上限
-    async fn lower_concurrency_limit(
-        &self,
-        account_id: &gateway_core::account::ProviderAccountId,
-        limit: gateway_core::account::AccountConcurrencyLimit,
-        context: &MutationContext,
-    ) -> AdminStoreResult<Option<AccountUpdateResult>>;
-
     async fn recover_account(
         &self,
         account_id: &gateway_core::account::ProviderAccountId,
@@ -259,16 +251,10 @@ pub trait AccountRuntimeStore: Send + Sync {
         account_ids: &[String],
     ) -> AdminStoreResult<AccountRuntimeSnapshot>;
 
-    /// 容量熔断自动冻结中的账号与其冻结截止时间；429 临时限流不包含在内
+    /// 账号错误保护中的账号与其冻结快照；临时限流不包含在内
     async fn active_freezes(
         &self,
     ) -> AdminStoreResult<BTreeMap<String, crate::model::accounts::AccountFreeze>>;
-
-    /// 读取容量失败窗口内观测到的在途并发峰值（自适应并发下调的证据）
-    async fn capacity_peaks(
-        &self,
-        account_ids: &[String],
-    ) -> AdminStoreResult<BTreeMap<String, u32>>;
 
     /// 仅当冻结快照仍匹配时解除或顺延；旧探测不得覆盖手动恢复或新一轮冻结
     async fn finish_freeze(
@@ -485,7 +471,7 @@ pub trait ObservabilityStore: Send + Sync {
         &self,
         range: TimeRange,
         filter: UsageFilter,
-    ) -> AdminStoreResult<UsageOverview>;
+    ) -> AdminStoreResult<UsageSummaryObservation>;
 
     async fn usage_diagnostics(
         &self,

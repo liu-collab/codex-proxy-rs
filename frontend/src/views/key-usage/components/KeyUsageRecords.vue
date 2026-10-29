@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import type { PaginationState as Pagination } from '@codex-proxy/ui'
+
 import type { KeyUsageRecord, KeyUsageRecordKind } from '@/api/modules/key-usage'
 import { defineTableColumns, useTableColumns, ZCard, ZPagination, ZTable, ZTableColumnSettings } from '@codex-proxy/ui'
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { usageDataColumns } from '@/components/usage/shared/columns'
 import UsageBillingCell from '@/components/usage/UsageBillingCell.vue'
 import UsageClientIpCell from '@/components/usage/UsageClientIpCell.vue'
@@ -15,26 +18,27 @@ import UsageTimeCell from '@/components/usage/UsageTimeCell.vue'
 import UsageTokenCell from '@/components/usage/UsageTokenCell.vue'
 import UsageTransportBadge from '@/components/usage/UsageTransportBadge.vue'
 
-defineProps<{ rows: KeyUsageRecord[], pagination: Pagination, loading: boolean, error: string, stale: boolean }>()
+defineProps<{ rows: KeyUsageRecord[], pagination: Pagination, loading: boolean }>()
+
 defineEmits<{ pageChange: [page: number], pageSizeChange: [size: number] }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const kind = defineModel<KeyUsageRecordKind>('kind', { required: true })
-const columns = defineTableColumns<KeyUsageRecord>(usageDataColumns)
+const columns = computed(() => defineTableColumns<KeyUsageRecord>(usageDataColumns.value))
 const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetColumns } = useTableColumns(columns, 'key-usage-records')
 </script>
 
 <template>
-  <ZCard title="请求日志" description="当前请求记录">
+  <ZCard :title="t('usage.records.requestLog')" :description="t('usage.records.currentRequestRecord')">
     <template #actions>
       <div class="flex items-center gap-2">
         <UsageRecordStatusFilter v-model="kind" />
         <ZTableColumnSettings :options="columnOptions" @change="setColumnVisible" @reorder="setColumnOrder" @reset="resetColumns" />
       </div>
     </template>
-    <p v-if="error || stale" role="status" class="mt-0 mb-3 text-cp-sm text-cp-error-text">
-      {{ error || '请求日志刷新失败，暂时保留上次结果' }}
-    </p>
     <div class="flex h-120 min-h-0 overflow-hidden">
-      <ZTable class="min-w-0 flex-1" :columns="visibleColumns" :data="rows" :loading="loading" :empty-text="error ? '请求日志加载失败，请点击顶部刷新重试' : '所选条件下暂无记录'">
+      <ZTable class="min-w-0 flex-1" :columns="visibleColumns" :data="rows" :loading="loading" :empty-text="t('usage.records.noRecordsMatchTheseFilters')">
         <template #model="{ row }">
           <UsageModelCell :record="row" />
         </template>

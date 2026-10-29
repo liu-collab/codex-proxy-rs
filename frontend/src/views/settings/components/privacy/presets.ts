@@ -1,64 +1,163 @@
 import type { PrivacyAction, PrivacyRule, PrivacySample, PrivacyScope, PrivacyStep } from '@/api/modules/settings/privacy'
 import { cloneDeep } from 'es-toolkit'
+import { computed } from 'vue'
+import { t } from '@/i18n'
 
-export const scopes: { value: PrivacyScope, label: string }[] = [
-  { value: 'turn_metadata', label: '工作区附加信息' },
-  { value: 'desktop_git_context', label: 'Desktop Git 信息' },
-  { value: 'environment_text', label: '自动环境上下文' },
-  { value: 'request_body', label: '指定请求字段' },
-  { value: 'request_header', label: '指定请求头' },
-]
-export const actions: { value: PrivacyAction, label: string }[] = [
-  { value: 'regex_replace', label: '正则替换' },
-  { value: 'set_value', label: '固定值' },
-  { value: 'rename_key', label: '字段名替换' },
-  { value: 'remove_field', label: '删除字段 / 数组项' },
-]
-export const fieldsByScope: Partial<Record<PrivacyScope, { value: string, label: string }[]>> = {
+export const scopes = computed<{ value: PrivacyScope, label: string }[]>(() => ([
+  {
+    value: 'turn_metadata',
+    label: t('settings.privacy.presets.workspaceMetadata'),
+  },
+  {
+    value: 'desktop_git_context',
+    label: t('settings.privacy.presets.desktopGitInformation'),
+  },
+  {
+    value: 'environment_text',
+    label: t('settings.privacy.presets.automaticEnvironmentContext'),
+  },
+  {
+    value: 'request_body',
+    label: t('settings.privacy.presets.specifyRequestFields'),
+  },
+  {
+    value: 'request_header',
+    label: t('settings.privacy.presets.specifyRequestHeader'),
+  },
+]))
+export const actions = computed<{ value: PrivacyAction, label: string }[]>(() => ([
+  {
+    value: 'regex_replace',
+    label: t('settings.privacy.presets.regularReplacement'),
+  },
+  {
+    value: 'set_value',
+    label: t('settings.privacy.presets.fixedValue'),
+  },
+  {
+    value: 'rename_key',
+    label: t('settings.privacy.presets.fieldNameReplacement'),
+  },
+  {
+    value: 'remove_field',
+    label: t('settings.privacy.presets.deleteFieldArrayItem'),
+  },
+]))
+export const fieldsByScope = computed<Partial<Record<PrivacyScope, { value: string, label: string }[]>>>(() => ({
   turn_metadata: [
-    { value: '', label: '自定义字段路径' },
-    { value: '$.workspaces.*.associated_remote_urls.*', label: 'Git 远端地址' },
-    { value: '$.workspaces', label: '工作区路径键' },
-    { value: '$.workspaces.*.latest_git_commit_hash', label: 'Git 提交标识' },
+    {
+      value: '',
+      label: t('settings.privacy.presets.customFieldPath'),
+    },
+    {
+      value: '$.workspaces.*.associated_remote_urls.*',
+      label: t('settings.privacy.presets.gitRemoteAddress'),
+    },
+    {
+      value: '$.workspaces',
+      label: t('settings.privacy.presets.workspacePathKey'),
+    },
+    {
+      value: '$.workspaces.*.latest_git_commit_hash',
+      label: t('settings.privacy.presets.gitCommitId'),
+    },
   ],
   desktop_git_context: [
-    { value: '', label: '自定义字段路径' },
-    { value: '$.remotes', label: 'Git 远端集合' },
-    { value: '$.remotes[*].fetchUrl', label: 'Git 远端地址' },
-    { value: '$.headCommitSha', label: 'Git 提交标识' },
-    { value: '$.worktreeId', label: '工作区指纹' },
+    {
+      value: '',
+      label: t('settings.privacy.presets.customFieldPath'),
+    },
+    {
+      value: '$.remotes',
+      label: t('settings.privacy.presets.gitRemoteCollection'),
+    },
+    {
+      value: '$.remotes[*].fetchUrl',
+      label: t('settings.privacy.presets.gitRemoteAddress'),
+    },
+    {
+      value: '$.headCommitSha',
+      label: t('settings.privacy.presets.gitCommitId'),
+    },
+    {
+      value: '$.worktreeId',
+      label: t('settings.privacy.presets.workspaceFingerprint'),
+    },
   ],
-}
+}))
 
 export function newStep(): PrivacyStep {
-  return { scope: 'turn_metadata', selector: '$.workspaces.*.associated_remote_urls.*', action: 'regex_replace', pattern: '', replacement: '', value: '', replaceAll: true, caseInsensitive: false, multiLine: false }
+  return {
+    scope: 'turn_metadata',
+    selector: '$.workspaces.*.associated_remote_urls.*',
+    action: 'regex_replace',
+    pattern: '',
+    replacement: '',
+    value: '',
+    replaceAll: true,
+    caseInsensitive: false,
+    multiLine: false,
+  }
 }
 
 export function newRule(): PrivacyRule {
-  return { id: Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join(''), name: '', enabled: false, steps: [newStep()] }
+  return {
+    id: Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join(''),
+    name: '',
+    enabled: false,
+    steps: [
+      newStep(),
+    ],
+  }
 }
 
-export const presets: { key: string, name: string, steps: Partial<PrivacyStep>[] }[] = [
+export const presets = computed<{ key: string, name: string, steps: Partial<PrivacyStep>[] }[]>(() => ([
   {
     key: 'workspace',
-    name: '统一工作区信息',
+    name: t('settings.privacy.presets.unifyWorkspaceInformation'),
     steps: [
-      { scope: 'turn_metadata', selector: '$.workspaces', action: 'rename_key', pattern: String.raw`(?i)^((?:[a-z]:)?[/\\](?:home|users)[/\\])[^/\\]+`, replacement: `\${1}user` },
-      { scope: 'environment_text', selector: '$', action: 'regex_replace', pattern: String.raw`(?i)((?:[a-z]:)?[/\\](?:home|users)[/\\])[^/\\<>"'\r\n]+`, replacement: `\${1}user` },
-      // 路径隐藏本机目录布局，项目名和 Git 状态仍取自实际请求
-      { scope: 'turn_metadata', selector: '$.workspaces', action: 'rename_key', pattern: String.raw`(?s)^(?:[a-zA-Z]:)?[/\\](?:.*[/\\])?([^/\\]+)[/\\]*$`, replacement: `/workspace/\${1}` },
-      { scope: 'environment_text', selector: '$', action: 'regex_replace', pattern: String.raw`(<cwd>\s*)(?:[a-zA-Z]:)?[/\\](?:[^<>\r\n]*[/\\])?([^/\\<>\r\n]+?)[/\\]*\s*(</cwd>)`, replacement: `\${1}/workspace/\${2}\${3}` },
+      // 只改写附加元数据中的路径，正文路径供本地工具执行使用
+      {
+        scope: 'turn_metadata',
+        selector: '$.workspaces',
+        action: 'rename_key',
+        pattern: String.raw`(?i)^((?:[a-z]:)?[/\\](?:home|users)[/\\])[^/\\]+`,
+        replacement: `\${1}user`,
+      },
+      {
+        scope: 'turn_metadata',
+        selector: '$.workspaces.*.associated_remote_urls.*',
+        action: 'regex_replace',
+        pattern: String.raw`(?i)^((?:(?:https?|ssh|git)://[^/?#]+/|[^/@:\s]+@[^/:\s]+:))[^/?#]+/([^/?#]+)(/?)$`,
+        replacement: `\${1}alex/\${2}\${3}`,
+      },
     ],
   },
-]
+]))
 
 export function createPreset(key: string): PrivacyRule {
-  const preset = presets.find(item => item.key === key)!
-  return { ...newRule(), name: preset.name, steps: preset.steps.map(step => ({ ...newStep(), ...cloneDeep(step) })) }
+  const preset = presets.value.find(item => item.key === key)!
+  return {
+    ...newRule(),
+    name: preset.name,
+    steps: preset.steps.map(step => ({
+      ...newStep(),
+      ...cloneDeep(step),
+    })),
+  }
 }
 
 // 样本使用虚构仓库、路径与标识，字段形状对应官方 Core 和 Desktop Git 上下文
-const metadata = { workspaces: { '/home/alex/projects/demo': { associated_remote_urls: { origin: 'https://git.example.invalid/private-org/repo.git', public: 'git@git.example.invalid:public/repo.git' }, latest_git_commit_hash: 'a'.repeat(40), has_changes: true } }, request_kind: 'turn' }
+const metadata = {
+  workspaces: {
+    '/home/alex/projects/demo': {
+      associated_remote_urls: { origin: 'https://git.example.invalid/private-org/repo.git', public: 'git@git.example.invalid:public/repo.git' },
+      latest_git_commit_hash: 'a'.repeat(40),
+      has_changes: true,
+    },
+  },
+  request_kind: 'turn',
+}
 const desktopGit = {
   schemaVersion: 1,
   phase: 'before_turn_request',
@@ -89,10 +188,31 @@ function desktopContext(value: unknown): string {
 }
 
 function contextMessage(text: string) {
-  return { role: 'user', content: [{ type: 'input_text', text }] }
+  return {
+    role: 'user',
+    content: [
+      { type: 'input_text', text },
+    ],
+  }
 }
 
 export function exampleRequest(): PrivacySample {
   const environment = '<environment_context>\n<cwd>/home/alex/projects/demo</cwd>\n<filesystem><workspace_roots><root>/home/alex/projects/demo</root></workspace_roots></filesystem>\n<timezone>Asia/Shanghai</timezone>\n</environment_context>'
-  return { body: { input: [contextMessage(environment), contextMessage(desktopContext(desktopGit))], client_metadata: { 'x-codex-turn-metadata': JSON.stringify(metadata) } }, headers: { 'x-codex-turn-metadata': [JSON.stringify(metadata)] }, turnMetadata: null }
+  return {
+    body: {
+      input: [
+        contextMessage(environment),
+        contextMessage(desktopContext(desktopGit)),
+      ],
+      client_metadata: {
+        'x-codex-turn-metadata': JSON.stringify(metadata),
+      },
+    },
+    headers: {
+      'x-codex-turn-metadata': [
+        JSON.stringify(metadata),
+      ],
+    },
+    turnMetadata: null,
+  }
 }

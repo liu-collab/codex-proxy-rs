@@ -3,6 +3,7 @@
 mod body;
 mod call;
 mod http;
+mod outbound;
 mod plugin;
 mod service;
 mod websocket;
@@ -10,6 +11,7 @@ mod websocket;
 pub use body::{MiddlewareBody, MiddlewareBodySender};
 pub use call::{MiddlewareCall, MiddlewareResult};
 pub use http::{HttpBody, HttpCall, HttpFrame, HttpNext, HttpRequest, HttpResponse};
+pub use outbound::{OutboundCall, OutboundNext, OutboundRequest};
 pub use plugin::MiddlewarePlugin;
 pub use service::{ServiceCall, ServiceNext, ServiceResponse, TypedServiceCall};
 pub use websocket::{

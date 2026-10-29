@@ -1,8 +1,9 @@
 import type { ProxyTestExecutor } from './useProxyBatchTest'
 import type { OutboundProxyRecord } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { getProxies } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { useProxyBatchTest } from './useProxyBatchTest'
 
 export function useProxyBatchTesting(options: { test: ProxyTestExecutor, reload: () => Promise<unknown> }) {
@@ -34,10 +35,14 @@ export function useProxyBatchTesting(options: { test: ProxyTestExecutor, reload:
       if (!request.isCurrent(requestId))
         return
       if (!collected.size) {
-        ZNotification.warning({ message: '所选代理已不存在，请刷新列表' })
+        ZNotification.warning({
+          message: t('proxies.batchTest.proxyMissing'),
+        })
         return
       }
-      await tests.run([...collected.values()])
+      await tests.run([
+        ...collected.values(),
+      ])
       if (!request.isCurrent(requestId))
         return
       await options.reload()
@@ -47,18 +52,24 @@ export function useProxyBatchTesting(options: { test: ProxyTestExecutor, reload:
       const incomplete = tests.items.value.filter(item => item.status !== 'succeeded')
       const locationPending = tests.items.value.filter(item => item.status === 'succeeded' && item.record?.lastTest?.location.status !== 'detected').length
       const missing = wanted.size - collected.size
-      const summary = [`批量测试完成，连接正常 ${succeeded} 条`]
+      const summary = [
+        t('proxies.batchTest.batchTestCompletedConnected', { succeeded }),
+      ]
       if (incomplete.length)
-        summary.push(`未成功 ${incomplete.length} 条`)
+        summary.push(t('proxies.batchTest.unsuccessful', { count: incomplete.length }))
       if (locationPending)
-        summary.push(`地区待处理 ${locationPending} 条`)
+        summary.push(t('proxies.batchTest.locationsPending', { locationPending }))
       if (missing)
-        summary.push(`${missing} 条代理已不存在`)
+        summary.push(t('proxies.batchTest.proxiesNoLongerAvailable', { missing }))
       const firstFailure = incomplete.find(item => item.status !== 'skipped')
       if (firstFailure)
         summary.push(`${firstFailure.name}：${firstFailure.message}`)
-      const notify = incomplete.length || locationPending || missing ? ZNotification.warning : ZNotification.success
-      notify({ message: summary.join('，') })
+      const notify = incomplete.length || locationPending || missing
+        ? ZNotification.warning
+        : ZNotification.success
+      notify({
+        message: summary.join('，'),
+      })
     }
     catch (cause) {
       request.fail(requestId, cause)

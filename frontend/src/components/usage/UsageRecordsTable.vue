@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { TableColumn } from '@codex-proxy/ui'
-import type { UsageListRecord } from '@/api'
 
+import type { UsageListRecord } from '@/api'
 import { ZTable } from '@codex-proxy/ui'
+
+import { useI18n } from 'vue-i18n'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import UsageBillingCell from '@/components/usage/UsageBillingCell.vue'
@@ -30,9 +32,10 @@ withDefaults(
   }>(),
   {
     loading: false,
-    emptyText: '暂无使用记录',
   },
 )
+
+const { t } = useI18n({ useScope: 'global' })
 </script>
 
 <template>
@@ -40,7 +43,7 @@ withDefaults(
     :columns="columns"
     :data="rows"
     :loading="loading"
-    :empty-text="emptyText"
+    :empty-text="emptyText ?? t('usage.noUsageRecords')"
   >
     <template #clientApiKeyName="{ displayValue }">
       <span
@@ -113,7 +116,7 @@ withDefaults(
     <template #errorMessage="{ row }">
       <div class="min-w-0 py-0.5" :title="row.errorMessage || row.errorCode || undefined">
         <code class="block truncate font-mono text-cp-sm font-bold text-cp-error-text">
-          {{ row.errorCode || (row.logicalOutcome === 'incomplete' ? '响应未完成' : '请求失败') }}
+          {{ row.errorCode || (row.logicalOutcome === 'incomplete' ? t('usage.error.responseIsNotComplete') : t('usage.error.requestFailed')) }}
         </code>
         <p v-if="row.errorMessage" class="mt-1 mb-0 truncate text-cp-xs leading-[1.45] font-emphasis text-cp-text-secondary">
           {{ row.errorMessage }}

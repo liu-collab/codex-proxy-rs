@@ -18,6 +18,9 @@
       ],
       "@codex-proxy/ui/*": [
         "../modules/ui/src/components/*/index.ts"
+      ],
+      "@codex-proxy/ui/locale": [
+        "../modules/ui/src/locale/index.ts"
       ]
     }
   }

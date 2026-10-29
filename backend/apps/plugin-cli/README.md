@@ -26,10 +26,15 @@ cpr-plugin package \
   --output-dir /path/to/output
 ```
 
-资源映射相对于作者清单所在目录解析。输出包括完整插件 ID、版本和目标 triple 命名的 `.tar.gz` 及 `.sha256`；归档根目录直接包含 `plugin.json`、可执行文件和已声明资源，不包含开发依赖
+`--resource-map web=web/dist` 将包内 `web/` 前缀映射到作者清单所在目录下的 `web/dist/`。
+可重复传入不同前缀，源目录必须位于项目内；没有对应资源时省略该参数，未使用的映射会被拒绝。
+未映射的资源按清单中的相对路径读取，只收集 `resources` 声明的文件
 
-作者清单的省略规则、能力版本和挂载阶段见 [SDK 扩展项声明](../../crates/gateway-plugin/sdk/docs/manifest.md#扩展项简写)。
-CLI 与 SDK 的 `Manifest::from_author_slice`、`PluginBuilder::from_json` 共用规范化入口，归档只保留补全字段后的 `plugin.json`
+输出为 `<插件 ID>-<版本>-<目标 triple>.tar.gz` 及同名 `.tar.gz.sha256`；归档根目录直接包含 `plugin.json`、可执行文件和声明资源。
+输入清单及生成后的清单均不得超过 64 KiB，压缩包上限为 32 MiB，展开归档上限为 128 MiB
+
+作者清单不填写 `package`；字段省略规则、能力版本和挂载阶段见 [SDK 扩展项声明](../../crates/gateway-plugin/sdk/docs/manifest.md#扩展项简写)。
+CLI 生成规范化后的 `plugin.json`，补入协议版本、目标平台和文件摘要。打包成功只证明输入符合包合同，实际启动与能力仍需在目标宿主验证
 
 支持 `x86_64-unknown-linux-gnu`、`aarch64-unknown-linux-gnu` 和 `aarch64-apple-darwin`。
 完整开发示例在独立仓库 `codex-proxy-plugins` 的 `examples/workbench`，可通过[子模块](../../../docs/development.md#源码联调)检出；本工具不负责源码构建、上传或启用插件

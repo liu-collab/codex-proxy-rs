@@ -1,6 +1,6 @@
 //! 编译插件客户端认证绑定，并将认证结果映射为宿主身份
 
-use std::{collections::BTreeMap, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, sync::Arc};
 
 use futures::future::BoxFuture;
 use gateway_admin::model::{
@@ -26,8 +26,6 @@ use gateway_plugin_sdk::{
 
 use crate::{RpcSession, callback::PluginCallbacks};
 
-const IDENTIFIER_TIMEOUT: Duration = Duration::from_secs(5);
-
 #[derive(Clone)]
 pub(crate) struct FrontendAuthenticationEntry {
     identities: BTreeMap<String, ClientApiKeyId>,
@@ -47,7 +45,7 @@ pub(crate) async fn prepare_entry(
     let reply = session
         .call(
             "frontend_auth.identifier",
-            session.context(Stage::Registration, IDENTIFIER_TIMEOUT),
+            session.context(Stage::Registration, session.budget(Stage::Registration)),
             serde_json::json!({}),
             Vec::new(),
         )
@@ -167,19 +165,16 @@ fn valid_identifier(value: &str) -> bool {
 
 pub(crate) struct PluginFrontendAuthenticationPlan {
     entry: FrontendAuthenticationEntry,
-    timeout: Duration,
 }
 
 impl PluginFrontendAuthenticationPlan {
     pub(crate) fn compile(
         mut entries: Vec<FrontendAuthenticationEntry>,
-        maximum_call_timeout: Duration,
     ) -> Result<Option<Arc<Self>>, AdminError> {
         match entries.len() {
             0 => Ok(None),
             1 => Ok(Some(Arc::new(Self {
                 entry: entries.pop().expect("one entry was checked"),
-                timeout: maximum_call_timeout.min(Duration::from_secs(30)),
             }))),
             _ => Err(AdminError::invalid("同一发布集合只能启用一个入口认证插件")),
         }
@@ -197,28 +192,34 @@ impl FrontendAuthenticationPlan for PluginFrontendAuthenticationPlan {
                 .invocation
                 .as_ref()
                 .ok_or(FrontendAuthenticationError)?;
-            let mut context = session.context(Stage::Authentication, self.timeout);
+            let mut context =
+                session.context(Stage::Authentication, session.budget(Stage::Authentication));
             context.request = crate::adapter::request_context(request.request_context());
+            context.request_id = request.invocation().map(|origin| origin.request_id.clone());
             let _scope = callbacks
-                .prepare_frontend_authentication(&context, request.shared_request_context())
+                .prepare_frontend_authentication(&context, request)
                 .map_err(|_| FrontendAuthenticationError)?;
             let input = FrontendAuthenticationRequest {
                 authorization: request.authorization().to_owned(),
             };
-            let reply = session
-                .call(
-                    "frontend_auth.authenticate",
-                    context,
-                    serde_json::json!({}),
-                    serde_json::to_vec(&input).map_err(|_| FrontendAuthenticationError)?,
-                )
-                .await
-                .map_err(|_| FrontendAuthenticationError)?;
-            let result: FrontendAuthenticationResult = serde_json::from_slice(&reply.payload)
-                .map_err(|_| {
-                    session.invalid_response(Stage::Authentication);
-                    FrontendAuthenticationError
-                })?;
+            let invocation = session.call(
+                "frontend_auth.authenticate",
+                context,
+                serde_json::json!({}),
+                serde_json::to_vec(&input).map_err(|_| FrontendAuthenticationError)?,
+            );
+            let reply = if let Some(origin) = request.invocation() {
+                tokio::select! {
+                    biased;
+                    () = origin.cancellation.cancelled() => return Err(FrontendAuthenticationError),
+                    reply = invocation => reply,
+                }
+            } else {
+                invocation.await
+            }
+            .map_err(|_| FrontendAuthenticationError)?;
+            let result: FrontendAuthenticationResult =
+                serde_json::from_slice(&reply.payload).map_err(|_| FrontendAuthenticationError)?;
             match result {
                 FrontendAuthenticationResult::Authenticated { principal }
                     if valid_principal(&principal) =>
@@ -226,7 +227,6 @@ impl FrontendAuthenticationPlan for PluginFrontendAuthenticationPlan {
                     Ok(FrontendAuthenticationDecision::Authenticated { principal })
                 }
                 FrontendAuthenticationResult::Authenticated { .. } => {
-                    session.invalid_response(Stage::Authentication);
                     Err(FrontendAuthenticationError)
                 }
                 FrontendAuthenticationResult::NotMatched {} => {

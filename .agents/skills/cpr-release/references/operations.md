@@ -20,7 +20,7 @@
 
 调用入口前重新核对当前脚本的副作用、目标版本和待推送提交，保留无关工作区内容，不自动清理或暂存用户文件。
 先编辑 `release/notes.md`，保留为未提交改动（已暂存或未暂存均可）；其他已跟踪文件的改动应先单独提交。
-脚本会更新 `release/version.yaml`，将它与最终工作区中的发布说明一起提交为 `chore(release): vX.Y.Z`。
+脚本会更新 `release/version.yaml`，按[接口弃用规则](../../../../backend/crates/gateway-plugin/sdk/docs/manifest.md#接口弃用)校验并维护 `plugin-api-deprecations.json`，将这些差异与最终工作区中的发布说明一起提交为 `chore(release): vX.Y.Z`。
 不要提前单独提交说明或把版本文件改成目标版本；脚本要求说明相对 HEAD 有改动，并自行更新版本号。
 本任务需要的提交按[项目约定](../../../../CONTRIBUTING.md#项目约定)保留英文 Conventional Commits 与相应署名。
 
@@ -30,7 +30,7 @@
 release/publish "$release_version"
 ```
 
-该命令会创建包含版本号和发布说明的单次提交与 annotated tag，原子推送分支和 tag，再从长期分支手动触发 `release.yml`。
+该命令会创建上述版本提交与 annotated tag，原子推送分支和 tag，再从长期分支手动触发 `release.yml`。
 它没有只读预演模式；不能为了检查或演练而执行。发布工作流读取 tag 中的说明，修改 tag 之后的本地文件不会改变该次构建。
 
 只调整已发布页面的标题或正文时，编辑对应 GitHub Release 的 `name` 或 `body` 并回读核对；

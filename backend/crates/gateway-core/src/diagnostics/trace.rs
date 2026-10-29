@@ -1,7 +1,7 @@
 //! 首部与最近事件同时保留，流式 delta 合并，所有淘汰均有计数
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeMap, VecDeque},
     sync::{Arc, Mutex},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -15,10 +15,16 @@ use crate::error::ProviderError;
 use super::capture::{bounded, diagnostic_event_json, diagnostic_event_type};
 use super::{body_fingerprint, diagnostic_headers};
 
+/// 完整诊断快照的编码上限，生产者与持久化适配器共用
+pub const MAX_TRACE_SNAPSHOT_BYTES: usize = 128 * 1024;
+
 const MAX_EVENTS: usize = 128;
 const HEAD_EVENTS: usize = 8;
 const MAX_DATA_BYTES: usize = 4096;
-const MAX_BUFFER_BYTES: usize = 64 * 1024;
+const MAX_BUFFER_BYTES: usize = MAX_TRACE_SNAPSHOT_BYTES / 2;
+const MAX_EVIDENCE_EVENTS: usize = 64;
+const MAX_EVIDENCE_DATA_BYTES: usize = 16 * 1024;
+const MAX_EVIDENCE_BUFFER_BYTES: usize = MAX_TRACE_SNAPSHOT_BYTES / 2;
 
 /// 显式传给异步任务的关联上下文；默认值禁用捕获，避免全局请求映射
 #[derive(Clone, Default)]
@@ -46,7 +52,12 @@ struct TraceState {
     wire_frames: u64,
     wire_bytes: u64,
     dropped_events: u64,
+    dropped_evidence_events: u64,
     bytes: usize,
+    evidence_bytes: usize,
+    evidence_events: usize,
+    stage_counts: BTreeMap<&'static str, u64>,
+    stage_count_overflow: u64,
     events: VecDeque<TraceEvent>,
 }
 
@@ -64,6 +75,8 @@ struct TraceEvent {
     data: Value,
     #[serde(skip)]
     bytes: usize,
+    #[serde(skip)]
+    evidence: bool,
 }
 
 impl TraceContext {
@@ -89,7 +102,12 @@ impl TraceContext {
                 wire_frames: 0,
                 wire_bytes: 0,
                 dropped_events: 0,
+                dropped_evidence_events: 0,
                 bytes: 0,
+                evidence_bytes: 0,
+                evidence_events: 0,
+                stage_counts: BTreeMap::new(),
+                stage_count_overflow: 0,
                 events: VecDeque::new(),
             }))),
             ..Self::default()
@@ -123,6 +141,11 @@ impl TraceContext {
     /// details 只允许调用方构造的诊断事实；不接收原始请求/响应正文
     pub fn record(&self, stage: &'static str, data: Value) {
         self.push(stage, data, false);
+    }
+
+    /// 仅接收 owner 提取的有界安全事实，预留预算避免被常规流事件挤掉
+    pub fn record_evidence(&self, stage: &'static str, data: Value) {
+        self.push_with_retention(stage, data, false, true, MAX_EVIDENCE_DATA_BYTES);
     }
 
     /// 诊断正文与导出分类来自同一失败，导出路径不接收任意 JSON 或上游文案
@@ -264,27 +287,45 @@ impl TraceContext {
     /// 与请求终态原子持久化；旧记录没有此字段，不伪造历史时间线
     #[must_use]
     pub fn snapshot(&self) -> Option<Value> {
-        let state = self
+        let mut state = self
             .state
             .as_ref()?
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        Some(json!({
-            "schemaVersion": 2, "requestId": state.request_id,
-            "startedAtUnixMs": state.started_at_ms, "totalEvents": state.sequence,
-            "droppedEvents": state.dropped_events, "maxEvents": MAX_EVENTS,
-            "captureMode": "sanitized", "events": state.events,
-            "wireDumpEnabled": tracing::enabled!(target: "request_dump", tracing::Level::INFO),
-            "wireFrames": state.wire_frames, "wireBytes": state.wire_bytes,
-            "maxBufferBytes": MAX_BUFFER_BYTES, "headEvents": HEAD_EVENTS,
-            "snapshotBoundary": "execution_finalization",
-        }))
+        loop {
+            let snapshot = state.snapshot();
+            if snapshot.to_string().len() <= MAX_TRACE_SNAPSHOT_BYTES {
+                return Some(snapshot);
+            }
+            // 完整编码还包含计数与外层字段，超限时先淘汰普通事件并保留丢弃计数
+            // 元数据本身无法容纳时省略诊断，不能让辅助观测阻断请求终态写入
+            let index =
+                regular_eviction_index(&state).or_else(|| evidence_eviction_index(&state))?;
+            remove_event(&mut state, index);
+        }
     }
 
-    fn push(&self, stage: &'static str, mut data: Value, coalesce: bool) {
+    fn push(&self, stage: &'static str, data: Value, coalesce: bool) {
+        self.push_with_retention(
+            stage,
+            data,
+            coalesce,
+            important_stage(stage),
+            MAX_DATA_BYTES,
+        );
+    }
+
+    fn push_with_retention(
+        &self,
+        stage: &'static str,
+        mut data: Value,
+        coalesce: bool,
+        evidence: bool,
+        data_limit: usize,
+    ) {
         let Some(state) = &self.state else { return };
         let mut encoded = serde_json::to_vec(&data).unwrap_or_default();
-        if encoded.len() > MAX_DATA_BYTES {
+        if encoded.len() > data_limit {
             let mut summary = json!({"truncated": true, "summary": body_fingerprint(&encoded),
                 "eventType": data.get("eventType"), "body": data.get("body"),
                 "jsonValid": data.get("jsonValid"),
@@ -341,11 +382,17 @@ impl TraceContext {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         state.sequence += 1;
+        if state.stage_counts.contains_key(stage) || state.stage_counts.len() < 64 {
+            *state.stage_counts.entry(stage).or_default() += 1;
+        } else {
+            state.stage_count_overflow += 1;
+        }
         let sequence = state.sequence;
         let elapsed_ms = u64::try_from(state.started.elapsed().as_millis()).unwrap_or(u64::MAX);
         if coalesce
             && let Some(last) = state.events.iter_mut().rev().find(|event| {
-                event.stage == stage
+                !event.evidence
+                    && event.stage == stage
                     && event.attempt_index == self.attempt_index
                     && event.exchange_id == self.exchange_id
             })
@@ -365,6 +412,10 @@ impl TraceContext {
             sequence, elapsed_ms, stage, data = %data, "request trace");
         let bytes = encoded.len() + 256;
         state.bytes += bytes;
+        if evidence {
+            state.evidence_bytes += bytes;
+            state.evidence_events += 1;
+        }
         state.events.push_back(TraceEvent {
             sequence,
             last_sequence: sequence,
@@ -376,37 +427,101 @@ impl TraceContext {
             count: 1,
             data,
             bytes,
+            evidence,
         });
-        while state.events.len() > MAX_EVENTS || state.bytes > MAX_BUFFER_BYTES {
+        while state.events.len() > MAX_EVENTS
+            || state.bytes.saturating_sub(state.evidence_bytes) > MAX_BUFFER_BYTES
+            || state.evidence_bytes > MAX_EVIDENCE_BUFFER_BYTES
+            || state.evidence_events > MAX_EVIDENCE_EVENTS
+        {
+            if state.evidence_bytes > MAX_EVIDENCE_BUFFER_BYTES
+                || state.evidence_events > MAX_EVIDENCE_EVENTS
+            {
+                if let Some(index) = evidence_eviction_index(&state) {
+                    remove_event(&mut state, index);
+                }
+                continue;
+            }
             // 相比流中间的常规事件，优先保留失败与重试决策
-            // 首尾事件与重要阶段共用同一内存上限
-            let index = (HEAD_EVENTS..state.events.len().saturating_sub(8))
-                .find(|index| {
-                    !matches!(
-                        state.events[*index].stage,
-                        "attempt.started"
-                            | "account.selection"
-                            | "account.selected"
-                            | "attempt.failed"
-                            | "retry.decided"
-                            | "retry.policy"
-                            | "upstream.close"
-                            | "upstream.read.failed"
-                            | "capture.gap"
-                            | "request.finished"
-                    )
-                })
-                .unwrap_or(if state.events.len() > HEAD_EVENTS {
-                    HEAD_EVENTS
-                } else {
-                    0
-                });
-            if let Some(event) = state.events.remove(index) {
-                state.bytes = state.bytes.saturating_sub(event.bytes);
-                state.dropped_events += event.count;
+            // 关键事实使用独立预算，只有自身超限才会淘汰
+            if let Some(index) = regular_eviction_index(&state) {
+                remove_event(&mut state, index);
+            } else {
+                break;
             }
         }
     }
+}
+
+impl TraceState {
+    fn snapshot(&self) -> Value {
+        json!({
+            "schemaVersion": 3, "requestId": self.request_id,
+            "startedAtUnixMs": self.started_at_ms, "totalEvents": self.sequence,
+            "droppedEvents": self.dropped_events, "maxEvents": MAX_EVENTS,
+            "captureMode": "sanitized", "events": self.events,
+            "wireDumpEnabled": tracing::enabled!(target: "request_dump", tracing::Level::INFO),
+            "wireFrames": self.wire_frames, "wireBytes": self.wire_bytes,
+            "maxBufferBytes": MAX_BUFFER_BYTES + MAX_EVIDENCE_BUFFER_BYTES, "headEvents": HEAD_EVENTS,
+            "maxEvidenceEvents": MAX_EVIDENCE_EVENTS,
+            "maxEvidenceDataBytes": MAX_EVIDENCE_DATA_BYTES,
+            "maxEvidenceBufferBytes": MAX_EVIDENCE_BUFFER_BYTES,
+            "droppedEvidenceEvents": self.dropped_evidence_events,
+            "stageCounts": self.stage_counts,
+            "stageCountOverflow": self.stage_count_overflow,
+            "snapshotBoundary": "execution_finalization",
+        })
+    }
+}
+
+fn regular_eviction_index(state: &TraceState) -> Option<usize> {
+    (HEAD_EVENTS..state.events.len().saturating_sub(8))
+        .find(|index| !state.events[*index].evidence)
+        .or_else(|| {
+            (HEAD_EVENTS..state.events.len())
+                .chain(0..HEAD_EVENTS.min(state.events.len()))
+                .find(|index| !state.events[*index].evidence)
+        })
+}
+
+fn evidence_eviction_index(state: &TraceState) -> Option<usize> {
+    state
+        .events
+        .iter()
+        .position(|event| event.evidence && event.stage != "request.routed")
+        .or_else(|| state.events.iter().position(|event| event.evidence))
+}
+
+fn remove_event(state: &mut TraceState, index: usize) {
+    if let Some(event) = state.events.remove(index) {
+        state.bytes = state.bytes.saturating_sub(event.bytes);
+        state.dropped_events += event.count;
+        if event.evidence {
+            state.evidence_bytes = state.evidence_bytes.saturating_sub(event.bytes);
+            state.evidence_events = state.evidence_events.saturating_sub(1);
+            state.dropped_evidence_events += event.count;
+        }
+    }
+}
+
+fn important_stage(stage: &str) -> bool {
+    matches!(
+        stage,
+        "request.routed"
+            | "attempt.started"
+            | "account.selection"
+            | "account.selected"
+            | "attempt.failed"
+            | "retry.decided"
+            | "retry.policy"
+            | "request.finished"
+            | "upstream.exchange.started"
+            | "upstream.response.headers"
+            | "upstream.close"
+            | "upstream.read.failed"
+            | "upstream.payload.sent"
+            | "capture.gap"
+    )
 }
 
 impl Drop for TraceState {

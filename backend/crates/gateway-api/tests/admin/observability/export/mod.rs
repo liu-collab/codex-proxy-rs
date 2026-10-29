@@ -34,7 +34,35 @@ async fn export(
     let body = to_bytes(response.into_body(), 20 * 1024 * 1024)
         .await
         .unwrap();
-    (status, headers, serde_json::from_slice(&body).unwrap())
+    let file = if status == StatusCode::OK {
+        assert_eq!(headers[header::CONTENT_TYPE], "application/zip");
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&body)).unwrap();
+        assert_eq!(archive.len(), 3);
+        let file: Value =
+            serde_json::from_reader(archive.by_name("diagnostics.json").unwrap()).unwrap();
+        for name in ["summary.txt", "README.txt"] {
+            use std::io::Read as _;
+            let mut text = String::new();
+            archive
+                .by_name(name)
+                .unwrap()
+                .read_to_string(&mut text)
+                .unwrap();
+            assert!(!text.is_empty());
+            for marker in [
+                "fixture-authorization",
+                "fixture-refresh",
+                "fixture-password",
+                "fixture@example.invalid",
+            ] {
+                assert!(!text.contains(marker), "archive leaked {marker} in {name}");
+            }
+        }
+        file
+    } else {
+        serde_json::from_slice(&body).unwrap()
+    };
+    (status, headers, file)
 }
 
 #[tokio::test]
@@ -85,11 +113,15 @@ async fn diagnostic_export_keeps_retry_evidence_and_original_errors_but_not_cred
         .lock()
         .unwrap()
         .extend([error, unrelated]);
-    let trace = json!({"droppedEvents": 0, "events": [
+    let trace = json!({"droppedEvents": 5, "droppedEvidenceEvents": 1, "stageCountOverflow": 2,
+        "stageCounts": {"provider.response.parse_gap": 1}, "events": [
         {"stage": "request.routed", "data": {"accountPolicy": {"maxAccountRotations": 3}}},
         {"stage": "account.selection", "data": {"candidates": [{"id": "acct_high", "weight": 2}, {"id": "acct_low", "weight": 1}]}},
         {"stage": "attempt.failed", "data": {"kind": "unavailable", "recovery": {"replaySafe": true}}},
         {"stage": "retry.decided", "data": {"phase": "execute", "retryable": false, "clientRetrySuppressed": true, "replayBarrierReached": false}},
+        {"stage": "provider.response.parse_gap", "data": {"reason": "invalid_json"}},
+        {"stage": "provider.request.input", "data": {"input": {"omittedItems": 10}}},
+        {"stage": "upstream.event", "data": {"truncated": true, "jsonValid": false}},
     ]});
     fixture.usage_detail.lock().unwrap().replace(UsageDetail {
         request: usage_record_with_account(
@@ -108,10 +140,32 @@ async fn diagnostic_export_keeps_retry_evidence_and_original_errors_but_not_cred
     assert_eq!(status, StatusCode::OK, "{file}");
     assert_eq!(
         headers[header::CONTENT_DISPOSITION],
-        "attachment; filename=diagnostics.json"
+        "attachment; filename=cpr-diagnostics-req_err.zip"
     );
     assert_eq!(headers[header::CACHE_CONTROL], "private, no-store");
     assert_eq!(file["schemaVersion"], 5);
+    assert_eq!(
+        file["exportTruncated"], false,
+        "capture loss is distinct from export truncation"
+    );
+    for reason in [
+        "events_evicted",
+        "critical_evidence_evicted",
+        "stage_coverage_incomplete",
+        "response_parse_failed",
+        "input_prefix_sample_limited",
+        "event_data_truncated",
+        "json_parse_failed",
+    ] {
+        assert!(
+            file["availability"]["gaps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|gap| gap["reason"] == reason),
+            "missing gap {reason}"
+        );
+    }
     assert_eq!(file["requests"][0]["evidence"]["trace"], trace);
     assert_eq!(
         file["requests"][0]["evidence"]["incidentConfiguration"]["revision"],

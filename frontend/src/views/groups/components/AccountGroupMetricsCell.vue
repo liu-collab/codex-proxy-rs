@@ -1,10 +1,19 @@
 <script setup lang="ts">
 import type { Component } from 'vue'
+
 import type { AccountGroup } from '@/api'
 import { AlertTriangle, CircleCheck, Grid2X2, Users } from '@lucide/vue'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { formatUsd } from '@/utils/format'
+
+const props = defineProps<{
+  group: AccountGroup
+  kind: MetricKind
+}>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 type MetricKind = 'accounts' | 'capacity' | 'usage'
 type MetricTone = 'primary' | 'secondary' | 'success' | 'warning' | 'active'
@@ -15,11 +24,6 @@ interface MetricItem {
   tone: MetricTone
   icon?: Component
 }
-
-const props = defineProps<{
-  group: AccountGroup
-  kind: MetricKind
-}>()
 
 const toneClasses: Record<MetricTone, string> = {
   primary: 'text-cp-text',
@@ -33,19 +37,19 @@ const metrics = computed<MetricItem[]>(() => {
   if (props.kind === 'accounts') {
     return [
       {
-        label: '可用',
+        label: t('common.status.available'),
         value: props.group.accountSummary.available,
         tone: 'success',
         icon: CircleCheck,
       },
       {
-        label: '受限',
+        label: t('groups.metrics.restricted'),
         value: props.group.accountSummary.limited,
         tone: 'warning',
         icon: AlertTriangle,
       },
       {
-        label: '总数',
+        label: t('groups.metrics.total'),
         value: props.group.accountSummary.total,
         tone: 'primary',
         icon: Users,
@@ -56,18 +60,24 @@ const metrics = computed<MetricItem[]>(() => {
   if (props.kind === 'capacity') {
     return [
       {
-        label: '并发',
+        label: t('groups.metrics.concurrency'),
         value: `${props.group.capacity.usedSlots ?? '—'} / ${props.group.capacity.totalSlots ?? '∞'}`,
-        tone: (props.group.capacity.usedSlots ?? 0) > 0 ? 'active' : 'primary',
+        tone: (props.group.capacity.usedSlots ?? 0) > 0
+          ? 'active'
+          : 'primary',
         icon: Grid2X2,
       },
     ]
   }
 
   return [
-    { label: '今日', value: formatUsd(props.group.usage.todayUsd), tone: 'primary' },
     {
-      label: '累计',
+      label: t('groups.metrics.today'),
+      value: formatUsd(props.group.usage.todayUsd),
+      tone: 'primary',
+    },
+    {
+      label: t('groups.metrics.cumulative'),
       value: formatUsd(props.group.usage.retainedTotalUsd),
       tone: 'secondary',
     },

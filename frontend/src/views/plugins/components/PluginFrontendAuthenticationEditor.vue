@@ -7,11 +7,14 @@ import type {
   PluginFrontendIdentityBinding,
 } from '@/api'
 
-import { ZButton, ZFormItem, ZIconButton, ZInput, ZNotification, ZSegmented, ZSelect, ZSwitch } from '@codex-proxy/ui'
+import { ZButton, ZFormItem, ZIconButton, ZInput, ZSegmented, ZSelect, ZSwitch } from '@codex-proxy/ui'
+import { Plus, Trash2 } from '@lucide/vue'
 
-import { Plus, RefreshCw, Trash2 } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import { getApiKeys } from '@/api'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import PluginHelpPopover from './PluginHelpPopover.vue'
 
@@ -28,20 +31,30 @@ const emit = defineEmits<{
   validityChange: [valid: boolean]
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const binding = defineModel<PluginCapabilityBinding | null>({ required: true })
 const clientKeys = shallowRef<ApiKey[]>([])
 const loadingKeys = shallowRef(false)
 const keysFailed = shallowRef(false)
 let keyLoadController: AbortController | null = null
 
-const fallbackOptions = [
-  { label: '独占认证', value: 'reject' },
-  { label: '未匹配时回退 API Key', value: 'delegate' },
-]
+const fallbackOptions = computed(() => ([
+  {
+    label: t('plugins.frontendAuth.exclusiveCertification'),
+    value: 'reject',
+  },
+  {
+    label: t('plugins.frontendAuth.fallbackApiKeyIfNoMatch'),
+    value: 'delegate',
+  },
+]))
 
 const keyOptions = computed(() => {
   const options = clientKeys.value.map(key => ({
-    label: `${key.name || key.prefix}${key.enabled ? '' : '（已停用）'}`,
+    label: `${key.name || key.prefix}${key.enabled
+      ? ''
+      : t('plugins.frontendAuth.disabled')}`,
     value: key.id,
     description: `${key.prefix} · ${key.id}`,
   }))
@@ -49,7 +62,7 @@ const keyOptions = computed(() => {
   for (const identity of binding.value?.identityBindings ?? []) {
     if (identity.clientKeyId && !knownIds.has(identity.clientKeyId)) {
       options.push({
-        label: '已配置但当前不可用',
+        label: t('plugins.frontendAuth.configuredUnavailable'),
         value: identity.clientKeyId,
         description: identity.clientKeyId,
       })
@@ -69,7 +82,7 @@ const validationError = computed(() => {
     || !props.contribution.stages.includes(value.stage)
     || (value.failurePolicy !== 'reject' && value.failurePolicy !== 'delegate')
   ) {
-    return '客户端认证绑定必须使用认证阶段和受支持的未匹配处理'
+    return t('plugins.frontendAuth.invalidBinding')
   }
   if (
     value.providerIds.length
@@ -77,12 +90,12 @@ const validationError = computed(() => {
     || value.clientKeyIds.length
     || value.accountGroupIds.length
   ) {
-    return '客户端认证不支持 Provider、模型或分组范围，请关闭后重新启用该绑定'
+    return t('plugins.frontendAuth.unsupportedScope')
   }
   if (value.identityBindings.length === 0)
-    return '请添加至少一条身份映射'
+    return t('plugins.frontendAuth.addAtLeastOneIdentityMapping')
   if (value.identityBindings.length > 256)
-    return '身份映射不能超过 256 条'
+    return t('plugins.frontendAuth.mappingLimit')
 
   const principals = new Set<string>()
   for (const identity of value.identityBindings) {
@@ -92,12 +105,12 @@ const validationError = computed(() => {
       || new TextEncoder().encode(identity.principal).byteLength > 256
       || /\p{Cc}/u.test(identity.principal)
     ) {
-      return '身份标识必须是 1–256 个 UTF-8 字节，且不能含首尾空白或控制字符'
+      return t('plugins.frontendAuth.invalidIdentity')
     }
     if (principals.has(identity.principal))
-      return '同一身份标识只能配置一次'
+      return t('plugins.frontendAuth.duplicateIdentity')
     if (!identity.clientKeyId)
-      return '请为每个身份标识选择客户端 Key'
+      return t('plugins.frontendAuth.keyRequired')
     principals.add(identity.principal)
   }
   return ''
@@ -114,7 +127,9 @@ function enableAuthentication(enabled: boolean) {
         models: [],
         clientKeyIds: [],
         accountGroupIds: [],
-        identityBindings: [{ principal: '', clientKeyId: '' }],
+        identityBindings: [
+          { principal: '', clientKeyId: '' },
+        ],
       }
     : null
 }
@@ -143,7 +158,12 @@ function updateIdentity(index: number, update: Partial<PluginFrontendIdentityBin
   binding.value = {
     ...binding.value,
     identityBindings: binding.value.identityBindings.map((identity, identityIndex) =>
-      identityIndex === index ? { ...identity, ...update } : identity,
+      identityIndex === index
+        ? {
+            ...identity,
+            ...update,
+          }
+        : identity,
     ),
   }
 }
@@ -172,7 +192,7 @@ async function loadClientKeys() {
       items.push(...result.items)
       cursor = result.nextCursor ?? undefined
       if (cursor && seenCursors.has(cursor))
-        throw new Error('服务返回了重复的分页位置')
+        throw new Error(t('plugins.frontendAuth.repeatedCursor'))
       if (cursor)
         seenCursors.add(cursor)
     } while (cursor)
@@ -182,7 +202,9 @@ async function loadClientKeys() {
   catch (error: unknown) {
     if (!controller.signal.aborted) {
       keysFailed.value = true
-      ZNotification.error({ message: errorMessage(error, '加载客户端 Key 失败') })
+      ZNotification.error({
+        message: errorMessage(error, t('plugins.frontendAuth.failedToLoadClientKey')),
+      })
     }
   }
   finally {
@@ -212,16 +234,16 @@ defineExpose({ validationError })
     <div class="flex items-center gap-2 rounded-cp-lg bg-cp-fill-alter p-4">
       <ZSwitch
         :model-value="Boolean(binding)"
-        label="启用客户端认证"
+        :label="t('plugins.frontendAuth.enableClientAuthentication')"
         :disabled="disabled"
         @update:model-value="enableAuthentication"
       />
-      <PluginHelpPopover label="客户端认证说明">
+      <PluginHelpPopover :label="t('plugins.frontendAuth.helpTitle')">
         <p class="m-0">
-          插件识别请求中的外部身份，宿主再将该身份映射到已有 Client Key，沿用这个 Key 的限额、账号范围与并发策略
+          {{ t('plugins.frontendAuth.description') }}
         </p>
         <p class="m-0">
-          此功能用于客户端 API 请求，不替代管理端登录
+          {{ t('plugins.frontendAuth.loginNotice') }}
         </p>
         <p class="m-0 break-all font-mono text-cp-text-quaternary">
           {{ contribution.id }}
@@ -230,24 +252,24 @@ defineExpose({ validationError })
     </div>
 
     <template v-if="binding">
-      <ZFormItem label="未匹配处理">
+      <ZFormItem :label="t('plugins.frontendAuth.unmatchedProcessing')">
         <template #label-extra>
-          <PluginHelpPopover label="未匹配处理说明">
+          <PluginHelpPopover :label="t('plugins.frontendAuth.unmatchedHandlingInstructions')">
             <p class="m-0">
-              独占认证：插件未识别到身份时拒绝请求
+              {{ t('plugins.frontendAuth.exclusiveHelp') }}
             </p>
             <p class="m-0">
-              未匹配时回退 API Key：插件未识别到身份时，继续使用宿主原有的 API Key 认证
+              {{ t('plugins.frontendAuth.fallbackToApiKeyWhenNoMatch') }}
             </p>
             <p class="m-0">
-              插件明确拒绝或调用失败时始终拒绝请求，不会回退
+              {{ t('plugins.frontendAuth.rejectionHelp') }}
             </p>
           </PluginHelpPopover>
         </template>
         <ZSegmented
           :model-value="binding.failurePolicy"
           :options="fallbackOptions"
-          aria-label="客户端认证未匹配处理"
+          :aria-label="t('plugins.frontendAuth.unmatchedLabel')"
           :disabled="disabled"
           @update:model-value="setFailurePolicy"
         />
@@ -257,21 +279,18 @@ defineExpose({ validationError })
         <div class="flex min-w-0 items-end justify-between gap-3">
           <div class="flex min-w-0 items-center gap-1.5">
             <p class="m-0 text-cp leading-none font-medium text-cp-text-secondary">
-              身份映射
+              {{ t('plugins.frontendAuth.identityMapping') }}
             </p>
-            <PluginHelpPopover label="身份映射说明">
+            <PluginHelpPopover :label="t('plugins.frontendAuth.identityMappingDescription')">
               <p class="m-0">
-                身份标识必须与插件返回的值完全一致，同一身份只能映射一次
+                {{ t('plugins.frontendAuth.identityHelp') }}
               </p>
               <p class="m-0">
-                选择该身份使用的 Client Key，已停用或删除的 Key 不会获得执行权限
+                {{ t('plugins.frontendAuth.keyHelp') }}
               </p>
             </PluginHelpPopover>
           </div>
           <div class="flex shrink-0 items-center gap-1">
-            <ZIconButton v-if="keysFailed" size="small" aria-label="重新加载客户端 Key" :disabled="disabled" :loading="loadingKeys" @click="loadClientKeys()">
-              <RefreshCw class="size-3.5" />
-            </ZIconButton>
             <ZButton
               size="small"
               :disabled="disabled || binding.identityBindings.length >= 256"
@@ -280,7 +299,7 @@ defineExpose({ validationError })
               <template #icon>
                 <Plus class="size-3.5" />
               </template>
-              添加映射
+              {{ t('plugins.frontendAuth.addMapping') }}
             </ZButton>
           </div>
         </div>
@@ -290,22 +309,22 @@ defineExpose({ validationError })
           :key="index"
           class="grid min-w-0 gap-3 rounded-cp-lg bg-cp-fill-alter p-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] md:items-end"
         >
-          <ZFormItem label="身份标识" required>
+          <ZFormItem :label="t('plugins.frontendAuth.identityMark')" required>
             <ZInput
               :model-value="identity.principal"
               maxlength="256"
-              placeholder="填写插件返回的身份标识"
+              :placeholder="t('plugins.frontendAuth.identityPlaceholder')"
               :disabled="disabled"
               @update:model-value="updateIdentity(index, { principal: $event })"
             />
           </ZFormItem>
-          <ZFormItem label="客户端 Key" required>
+          <ZFormItem :label="t('plugins.bindings.clientKey')" required>
             <ZSelect
               :model-value="identity.clientKeyId"
               :options="keyOptions"
-              :disabled="disabled || loadingKeys"
-              :placeholder="loadingKeys ? '加载中' : keysFailed ? '加载失败，请重试' : '选择客户端 Key'"
-              empty-text="暂无客户端 Key"
+              :disabled="disabled || loadingKeys || keysFailed"
+              :placeholder="loadingKeys ? t('common.status.loading') : t('plugins.frontendAuth.selectClientApiKey')"
+              :empty-text="t('plugins.frontendAuth.noClientKeyYet')"
               class="w-full min-w-0"
               @update:model-value="updateIdentity(index, { clientKeyId: $event })"
             />
@@ -313,7 +332,7 @@ defineExpose({ validationError })
           <ZIconButton
             size="default"
             :disabled="disabled"
-            :aria-label="`移除第 ${index + 1} 条身份映射`"
+            :aria-label="t('plugins.frontendAuth.removeIdentityMapping', { value: index + 1 })"
             class="justify-self-end"
             @click="removeIdentity(index)"
           >

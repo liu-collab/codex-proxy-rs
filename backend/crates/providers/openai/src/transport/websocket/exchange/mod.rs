@@ -59,8 +59,6 @@ pub type CodexWebSocketRateLimitUpdates = Arc<Mutex<Vec<ParsedRateLimits>>>;
 pub struct CodexWebSocketResponseMetadataUpdate {
     /// 当前响应首次声明的会话续接状态
     pub turn_state: Option<String>,
-    /// 当前响应最新的服务端模型报告
-    pub reported_model: Option<String>,
 }
 
 pub type CodexWebSocketResponseMetadataUpdates = Arc<Mutex<CodexWebSocketResponseMetadataUpdate>>;
@@ -72,8 +70,7 @@ pub(super) fn reusable_websocket_metadata(
     metadata.set_cookie_headers.clear();
     metadata.rate_limit_headers.clear();
     metadata.turn_state = None;
-    // 模型报告属于上一轮请求，池中连接不能把它带到下一轮缺失报告的响应
-    metadata.response_metadata.effective_model = None;
+    // 请求级响应头不能随池中连接带到下一轮响应
     metadata
         .response_metadata
         .client_headers

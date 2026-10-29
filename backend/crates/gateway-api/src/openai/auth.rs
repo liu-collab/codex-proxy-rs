@@ -153,6 +153,19 @@ pub(crate) fn client_access_error_response(error: ClientAccessError) -> Response
 #[must_use]
 pub fn identify_codex_client(headers: &HeaderMap) -> Option<IdentifiedCodexClient> {
     const MAXIMUM_HEADER_LENGTH: usize = 4096;
+    // 官方 CLI、IDE、SDK 与 App Server 的 UA 产品版本均来自所运行的 Codex Core
+    const CORE_CLIENT_PRODUCTS: &[&str] = &[
+        "codex_cli_rs",
+        "codex-cli",
+        "codex-tui",
+        "codex_exec",
+        "codex_vscode",
+        "codex_sdk_ts",
+        "codex_python_sdk",
+        "codex-app-server",
+        "codex-app-server-sdk",
+        "codex_mcp_server",
+    ];
 
     let originator = bounded_ascii_header(headers, "originator", MAXIMUM_HEADER_LENGTH);
     let user_agent = bounded_ascii_header(headers, "user-agent", MAXIMUM_HEADER_LENGTH);
@@ -186,22 +199,17 @@ pub fn identify_codex_client(headers: &HeaderMap) -> Option<IdentifiedCodexClien
     for product in user_agent.split(|character: char| {
         character.is_ascii_whitespace() || matches!(character, '(' | ')' | ';' | ',' | '[' | ']')
     }) {
-        for prefix in ["codex_cli_rs", "codex-cli"] {
-            if product.eq_ignore_ascii_case(prefix) {
-                return Some(IdentifiedCodexClient {
-                    kind: CodexClientKind::Cli,
-                    version: None,
-                });
-            }
-            let Some((name, version)) = product.split_once('/') else {
-                continue;
-            };
-            if name.eq_ignore_ascii_case(prefix) {
-                return Some(IdentifiedCodexClient {
-                    kind: CodexClientKind::Cli,
-                    version: CodexClientVersion::parse(version).ok(),
-                });
-            }
+        let (name, version) = product
+            .split_once('/')
+            .map_or((product, None), |(name, version)| (name, Some(version)));
+        if CORE_CLIENT_PRODUCTS
+            .iter()
+            .any(|known| name.eq_ignore_ascii_case(known))
+        {
+            return Some(IdentifiedCodexClient {
+                kind: CodexClientKind::Cli,
+                version: version.and_then(|value| CodexClientVersion::parse(value).ok()),
+            });
         }
     }
     None

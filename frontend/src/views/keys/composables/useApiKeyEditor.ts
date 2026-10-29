@@ -1,10 +1,11 @@
 import type { ApiKey } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
-import { ZNotification } from '@codex-proxy/ui'
 import { cloneDeep } from 'es-toolkit'
 import { ref, shallowRef } from 'vue'
 import { createApiKey, updateApiKey } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 
 export interface ApiKeyFormValue {
   providerRequestProfileOverrides: ProviderRequestProfiles
@@ -52,7 +53,7 @@ export function useApiKeyEditor(options: {
   }
 
   function requestSave() {
-    if (!validateForm() || savingKey.value)
+    if (savingKey.value)
       return
     if (form.value.groupIds.length === 0) {
       showAllAccountsConfirm.value = true
@@ -67,7 +68,7 @@ export function useApiKeyEditor(options: {
   }
 
   async function save() {
-    if (!validateForm() || savingKey.value)
+    if (savingKey.value)
       return
 
     await savingKeyAction.run(
@@ -75,7 +76,9 @@ export function useApiKeyEditor(options: {
         const payload = {
           name: form.value.name.trim(),
           label: form.value.label.trim() || null,
-          groupIds: [...new Set(form.value.groupIds)],
+          groupIds: [
+            ...new Set(form.value.groupIds),
+          ],
           maxConcurrency: Number(form.value.maxConcurrency),
           requestsPerMinute: Number(form.value.requestsPerMinute),
           dailyLimitUsd: form.value.dailyLimitUsd.trim() || '0',
@@ -105,50 +108,39 @@ export function useApiKeyEditor(options: {
         showFormModal.value = false
         await options.reload()
         if (current) {
-          ZNotification.success({ message: 'API Key 已更新' })
+          ZNotification.success({
+            message: t('keys.editor.updated'),
+          })
         }
         else if (created) {
           options.onCreated(created.key, created.name)
-          ZNotification.success({ message: 'API Key 创建成功' })
+          ZNotification.success({
+            message: t('keys.editor.created'),
+          })
         }
       },
-      { onError: () => void options.reload() },
+      {
+        onError: () => void options.reload(),
+      },
     )
-  }
-
-  function validateForm() {
-    for (const [label, value] of [['日限额', form.value.dailyLimitUsd], ['周限额', form.value.weeklyLimitUsd]]) {
-      if (value.trim() && !/^\d{1,10}(?:\.\d{1,10})?$/.test(value.trim())) {
-        ZNotification.warning({ message: `${label}必须是非负金额，最多 10 位小数` })
-        return false
-      }
-    }
-    if (!form.value.name.trim()) {
-      ZNotification.warning({ message: '请输入 API Key 名称' })
-      return false
-    }
-    if (!editingKey.value && form.value.customKey && !/^[\x21-\x7E]+$/.test(form.value.customKey)) {
-      ZNotification.warning({ message: '自定义 Key 只能包含 HTTP 可传输的可见字符，不能包含空格或换行' })
-      return false
-    }
-    for (const [label, value] of [
-      ['最大并发', form.value.maxConcurrency],
-      ['每分钟请求数', form.value.requestsPerMinute],
-    ] as const) {
-      const parsed = Number(value)
-      if (!Number.isSafeInteger(parsed) || parsed < 0) {
-        ZNotification.warning({ message: `${label}必须是非负整数` })
-        return false
-      }
-    }
-    return true
   }
 
   function clearCustomKey() {
     form.value.customKey = ''
   }
 
-  return { showFormModal, showAllAccountsConfirm, editingKey, savingKey, form, openCreate, openEdit, clearCustomKey, requestSave, confirmAllAccountsScope }
+  return {
+    showFormModal,
+    showAllAccountsConfirm,
+    editingKey,
+    savingKey,
+    form,
+    openCreate,
+    openEdit,
+    clearCustomKey,
+    requestSave,
+    confirmAllAccountsScope,
+  }
 }
 
 function emptyForm(): ApiKeyFormValue {
@@ -178,5 +170,7 @@ function profileOverrideUpdates(
 }
 
 function limitInputValue(limit: string | number) {
-  return Number(limit) === 0 ? '' : String(limit)
+  return Number(limit) === 0
+    ? ''
+    : String(limit)
 }

@@ -1,48 +1,46 @@
 <script setup lang="ts">
 import type { AccountResetCreditAutomation } from '@/api'
-import { ZButton, ZEmpty, ZIconButton, ZPopover, ZSwitch } from '@codex-proxy/ui'
+
+import { ZButton, ZIconButton, ZPopover, ZSwitch } from '@codex-proxy/ui'
 import { CircleHelp, Clock3 } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { getAccountResetCreditAutomation, setAccountResetCreditAutomation } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
-import { errorMessage } from '@/utils/operation'
 
 const props = defineProps<{ accountId: string }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const router = useRouter()
 const status = shallowRef<AccountResetCreditAutomation>()
-const loadError = shallowRef('')
 const switchEnabled = shallowRef(false)
-const loadAction = useAsyncAction({ errorText: false })
+const loadAction = useAsyncAction()
 const saveAction = useAsyncAction()
 const busy = computed(() => loadAction.loading.value || saveAction.loading.value)
 const resultText = computed(() => {
   switch (status.value?.lastResult) {
-    case 'pending': return status.value?.enabled ? '上次自动重置结果待确认，将继续核对' : '上次自动重置结果待确认'
-    case 'expired_unknown': return '上次重置结果未能确认，卡片已到期'
-    case 'discovery_failed': return '最近查询失败，将按计划重试'
-    case 'weekly_quota_above_threshold': return '剩余周额度高于上限，稍后检查'
-    case 'weekly_quota_unavailable': return '暂时无法确认周额度，稍后检查'
-    case 'nothing_to_reset': return '当前额度窗口不需要重置，稍后检查'
-    case 'not_redeemed': return '上游未完成最近一次自动重置'
+    case 'pending': return status.value?.enabled
+      ? t('accounts.quotaReset.automation.confirming')
+      : t('accounts.quotaReset.automation.unconfirmed')
+    case 'expired_unknown': return t('accounts.quotaReset.automation.expiredUnconfirmed')
+    case 'discovery_failed': return t('accounts.quotaReset.automation.queryFailed')
+    case 'weekly_quota_above_threshold': return t('accounts.quotaReset.automation.aboveThreshold')
+    case 'weekly_quota_unavailable': return t('accounts.quotaReset.automation.quotaUnavailable')
+    case 'nothing_to_reset': return t('accounts.quotaReset.automation.resetNotNeeded')
+    case 'not_redeemed': return t('accounts.quotaReset.automation.resetIncomplete')
     default: return ''
   }
 })
 
 async function load() {
   const accountId = props.accountId
-  loadError.value = ''
   await loadAction.run(async () => {
-    try {
-      const result = await getAccountResetCreditAutomation({ accountId }, { silent: true })
-      if (props.accountId === accountId) {
-        status.value = result
-        switchEnabled.value = result.enabled
-      }
-    }
-    catch (error) {
-      if (props.accountId === accountId)
-        loadError.value = errorMessage(error)
+    const result = await getAccountResetCreditAutomation({ accountId })
+    if (props.accountId === accountId) {
+      status.value = result
+      switchEnabled.value = result.enabled
     }
   })
 }
@@ -67,53 +65,46 @@ watch(() => props.accountId, () => {
 </script>
 
 <template>
-  <section class="grid gap-2 rounded-cp bg-cp-fill-quaternary px-4 py-3" aria-label="自动使用重置卡">
+  <section class="grid gap-2 rounded-cp bg-cp-fill-quaternary px-4 py-3" :aria-label="t('accounts.quotaReset.automaticallyUseResetCard')">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-1">
         <h3 class="m-0 text-cp-sm font-heavy text-cp-text">
-          自动使用
+          {{ t('accounts.quotaReset.automaticallyUsed') }}
         </h3>
         <ZPopover trigger="click" placement="bottom-start" role="dialog">
           <template #reference="{ open, id }">
-            <ZIconButton size="small" class="size-6! p-0!" aria-label="自动使用规则" :aria-expanded="open" :aria-controls="id">
+            <ZIconButton size="small" class="size-6! p-0!" :aria-label="t('accounts.quotaReset.automaticUsageRules')" :aria-expanded="open" :aria-controls="id">
               <CircleHelp class="size-3.5" />
             </ZIconButton>
           </template>
           <div class="grid max-w-64 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
-            <p>每天随机查询一次，各账号错开时间</p>
-            <p>临期使用前核对卡片，已在其他地方使用的会自动跳过</p>
+            <p>{{ t('accounts.quotaReset.automation.scheduleHelp') }}</p>
+            <p>{{ t('accounts.quotaReset.automation.verifyHelp') }}</p>
           </div>
         </ZPopover>
       </div>
       <div class="flex items-center gap-3">
-        <ZButton size="small" variant="text" aria-label="设置全局提前时间" @click="router.push('/settings#reset-credits')">
+        <ZButton size="small" variant="text" :aria-label="t('accounts.quotaReset.setGlobalLeadTime')" @click="router.push('/settings#reset-credits')">
           <template #icon>
             <Clock3 class="size-3.5" />
           </template>
-          {{ status ? `提前 ${status.leadMinutes} 分钟` : '提前时间' }}
+          {{ status ? t('accounts.quotaReset.minutesInAdvance', { leadMinutes: status.leadMinutes }) : t('accounts.quotaReset.leadTime') }}
         </ZButton>
         <ZSwitch
           class="reset-credit-switch"
           :model-value="switchEnabled"
           :disabled="busy || !status"
-          aria-label="自动使用临期重置卡"
+          :aria-label="t('accounts.quotaReset.automation.label')"
           @update:model-value="toggle"
         />
       </div>
     </div>
     <p v-if="status?.enabled && status.nextConsumeAtDisplay" class="text-cp-xs text-cp-text-secondary">
-      下次使用 {{ status.nextConsumeAtDisplay }}
+      {{ t('accounts.quotaReset.nextUse', { nextConsumeAtDisplay: status.nextConsumeAtDisplay }) }}
     </p>
     <p v-if="resultText" class="text-cp-xs text-cp-warning" role="status">
       {{ resultText }}
     </p>
-    <ZEmpty v-if="loadError" title="自动使用设置加载失败" :description="loadError" size="small" surface="none" role="alert">
-      <template #action>
-        <ZButton size="small" variant="plain" :loading="loadAction.loading.value" @click="load">
-          重试
-        </ZButton>
-      </template>
-    </ZEmpty>
   </section>
 </template>
 

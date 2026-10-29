@@ -1,0 +1,112 @@
+{
+  "keys": {
+    "configuration": {
+      "description": "Save or merge the configuration below and then restart Codex",
+      "platform": "Platform",
+      "toggleWebSocket": "Switch WebSocket configuration",
+      "importTo": "Import",
+      "selectImportTool": "Choose a tool to import into",
+      "ccSwitchDescription": "Manage AI client configurations",
+      "viewOnGitHub": "View {name} on GitHub",
+      "copiedToClipboard": "Copied to clipboard",
+      "fullApiKeyNotAvailable": "Full API key not available",
+      "title": "Use API key"
+    },
+    "actions": {
+      "editKey": "Edit key",
+      "useKey": "Use key",
+      "moreActions": "More actions",
+      "resetUsedCredit": "Reset usage",
+      "disableKey": "Disable",
+      "enableKey": "Enable",
+      "deleteKey": "Delete",
+      "deletedApiKeyDeletedApiKeys": "Deleted {count} API key | Deleted {count} API keys",
+      "configure": "Configure"
+    },
+    "day": "Day",
+    "dailyUsage": "Daily usage",
+    "week": "Week",
+    "weeklyUsage": "Weekly usage",
+    "viewUsageAndCostsFor": "View usage and costs for {name}",
+    "costDetailsTitle": "Cost details (USD)",
+    "confirmNextTime": "Confirm next time",
+    "budgetReset": {
+      "dailyQuota": "Daily quota",
+      "weeklyQuota": "Weekly quota",
+      "keyQuotaReset": "Key quota reset",
+      "description": "Clear spending for the selected period, the reset date is set again on the next request",
+      "targetKey": "Target key",
+      "resetScope": "Reset scope",
+      "currentlyUsed": "Currently used",
+      "afterReset": "After reset",
+      "remainUnchanged": "Remain unchanged",
+      "confirmReset": "Confirm reset"
+    },
+    "created": {
+      "apiKeyCreated": "API key created",
+      "description": "Copy the API key or import it into a client",
+      "accessNotice": "This key grants gateway access, share it only with trusted callers",
+      "iHaveSaved": "I have saved"
+    },
+    "filters": {
+      "apiKeyFilteringAndOperations": "API key filtering and operations",
+      "searchPlaceholder": "Search by name or label",
+      "searchLabel": "Search API keys by name or label",
+      "deleteSelected": "Delete ({count})",
+      "createApiKey": "Create API key"
+    },
+    "editor": {
+      "description": "Set API key details, account groups, and usage limits",
+      "namePlaceholder": "For example: Production",
+      "labelOptional": "Label (optional)",
+      "forExampleBackendService": "For example: backend service",
+      "customKeyOptional": "Custom Key (optional)",
+      "keyPlaceholder": "Leave blank to generate a key",
+      "upstreamIdentity": "Upstream identity",
+      "dailyLimit": "Daily limit",
+      "dailyLimitUsd": "Daily limit (USD)",
+      "weeklyLimit": "Weekly limit",
+      "weeklyLimitUsd": "Weekly limit (USD)",
+      "maximumConcurrency": "Concurrency",
+      "requestsPerMinuteRpm": "RPM",
+      "updated": "API key updated",
+      "created": "API key created",
+      "validation": {
+        "amount": "{label} must be a non-negative amount with up to 10 decimal places",
+        "integer": "{label} must be a non-negative integer"
+      },
+      "enterApiKeyName": "Please enter API key name",
+      "invalidKey": "Use visible HTTP header characters, without spaces or line breaks",
+      "requestsPerMinute": "Requests per minute"
+    },
+    "fields": {
+      "copyFullKey": "Copy full key",
+      "allAccounts": "All accounts",
+      "keyPrefix": "Prefix",
+      "quotaUsage": "Quota",
+      "requestLimits": "Limits",
+      "lastUsed": "Last used"
+    },
+    "page": {
+      "description": "Manage API keys and account access",
+      "noApiKeyYet": "No API key yet",
+      "selectCurrentPageKey": "Select current page key",
+      "selectKey": "Select key",
+      "concurrency": "Concurrency",
+      "batchDeleteWarning": "These API keys will stop working immediately, deletion cannot be undone",
+      "batchDeleteDescription": "Delete the {count} selected API key? | Delete the {count} selected API keys?",
+      "deleteApiKey": "Delete API key",
+      "deleteWarning": "This API key will stop working immediately, deletion cannot be undone",
+      "apiKey": "The API key",
+      "delete": "Delete {name}?"
+    },
+    "scope": {
+      "allAccounts": {
+        "title": "Allow access to all accounts",
+        "summary": "After saving, this key can access all accounts",
+        "confirm": "Allow access",
+        "description": "This key can access all accounts, including ungrouped and future accounts"
+      }
+    }
+  }
+}

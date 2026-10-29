@@ -28,7 +28,7 @@ export const usePluginViewsStore = defineStore('plugin-views', () => {
     loadError.value = ''
   }
 
-  function refresh(silent = true) {
+  function refresh(silent = false) {
     controller?.abort()
     const current = new AbortController()
     controller = current

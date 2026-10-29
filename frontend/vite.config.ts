@@ -1,5 +1,6 @@
 import { fileURLToPath, URL } from 'node:url'
 import CodexProxyUI from '@codex-proxy/ui/vite'
+import VueI18n from '@intlify/unplugin-vue-i18n/vite'
 import tailwindcss from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
@@ -11,9 +12,21 @@ export default defineConfig(({ mode }) => {
 
   return {
     base: '/',
-    plugins: [vue(), tailwindcss(), CodexProxyUI({ source: sourceUi ? uiRoot : undefined }), pluginBridge()],
+    plugins: [
+      vue(),
+      VueI18n({
+        include: fileURLToPath(new URL('./src/i18n/locales/**/*.json', import.meta.url)),
+      }),
+      tailwindcss(),
+      CodexProxyUI({
+        source: sourceUi ? uiRoot : undefined,
+      }),
+      pluginBridge(),
+    ],
     resolve: {
-      alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
+      alias: {
+        '@': fileURLToPath(new URL('./src', import.meta.url)),
+      },
     },
     server: {
       port: 5173,

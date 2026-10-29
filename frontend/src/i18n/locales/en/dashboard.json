@@ -1,0 +1,111 @@
+{
+  "dashboard": {
+    "scheduling": {
+      "defaultConcurrency": "Default concurrency",
+      "totalSlots": "Total slots",
+      "freeSlots": "Available slots",
+      "smart": "Smart scheduling",
+      "quotaReset": "Quota reset priority",
+      "sticky": "Sticky",
+      "title": "Account scheduling",
+      "description": "Capacity, concurrency and allocation strategies",
+      "occupiedSlots": "Slots in use",
+      "strategy": "Allocation strategy"
+    },
+    "accountPool": {
+      "empty": "No account pool data",
+      "quotaExhausted": "Quota exhausted",
+      "rateLimited": "Rate limited",
+      "pending": "Pending",
+      "issueCountsEmpty": "Disabled: — · Errors: —",
+      "availableDescription": "Account is currently available",
+      "exhaustedDescription": "Account quota has been exhausted",
+      "limitedDescription": "Account requests are temporarily restricted",
+      "issueCounts": "Disabled: {disabled} · Errors: {error}",
+      "title": "Account status",
+      "description": "Account pool health",
+      "healthyRate": "Healthy accounts",
+      "distribution": "State distribution",
+      "unavailableCount": "Unavailable: {value}"
+    },
+    "activeAccounts": {
+      "todayTokens": "Tokens",
+      "requestCount": "Requests",
+      "title": "Active account usage",
+      "sortByRecent": "Sorted by last used",
+      "empty": "No recent account requests",
+      "recent": "Recently"
+    },
+    "title": "System overview",
+    "today": "Today's statistics",
+    "refresh": {
+      "action": "Refresh overview",
+      "lastUpdated": "Refreshes every 30 seconds, last refreshed {updatedAt}",
+      "waiting": "Refreshes every 30 seconds, waiting for the first update",
+      "interval": "Refreshes every 30 s"
+    },
+    "metrics": {
+      "title": "Key metrics",
+      "outputTokens": "Output",
+      "inputTokens": "Input",
+      "cachedInputTokens": "Cached input",
+      "cacheHits": "Cache hits",
+      "requests": "Requests",
+      "firstTokenP95Ms": "TTFT P95",
+      "latencyP95Ms": "Latency P95",
+      "outputThroughputP50": "Output throughput P50",
+      "errors": "Errors",
+      "successRate": "Success rate",
+      "totalRequests": "Total requests",
+      "requestCount": "Requests",
+      "totalTokens": "Total tokens",
+      "totalCharges": "Total cost",
+      "totalCacheHits": "Total cache hits",
+      "totalCache": "Total cache"
+    },
+    "comparedWithYesterday": "vs. yesterday",
+    "trends": {
+      "title": "Trends",
+      "metric": "Trend indicator",
+      "highlight": "Highlight the {label} series",
+      "empty": "No trend data",
+      "latency": "Latency",
+      "errors": "Errors"
+    },
+    "recentRequests": {
+      "title": "Usage records",
+      "description": "Last 10 successful requests",
+      "empty": "No successful requests"
+    },
+    "clientIdentity": {
+      "clientMode": "Client mode",
+      "versionPolicy": "Version policy",
+      "notChecked": "Not checked yet",
+      "customVersion": "Custom version",
+      "active": "Active",
+      "activeDescription": "New requests using the global settings use this identity",
+      "upToDate": "Up to date",
+      "upToDateDescription": "The active version matches the latest official release",
+      "updateAvailable": "Update available",
+      "latestRelease": "Latest official version: {releaseLabel}",
+      "checkFailed": "Check failed",
+      "checkFailedDescription": "Official version check failed",
+      "pending": "Pending check",
+      "pendingDescription": "Official releases have not been checked yet",
+      "verifiedAt": "Profile verified: {verifiedAt}",
+      "checkedAt": "Release checked: {checkedAt}",
+      "clientId": "Client ID",
+      "title": "Default upstream identity",
+      "provider": "Upstream platform",
+      "empty": "No request identity available",
+      "attributes": "Request identity details",
+      "authProtocol": "Authentication protocol",
+      "emulatedEnvironment": "Emulated environment",
+      "environment": "Environment"
+    },
+    "health": {
+      "title": "Request health",
+      "description": "Valid request availability"
+    }
+  }
+}

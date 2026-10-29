@@ -134,7 +134,11 @@ async fn independent_endpoints_send_opaque_headers_without_client_identity() {
         let requests = server.received_requests().await.unwrap();
         let sent = requests.last().unwrap();
         assert_eq!(sent.url.path(), endpoint);
-        assert_eq!(sent.body, raw);
+        if endpoint.ends_with("search") {
+            assert_scoped_search_body(&sent.body, &raw);
+        } else {
+            assert_eq!(sent.body, raw);
+        }
         assert_eq!(
             captured_header_values(sent, "x-future-business"),
             vec![b"first".to_vec(), b"second".to_vec()]

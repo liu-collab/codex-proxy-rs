@@ -2211,109 +2211,132 @@ async fn streaming_upstream_wire_failure_should_not_be_rewritten_as_a_gateway_er
 
 #[tokio::test]
 async fn streaming_upstream_error_event_should_be_translated_to_response_failed_for_sse() {
-    let trace = Arc::new(Trace::default());
-    let error_data = json!({
-        "type": "error",
-        "error": {
-            "type": "service_unavailable_error",
-            "code": "server_is_overloaded",
-            "message": "Our servers are currently overloaded. Please try again later.",
-            "param": null,
-            "future_error_field": {"keep": true}
-        },
-        "sequence_number": 2,
-        "future_event_field": {"keep": true}
-    });
-    let projected_error_frame = Bytes::from(encode_sse_event("error", &error_data.to_string()));
-    let error_wire = ProviderEvent::wire(
-        ProtocolWireEvent::json_with_raw_sse_metadata(
-            "openai",
-            Some("error".to_owned()),
-            error_data,
-            projected_error_frame,
-            None,
-            None,
-        )
-        .expect("valid upstream error wire"),
-    );
-    let started_wire = ProviderEvent::canonical_with_wire(
-        vec![started()],
-        ProtocolWireEvent::json(
-            "openai",
-            Some("response.created".to_owned()),
-            json!({
-                "type": "response.created",
-                "response": {
-                    "id": "resp_test",
-                    "model": "public-model",
-                    "status": "in_progress",
-                    "future_response_field": {"keep": true}
-                }
-            }),
-        )
-        .expect("valid upstream started wire"),
-    );
-    let session = FakeSession::streaming(
-        Arc::clone(&trace),
-        vec![
-            NextStep::Event(CoordinatedEvent::single(
-                started_wire,
-                CommitRequirement::CommitBeforeDelivery,
-            )),
-            NextStep::Event(CoordinatedEvent::single(
-                error_wire,
-                CommitRequirement::AlreadyCommitted,
-            )),
-            NextStep::Error(EngineError::Provider(ProviderError::new(
-                ProviderErrorKind::UpstreamCapacityUnavailable,
-                UpstreamSendState::Sent,
-            ))),
-        ],
-    );
-
-    let response = stream_execution_response(Box::new(session), None).await;
-    let body = to_bytes(response.into_body(), usize::MAX)
-        .await
-        .expect("read SSE body");
-    let body = String::from_utf8(body.to_vec()).expect("SSE is UTF-8");
-    let events = parse_sse_events(&body).expect("translated SSE should parse");
-    let failed = events
-        .iter()
-        .find(|event| event.event.as_deref() == Some("response.failed"))
-        .expect("translated response.failed event");
-    let failed: Value = serde_json::from_str(&failed.data).expect("response.failed JSON");
-
-    assert_eq!(
+    for (error_type, code, client_code, kind, client_status) in [
         (
-            failed,
-            body.matches("event: response.failed").count(),
-            body.contains("event: error\n"),
-            body.ends_with("data: [DONE]\n\n"),
+            "service_unavailable_error",
+            "server_is_overloaded",
+            "server_error",
+            ProviderErrorKind::UpstreamCapacityUnavailable,
+            503,
         ),
         (
-            json!({
-                "type": "response.failed",
-                "response": {
-                    "id": "resp_test",
-                    "model": "public-model",
-                    "status": "failed",
-                    "error": {
-                        "type": "service_unavailable_error",
-                        "code": "server_error",
-                        "message": "Our servers are currently overloaded. Please try again later.",
-                        "param": null,
-                        "future_error_field": {"keep": true}
+            "rate_limit_error",
+            "turn_rate_limit_exceeded",
+            "turn_rate_limit_exceeded",
+            ProviderErrorKind::RateLimited,
+            429,
+        ),
+    ] {
+        let trace = Arc::new(Trace::default());
+        let error_data = json!({
+            "type": "error",
+            "status": 429,
+            "headers": {"Retry-After": "24"},
+            "error": {
+                "type": error_type,
+                "code": code,
+                "message": "Our servers are currently overloaded. Please try again later.",
+                "param": null,
+                "future_error_field": {"keep": true}
+            },
+            "sequence_number": 2,
+            "future_event_field": {"keep": true}
+        });
+        let projected_error_frame = Bytes::from(encode_sse_event("error", &error_data.to_string()));
+        let error_wire = ProviderEvent::wire(
+            ProtocolWireEvent::json_with_raw_sse_metadata(
+                "openai",
+                Some("error".to_owned()),
+                error_data,
+                projected_error_frame,
+                None,
+                None,
+            )
+            .expect("valid upstream error wire"),
+        );
+        let started_wire = ProviderEvent::canonical_with_wire(
+            vec![started()],
+            ProtocolWireEvent::json(
+                "openai",
+                Some("response.created".to_owned()),
+                json!({
+                    "type": "response.created",
+                    "response": {
+                        "id": "resp_test",
+                        "model": "public-model",
+                        "status": "in_progress",
+                        "future_response_field": {"keep": true}
+                    }
+                }),
+            )
+            .expect("valid upstream started wire"),
+        );
+        let session = FakeSession::streaming(
+            Arc::clone(&trace),
+            vec![
+                NextStep::Event(CoordinatedEvent::single(
+                    started_wire,
+                    CommitRequirement::CommitBeforeDelivery,
+                )),
+                NextStep::Event(CoordinatedEvent::single(
+                    error_wire,
+                    CommitRequirement::AlreadyCommitted,
+                )),
+                NextStep::Error(EngineError::Provider(ProviderError::new(
+                    kind,
+                    UpstreamSendState::Sent,
+                ))),
+            ],
+        );
+
+        let response = stream_execution_response(Box::new(session), None).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read SSE body");
+        let body = String::from_utf8(body.to_vec()).expect("SSE is UTF-8");
+        let events = parse_sse_events(&body).expect("translated SSE should parse");
+        let failed = events
+            .iter()
+            .find(|event| event.event.as_deref() == Some("response.failed"))
+            .expect("translated response.failed event");
+        let failed: Value = serde_json::from_str(&failed.data).expect("response.failed JSON");
+
+        assert_eq!(
+            (
+                failed,
+                body.matches("event: response.failed").count(),
+                body.contains("event: error\n"),
+                body.ends_with("data: [DONE]\n\n"),
+            ),
+            (
+                json!({
+                    "type": "response.failed",
+                    "status": client_status,
+                    "headers": {"Retry-After": "24"},
+                    "response": {
+                        "id": "resp_test",
+                        "model": "public-model",
+                        "status": "failed",
+                        "error": {
+                            "type": error_type,
+                            "code": client_code,
+                            "message": "Our servers are currently overloaded. Please try again later.",
+                            "param": null,
+                            "future_error_field": {"keep": true},
+                            "headers": {"retry-after": "24"}
+                        },
+                        "future_response_field": {"keep": true}
                     },
-                    "future_response_field": {"keep": true}
-                },
-                "sequence_number": 2,
-                "future_event_field": {"keep": true}
-            }),
-            1,
-            false,
-            true,
-        )
-    );
+                    "sequence_number": 2,
+                    "future_event_field": {"keep": true}
+                }),
+                1,
+                false,
+                true,
+            )
+        );
+    }
 }
 
 #[tokio::test]
@@ -2572,6 +2595,110 @@ async fn buffered_response_collects_completed_output_items_without_rewriting_str
     assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), expected);
     assert_eq!(trace.snapshot(), ["collect", "commit"]);
     assert!(!trace.is_cancelled());
+}
+
+#[tokio::test]
+async fn native_responses_route_preserves_images_and_encrypted_reasoning_in_json_and_sse() {
+    let admin = crate::admin::AdminTestFixture::new().await.services;
+    let reasoning = json!({
+        "id":"rs_native","type":"reasoning","encrypted_content":"opaque-reasoning-for-replay",
+        "summary":[{"type":"summary_text","text":"native summary"}],
+        "future_reasoning_field":{"keep":true}
+    });
+    let image = json!({
+        "id":"ig_native","type":"image_generation_call","status":"completed",
+        "result":"b3BhcXVlLWltYWdl","output_format":"png",
+        "future_image_field":{"keep":true}
+    });
+    let terminal = json!({
+        "id":"resp_test","object":"response","model":"public-model","status":"completed",
+        "output":[reasoning, image],"future_terminal_field":{"keep":true}
+    });
+    for streaming in [false, true] {
+        let trace = Arc::new(Trace::default());
+        let mut expected_sse = Vec::new();
+        let mut events = Vec::new();
+        for (index, (kind, mut data, facts)) in [
+            (
+                "response.created",
+                json!({"response":{"id":"resp_test","model":"public-model","status":"in_progress","output":[]}}),
+                vec![started()],
+            ),
+            (
+                "response.output_item.done",
+                json!({"output_index":0,"item":reasoning}),
+                vec![],
+            ),
+            (
+                "response.image_generation_call.partial_image",
+                json!({"item_id":"ig_native","output_index":1,"partial_image_index":0,"partial_image_b64":"b3BhcXVlLXBhcnRpYWw="}),
+                vec![],
+            ),
+            (
+                "response.output_item.done",
+                json!({"output_index":1,"item":image}),
+                vec![],
+            ),
+            (
+                "response.completed",
+                json!({"response":terminal}),
+                vec![completed()],
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            data["type"] = json!(kind);
+            let id = format!("native-boundary-{index}");
+            // 保留行结束符、空白和 SSE 元数据，不能仅比较 JSON 后掩盖重编码
+            let raw = Bytes::from(format!(
+                "id: {id}\r\nevent: {kind}\r\nretry: 1234\r\ndata: {data} \r\n\r\n"
+            ));
+            expected_sse.extend_from_slice(&raw);
+            events.push(ProviderEvent::canonical_with_wire(
+                facts,
+                ProtocolWireEvent::json_with_raw_sse_metadata(
+                    "openai",
+                    Some(kind.to_owned()),
+                    data,
+                    raw,
+                    Some(id),
+                    Some(1234),
+                )
+                .unwrap(),
+            ));
+        }
+        let session = if streaming {
+            FakeSession::streaming(
+                Arc::clone(&trace),
+                vec![
+                    NextStep::Event(
+                        CoordinatedEvent::try_batch(
+                            events,
+                            CommitRequirement::CommitBeforeDelivery,
+                        )
+                        .unwrap(),
+                    ),
+                    NextStep::FinalizeSuccess,
+                ],
+            )
+        } else {
+            FakeSession::buffered_provider(Arc::clone(&trace), events)
+        };
+        // 使用真实 /v1/responses 入口，覆盖共享执行函数的可选适配器为空分支
+        let response = response(&admin, "openai", session, streaming).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        if streaming {
+            expected_sse.extend_from_slice(b"data: [DONE]\n\n");
+            assert_eq!(body.as_ref(), expected_sse.as_slice());
+            assert_eq!(trace.snapshot(), ["next_event", "commit", "next_end"]);
+        } else {
+            assert_eq!(serde_json::from_slice::<Value>(&body).unwrap(), terminal);
+            assert_eq!(trace.snapshot(), ["collect", "commit"]);
+        }
+        assert!(!trace.is_cancelled());
+    }
 }
 
 #[tokio::test]
@@ -2866,6 +2993,69 @@ struct SessionExecution {
     client: AuthenticatedClient,
     session: Mutex<Option<Box<dyn ExecutionSession>>>,
     middleware: Option<FrozenMiddlewarePlan>,
+}
+
+#[tokio::test]
+async fn official_core_clients_should_be_version_checked_before_starting_responses() {
+    let admin = crate::admin::AdminTestFixture::new().await.services;
+    for product in [
+        "codex-tui",
+        "codex_exec",
+        "codex_vscode",
+        "codex_sdk_ts",
+        "codex_python_sdk",
+    ] {
+        for (version, allowed) in [("0.158.0", false), ("0.162.0", true)] {
+            let trace = Arc::new(Trace::default());
+            let execution = Arc::new(SessionExecution {
+                client: authenticated_client_with_min_versions(
+                    "sk_version_test",
+                    None,
+                    Some("0.162.0"),
+                ),
+                session: Mutex::new(Some(Box::new(FakeSession::streaming(
+                    Arc::clone(&trace),
+                    vec![
+                        NextStep::Event(delivery(
+                            started(),
+                            CommitRequirement::CommitBeforeDelivery,
+                        )),
+                        NextStep::Event(delivery(completed(), CommitRequirement::AlreadyCommitted)),
+                        NextStep::FinalizeSuccess,
+                    ],
+                )))),
+                middleware: None,
+            });
+            let request = Request::post("/v1/responses")
+                .header(AUTHORIZATION, "Bearer sk_version_test")
+                .header("user-agent", format!(
+                    "{product}/{version} (Mac OS 26.6.2; arm64) Apple_Terminal ({product}; 0.165.0)"
+                ))
+                .body(Body::from(json!({"model": "model-a", "input": "synthetic", "stream": true}).to_string()))
+                .unwrap();
+            let response = crate::openai::api_router_with_admin_and_execution(
+                admin.clone(),
+                execution.clone(),
+            )
+            .oneshot(request)
+            .await
+            .unwrap();
+            let status = response.status();
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            if allowed {
+                assert_eq!(status, StatusCode::OK, "{product}/{version}");
+                assert!(String::from_utf8_lossy(&body).contains("event: response.completed\n"));
+                assert!(trace.snapshot().contains(&"commit"));
+            } else {
+                assert_eq!(status, StatusCode::UPGRADE_REQUIRED, "{product}/{version}");
+                let value: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(value["error"]["code"], "client_version_too_old");
+                assert_eq!(value["error"]["current_version"], version);
+                assert_eq!(value["error"]["min_version"], "0.162.0");
+                assert!(execution.session.lock().unwrap().is_some());
+            }
+        }
+    }
 }
 
 #[tokio::test]
@@ -3261,12 +3451,12 @@ async fn compressed_http_request_above_default_limit_should_reach_execution_afte
 
 #[tokio::test]
 async fn streaming_middleware_preserves_heartbeats_before_and_after_rewriting() {
+    let admin = crate::admin::AdminTestFixture::new().await.services;
     for opaque in [
         b": ping\n\n".as_slice(),
         b"id: next\nretry: 1000\n\n".as_slice(),
         b"event: vendor.future\ndata: future non-JSON payload\n\n".as_slice(),
     ] {
-        let admin = crate::admin::AdminTestFixture::new().await.services;
         let trace = Arc::new(Trace::default());
         let heartbeat = Bytes::copy_from_slice(opaque);
         let future = Bytes::from_static(

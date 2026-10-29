@@ -1,5 +1,6 @@
 //! OpenAI 管理边界：Provider preparation 与 Redis OAuth pending 适配
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::SystemTime;
 
@@ -24,9 +25,10 @@ use gateway_admin::model::provider_credentials::{
     ProviderExportCredentialInput, ProviderModel, ProviderModelCatalogDocument, ProviderModels,
     ProviderProfileActivityInsights, ProviderProfileAvatar, ProviderProfileAvatarStreamError,
     ProviderProfileDailyUsage, ProviderProfileInvocation, ProviderProfileStatistics,
-    ProviderProfileStatisticsSummary, ProviderQuota, ProviderQuotaCredits, ProviderQuotaRequest,
-    ProviderQuotaWindow, ProviderQuotaWindowRole, ProviderResetCredit, ProviderResetCreditResult,
-    ProviderResetCredits, ProviderSubscription, QuotaLocalUsageAttribution,
+    ProviderProfileStatisticsSummary, ProviderQuota, ProviderQuotaCredits,
+    ProviderQuotaReadRequest, ProviderQuotaRequest, ProviderQuotaWindow, ProviderQuotaWindowRole,
+    ProviderResetCredit, ProviderResetCreditResult, ProviderResetCredits, ProviderSubscription,
+    QuotaLocalUsageAttribution,
 };
 use gateway_admin::model::quota_forecast_sampling::QuotaForecastObservation;
 use gateway_admin::ports::provider::{ProviderAdmin, ProviderAdminError, ProviderAdminErrorKind};
@@ -296,7 +298,7 @@ impl ProviderAdmin for OpenAiAdminProvider {
             },
             user_agent,
             attributes: vec![DashboardWireAttribute {
-                label: "客户端标识".to_owned(),
+                key: "client_identifier".to_owned(),
                 value: client_identity,
             }],
             verified_at: Some(profile.verified_at),
@@ -364,7 +366,7 @@ impl ProviderAdmin for OpenAiAdminProvider {
             },
             attributes: vec![
                 DashboardWireAttribute {
-                    label: "客户端标识".to_owned(),
+                    key: "client_identifier".to_owned(),
                     value: if profile.client_kind == ClientKind::Desktop {
                         format!("{}; {}", profile.originator, profile.desktop_version)
                     } else {
@@ -372,13 +374,8 @@ impl ProviderAdmin for OpenAiAdminProvider {
                     },
                 },
                 DashboardWireAttribute {
-                    label: "版本策略".to_owned(),
-                    value: if custom {
-                        "固定身份"
-                    } else {
-                        "自动最新"
-                    }
-                    .to_owned(),
+                    key: "version_policy".to_owned(),
+                    value: if custom { "fixed" } else { "latest" }.to_owned(),
                 },
             ],
             verified_at: (!custom && profile.verified_at != chrono::DateTime::UNIX_EPOCH)
@@ -707,7 +704,7 @@ impl ProviderAdmin for OpenAiAdminProvider {
             if refresh {
                 return Err(provider_admin_error(ProviderAdminErrorKind::Unsupported));
             }
-            return Ok(project_quota(None, &account));
+            return Ok(project_quota(None, account.quota().is_exhausted()));
         }
         let snapshot = if refresh {
             let snapshot = Some(
@@ -720,11 +717,81 @@ impl ProviderAdmin for OpenAiAdminProvider {
             snapshot
         } else {
             self.quota
-                .read_account(&account_id)
+                .read_snapshot_for(&account)
                 .await
                 .map_err(map_quota_error)?
         };
-        Ok(project_quota(snapshot, &account))
+        Ok(project_quota(snapshot, account.quota().is_exhausted()))
+    }
+
+    async fn read_quotas(
+        &self,
+        requests: &[ProviderQuotaReadRequest<'_>],
+    ) -> Vec<Result<ProviderQuota, ProviderAdminError>> {
+        let identities = requests
+            .iter()
+            .map(|request| {
+                if request.account.provider_kind != self.provider_kind {
+                    return Err(provider_admin_error(ProviderAdminErrorKind::NotFound));
+                }
+                let id = ProviderAccountId::new(request.account.id.clone())
+                    .map_err(|_| provider_admin_error(ProviderAdminErrorKind::Invalid))?;
+                let revision =
+                    CredentialRevision::new(request.account.credential_revision.get())
+                        .map_err(|_| provider_admin_error(ProviderAdminErrorKind::Invalid))?;
+                Ok((id, revision))
+            })
+            .collect::<Vec<_>>();
+        let ids = requests
+            .iter()
+            .zip(&identities)
+            .filter(|(request, _)| {
+                request.account.authentication_kind
+                    != crate::credential::CODEX_AUTHENTICATION_KIND_API_KEY
+            })
+            .filter_map(|(_, identity)| identity.as_ref().ok().map(|(id, _)| id.clone()))
+            .collect::<Vec<_>>();
+        let observations = if ids.is_empty() {
+            Ok(BTreeMap::new())
+        } else {
+            self.accounts
+                .get_quotas(&ids)
+                .await
+                .map_err(|error| map_quota_error(error.into()))
+                .map(|values| {
+                    values
+                        .into_iter()
+                        .map(|observation| (observation.account_id.clone(), observation))
+                        .collect::<BTreeMap<_, _>>()
+                })
+        };
+        requests
+            .iter()
+            .zip(identities)
+            .map(|(request, identity)| {
+                let (id, revision) = identity?;
+                let snapshot = if request.account.authentication_kind
+                    == crate::credential::CODEX_AUTHENTICATION_KIND_API_KEY
+                {
+                    None
+                } else {
+                    observations
+                        .as_ref()
+                        .map_err(Clone::clone)?
+                        .get(&id)
+                        .map(|observation| {
+                            self.quota.project_observation(&id, revision, observation)
+                        })
+                        .transpose()
+                        .map_err(map_quota_error)?
+                        .flatten()
+                };
+                Ok(project_quota(
+                    snapshot,
+                    request.account.quota.is_exhausted(),
+                ))
+            })
+            .collect()
     }
 
     fn quota_forecast_observation(
@@ -1170,12 +1237,12 @@ fn empty_quota() -> ProviderQuota {
 
 fn project_quota(
     snapshot: Option<CodexAccountQuotaSnapshot>,
-    account: &ProviderAccount,
+    limit_reached: bool,
 ) -> ProviderQuota {
     let mut quota = snapshot
         .map(project_quota_snapshot)
         .unwrap_or_else(empty_quota);
-    quota.limit_reached = account.quota().is_exhausted();
+    quota.limit_reached = limit_reached;
     quota
 }
 
@@ -1707,7 +1774,7 @@ fn map_credential_admin_error(error: CodexCredentialAdminError) -> ProviderAdmin
                 "OpenAI 返回的 Codex PAT 身份资料不完整或格式无效，请稍后重试",
             ),
         },
-        Error::InvalidInput => (Kind::Invalid, "OpenAI 账号输入格式不合法，请检查导入内容"),
+        Error::InvalidInput => (Kind::Invalid, "Codex 账号输入格式不合法，请检查导入内容"),
         Error::InvalidCredential => (
             Kind::Invalid,
             "OpenAI 凭据不完整或格式无效，请检查凭据或重新授权",
@@ -1717,8 +1784,8 @@ fn map_credential_admin_error(error: CodexCredentialAdminError) -> ProviderAdmin
             Kind::Invalid,
             refresh_rejection_message(code.as_deref()).unwrap_or("刷新令牌已失效，请重新授权"),
         ),
-        Error::AccountBanned { .. } => (Kind::Invalid, "OpenAI 账号已被停用，请检查账号状态"),
-        Error::NotFound => (Kind::NotFound, "OpenAI 账号不存在，请刷新账号列表"),
+        Error::AccountBanned { .. } => (Kind::Invalid, "Codex 账号已被停用，请检查账号状态"),
+        Error::NotFound => (Kind::NotFound, "Codex 账号不存在，请刷新账号列表"),
         Error::RefreshLeaseUnavailable => {
             (Kind::Conflict, "令牌刷新繁忙，请等待当前刷新完成后重试")
         }
@@ -1853,7 +1920,7 @@ fn map_quota_error(error: CodexCredentialQuotaError) -> ProviderAdminError {
             "OpenAI 额度查询凭据无效，请检查账号授权",
             None,
         ),
-        Error::NotFound => (Kind::NotFound, "OpenAI 额度查询账号不存在", None),
+        Error::NotFound => (Kind::NotFound, "Codex 额度查询账号不存在", None),
         Error::RevisionConflict => (
             Kind::Conflict,
             "账号凭据已被更新，请刷新账号列表后重试",

@@ -2,7 +2,7 @@
 import type { AccountQuotaWindow } from '@/api'
 
 import { computed } from 'vue'
-import { quotaWindowPresentation } from '@/components/account/account-usage-window/presenter'
+import { quotaWindowLabel, quotaWindowPresentation } from '@/components/account/account-usage-window/presenter'
 
 const props = withDefaults(defineProps<{
   label: string
@@ -14,7 +14,7 @@ const props = withDefaults(defineProps<{
 
 const windowItems = computed(() => props.windows.map(window => ({
   key: window.key,
-  labelTooltip: window.labelDisplay,
+  labelTooltip: quotaWindowLabel(window),
   usedPercent: window.usedPercent,
   usedPercentDisplay: window.usedPercentDisplay,
   presentation: quotaWindowPresentation(window, '2px'),

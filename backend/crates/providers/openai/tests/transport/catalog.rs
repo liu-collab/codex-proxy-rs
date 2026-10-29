@@ -229,13 +229,17 @@ fn missing_capability_fields_should_remain_unknown() {
 }
 
 #[test]
-fn legacy_data_shape_should_fail_the_entire_snapshot() {
-    let result = parse_codex_model_catalog(
-        br#"{"data":[{"slug":"gpt-5.4","display_name":"GPT-5.4"}]}"#,
-        None,
-    );
-
-    assert!(matches!(result, Err(CodexModelCatalogError::InvalidWire)));
+fn model_array_is_required_and_must_have_array_shape() {
+    for body in [
+        br#"{}"#.as_slice(),
+        br#"{"models":null}"#,
+        br#"{"models":{}}"#,
+    ] {
+        assert!(matches!(
+            parse_codex_model_catalog(body, None),
+            Err(CodexModelCatalogError::InvalidWire)
+        ));
+    }
 }
 
 #[test]
@@ -423,6 +427,7 @@ fn profile() -> CodexWireProfileState {
         terminal: "xterm".to_owned(),
         exact_user_agent: None,
         residency: None,
+        account_routing_override: None,
         verified_at: Utc
             .with_ymd_and_hms(2026, 7, 18, 0, 0, 0)
             .single()
@@ -432,6 +437,7 @@ fn profile() -> CodexWireProfileState {
 
 fn context() -> CodexRequestContext<'static> {
     CodexRequestContext {
+        response_control: None,
         trace: None,
         authorization: "Bearer oauth-access",
         account_id: Some("acct_123"),

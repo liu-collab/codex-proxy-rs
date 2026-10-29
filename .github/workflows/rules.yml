@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   guard:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       # 只查询 PR 元数据，禁止检出或执行贡献分支中的代码。

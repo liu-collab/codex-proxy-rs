@@ -101,21 +101,51 @@ impl TimePresenter {
         self.timezone.local(*value).to_rfc3339()
     }
 
-    pub(crate) fn relative(self, value: DateTime<Utc>, now: DateTime<Utc>) -> String {
+    pub(crate) fn relative_view(
+        self,
+        value: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> RelativeTimeView {
         let elapsed = now.signed_duration_since(value);
         if elapsed.num_seconds() < 0 {
-            return self.datetime(&value);
+            return RelativeTimeView::Absolute {
+                value: self.datetime(&value),
+            };
         }
         if elapsed.num_seconds() < 60 {
-            return "刚刚".to_owned();
+            return RelativeTimeView::JustNow;
         }
         if elapsed.num_minutes() < 60 {
-            return format!("{} 分钟前", elapsed.num_minutes());
+            return RelativeTimeView::Elapsed {
+                value: elapsed.num_minutes(),
+                unit: RelativeTimeUnit::Minute,
+            };
         }
         if elapsed.num_hours() < 24 {
-            return format!("{} 小时前", elapsed.num_hours());
+            return RelativeTimeView::Elapsed {
+                value: elapsed.num_hours(),
+                unit: RelativeTimeUnit::Hour,
+            };
         }
-        format!("{} 天前", elapsed.num_days())
+        RelativeTimeView::Elapsed {
+            value: elapsed.num_days(),
+            unit: RelativeTimeUnit::Day,
+        }
+    }
+
+    pub(crate) fn relative(self, value: DateTime<Utc>, now: DateTime<Utc>) -> String {
+        match self.relative_view(value, now) {
+            RelativeTimeView::JustNow => "刚刚".to_owned(),
+            RelativeTimeView::Elapsed { value, unit } => {
+                let unit = match unit {
+                    RelativeTimeUnit::Minute => "分钟",
+                    RelativeTimeUnit::Hour => "小时",
+                    RelativeTimeUnit::Day => "天",
+                };
+                format!("{value} {unit}前")
+            }
+            RelativeTimeView::Absolute { value } => value,
+        }
     }
 
     pub(crate) fn relative_optional(
@@ -125,6 +155,24 @@ impl TimePresenter {
     ) -> String {
         value.map_or_else(|| "—".to_owned(), |value| self.relative(value, now))
     }
+}
+
+/// 后端按查询锚点与部署时区决定展示方式，前端只本地化分类和单位
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum RelativeTimeView {
+    JustNow,
+    Elapsed { value: i64, unit: RelativeTimeUnit },
+    Absolute { value: String },
+}
+
+/// 相对时间保持分钟、小时、天的固定精度，不引入月或年的日历推算
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelativeTimeUnit {
+    Minute,
+    Hour,
+    Day,
 }
 
 #[derive(Debug, serde::Serialize)]

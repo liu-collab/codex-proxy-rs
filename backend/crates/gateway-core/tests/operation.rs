@@ -261,7 +261,7 @@ fn operation_kind_should_remain_stable() {
             ProviderHttpMethod::Post,
             Some("mode=future".to_owned()),
             vec![ProviderHttpHeader::new(
-                "x-opaque",
+                "x_opaque.extension",
                 Bytes::from_static(b"private-header"),
             )],
             RawHttpPayload::new("provider-http", Bytes::from_static(b"private-body"))
@@ -288,6 +288,18 @@ fn operation_kind_should_remain_stable() {
 fn provider_http_should_reject_urls_controls_and_unbounded_headers() {
     let payload =
         || RawHttpPayload::new("provider-http", Bytes::new()).expect("provider HTTP payload");
+    for name in ["", "bad header", "bad:header", "x\r\nheader"] {
+        assert!(
+            ProviderHttpRequest::new(
+                "models",
+                ProviderHttpMethod::Get,
+                None,
+                vec![ProviderHttpHeader::new(name, Bytes::from_static(b"value"))],
+                payload(),
+            )
+            .is_err()
+        );
+    }
     assert!(
         ProviderHttpRequest::new(
             "https://example.invalid/models",

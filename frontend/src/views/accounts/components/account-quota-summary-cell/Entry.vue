@@ -4,9 +4,11 @@ import type { AccountQuotaWindow } from '@/api'
 import { ZPopover } from '@codex-proxy/ui'
 
 import { computed } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import AccountRequestTimeline from '@/components/account/account-usage-window/AccountRequestTimeline.vue'
 import AccountUsageWindow from '@/components/account/account-usage-window/index.vue'
-import { resolveAccountUsageWindowPresentation } from '@/components/account/account-usage-window/presenter'
+import { quotaWindowLabel, resolveAccountUsageWindowPresentation } from '@/components/account/account-usage-window/presenter'
 import AccountQuotaWindowGroup from './WindowGroup.vue'
 
 const props = withDefaults(defineProps<{
@@ -17,9 +19,15 @@ const props = withDefaults(defineProps<{
   showPercentage: true,
 })
 
+const { t } = useI18n({ useScope: 'global' })
+
 const detailHeading = computed(() => props.label)
-const detailTitle = computed(() => detailHeading.value ?? props.windows[0]?.labelDisplay ?? '额度详情')
-const summaryLabel = computed(() => props.label ?? props.windows[0]?.labelDisplay ?? '额度')
+const detailTitle = computed(() => detailHeading.value ?? (props.windows[0]
+  ? quotaWindowLabel(props.windows[0])
+  : t('accounts.quota.quotaDetails')))
+const summaryLabel = computed(() => props.label ?? (props.windows[0]
+  ? quotaWindowLabel(props.windows[0])
+  : t('usage.quota')))
 const hasQuotaWindow = computed(() => props.windows.some(window => typeof window.usedPercent === 'number'))
 const detailItems = computed(() =>
   props.windows.map((window) => {
@@ -38,7 +46,7 @@ const detailItems = computed(() =>
       timelineTitle: view.local.timelineTitle,
       durationDisplay: view.local.durationDisplay,
       code: quotaWindowCode(window.windowSeconds, window.role),
-      label: window.windowLabelDisplay,
+      label: quotaWindowLabel(window, false),
       usedPercent: window.usedPercent,
       usedPercentDisplay: window.usedPercentDisplay,
       resetAtDisplay: window.resetAtDisplay,
@@ -79,7 +87,7 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
       <button
         type="button"
         class="col-span-full grid w-full min-w-0 grid-cols-subgrid cursor-pointer rounded-sm border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline"
-        :aria-label="`查看${detailTitle}详情`"
+        :aria-label="t('accounts.quota.viewDetails', { detailTitle })"
         :aria-expanded="open"
         aria-haspopup="dialog"
       >
@@ -101,7 +109,7 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
       </button>
     </template>
 
-    <section class="w-84 overflow-hidden rounded-cp-lg" role="dialog" :aria-label="`${detailTitle}详情`">
+    <section class="w-84 overflow-hidden rounded-cp-lg" role="dialog" :aria-label="t('accounts.quota.details', { detailTitle })">
       <header v-if="detailHeading" class="bg-cp-popover-header-bg px-3 py-2.5">
         <h3 class="m-0 truncate text-cp leading-5 font-heavy text-cp-text" :title="detailHeading">
           {{ detailHeading }}
@@ -112,7 +120,7 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
         <article v-for="item in detailItems" :key="item.key">
           <div class="grid grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-2.5">
             <span
-              class="grid h-5 w-8 place-items-center rounded-sm bg-cp-blue-container-strong font-mono text-[9px] leading-none font-heavy tracking-[0.04em] text-cp-blue-on-container"
+              class="grid h-5 w-8 place-items-center rounded-sm bg-cp-blue-container-strong font-mono text-[9px] leading-none font-heavy tracking-[0.04em] whitespace-nowrap text-cp-blue-on-container"
             >
               {{ item.code }}
             </span>
@@ -123,7 +131,7 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
               class="font-mono text-cp-xs leading-none font-heavy tabular-nums"
               :class="item.local ? 'text-cp-text' : item.percentTextClass"
             >
-              {{ item.local ? `${item.requestDisplay} 次` : item.usedPercentDisplay }}
+              {{ item.local ? t('accounts.quota.requestCount', { requestDisplay: item.requestDisplay }) : item.usedPercentDisplay }}
             </strong>
           </div>
 
@@ -154,13 +162,13 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
           <dl class="mt-2.5 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-[10px] leading-4">
             <template v-if="item.local">
               <dt class="font-emphasis text-cp-text-tertiary">
-                统计方式
+                {{ t('accounts.quota.statisticalMethod') }}
               </dt>
               <dd class="m-0 text-right font-mono font-heavy tabular-nums text-cp-text">
-                滚动窗口
+                {{ t('accounts.quota.rollingWindow') }}
               </dd>
               <dt class="font-emphasis text-cp-text-tertiary">
-                统计范围
+                {{ t('accounts.quota.statisticalRange') }}
               </dt>
               <dd class="m-0 truncate text-right font-mono font-emphasis tabular-nums text-cp-text-secondary">
                 {{ item.durationDisplay }}
@@ -168,13 +176,13 @@ function quotaWindowCode(windowSeconds: number | null, role: AccountQuotaWindow[
             </template>
             <template v-else>
               <dt class="font-emphasis text-cp-text-tertiary">
-                窗口消耗
+                {{ t('accounts.quota.windowConsumption') }}
               </dt>
               <dd class="m-0 text-right font-mono font-heavy tabular-nums text-cp-text">
                 {{ item.localUsageDisplay }}
               </dd>
               <dt class="font-emphasis text-cp-text-tertiary">
-                重置时间
+                {{ t('accounts.quota.resetTime') }}
               </dt>
               <dd class="m-0 truncate text-right font-mono font-emphasis tabular-nums text-cp-text-secondary">
                 {{ item.resetAtDisplay }}

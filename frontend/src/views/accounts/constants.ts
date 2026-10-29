@@ -1,5 +1,7 @@
-import type { Account, AccountErrorReason, AccountQuotaWindow, AccountStatus } from '@/api'
+import type { Account, AccountErrorReason, AccountQuotaWindow, AccountStatus, AccountUsage } from '@/api'
 import { defineTableColumns } from '@codex-proxy/ui'
+import { computed } from 'vue'
+import { t } from '@/i18n'
 import { formatProviderLabel } from '@/utils/providers'
 
 export interface AccountQuotaWindowEntry {
@@ -8,60 +10,99 @@ export interface AccountQuotaWindowEntry {
   windows: AccountQuotaWindow[]
 }
 
+export const usageWindowLabels = computed<Record<AccountUsage['windowKind'], string>>(() => ({
+  general: t('accounts.usage.windows.general'),
+  weekly: t('accounts.usage.windows.weekly'),
+  monthly: t('accounts.usage.windows.monthly'),
+  quota: t('accounts.usage.windows.quota'),
+}))
+
 const quotaGroupOrder = new Map([
   ['shortTerm', 0],
   ['monthly', 1],
   ['other', 2],
 ])
 
-export const accountColumns = defineTableColumns<Account>([
+export const accountColumns = computed(() => (defineTableColumns<Account>([
   { key: 'expander', kind: 'expander', hideable: false },
   { key: 'selection', kind: 'selection', hideable: false },
   {
     key: 'identity',
     hideable: false,
-    label: '账号',
+    label: t('accounts.account'),
     kind: 'identity',
     size: '3xl',
     sortable: 'email',
   },
   {
     key: 'provider',
-    label: '平台/类型',
+    label: t('accounts.fields.platformType'),
     kind: 'meta',
     size: 'md',
     align: 'center',
-    formatter: value => formatProviderLabel(typeof value === 'string' ? value : null),
+    formatter: value => formatProviderLabel(typeof value === 'string'
+      ? value
+      : null),
   },
-  { key: 'status', label: '状态', kind: 'status', align: 'left', sortable: true },
-  { key: 'planType', label: '订阅', kind: 'status', sortable: true },
-  { key: 'usage', label: '用量', kind: 'custom', size: '2xl', sortable: true },
-  { key: 'groups', label: '账号分组', kind: 'status' },
+  {
+    key: 'status',
+    label: t('common.fields.status'),
+    kind: 'status',
+    align: 'center',
+    sortable: true,
+  },
+  {
+    key: 'planType',
+    label: t('accounts.profile.subscription.label'),
+    kind: 'status',
+    size: 'sm',
+    sortable: true,
+  },
+  {
+    key: 'usage',
+    label: t('usage.usage'),
+    kind: 'custom',
+    size: '2xl',
+    sortable: true,
+  },
+  {
+    key: 'groups',
+    label: t('accounts.fields.accountGrouping'),
+    kind: 'status',
+    size: 'sm',
+  },
   {
     key: 'lastUsedAt',
-    label: '最后使用',
+    label: t('accounts.fields.lastUsed'),
     kind: 'datetime',
+    size: 'md',
     sortable: true,
     emptyText: '',
   },
   {
     key: 'accessTokenExpiresAtDisplay',
-    label: '令牌过期',
+    label: t('accounts.fields.tokenExpires'),
     kind: 'datetime',
     sortable: 'expiresAt',
     formatter: value => optionalAccountCell(value),
     emptyText: '',
   },
-  { key: 'actions', label: '操作', kind: 'actions', size: 'lg', hideable: false },
-])
+  {
+    key: 'actions',
+    label: t('common.fields.actions'),
+    kind: 'actions',
+    size: 'lg',
+    hideable: false,
+  },
+])))
 
-export const statusLabels: Record<AccountStatus, string> = {
-  normal: '正常',
-  quota_exhausted: '配额耗尽',
-  rate_limited: '限流中',
-  disabled: '已停用',
-  error: '错误',
-}
+export const statusLabels = computed<Record<AccountStatus, string>>(() => ({
+  normal: t('common.status.healthy'),
+  quota_exhausted: t('accounts.fields.quotaExhausted'),
+  rate_limited: t('accounts.fields.rateLimiting'),
+  disabled: t('accounts.fields.deactivated'),
+  error: t('accounts.fields.error'),
+}))
 
 export const statusTones: Record<AccountStatus, 'success' | 'danger' | 'warning' | 'info' | 'normal'> = {
   normal: 'success',
@@ -71,29 +112,34 @@ export const statusTones: Record<AccountStatus, 'success' | 'danger' | 'warning'
   error: 'danger',
 }
 
-export const accountStatusFilterOptions = [
-  { label: '全部状态', value: '' },
-  { label: statusLabels.normal, value: 'normal' },
-  { label: statusLabels.quota_exhausted, value: 'quota_exhausted' },
-  { label: statusLabels.rate_limited, value: 'rate_limited' },
-  { label: statusLabels.disabled, value: 'disabled' },
-  { label: statusLabels.error, value: 'error' },
-]
+export const accountStatusFilterOptions = computed(() => ([
+  {
+    label: t('common.status.all'),
+    value: '',
+  },
+  { label: statusLabels.value.normal, value: 'normal' },
+  { label: statusLabels.value.quota_exhausted, value: 'quota_exhausted' },
+  { label: statusLabels.value.rate_limited, value: 'rate_limited' },
+  { label: statusLabels.value.disabled, value: 'disabled' },
+  { label: statusLabels.value.error, value: 'error' },
+]))
 
 /** `error` 分类下具体原因的展示文案（对应后端 `errorReason`）。 */
-export const errorReasonLabels: Record<AccountErrorReason, string> = {
-  account_unverified: '账号身份尚未确认',
-  access_token_expired: 'Access Token 已过期',
-  credential_expired: '凭据已过期',
-  credential_invalid: '凭据无效',
-  account_banned: '账号不可用或已被封禁',
-}
+export const errorReasonLabels = computed<Record<AccountErrorReason, string>>(() => ({
+  account_unverified: t('accounts.fields.identityUnconfirmed'),
+  access_token_expired: t('accounts.fields.accessTokenHasExpired'),
+  credential_expired: t('accounts.fields.credentialsHaveExpired'),
+  credential_invalid: t('accounts.fields.invalidCredentials'),
+  account_banned: t('accounts.fields.accountUnavailable'),
+}))
 
 export function visibleSummaryQuotaWindows(windows: AccountQuotaWindow[]) {
   const known = [...windows]
     .filter(window => window.group !== 'other')
     .sort(compareQuotaWindows)
-  return known.length > 0 ? known : [...windows].sort(compareQuotaWindows)
+  return known.length > 0
+    ? known
+    : [...windows].sort(compareQuotaWindows)
 }
 
 export function orderedPanelQuotaWindows(windows: AccountQuotaWindow[]) {
@@ -107,7 +153,11 @@ export function groupedAccountQuotaWindows(windows: AccountQuotaWindow[]) {
   for (const window of windows) {
     const limitLabel = quotaLimitLabel(window)
     if (!window.limitId || !limitLabel) {
-      entries.push({ key: window.key, label: null, windows: [window] })
+      entries.push({
+        key: window.key,
+        label: null,
+        windows: [window],
+      })
       continue
     }
 
@@ -184,10 +234,12 @@ function windowRoleOrder(role: AccountQuotaWindow['role']) {
 
 function quotaLimitLabel(window: AccountQuotaWindow) {
   if (window.limitId === 'codex')
-    return '通用额度'
+    return t('accounts.quota.general')
   return window.limitName
 }
 
 function optionalAccountCell(value: unknown) {
-  return value === '—' || value === '-' ? '' : value
+  return value === '—' || value === '-'
+    ? ''
+    : value
 }

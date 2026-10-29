@@ -1,13 +1,14 @@
 import type { OutboundProxyRecord, OutboundProxyTest } from '@/api'
 import type { RequestOptions } from '@/api/request'
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, onMounted, reactive, shallowRef, watch } from 'vue'
 import { createProxy, deleteProxy, getProxies, probeProxy, proxyProtocolOf, testProxy, updateProxy } from '@/api'
 import { ApiError } from '@/api/request'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useIdSet } from '@/composables/useIdSet'
 import { usePagedQuery } from '@/composables/usePagedQuery'
+import { t } from '@/i18n'
 import { normalizeRequestLocation, requestLocationError } from '@/utils/location'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import { proxyResultData } from '../utils/batch'
 
@@ -27,7 +28,12 @@ export function useProxies() {
     proxyProtocol: 'socks5',
     maxWebsocketConnections: '',
     customLocation: false,
-    location: { country: '', region: '', city: '', timezone: '' },
+    location: {
+      country: '',
+      region: '',
+      city: '',
+      timezone: '',
+    },
   })
   const formTestResult = shallowRef<OutboundProxyTest | null>(null)
   const saveAction = useAsyncAction()
@@ -53,17 +59,26 @@ export function useProxies() {
     form.name = proxy?.name ?? ''
     form.proxyUrl = ''
     form.proxyProtocol = proxy ? proxyProtocolOf(proxy.endpoint) : 'socks5'
-    form.maxWebsocketConnections = proxy?.maxWebsocketConnections ? String(proxy.maxWebsocketConnections) : ''
+    form.maxWebsocketConnections = proxy?.maxWebsocketConnections
+      ? String(proxy.maxWebsocketConnections)
+      : ''
     formTestResult.value = null
     // 表单只表达手填位置：关闭开关即跟随出口 IP，不把手填值伪装成已配置的覆盖
     form.customLocation = proxy?.location != null
-    form.location = proxy?.location ? { ...proxy.location } : { country: '', region: '', city: '', timezone: '' }
+    form.location = proxy?.location
+      ? { ...proxy.location }
+      : {
+          country: '',
+          region: '',
+          city: '',
+          timezone: '',
+        }
     showForm.value = true
   }
 
   async function testSavedProxies(targets: OutboundProxyRecord[], options: RequestOptions = {}, detectLocation = false) {
     if (targets.some(proxy => testing.has(proxy.id)))
-      throw new ApiError('代理正在测试，请等待当前测试结束', 429)
+      throw new ApiError(t('proxies.actions.testInProgress'), 429)
     for (const proxy of targets)
       testing.add(proxy.id)
     try {
@@ -74,7 +89,9 @@ export function useProxies() {
           continue
         const record = result.data
         // 列表或编辑目标已换版本时，迟到的测试不能覆盖新配置
-        proxies.value = proxies.value.map(item => item.id === record.id && item.revision === target.revision ? record : item)
+        proxies.value = proxies.value.map(item => item.id === record.id && item.revision === target.revision
+          ? record
+          : item)
         if (editing.value?.id === record.id && editing.value.revision === target.revision) {
           editing.value = record
           formTestResult.value = record.lastTest
@@ -94,18 +111,31 @@ export function useProxies() {
     try {
       const result = proxyResultData((await testSavedProxies([proxy], {}, true))[0])
       const test = result.lastTest
-      if (!test?.success)
-        ZNotification.error({ message: `${result.name}：${test?.message ?? '代理测试失败'}` })
-      else if (test.location.status === 'failed')
-        ZNotification.warning({ message: `${result.name}：连接成功，${test.location.message}` })
-      else if (test.location.status === 'conflict')
-        ZNotification.warning({ message: `${result.name}：连接成功，IPv4 与 IPv6 出口时区不一致` })
-      else
-        ZNotification.success({ message: `${result.name}：连接成功` })
+      if (!test?.success) {
+        ZNotification.error({ message: `${result.name}：${test?.message ?? t('proxies.actions.testFailed')}` })
+      }
+      else if (test.location.status === 'failed') {
+        ZNotification.warning({
+          message: t('proxies.actions.connectedWithDetails', { name: result.name, message: test.location.message }),
+        })
+      }
+      else if (test.location.status === 'conflict') {
+        ZNotification.warning({
+          message: t('proxies.actions.timeZoneMismatch', { name: result.name }),
+        })
+      }
+      else {
+        ZNotification.success({
+          message: t('proxies.actions.connected', { name: result.name }),
+        })
+      }
     }
     catch (error) {
-      if (!(error instanceof ApiError))
-        ZNotification.error({ message: errorMessage(error, '代理测试失败') })
+      if (!(error instanceof ApiError)) {
+        ZNotification.error({
+          message: errorMessage(error, t('proxies.actions.testFailed')),
+        })
+      }
     }
     finally {
       await query.execute({ silent: true })
@@ -121,17 +151,23 @@ export function useProxies() {
       return
     }
     if (!proxyUrl) {
-      ZNotification.warning({ message: '请填写代理连接地址' })
+      ZNotification.warning({
+        message: t('proxies.actions.fillInProxyConnectionAddress'),
+      })
       return
     }
     await formTestAction.run(async () => {
       // 新地址只做探测，保存前不修改代理及关联账号的连接配置。
       const result = await probeProxy({ proxyUrl, proxyProtocol: form.proxyProtocol, detectLocation: false })
       formTestResult.value = result
-      if (!result.success)
+      if (!result.success) {
         ZNotification.error({ message: result.message })
-      else
-        ZNotification.success({ message: `连接成功，耗时 ${result.latencyMs} ms` })
+      }
+      else {
+        ZNotification.success({
+          message: t('proxies.actions.connectedInMs', { latencyMs: result.latencyMs }),
+        })
+      }
     })
   }
 
@@ -140,7 +176,9 @@ export function useProxies() {
       return
     const proxyUrl = form.proxyUrl.trim()
     if (!proxyUrl && !editing.value) {
-      ZNotification.warning({ message: '请填写代理连接地址' })
+      ZNotification.warning({
+        message: t('proxies.actions.fillInProxyConnectionAddress'),
+      })
       return
     }
     detectingLocation.value = true
@@ -153,29 +191,37 @@ export function useProxies() {
         }
         else {
           const proxy = editing.value!
-          const updated = proxyResultData((await testProxy([{ id: proxy.id, revision: proxy.revision, detectLocation: true }]))[0])
+          const updated = proxyResultData((await testProxy([
+            { id: proxy.id, revision: proxy.revision, detectLocation: true },
+          ]))[0])
           editing.value = updated
           result = updated.lastTest
           await query.execute({ silent: true })
         }
         formTestResult.value = result
         if (!result?.success) {
-          ZNotification.error({ message: result?.message ?? '代理连接失败，未能解析位置' })
+          ZNotification.error({ message: result?.message ?? t('proxies.actions.locationFailed') })
           return
         }
         if (result.location.status === 'detected') {
           form.location = { ...result.location.location }
           form.customLocation = true
-          ZNotification.success({ message: '已填入出口位置' })
+          ZNotification.success({
+            message: t('proxies.actions.exitLocationFilledIn'),
+          })
         }
         else if (result.location.status === 'conflict') {
-          ZNotification.warning({ message: 'IPv4 与 IPv6 出口时区不一致，请手动填写' })
+          ZNotification.warning({
+            message: t('proxies.editor.timeZoneMismatch'),
+          })
         }
         else if (result.location.status === 'failed') {
           ZNotification.warning({ message: result.location.message })
         }
         else {
-          ZNotification.warning({ message: '未获取到出口位置' })
+          ZNotification.warning({
+            message: t('proxies.actions.unableToObtainExitLocation'),
+          })
         }
       })
     }
@@ -190,16 +236,24 @@ export function useProxies() {
     const name = form.name.trim()
     const proxyUrl = form.proxyUrl.trim()
     if (!name || (!editing.value && !proxyUrl)) {
-      ZNotification.warning({ message: '请填写代理名称和连接地址' })
+      ZNotification.warning({
+        message: t('proxies.actions.fieldsRequired'),
+      })
       return
     }
     const maxWebsocketConnections = Number(form.maxWebsocketConnections)
     if (!Number.isInteger(maxWebsocketConnections) || maxWebsocketConnections < 0 || maxWebsocketConnections > 4294967295) {
-      ZNotification.warning({ message: '连接上限须为 0 到 4294967295 之间的整数' })
+      ZNotification.warning({
+        message: t('proxies.actions.invalidConnectionLimit'),
+      })
       return
     }
-    const location = form.customLocation ? normalizeRequestLocation(form.location) : null
-    const locationError = location ? requestLocationError(location) : ''
+    const location = form.customLocation
+      ? normalizeRequestLocation(form.location)
+      : null
+    const locationError = location
+      ? requestLocationError(location)
+      : ''
     if (locationError) {
       ZNotification.warning({ message: locationError })
       return
@@ -219,16 +273,20 @@ export function useProxies() {
             proxyProtocol: form.proxyProtocol,
             location,
           })
-        : createProxy([{
-            name,
-            autoLocation,
-            maxWebsocketConnections,
-            proxyUrl,
-            proxyProtocol: form.proxyProtocol,
-            location,
-          }]).then(results => proxyResultData(results[0])))
+        : createProxy([
+            {
+              name,
+              autoLocation,
+              maxWebsocketConnections,
+              proxyUrl,
+              proxyProtocol: form.proxyProtocol,
+              location,
+            },
+          ]).then(results => proxyResultData(results[0])))
       showForm.value = false
-      ZNotification.success({ message: '代理已保存' })
+      ZNotification.success({
+        message: t('proxies.actions.saved'),
+      })
       await reloadAfterCreate()
     })
   }
@@ -248,9 +306,18 @@ export function useProxies() {
       return
     updating.add(proxy.id)
     try {
-      await updateProxy({ id: proxy.id, revision: proxy.revision, name: proxy.name, enabled })
+      await updateProxy({
+        id: proxy.id,
+        revision: proxy.revision,
+        name: proxy.name,
+        enabled,
+      })
       showDisable.value = false
-      ZNotification.success({ message: enabled ? '代理已启用' : '代理已禁用，关联账号已改为直连' })
+      ZNotification.success({
+        message: enabled
+          ? t('proxies.actions.proxyEnabled')
+          : t('proxies.actions.disabled'),
+      })
     }
     catch {}
     finally {
@@ -282,7 +349,9 @@ export function useProxies() {
       await deleteProxy({ id: proxy.id, revision: proxy.revision })
       showDelete.value = false
       await query.execute()
-      ZNotification.success({ message: '代理已删除' })
+      ZNotification.success({
+        message: t('proxies.actions.deleted'),
+      })
     })
   }
 

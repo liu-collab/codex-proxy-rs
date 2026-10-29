@@ -1,10 +1,11 @@
 import type { Ref } from 'vue'
 import type { ApiKey } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { shallowRef, watch } from 'vue'
 import { deleteApiKey, disableApiKey, enableApiKey } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useIdSet } from '@/composables/useIdSet'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 
 export function useApiKeyMutations(options: {
   selectedIds: Ref<Set<string>>
@@ -46,9 +47,13 @@ export function useApiKeyMutations(options: {
         options.selectedIds.value = remaining
         showSingleDeleteModal.value = false
         await options.reload()
-        ZNotification.success({ message: '删除成功' })
+        ZNotification.success({
+          message: t('common.feedback.deleted'),
+        })
       },
-      { onError: () => void options.reload() },
+      {
+        onError: () => void options.reload(),
+      },
     )
   }
 
@@ -67,9 +72,13 @@ export function useApiKeyMutations(options: {
         }
         showDeleteModal.value = false
         await options.reload()
-        ZNotification.success({ message: `已删除 ${deleteCount} 个 API Key` })
+        ZNotification.success({
+          message: t('keys.actions.deletedApiKeyDeletedApiKeys', { count: deleteCount }),
+        })
       },
-      { onError: () => void options.reload() },
+      {
+        onError: () => void options.reload(),
+      },
     )
   }
 
@@ -79,7 +88,11 @@ export function useApiKeyMutations(options: {
         const mutation = key.enabled ? disableApiKey : enableApiKey
         await mutation({ id: key.id })
         await options.reload()
-        ZNotification.success({ message: key.enabled ? '已禁用' : '已启用' })
+        ZNotification.success({
+          message: key.enabled
+            ? t('common.status.disabled')
+            : t('common.status.enabled'),
+        })
       }
       catch {
         void options.reload()
@@ -87,5 +100,17 @@ export function useApiKeyMutations(options: {
     })
   }
 
-  return { showDeleteModal, showSingleDeleteModal, pendingDeleteKey, deleteCount, deletingKey, batchDeleting, updatingStatusKeyIds, requestDeleteKey, handleDelete, handleBatchDelete, handleToggleStatus }
+  return {
+    showDeleteModal,
+    showSingleDeleteModal,
+    pendingDeleteKey,
+    deleteCount,
+    deletingKey,
+    batchDeleting,
+    updatingStatusKeyIds,
+    requestDeleteKey,
+    handleDelete,
+    handleBatchDelete,
+    handleToggleStatus,
+  }
 }

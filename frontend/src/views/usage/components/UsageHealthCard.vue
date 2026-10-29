@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import type { BarSeriesOption, EChartsOption, LineSeriesOption } from 'echarts'
+
 import type { getUsageRecordInsightsOverview } from '@/api'
 import { ZCard, ZEmpty } from '@codex-proxy/ui'
-
 import { BarChart } from 'echarts/charts'
+
 import { use } from 'echarts/core'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import BaseChart from '@/components/charts/BaseChart.vue'
-import { tooltipIndex, tooltipRows } from '@/components/charts/tooltip'
+import { chartTooltipContent, tooltipIndex, tooltipRows } from '@/components/charts/tooltip'
 import { healthEligibleRequestCount } from '@/components/usage/shared/health'
 import { useChartPalette } from '@/composables/useChartPalette'
+
 import { formatLocalizedCompactNumber as formatCompactNumber, formatPercent } from '@/utils/format'
 
 import {
@@ -17,13 +20,9 @@ import {
   usageGapAwareLineSeries,
   usageLegend,
   usageTooltip,
-  usageTooltipContent,
   usageTooltipItem,
   usageValueAxis,
 } from '../utils/chart'
-
-type Health = Awaited<ReturnType<typeof getUsageRecordInsightsOverview>>['health']
-type HealthPoint = Health['points'][number]
 
 const props = withDefaults(
   defineProps<{
@@ -36,6 +35,11 @@ const props = withDefaults(
   },
 )
 
+const { t } = useI18n({ useScope: 'global' })
+
+type Health = Awaited<ReturnType<typeof getUsageRecordInsightsOverview>>['health']
+type HealthPoint = Health['points'][number]
+
 use([BarChart])
 
 const { palette } = useChartPalette()
@@ -47,35 +51,41 @@ const hasData = computed(
 
 const granularityText = computed(() => {
   const labels: Record<string, string> = {
-    '15m': '15 分钟',
-    '1h': '小时',
-    '1d': '天',
-    'day': '天',
-    'hour': '小时',
+    '15m': t('usage.health.point.minutes'),
+    '1h': t('usage.health.hours'),
+    '1d': t('usage.health.day'),
+    'day': t('usage.health.day'),
+    'hour': t('usage.health.hours'),
   }
   return labels[props.granularity] ?? props.granularity
 })
+
+const description = computed(() => props.loading || !granularityText.value
+  ? t('usage.health.description')
+  : t('usage.health.descriptionWithGranularity', { granularityText: granularityText.value }))
 
 const chartOption = computed<EChartsOption>(() => {
   const theme = palette.value
   const chartPoints = points.value
   const activePointCount = chartPoints.filter(point => requestCount(point) > 0).length
   const successRateSeries = usageGapAwareLineSeries(
-    '服务成功率',
+    t('usage.health.serviceSuccessRate'),
     chartPoints.map(serviceSuccessRate),
     theme.success,
     { yAxisIndex: 1 },
   )
   const series: Array<BarSeriesOption | LineSeriesOption> = [
-    outcomeSeries('成功', chartPoints.map(point => point.successRequests), theme.success),
-    outcomeSeries('服务失败', chartPoints.map(point => point.failedRequests), theme.danger),
-    outcomeSeries('取消', chartPoints.map(point => point.cancelledRequests), theme.info),
-    outcomeSeries('未完成', chartPoints.map(point => point.incompleteRequests), theme.warning),
-    outcomeSeries('调用方错误', chartPoints.map(point => point.callerErrorRequests), theme.normal),
+    outcomeSeries(t('common.status.success'), chartPoints.map(point => point.successRequests), theme.success),
+    outcomeSeries(t('usage.health.point.serviceFailed'), chartPoints.map(point => point.failedRequests), theme.danger),
+    outcomeSeries(t('usage.status.cancelled'), chartPoints.map(point => point.cancelledRequests), theme.info),
+    outcomeSeries(t('usage.health.notCompleted'), chartPoints.map(point => point.incompleteRequests), theme.warning),
+    outcomeSeries(t('usage.health.point.callerError'), chartPoints.map(point => point.callerErrorRequests), theme.normal),
     ...successRateSeries.map((item, index) => index === 0
       ? {
           ...item,
-          symbol: activePointCount <= 16 ? 'circle' : 'none',
+          symbol: activePointCount <= 16
+            ? 'circle'
+            : 'none',
           symbolSize: 4,
         }
       : item),
@@ -91,7 +101,14 @@ const chartOption = computed<EChartsOption>(() => {
       outerBoundsMode: 'same',
       outerBoundsContain: 'axisLabel',
     },
-    legend: usageLegend(theme, ['成功', '服务失败', '取消', '未完成', '调用方错误', '服务成功率']),
+    legend: usageLegend(theme, [
+      t('common.status.success'),
+      t('usage.health.point.serviceFailed'),
+      t('usage.status.cancelled'),
+      t('usage.health.notCompleted'),
+      t('usage.health.point.callerError'),
+      t('usage.health.serviceSuccessRate'),
+    ]),
     tooltip: usageTooltip(theme, formatTooltip),
     xAxis: usageCategoryAxis(
       chartPoints.map(point => point.label),
@@ -117,7 +134,9 @@ function serviceSuccessRate(point: HealthPoint) {
   const total = healthEligibleRequestCount(point)
   if (total > 0)
     return 1 - point.errorRate
-  return requestCount(point) === 0 ? 0 : null
+  return requestCount(point) === 0
+    ? 0
+    : null
 }
 
 function outcomeSeries(name: string, data: number[], color: string) {
@@ -140,16 +159,18 @@ function formatTooltip(params: unknown) {
   const successRate = serviceSuccessRate(point)
   const theme = palette.value
 
-  return usageTooltipContent(theme, point.label, [
-    usageTooltipItem('请求量', formatCompactNumber(requestCount(point)), theme.textSecondary),
-    usageTooltipItem('成功', formatCompactNumber(point.successRequests), theme.success),
-    usageTooltipItem('服务失败', formatCompactNumber(point.failedRequests), theme.danger),
-    usageTooltipItem('取消', formatCompactNumber(point.cancelledRequests), theme.info),
-    usageTooltipItem('未完成', formatCompactNumber(point.incompleteRequests), theme.warning),
-    usageTooltipItem('调用方错误', formatCompactNumber(point.callerErrorRequests), theme.normal),
+  return chartTooltipContent(point.label, [
+    usageTooltipItem(t('usage.health.requestVolume'), formatCompactNumber(requestCount(point)), theme.textSecondary),
+    usageTooltipItem(t('common.status.success'), formatCompactNumber(point.successRequests), theme.success),
+    usageTooltipItem(t('usage.health.point.serviceFailed'), formatCompactNumber(point.failedRequests), theme.danger),
+    usageTooltipItem(t('usage.status.cancelled'), formatCompactNumber(point.cancelledRequests), theme.info),
+    usageTooltipItem(t('usage.health.notCompleted'), formatCompactNumber(point.incompleteRequests), theme.warning),
+    usageTooltipItem(t('usage.health.point.callerError'), formatCompactNumber(point.callerErrorRequests), theme.normal),
     usageTooltipItem(
-      '服务成功率',
-      successRate == null ? '无服务结果' : formatPercent(successRate),
+      t('usage.health.serviceSuccessRate'),
+      successRate == null
+        ? t('usage.health.noServiceResult')
+        : formatPercent(successRate),
       theme.success,
     ),
   ])
@@ -159,27 +180,27 @@ function formatTooltip(params: unknown) {
 <template>
   <ZCard
     as="article"
-    title="请求健康"
-    :description="`按${granularityText}区分服务结果、取消、未完成与调用方错误`"
+    :title="t('usage.health.title')"
+    :description="description"
     class="min-h-90 xl:h-full"
   >
     <template #body>
       <div class="grid min-h-66" :class="hasData ? 'gap-3' : 'h-full'">
         <div v-if="hasData" class="grid grid-cols-3 gap-2 rounded-xl bg-cp-fill-quaternary/45 p-2">
           <div class="grid gap-1 px-2">
-            <span class="text-[10px] font-bold text-cp-text-quaternary">服务成功率</span>
+            <span class="text-[10px] font-bold text-cp-text-quaternary">{{ t('usage.health.serviceSuccessRate') }}</span>
             <strong class="font-mono text-cp-base font-heavy tabular-nums text-cp-green-text">
               {{ formatPercent(health.successRate) }}
             </strong>
           </div>
           <div class="grid gap-1 px-2">
-            <span class="text-[10px] font-bold text-cp-text-quaternary">完成率</span>
+            <span class="text-[10px] font-bold text-cp-text-quaternary">{{ t('usage.health.completionRate') }}</span>
             <strong class="font-mono text-cp-base font-heavy tabular-nums text-cp-text">
               {{ formatPercent(health.completionRate) }}
             </strong>
           </div>
           <div class="grid gap-1 px-2">
-            <span class="text-[10px] font-bold text-cp-text-quaternary">非正常结束</span>
+            <span class="text-[10px] font-bold text-cp-text-quaternary">{{ t('usage.health.abnormalEnd') }}</span>
             <strong class="font-mono text-cp-base font-heavy tabular-nums text-cp-orange-text">
               {{ formatCompactNumber(health.cancelledRequests + health.incompleteRequests) }}
             </strong>
@@ -190,8 +211,7 @@ function formatTooltip(params: unknown) {
           v-else
           size="small"
           surface="none"
-          :title="loading ? '正在加载请求健康数据' : '暂无请求健康数据'"
-          description="当前范围没有可绘制的请求记录"
+          :title="loading ? t('usage.health.loading') : t('usage.health.empty')"
           class="h-full place-content-center"
         />
       </div>

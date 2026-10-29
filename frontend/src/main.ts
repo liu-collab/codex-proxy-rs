@@ -1,6 +1,7 @@
-import { vLoading } from '@codex-proxy/ui'
 import { createApp } from 'vue'
 import App from './App.vue'
+import { i18n, setLocale } from './i18n'
+import { readInitialLocale } from './i18n/locale'
 
 import { authPlugin } from './plugins/auth'
 import { router } from './router'
@@ -14,11 +15,16 @@ import './styles/index.css'
 
 const app = createApp(App)
 
-app.directive('loading', vLoading)
 app.use(pinia)
 
 useThemeStore(pinia).initializeTheme()
 
-app.use(router)
-app.use(authPlugin)
-app.mount('#app')
+async function mountApp() {
+  await setLocale(readInitialLocale())
+  app.use(i18n)
+  app.use(router)
+  app.use(authPlugin)
+  app.mount('#app')
+}
+
+void mountApp()

@@ -1,4 +1,4 @@
-//! 从 OpenAI 事件与响应头提取模型、用量、额度和重试等待事实
+//! 从 OpenAI 事件与响应头提取用量、额度和重试等待事实
 
 use std::{collections::BTreeMap, time::Duration};
 
@@ -6,56 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::sse::{SseError, parse_sse_events};
-
-/// 单次 Responses 流明确声明的模型；终态优先，缺失时不使用请求模型补齐
-#[derive(Debug, Default)]
-pub struct ResponseModelObservation {
-    model: Option<String>,
-    terminal: bool,
-}
-
-impl ResponseModelObservation {
-    /// 从原始事件读取响应模型，避免工具转换或 canonical 兜底改写观测事实
-    pub fn observe(&mut self, event_type: Option<&str>, value: &Value) {
-        let terminal = matches!(
-            event_type,
-            Some(
-                "response.completed"
-                    | "response.done"
-                    | "response.incomplete"
-                    | "response.failed"
-                    | "response.cancelled"
-                    | "response.canceled"
-            )
-        );
-        if self.terminal || (self.model.is_some() && !terminal) {
-            return;
-        }
-        let Some(model) = value
-            .pointer("/response/model")
-            .and_then(Value::as_str)
-            .and_then(observed_model_name)
-        else {
-            return;
-        };
-        self.model = Some(model.to_owned());
-        self.terminal = terminal;
-    }
-
-    /// 返回原始响应声明，未声明时保持未知
-    #[must_use]
-    pub fn model(&self) -> Option<&str> {
-        self.model.as_deref()
-    }
-}
-
-/// 规范化可展示的上游模型名，非法值不影响响应交付
-#[must_use]
-pub fn observed_model_name(value: &str) -> Option<&str> {
-    let value = value.trim();
-    (!value.is_empty() && value.len() <= 256 && !value.chars().any(char::is_control))
-        .then_some(value)
-}
 
 /// 从 Codex/OpenAI usage 结构中提取出的标准化 token 用量
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,8 +199,9 @@ pub fn retry_after_seconds_from_value(value: &Value) -> Option<u64> {
         .pointer("/response/error")
         .or_else(|| value.get("error"))
         .unwrap_or(value);
-    retry_after_seconds_header(error)
-        .or_else(|| retry_after_seconds_header(value))
+    retry_after_header(error)
+        .or_else(|| retry_after_header(value))
+        .map(|(_, seconds)| seconds)
         .or_else(|| retry_after_seconds_field(error))
         .or_else(|| {
             error
@@ -275,22 +226,27 @@ fn retry_after_seconds_field(value: &Value) -> Option<u64> {
         .filter(|seconds| *seconds > 0)
 }
 
-fn retry_after_seconds_header(value: &Value) -> Option<u64> {
+/// 同时保留原始头值与解析秒数，供事件转换和重试观测共用官方头部规则
+pub(super) fn retry_after_header(value: &Value) -> Option<(&Value, u64)> {
     let headers = value.get("headers")?.as_object()?;
     // 官方先按 HTTP 头值校验，再覆盖大小写不同的同名头；最后才解释重试时间
     // 合法但无法解析为时间的末项也会覆盖前值，非法头值和数组不参与覆盖
-    let header = headers
+    let (value, header) = headers
         .iter()
         .filter(|(name, _)| name.eq_ignore_ascii_case("retry-after"))
-        .filter_map(|(_, value)| match value {
-            Value::String(value) => http::HeaderValue::from_str(value).ok(),
-            Value::Number(_) | Value::Bool(_) => {
-                http::HeaderValue::from_str(&value.to_string()).ok()
-            }
-            Value::Null | Value::Array(_) | Value::Object(_) => None,
+        .filter_map(|(_, value)| {
+            let header = match value {
+                Value::String(value) => http::HeaderValue::from_str(value).ok(),
+                Value::Number(_) | Value::Bool(_) => {
+                    http::HeaderValue::from_str(&value.to_string()).ok()
+                }
+                Value::Null | Value::Array(_) | Value::Object(_) => None,
+            }?;
+            Some((value, header))
         })
         .next_back()?;
-    super::headers::parse_retry_after_seconds(header.to_str().ok()?)
+    let seconds = super::headers::parse_retry_after_seconds(header.to_str().ok()?)?;
+    Some((value, seconds))
 }
 
 /// 标准化的单个限流窗口

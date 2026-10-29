@@ -2,8 +2,11 @@
 import type { AccountQuotaWindow } from '@/api'
 
 import { computed } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import AccountRequestTimeline from '@/components/account/account-usage-window/AccountRequestTimeline.vue'
 import {
+  quotaWindowLabel,
   quotaWindowLocalUsageDisplay,
   quotaWindowPresentation,
   resolveAccountUsageWindowPresentation,
@@ -13,6 +16,8 @@ const props = defineProps<{
   label: string | null
   windows: AccountQuotaWindow[]
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 const grouped = computed(() => props.windows.length > 1 && Boolean(props.label))
 const items = computed(() => props.windows.map((window) => {
@@ -32,9 +37,9 @@ const items = computed(() => props.windows.map((window) => {
     timelineTitle: view.local.timelineTitle,
     durationDisplay: view.local.durationDisplay,
     label: grouped.value
-      ? window.windowLabelDisplay
-      : window.labelDisplay,
-    ariaLabel: window.labelDisplay,
+      ? quotaWindowLabel(window, false)
+      : quotaWindowLabel(window),
+    ariaLabel: quotaWindowLabel(window),
     usedPercent: window.usedPercent,
     usedPercentDisplay: window.usedPercentDisplay,
     localUsageDisplay: quotaWindowLocalUsageDisplay(window),
@@ -49,7 +54,7 @@ const items = computed(() => props.windows.map((window) => {
 <template>
   <section class="grid min-w-0 gap-2">
     <h4
-      v-if="grouped && label"
+      v-if="grouped && label && windows[0]?.limitId !== 'codex'"
       class="m-0 truncate text-cp-xs leading-4 font-heavy text-cp-text-secondary"
       :title="label"
     >
@@ -68,9 +73,9 @@ const items = computed(() => props.windows.map((window) => {
             </span>
             <strong
               class="shrink-0 font-mono font-heavy tabular-nums text-cp-text"
-              :title="`窗口请求：${item.requestDisplay} 次`"
+              :title="t('accounts.quota.requestsInThisWindow', { requestDisplay: item.requestDisplay })"
             >
-              {{ item.requestDisplay }} 次
+              {{ t('accounts.quota.requestCount', { requestDisplay: item.requestDisplay }) }}
             </strong>
           </div>
 
@@ -81,12 +86,12 @@ const items = computed(() => props.windows.map((window) => {
           />
 
           <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
-            <span class="shrink-0 font-emphasis">统计范围</span>
+            <span class="shrink-0 font-emphasis">{{ t('accounts.quota.statisticalRange') }}</span>
             <span
               class="min-w-0 truncate font-mono font-emphasis tabular-nums"
-              :title="`滚动 ${item.durationDisplay}`"
+              :title="t('accounts.quota.rolling', { duration: item.durationDisplay })"
             >
-              滚动 {{ item.durationDisplay }}
+              {{ t('accounts.quota.rolling', { duration: item.durationDisplay }) }}
             </span>
           </p>
         </template>
@@ -99,13 +104,13 @@ const items = computed(() => props.windows.map((window) => {
               <strong
                 v-if="item.localUsageDisplay"
                 class="text-cp-text-quaternary"
-                :title="`窗口消耗：${item.localUsageDisplay}`"
+                :title="t('accounts.quota.usageInThisWindow', { localUsageDisplay: item.localUsageDisplay })"
               >
                 {{ item.localUsageDisplay }}
               </strong>
               <strong
                 :class="item.percentTextClass"
-                :title="`额度已使用：${item.usedPercentDisplay}`"
+                :title="t('accounts.quota.quotaUsed', { rate: item.usedPercentDisplay })"
               >
                 {{ item.usedPercentDisplay }}
               </strong>
@@ -129,7 +134,7 @@ const items = computed(() => props.windows.map((window) => {
           </div>
 
           <p class="m-0 flex min-w-0 items-center justify-between gap-2 text-[10px] leading-3.5 text-cp-text-tertiary">
-            <span class="shrink-0 font-emphasis">重置</span>
+            <span class="shrink-0 font-emphasis">{{ t('common.actions.reset') }}</span>
             <span class="min-w-0 truncate font-mono font-emphasis tabular-nums" :title="item.resetAtDisplay">
               {{ item.resetAtDisplay }}
             </span>

@@ -11,7 +11,7 @@ use gateway_admin::{
             state::{
                 ApplyPluginStateMigration, DeletePluginState, PluginStateCommit,
                 PluginStateConfiguration, PluginStateMigrationAction, PluginStateMigrationChange,
-                PluginStateOwnerRequest, PluginStateSchema, PutPluginState,
+                PluginStateOwnerRequest, PluginStateSchema, PluginStateTransition, PutPluginState,
             },
         },
     },
@@ -164,6 +164,31 @@ async fn transition_fixture(
     )
 }
 
+async fn begin_transition_after_release(
+    store: &PgPluginStore,
+    instance: &PluginInstance,
+    digest: &str,
+    target: PluginStateConfiguration,
+) -> PluginStateTransition {
+    // PostgreSQL 异步处理断连，所有者释放后仍需等待服务端解除会话锁
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            match store
+                .begin_transition(&instance.id, instance.revision, digest, target.clone())
+                .await
+            {
+                Ok(transition) => break transition,
+                Err(error) if error.kind() == PluginStateStoreErrorKind::Conflict => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => panic!("unexpected retry failure: {error:?}"),
+            }
+        }
+    })
+    .await
+    .expect("released migration owner must relinquish its session lock")
+}
+
 #[tokio::test]
 async fn cancelled_migration_releases_ownership_and_can_be_retried() {
     let Some(database) = TestDatabase::create("plugin_state_cancel").await else {
@@ -191,23 +216,7 @@ async fn cancelled_migration_releases_ownership_and_can_be_retried() {
     let abandoned_id = migration.await.unwrap();
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());
-    // 关闭会话由 PostgreSQL 异步处理，重试只等待所有权释放，不调用清理接口补偿
-    let retried = tokio::time::timeout(Duration::from_secs(3), async {
-        loop {
-            match store
-                .begin_transition(&instance.id, instance.revision, &digest, target.clone())
-                .await
-            {
-                Ok(transition) => break transition,
-                Err(error) if error.kind() == PluginStateStoreErrorKind::Conflict => {
-                    tokio::time::sleep(Duration::from_millis(10)).await;
-                }
-                Err(error) => panic!("unexpected retry failure: {error:?}"),
-            }
-        }
-    })
-    .await
-    .expect("cancelled migration must release its session lock");
+    let retried = begin_transition_after_release(&store, &instance, &digest, target).await;
     assert_ne!(retried.id, abandoned_id);
     let retained: bool = sqlx::query_scalar(
         "select exists(select 1 from plugin_state_generations where transition_id=$1)",
@@ -1050,15 +1059,13 @@ async fn migration_promotes_atomically_and_incomplete_staging_cannot_replace_act
     drop(transition);
 
     let third_state = configuration(schema(3, vec![2], 4));
-    let incomplete = store
-        .begin_transition(
-            &upgraded.instance.id,
-            upgraded.instance.revision,
-            &third_artifact.artifact.metadata.sha256,
-            third_state.clone(),
-        )
-        .await
-        .unwrap();
+    let incomplete = begin_transition_after_release(
+        &store,
+        &upgraded.instance,
+        &third_artifact.artifact.metadata.sha256,
+        third_state.clone(),
+    )
+    .await;
     let mut rejected = upgraded.instance.clone();
     rejected.artifact_sha256 = third_artifact.artifact.metadata.sha256;
     let error = store

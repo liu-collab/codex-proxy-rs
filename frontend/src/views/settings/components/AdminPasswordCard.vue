@@ -1,20 +1,24 @@
 <script setup lang="ts">
 import { ZButton, ZCard, ZMotionIcon } from '@codex-proxy/ui'
+
 import { LockKeyhole } from '@lucide/vue'
 import { shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ChangePasswordModal from './ChangePasswordModal.vue'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const open = shallowRef(false)
 </script>
 
 <template>
-  <ZCard title="管理员密码" description="用于登录管理后台">
+  <ZCard :title="t('settings.password.administratorPassword')" :description="t('settings.password.description')">
     <template #actions>
       <ZButton @click="open = true">
         <template #icon>
           <LockKeyhole class="size-4" aria-hidden="true" />
         </template>
-        修改密码
+        {{ t('settings.password.changePassword') }}
       </ZButton>
     </template>
 
@@ -24,10 +28,10 @@ const open = shallowRef(false)
       </ZMotionIcon>
       <div class="min-w-0">
         <p class="m-0 text-cp leading-[1.15] font-bold text-cp-text">
-          验证当前密码
+          {{ t('settings.password.verifyCurrentPassword') }}
         </p>
         <p class="mt-1.5 mb-0 text-cp-sm leading-snug font-emphasis text-cp-text-secondary">
-          修改后，所有管理员需重新登录
+          {{ t('settings.password.sessionNotice') }}
         </p>
       </div>
     </div>

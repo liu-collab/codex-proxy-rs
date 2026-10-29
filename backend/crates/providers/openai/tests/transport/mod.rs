@@ -1,4 +1,4 @@
-//! OpenAI 上游 HTTP、SSE、WebSocket 与客户端画像的测试入口
+﻿//! OpenAI 上游 HTTP、SSE、WebSocket 与客户端画像的测试入口
 
 use std::{
     process::Command,
@@ -57,7 +57,6 @@ mod downstream;
 mod endpoints;
 mod headers;
 mod http_client;
-mod identity_pseudonym;
 mod input_guard;
 mod json_literal;
 mod latency;
@@ -77,7 +76,7 @@ mod usage;
 mod websocket;
 mod websocket_pool;
 
-fn websocket_accept_config() -> WebSocketConfig {
+pub(crate) fn websocket_accept_config() -> WebSocketConfig {
     let mut extensions = ExtensionsConfig::default();
     extensions.permessage_deflate = Some(DeflateConfig::default());
     let mut config = WebSocketConfig::default();
@@ -145,6 +144,7 @@ fn test_wire_profile() -> CodexWireProfileState {
         terminal: "transport-test".to_owned(),
         exact_user_agent: None,
         residency: None,
+        account_routing_override: None,
         verified_at: Utc::now(),
     })
 }
@@ -154,6 +154,7 @@ fn request_context<'a>(
     account_id: Option<&'a str>,
 ) -> CodexRequestContext<'a> {
     CodexRequestContext {
+        response_control: None,
         trace: None,
         authorization: "Bearer access-token",
         account_id,
@@ -185,7 +186,6 @@ struct CollectedBackendResponse {
     rate_limit_headers: Vec<(String, String)>,
     websocket_pool_decision: Option<WebSocketPoolDecision>,
     response_metadata: CodexResponseMetadata,
-    reported_model: Option<String>,
     transport_metrics: CodexTransportMetrics,
     connection_local_continuation: bool,
 }
@@ -291,11 +291,9 @@ async fn collect_backend_response(
             rate_limit_headers.extend(rate_limits_to_header_pairs(update));
         }
     }
-    let mut reported_model = response_metadata.effective_model.clone();
     if let Some(update) = response_metadata_updates {
         let update = update.lock().await;
         turn_state = update.turn_state.clone().or(turn_state);
-        reported_model = update.reported_model.clone().or(reported_model);
     }
     let body = String::from_utf8_lossy(&body_bytes).into_owned();
     let usage = extract_sse_usage(&body).map_err(CodexClientError::InvalidSse)?;
@@ -308,7 +306,6 @@ async fn collect_backend_response(
         rate_limit_headers,
         websocket_pool_decision,
         response_metadata,
-        reported_model,
         transport_metrics,
         connection_local_continuation,
     })
@@ -525,18 +522,12 @@ async fn write_empty_http_response(stream: &mut TcpStream) {
 
 fn websocket_pool_config_for_tests(
     maintenance_interval: Option<Duration>,
-    ping_interval: Option<Duration>,
-    liveness_timeout: Option<Duration>,
 ) -> CodexWebSocketPoolConfig {
     CodexWebSocketPoolConfig {
-        enabled: true,
         max_age: Duration::from_mins(1),
-        max_connecting: 16,
         maintenance_interval,
-        ping_interval,
-        ping_timeout: Duration::from_secs(1),
-        liveness_timeout,
         stream_idle_timeout: None,
+        ..CodexWebSocketPoolConfig::default()
     }
 }
 

@@ -1,5 +1,8 @@
 //! 请求中间件的改写、交付状态与发布代次持有测试
 
+mod cold;
+mod outbound;
+
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};

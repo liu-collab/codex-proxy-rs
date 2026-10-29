@@ -1,7 +1,23 @@
 //! 验证诊断采集的敏感信息过滤与结构、大小边界
 
-use gateway_core::diagnostics::{body_fingerprint, diagnostic_headers, diagnostic_json};
+use gateway_core::diagnostics::{
+    body_fingerprint, diagnostic_headers, diagnostic_json, json_fingerprint,
+};
 use serde_json::{Value, json};
+
+#[test]
+fn parsed_json_fingerprint_matches_serialized_bytes_without_retaining_content() {
+    let value = json!({"input": "private-content".repeat(30_000), "nested": [1, null, "中文"]});
+    assert_eq!(
+        json_fingerprint(&value),
+        body_fingerprint(&serde_json::to_vec(&value).unwrap())
+    );
+    assert!(
+        !json_fingerprint(&value)
+            .to_string()
+            .contains("private-content")
+    );
+}
 
 #[test]
 fn credentials_and_content_never_enter_diagnostics_but_trace_ids_survive() {

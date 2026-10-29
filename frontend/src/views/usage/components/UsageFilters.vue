@@ -1,7 +1,11 @@
 <script setup lang="ts">
-import { ZIconButton, ZInput } from '@codex-proxy/ui'
+import type { UsageRecordFilterField } from '../composables/useUsageRecordsTable'
+import { ZIconButton, ZInput, ZSelect } from '@codex-proxy/ui'
 
 import { RefreshCw, Search } from '@lucide/vue'
+
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 defineProps<{
   refreshing: boolean
@@ -12,13 +16,36 @@ const emit = defineEmits<{
   refresh: []
 }>()
 
-const search = defineModel<string>('search', { required: true })
+const { t } = useI18n({ useScope: 'global' })
+
+const field = defineModel<UsageRecordFilterField>('field', { required: true })
+const value = defineModel<string>('value', { required: true })
+const fieldOptions = computed(() => [
+  {
+    value: 'key',
+    label: t('usage.filters.keyName'),
+  },
+  {
+    value: 'account',
+    label: t('usage.filters.account'),
+  },
+  {
+    value: 'model',
+    label: t('usage.fields.model'),
+  },
+])
 </script>
 
 <template>
-  <div class="flex w-full flex-wrap items-center gap-3" role="group" aria-label="使用记录筛选与操作">
-    <div class="w-full min-w-0 sm:w-96 sm:flex-none">
-      <ZInput v-model="search" placeholder="密钥名称、账号或模型" aria-label="搜索使用记录：密钥名称、账号或模型" class="w-full">
+  <div class="flex w-full flex-wrap items-center gap-3" role="group" :aria-label="t('usage.filters.label')">
+    <div class="grid w-full min-w-0 grid-cols-[8rem_minmax(0,1fr)] gap-2 sm:w-md sm:flex-none">
+      <ZSelect v-model="field" :options="fieldOptions" :aria-label="t('usage.filters.fieldLabel')" />
+      <ZInput
+        v-model="value"
+        :placeholder="t('usage.filters.enterFilterValue')"
+        :aria-label="t('usage.filters.valueLabel')"
+        class="w-full"
+      >
         <template #prefix>
           <Search class="size-4.5 text-cp-text-tertiary" />
         </template>
@@ -29,7 +56,7 @@ const search = defineModel<string>('search', { required: true })
       <slot name="actions" />
       <ZIconButton
         size="default"
-        aria-label="刷新使用记录"
+        :aria-label="t('usage.filters.refreshUsageHistory')"
         :loading="refreshing"
         :disabled="loading || refreshing"
         @click="emit('refresh')"

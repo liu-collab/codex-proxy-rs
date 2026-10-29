@@ -3,6 +3,8 @@ import { ZIconButton, ZInput } from '@codex-proxy/ui'
 
 import { RotateCcw } from '@lucide/vue'
 
+import { useI18n } from 'vue-i18n'
+
 defineProps<{
   label: string
   token: string
@@ -14,6 +16,8 @@ const emit = defineEmits<{
   change: [value: string]
   reset: []
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 </script>
 
 <template>
@@ -25,7 +29,7 @@ const emit = defineEmits<{
       </div>
       <ZIconButton
         v-if="overridden"
-        aria-label="恢复派生值"
+        :aria-label="t('appearance.color.restoreDerivedValue')"
         size="small"
         @click="emit('reset')"
       >

@@ -83,7 +83,8 @@ pub async fn initialize(
     let credential_state = ports.credential_state();
     let profile =
         transport::profile::CodexWireProfileState::new(transport::profile::CodexWireProfile {
-            residency: config.residency,
+            residency: config.residency.clone(),
+            account_routing_override: config.account_routing_override.clone(),
             ..Default::default()
         });
     let artifact_cache =
@@ -155,7 +156,6 @@ pub async fn initialize(
         http.clone(),
         config.base_url().to_owned(),
         ports.cooldowns(),
-        Arc::clone(&leases),
         Arc::clone(&runtime_policy),
     ));
     let profile_statistics = Arc::new(CodexCredentialProfileService::new(

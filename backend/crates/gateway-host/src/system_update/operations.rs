@@ -13,7 +13,7 @@ use gateway_admin::ports::system::{
 };
 use gateway_core::lifecycle::CancellationToken;
 use serde::Deserialize;
-use tokio::sync::{Mutex as AsyncMutex, broadcast};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, broadcast};
 
 use super::archive::extract_release;
 use super::download::{
@@ -41,7 +41,7 @@ pub struct ProcessSystemOperations {
     cancellation: CancellationToken,
     events: Arc<UpdateEvents>,
     config: Arc<SystemUpdateConfig>,
-    operation_lock: Arc<AsyncMutex<()>>,
+    operation_lock: Arc<AsyncMutex<Option<OperationFileLock>>>,
     release_cache: Arc<ReleaseCache>,
     running_files: Arc<Result<ReleaseFiles, OperationError>>,
 }
@@ -59,10 +59,23 @@ impl ProcessSystemOperations {
             cancellation,
             events: Arc::new(UpdateEvents::default()),
             config: Arc::new(config),
-            operation_lock: Arc::new(AsyncMutex::new(())),
+            operation_lock: Arc::new(AsyncMutex::new(None)),
             release_cache: Arc::new(ReleaseCache::default()),
             running_files,
         }
+    }
+
+    fn lock_operation(&self) -> Result<OwnedMutexGuard<Option<OperationFileLock>>, OperationError> {
+        let operation = Arc::clone(&self.operation_lock)
+            .try_lock_owned()
+            .map_err(|_| conflict("system operation is already running"))?;
+        if operation.is_some() {
+            return Err(conflict("服务正在重启"));
+        }
+        if self.cancellation.is_cancelled() {
+            return Err(conflict("服务正在关闭"));
+        }
+        Ok(operation)
     }
 
     fn start_update(
@@ -71,12 +84,7 @@ impl ProcessSystemOperations {
         channel: Option<UpdateChannel>,
         preflight: Arc<dyn SystemUpdatePreflight>,
     ) -> Result<SystemOperationAccepted, OperationError> {
-        let operation_lock = Arc::clone(&self.operation_lock)
-            .try_lock_owned()
-            .map_err(|_| conflict("system operation is already running"))?;
-        if self.cancellation.is_cancelled() {
-            return Err(conflict("服务正在关闭"));
-        }
+        let operation_lock = self.lock_operation()?;
         if let Some(reason) = self.config.update_support_error() {
             self.events
                 .error_terminal(None, Some("preflight"), reason.clone());
@@ -398,7 +406,7 @@ impl SystemOperations for ProcessSystemOperations {
     }
 
     async fn update_status(&self) -> Result<SystemUpdateStatus, OperationError> {
-        if let Ok(_operation) = self.operation_lock.try_lock() {
+        if let Ok(_operation) = self.lock_operation() {
             recover_interrupted(
                 &self.config.update_state_file,
                 &self.config.update_lock_file,
@@ -418,10 +426,7 @@ impl SystemOperations for ProcessSystemOperations {
         &self,
         preflight: Arc<dyn SystemUpdatePreflight>,
     ) -> Result<SystemOperationAccepted, OperationError> {
-        let _operation = self
-            .operation_lock
-            .try_lock()
-            .map_err(|_| conflict("system operation is already running"))?;
+        let _operation = self.lock_operation()?;
         if let Some(reason) = self.config.update_support_error() {
             return Err(conflict(reason));
         }
@@ -496,10 +501,7 @@ impl SystemOperations for ProcessSystemOperations {
     }
 
     async fn restart_candidate(&self) -> Result<Option<SystemUpdateCandidate>, OperationError> {
-        let _operation = self
-            .operation_lock
-            .try_lock()
-            .map_err(|_| conflict("system operation is already running"))?;
+        let _operation = self.lock_operation()?;
         self.installed_restart_candidate()
     }
 
@@ -509,20 +511,20 @@ impl SystemOperations for ProcessSystemOperations {
     ) -> Result<SystemOperationAccepted, OperationError> {
         // 与 update/rollback 互斥：更新替换文件期间触发自重启会让新进程
         // 载入半成品产物
-        let _operation = self
-            .operation_lock
-            .try_lock()
-            .map_err(|_| conflict("system operation is already running"))?;
+        let mut operation = self.lock_operation()?;
         if !self.config.self_restart_enabled {
             return Err(conflict("self restart is disabled"));
         }
-        let _file_lock = OperationFileLock::acquire(&self.config.update_lock_file)?;
+        let file_lock = OperationFileLock::acquire(&self.config.update_lock_file)?;
         let candidate = self.installed_restart_candidate()?;
         let files = candidate
             .as_ref()
             .map(|_| ReleaseFiles::installed(&self.config))
             .transpose()?;
         preflight.prepare(candidate).await?;
+        if self.cancellation.is_cancelled() {
+            return Err(conflict("服务正在关闭"));
+        }
         if let Some(files) = files
             && files != ReleaseFiles::installed(&self.config)?
         {
@@ -535,6 +537,8 @@ impl SystemOperations for ProcessSystemOperations {
             "已安排自重启"
         };
         let operation_id = operation_id("restart");
+        // 受理后直到旧服务释放，保留重启状态和跨进程锁；延迟关闭只用于送达响应
+        *operation = Some(file_lock);
         let cancellation = self.cancellation.clone();
         drop(tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(500)).await;

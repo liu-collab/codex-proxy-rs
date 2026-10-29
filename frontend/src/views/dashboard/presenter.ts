@@ -1,6 +1,8 @@
 import type { Component } from 'vue'
-import type { DashboardSummaryResponse, DashboardTrendKind, DashboardTrendPoint, DashboardTrendResponse } from '@/api'
+import type { DashboardSummaryResponse, DashboardTrendKind, DashboardTrendMetric, DashboardTrendPoint, DashboardTrendResponse } from '@/api'
 import { Activity, FileText, Timer, Users } from '@lucide/vue'
+import { computed } from 'vue'
+import { t } from '@/i18n'
 import { formatCompactNumber, formatInteger } from '@/utils/format'
 
 export type MetricTone = 'normal' | 'info' | 'success' | 'warning' | 'danger'
@@ -61,9 +63,9 @@ const emptyCards: DashboardSummaryResponse['cards'] = {
   },
 }
 
-const emptyHealthTimeline: DashboardSummaryResponse['healthTimeline'] = {
-  title: '请求健康时间线',
-  description: '有效请求可用性',
+const emptyHealthTimeline = computed<DashboardSummaryResponse['healthTimeline']>(() => ({
+  title: t('dashboard.health.title'),
+  description: t('dashboard.health.description'),
   reliabilityDisplay: '-',
   status: 'no_data',
   successRequests: 0,
@@ -72,7 +74,7 @@ const emptyHealthTimeline: DashboardSummaryResponse['healthTimeline'] = {
   incompleteRequests: 0,
   callerErrorRequests: 0,
   points: [],
-}
+}))
 
 const emptyCapacityInfo = {
   maxConcurrentPerAccount: null,
@@ -86,7 +88,7 @@ export function dashboardSnapshotView(summary: DashboardSummaryResponse | null) 
   return {
     analytics: summary?.analytics ?? null,
     metrics: metricCards(summary?.cards ?? emptyCards, trendPoints),
-    healthTimeline: summary?.healthTimeline ?? emptyHealthTimeline,
+    healthTimeline: summary?.healthTimeline ?? emptyHealthTimeline.value,
     accountUsage: (summary?.accountUsage ?? []),
     wireProfiles: summary?.wireProfiles ?? [],
     usageRecords: summary?.usageRecords ?? [],
@@ -105,18 +107,18 @@ export function dashboardTrendView(trend: DashboardTrendResponse | null) {
 
   if (trend.kind === 'usage') {
     const points = aggregateUsageTrend(trend.points)
-    return { points, summary: usageTrendSummary(points) }
+    return {
+      points,
+      summary: usageTrendSummary(points),
+    }
   }
 
-  const summary = []
-  for (const item of trend.summary) {
-    summary.push({
-      label: item.label,
-      value: trend.kind === 'errors' && item.ratio !== null ? item.ratio : item.value,
-      tone: trendSummaryTone(item.label),
-      colorVar: trendSummaryColorVar(trend.kind, item.label),
-    })
-  }
+  const summary = trend.summary.map(item => ({
+    ...trendMetricView(item.metric),
+    value: trend.kind === 'errors' && item.ratio !== null
+      ? item.ratio
+      : item.value,
+  }))
   return { points: trend.points, summary }
 }
 
@@ -135,7 +137,7 @@ function metricCards(
   const hasTodayRequests = traffic.todayRequestsValue > 0
   return [
     {
-      title: '账号',
+      title: t('accounts.fields.count'),
       value: credentials.total,
       valueRaw: credentials.totalValue,
       valueFormatter: formatAccountCount,
@@ -143,19 +145,19 @@ function metricCards(
       tone: 'normal',
       details: [
         {
-          label: '可用',
+          label: t('common.status.available'),
           value: credentials.available,
           tone: 'success',
         },
         {
-          label: '不可用',
+          label: t('common.status.unavailable'),
           value: credentials.unavailable,
           tone: 'danger',
         },
       ],
     },
     {
-      title: '请求次数',
+      title: t('dashboard.metrics.requestCount'),
       value: traffic.todayRequests,
       valueRaw: traffic.todayRequestsValue,
       valueFormatter: formatCompactNumber,
@@ -165,14 +167,24 @@ function metricCards(
         recentPoints.map(point => point.requestsValue),
         'info',
       ),
-      trend: hasTodayRequests ? trendState(traffic.todayRequestsValue, traffic.yesterdayRequestsValue, 'info') : undefined,
+      trend: hasTodayRequests
+        ? trendState(traffic.todayRequestsValue, traffic.yesterdayRequestsValue, 'info')
+        : undefined,
       details: [
-        { label: '总请求', value: traffic.totalRequests, tone: 'info' },
-        { label: '首字均值', value: cache.averageFirstTokenLatencyMs, tone: 'info' },
+        {
+          label: t('dashboard.metrics.totalRequests'),
+          value: traffic.totalRequests,
+          tone: 'info',
+        },
+        {
+          label: t('usage.averageTtft'),
+          value: cache.averageFirstTokenLatencyMs,
+          tone: 'info',
+        },
       ],
     },
     {
-      title: 'Token',
+      title: t('common.units.tokens'),
       value: tokens.todayTokens,
       valueRaw: tokens.todayTokensValue,
       valueFormatter: formatCompactNumber,
@@ -182,19 +194,31 @@ function metricCards(
         recentPoints.map(point => point.tokensValue),
         'success',
       ),
-      trend: hasTodayRequests ? trendState(tokens.todayTokensValue, tokens.yesterdayTokensValue, 'success') : undefined,
+      trend: hasTodayRequests
+        ? trendState(tokens.todayTokensValue, tokens.yesterdayTokensValue, 'success')
+        : undefined,
       details: [
-        { label: '总 Token', value: tokens.totalTokens, tone: 'success' },
-        { label: '总计费', value: formatDashboardUsd(tokens.totalBillingAmountUsd), tone: 'success' },
+        {
+          label: t('dashboard.metrics.totalTokens'),
+          value: tokens.totalTokens,
+          tone: 'success',
+        },
+        {
+          label: t('dashboard.metrics.totalCharges'),
+          value: formatDashboardUsd(tokens.totalBillingAmountUsd),
+          tone: 'success',
+        },
       ],
     },
     {
-      title: '缓存命中',
+      title: t('dashboard.metrics.cacheHits'),
       value: cache.todayHitRate,
       valueRaw: cache.todayHitRateValue,
       valueFormatter: formatDashboardRate,
       icon: Timer,
-      tone: cache.todayHitRateValue && cache.todayHitRateValue > 0 ? 'warning' : 'normal',
+      tone: cache.todayHitRateValue && cache.todayHitRateValue > 0
+        ? 'warning'
+        : 'normal',
       sparkline: sparkline(
         recentPoints.map(point => point.cacheHitRateValue),
         'warning',
@@ -203,8 +227,16 @@ function metricCards(
         ? trendState(cache.todayHitRateValue, cache.yesterdayHitRateValue, 'warning')
         : undefined,
       details: [
-        { label: '总缓存命中', value: cache.totalHitRate, tone: 'warning' },
-        { label: '总缓存', value: cache.totalCachedInputTokens, tone: 'warning' },
+        {
+          label: t('dashboard.metrics.totalCacheHits'),
+          value: cache.totalHitRate,
+          tone: 'warning',
+        },
+        {
+          label: t('dashboard.metrics.totalCache'),
+          value: cache.totalCachedInputTokens,
+          tone: 'warning',
+        },
       ],
     },
   ]
@@ -215,7 +247,9 @@ function formatAccountCount(value: number) {
 }
 
 function sparkline(values: number[], tone: MetricTone) {
-  return values.some(value => value > 0) ? { values, tone } : undefined
+  return values.some(value => value > 0)
+    ? { values, tone }
+    : undefined
 }
 
 function recentTrendWindow(points: DashboardTrendPoint[]) {
@@ -230,11 +264,15 @@ function recentTrendWindow(points: DashboardTrendPoint[]) {
 }
 
 function formatDashboardRate(value: number) {
-  return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : '—'
+  return Number.isFinite(value)
+    ? `${(value * 100).toFixed(1)}%`
+    : '—'
 }
 
 function aggregateUsageTrend(points: DashboardTrendPoint[]) {
-  return Array.from({ length: Math.ceil(points.length / 2) }, (_, groupIndex) => {
+  return Array.from({
+    length: Math.ceil(points.length / 2),
+  }, (_, groupIndex) => {
     const group = points.slice(groupIndex * 2, groupIndex * 2 + 2)
     const first = group[0]
     const requestsValue = sum(group, point => point.requestsValue)
@@ -247,7 +285,9 @@ function aggregateUsageTrend(points: DashboardTrendPoint[]) {
     )
     const uncachedInputTokensValue = inputTokensValue - cachedInputTokensValue
     const effectiveTokensValue = uncachedInputTokensValue + outputTokensValue
-    const cacheHitRateValue = inputTokensValue ? cachedInputTokensValue / inputTokensValue : 0
+    const cacheHitRateValue = inputTokensValue
+      ? cachedInputTokensValue / inputTokensValue
+      : 0
     const successRateValue = requestsValue
       ? ((requestsValue - errorsValue) / requestsValue) * 100
       : 0
@@ -265,7 +305,9 @@ function aggregateUsageTrend(points: DashboardTrendPoint[]) {
       uncachedInputTokens: formatCompactNumber(uncachedInputTokensValue),
       uncachedInputTokensValue,
       effectiveTokens: formatCompactNumber(effectiveTokensValue),
-      effectiveTokensValue: effectiveTokensValue > 0 ? effectiveTokensValue : null,
+      effectiveTokensValue: effectiveTokensValue > 0
+        ? effectiveTokensValue
+        : null,
       cacheHitRate: formatDashboardRate(cacheHitRateValue),
       cacheHitRateValue,
       tokensValue: inputTokensValue + outputTokensValue,
@@ -291,22 +333,16 @@ function usageTrendSummary(points: ReturnType<typeof aggregateUsageTrend>) {
 
   return [
     {
-      label: '输入',
+      ...trendMetricView('inputTokens'),
       value: formatCompactNumber(inputTokens),
-      tone: 'info',
-      colorVar: '--cp-color-blue-solid',
     },
     {
-      label: '输出',
+      ...trendMetricView('outputTokens'),
       value: formatCompactNumber(outputTokens),
-      tone: 'success',
-      colorVar: '--cp-color-green-solid',
     },
     {
-      label: '缓存',
+      ...trendMetricView('cachedInputTokens'),
       value: formatCompactNumber(cachedInputTokens),
-      tone: 'normal',
-      colorVar: '--cp-color-text-tertiary',
     },
   ]
 }
@@ -334,39 +370,60 @@ function trendState(
     return { direction: 'up', tone: 'success' }
   if (current < previous)
     return { direction: 'down', tone: 'danger' }
-  return previous > 0 || current > 0 ? { direction: 'flat', tone: fallbackTone } : undefined
+  return previous > 0 || current > 0
+    ? { direction: 'flat', tone: fallbackTone }
+    : undefined
 }
 
-function trendSummaryTone(label: string) {
-  if (label.includes('错误'))
-    return 'danger'
-  if (label.includes('总耗时'))
-    return 'warning'
-  if (label.includes('速率') || label.includes('输出') || label.includes('成功'))
-    return 'success'
-  if (label.includes('首字') || label.includes('缓存'))
-    return 'normal'
-  return 'info'
-}
+// 展示与交互共享指标身份，切换语言不改变高亮或颜色
+const trendMetrics = computed(() => ({
+  inputTokens: {
+    label: t('dashboard.metrics.inputTokens'),
+    tone: 'info',
+    colorVar: '--cp-color-blue-solid',
+  },
+  outputTokens: {
+    label: t('dashboard.metrics.outputTokens'),
+    tone: 'success',
+    colorVar: '--cp-color-green-solid',
+  },
+  cachedInputTokens: {
+    label: t('dashboard.metrics.cachedInputTokens'),
+    tone: 'normal',
+    colorVar: '--cp-color-text-tertiary',
+  },
+  firstTokenP95Ms: {
+    label: t('dashboard.metrics.firstTokenP95Ms'),
+    tone: 'normal',
+    colorVar: '--cp-color-cyan-solid',
+  },
+  latencyP95Ms: {
+    label: t('dashboard.metrics.latencyP95Ms'),
+    tone: 'warning',
+    colorVar: '--cp-color-orange-solid',
+  },
+  outputThroughputP50: {
+    label: t('dashboard.metrics.outputThroughputP50'),
+    tone: 'success',
+    colorVar: '--cp-color-green-solid',
+  },
+  errors: {
+    label: t('dashboard.metrics.errors'),
+    tone: 'danger',
+    colorVar: '--cp-color-red-solid',
+  },
+  successRate: {
+    label: t('dashboard.metrics.successRate'),
+    tone: 'success',
+    colorVar: '--cp-color-green-solid',
+  },
+  requests: {
+    label: t('dashboard.metrics.totalRequests'),
+    tone: 'info',
+    colorVar: '--cp-color-blue-solid',
+  },
+} satisfies Record<DashboardTrendMetric, { label: string, tone: MetricTone, colorVar: string }>))
 
-function trendSummaryColorVar(kind: DashboardTrendKind, label: string) {
-  if (kind === 'latency') {
-    if (label.includes('总耗时'))
-      return '--cp-color-orange-solid'
-    if (label.includes('速率'))
-      return '--cp-color-green-solid'
-    return '--cp-color-cyan-solid'
-  }
-  if (kind === 'errors') {
-    if (label.includes('错误'))
-      return '--cp-color-red-solid'
-    if (label.includes('成功'))
-      return '--cp-color-green-solid'
-    return '--cp-color-blue-solid'
-  }
-  if (label.includes('输出'))
-    return '--cp-color-green-solid'
-  if (label.includes('缓存'))
-    return '--cp-color-text-tertiary'
-  return '--cp-color-blue-solid'
+export function trendMetricView(metric: DashboardTrendMetric) {
+  return { metric, ...trendMetrics.value[metric] }
 }

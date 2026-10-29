@@ -1446,5 +1446,49 @@ async fn queued_history_keeps_frozen_identity_after_configuration_deletion() {
             "Original note".to_owned()
         )
     );
+    finalize_request(&database.pool, "queued_history", started_at).await;
+    let repository = observability_repository(&database.pool);
+    for published in [false, true] {
+        if published {
+            super::drain_analytics(&database.pool).await;
+        }
+        for (key_name, account_name, expected) in [
+            (Some("Original Key"), None, 1),
+            (None, Some("Original Account"), 1),
+            (Some("Original Key"), Some("Original Account"), 1),
+            (Some("Original"), None, 1),
+            (Some("ginal K"), None, 1),
+            (None, Some("ginal Acc"), 1),
+            (Some("queued_key"), None, 0),
+            (None, Some("queued_account"), 0),
+            (Some("Original Account"), None, 0),
+            (None, Some("Original Key"), 0),
+            (Some("Original%"), None, 0),
+        ] {
+            for status in [
+                admin_observability::UsageRecordStatus::Success,
+                admin_observability::UsageRecordStatus::All,
+            ] {
+                let mut query = usage_query(
+                    started_at,
+                    UsageRecordFilter {
+                        client_api_key_name: key_name.map(str::to_owned),
+                        provider_account_name: account_name.map(str::to_owned),
+                        ..Default::default()
+                    },
+                );
+                query.status = status;
+                let page = repository.list_usage_records(query).await.unwrap();
+                assert_eq!(
+                    page.total, expected,
+                    "published={published}, key={key_name:?}, account={account_name:?}, status={status:?}"
+                );
+                assert_eq!(page.items.len() as u64, expected);
+                if expected == 1 {
+                    assert_eq!(page.items[0].id, "queued_history");
+                }
+            }
+        }
+    }
     database.close().await;
 }

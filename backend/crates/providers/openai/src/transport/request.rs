@@ -3,7 +3,6 @@
 use std::io;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use chrono::{DateTime, Utc};
 use gateway_core::operation::GenerateRequest;
 use gateway_protocol::openai::{
     WS_REQUEST_HEADER_RESPONSES_LITE_CLIENT_METADATA_KEY, is_transport_managed_request_header,
@@ -16,9 +15,6 @@ use sha2::{Digest, Sha256};
 
 use crate::transport::downstream::{is_non_codex_request_header, normalize_codex_request_body};
 use crate::transport::headers::is_managed_identity_header;
-use crate::transport::identity_pseudonym::{
-    IdentityPseudonym, pseudonymize_identity_fields, pseudonymize_workspaces,
-};
 use crate::transport::profile::CodexRequestLocation;
 use crate::transport::profile::identity::ClientEnvironment;
 use crate::transport::protocol::responses::{
@@ -137,23 +133,17 @@ fn adapt_codex_responses_body(
     body.insert("model".to_owned(), Value::String(upstream_model.to_owned()));
     normalize_codex_request_body(body);
     if let Some(location) = location {
-        align_structured_location_fields(body, Utc::now(), location);
+        align_structured_location_fields(body, location);
     }
 }
 
 pub(crate) fn align_structured_location_fields(
     body: &mut Map<String, Value>,
-    now: DateTime<Utc>,
     location: &CodexRequestLocation,
 ) {
-    // 环境与 Desktop 时间上下文使用同一位置；epoch 时间戳保持绝对时间原值
-    let current_date = now
-        .with_timezone(&location.timezone)
-        .format("%Y-%m-%d")
-        .to_string();
     if let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) {
         for item in input {
-            align_time_context(item, &current_date, location.timezone.name());
+            align_time_context(item, location.timezone.name());
         }
     }
     if let Some(tools) = body.get_mut("tools").and_then(Value::as_array_mut) {
@@ -163,7 +153,7 @@ pub(crate) fn align_structured_location_fields(
     }
 }
 
-fn align_time_context(item: &mut Value, current_date: &str, timezone: &str) {
+fn align_time_context(item: &mut Value, timezone: &str) {
     let Some(item) = item.as_object_mut() else {
         return;
     };
@@ -207,18 +197,13 @@ fn align_time_context(item: &mut Value, current_date: &str, timezone: &str) {
         let Some(Value::String(text)) = part.get_mut("text") else {
             continue;
         };
-        if let Some(aligned) = aligned_time_context(text, context_tag, current_date, timezone) {
+        if let Some(aligned) = aligned_time_context(text, context_tag, timezone) {
             *text = aligned;
         }
     }
 }
 
-fn aligned_time_context(
-    text: &str,
-    context_tag: &str,
-    current_date: &str,
-    timezone: &str,
-) -> Option<String> {
+fn aligned_time_context(text: &str, context_tag: &str, timezone: &str) -> Option<String> {
     let trimmed = text.trim();
     if !trimmed.starts_with(&format!("<{context_tag}>"))
         || !trimmed.ends_with(&format!("</{context_tag}>"))
@@ -230,17 +215,12 @@ fn aligned_time_context(
     if !root.has_tag_name(context_tag) {
         return None;
     }
+    // 日期属于客户端生成该条上下文时的事实，不能用当前时间刷新历史并改变缓存前缀
+    // 仅有日期无法确定跨时区换算所需的时间点，因此位置覆盖只改时区
     let mut replacements = root
         .children()
-        .filter(|node| node.is_element())
-        .filter_map(|node| {
-            let replacement = match node.tag_name().name() {
-                "current_date" => format!("<current_date>{current_date}</current_date>"),
-                "timezone" => format!("<timezone>{timezone}</timezone>"),
-                _ => return None,
-            };
-            Some((node.range(), replacement))
-        })
+        .filter(|node| node.is_element() && node.tag_name().name() == "timezone")
+        .map(|node| (node.range(), format!("<timezone>{timezone}</timezone>")))
         .collect::<Vec<_>>();
     if replacements.is_empty() {
         return None;
@@ -502,7 +482,6 @@ pub(crate) fn scope_request_to_account(
     installation_id: &str,
     account_scope: RequestAccountScope,
 ) {
-    let pseudonym = IdentityPseudonym::for_account(installation_id);
     let reset_account_state = !account_scope.can_reuse_account_state();
     let client_metadata_turn_state = metadata_string(request, "x-codex-turn-state");
     let preserve_turn_state = !reset_account_state
@@ -515,12 +494,13 @@ pub(crate) fn scope_request_to_account(
     } else {
         None
     };
-    let turn_metadata = request.turn_metadata.as_deref().and_then(|metadata| {
-        scope_turn_metadata(metadata, installation_id, reset_account_state, &pseudonym)
-    });
+    let turn_metadata = request
+        .turn_metadata
+        .as_deref()
+        .and_then(|metadata| scope_turn_metadata(metadata, installation_id, reset_account_state));
     let client_metadata_turn_metadata =
         metadata_string(request, "x-codex-turn-metadata").and_then(|metadata| {
-            scope_turn_metadata(&metadata, installation_id, reset_account_state, &pseudonym)
+            scope_turn_metadata(&metadata, installation_id, reset_account_state)
         });
 
     if reset_account_state {
@@ -538,7 +518,7 @@ pub(crate) fn scope_request_to_account(
         for (name, value) in &mut request.passthrough_headers {
             if name == "x-codex-turn-metadata"
                 && let Ok(raw) = value.to_str()
-                && let Some(scoped) = scope_turn_metadata(raw, installation_id, false, &pseudonym)
+                && let Some(scoped) = scope_turn_metadata(raw, installation_id, false)
                 && let Ok(scoped) = HeaderValue::from_str(&scoped)
             {
                 *value = scoped;
@@ -554,25 +534,12 @@ pub(crate) fn scope_request_to_account(
             .body()
             .get(*key)
             .and_then(Value::as_str)
-            .and_then(|value| {
-                scope_turn_metadata(value, installation_id, reset_account_state, &pseudonym)
-            });
+            .and_then(|value| scope_turn_metadata(value, installation_id, reset_account_state));
         replace_existing_body_string(request, key, scoped.as_deref());
     }
 
-    // 出站身份伪名（§2）：会话、线程、轮次与窗口身份在头与正文上都换成本账号的伪名。
-    // 伪名只按原值派生，因此头（下面的 request 字段）与正文（下面的 id 键、内嵌 turn
-    // metadata）拿到的是同一个值。必须在账号亲和与本地会话锚点派生之后执行：那些本地
-    // 语义按客户端原值计算，不能被伪名改写。
-    pseudonymize_identity_id(request.client_session_id.as_mut(), &pseudonym);
-    pseudonymize_identity_id(request.client_thread_id.as_mut(), &pseudonym);
-    pseudonymize_identity_id(request.client_request_id.as_mut(), &pseudonym);
-    pseudonymize_identity_id(request.codex_window_id.as_mut(), &pseudonym);
-    pseudonymize_identity_id(request.parent_thread_id.as_mut(), &pseudonym);
-    let body_identity = request.body_mut();
-    pseudonymize_identity_fields(body_identity, &pseudonym);
-    // 原始会话头不再作为业务头透传：出站值只能是上面重建的伪名，否则真名与伪名同时
-    // 出站等于没脱敏。名单与 API 层的 `passthrough_header_name` 保持一致。
+    // 原始会话头不再作为业务头透传：出站值只由 correlation 的账号内映射生成，
+    // 否则真名与映射值同时出站等于没脱敏。名单与 API 层的 `passthrough_header_name` 保持一致。
     for name in SESSION_IDENTITY_HEADER_NAMES {
         request.passthrough_headers.remove(*name);
     }
@@ -588,12 +555,7 @@ pub(crate) fn scope_request_to_account(
                     (
                         key,
                         metadata.get(key).and_then(Value::as_str).and_then(|value| {
-                            scope_turn_metadata(
-                                value,
-                                installation_id,
-                                reset_account_state,
-                                &pseudonym,
-                            )
+                            scope_turn_metadata(value, installation_id, reset_account_state)
                         }),
                     )
                 });
@@ -609,9 +571,6 @@ pub(crate) fn scope_request_to_account(
                 // 扩展只是客户端关联信息，不能加入各层共用的清理名单
                 metadata.remove("parent_response_id");
             }
-            // `client_metadata` 里的扁平会话/线程/轮次键与顶层正文属于同一份身份，
-            // 必须换成同一个伪名，否则头和正文会各说各话。
-            pseudonymize_identity_fields(&mut metadata, &pseudonym);
             // 官方 Core 在 client_metadata 使用带 x-codex 前缀的键，
             // turn metadata 内仍使用 installation_id；两处均取当前账号的安装身份
             metadata.insert(
@@ -682,15 +641,6 @@ pub(crate) fn scope_standalone_body_installation_id(
     changed.then_some(current)
 }
 
-/// 原地把已有的非空身份值替换成伪名；空值不是身份，保持原样。
-fn pseudonymize_identity_id(value: Option<&mut String>, pseudonym: &IdentityPseudonym) {
-    if let Some(value) = value
-        && !value.is_empty()
-    {
-        *value = pseudonym.of(value);
-    }
-}
-
 fn metadata_string(request: &CodexResponsesRequest, key: &str) -> Option<String> {
     request
         .client_metadata()?
@@ -715,7 +665,6 @@ pub(crate) fn scope_turn_metadata(
     raw: &str,
     installation_id: &str,
     cross_account: bool,
-    pseudonym: &IdentityPseudonym,
 ) -> Option<String> {
     let Ok(Value::Object(mut metadata)) = serde_json::from_str::<Value>(raw) else {
         return (!cross_account).then(|| raw.to_owned());
@@ -733,8 +682,6 @@ pub(crate) fn scope_turn_metadata(
     }
     // turn metadata 同时承载于 HTTP header 与 WS client_metadata，两处共用这一份改写，
     // 头与正文里的会话身份因此不会分叉。
-    changed |= pseudonymize_identity_fields(&mut metadata, pseudonym);
-    changed |= pseudonymize_workspaces(&mut metadata, pseudonym);
     if !changed
         && raw.is_ascii()
         && !INSTALLATION_ID_KEYS

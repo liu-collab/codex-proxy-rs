@@ -1,5 +1,7 @@
 //! 验证类型化插件处理器的组合注册、分派与能力声明一致性
 
+mod outbound;
+
 use std::{
     collections::BTreeMap,
     sync::{
@@ -210,20 +212,27 @@ async fn composed_plugin_registers_and_dispatches_multiple_typed_entries() {
 #[tokio::test]
 async fn catalog_and_retry_entries_use_typed_registration_and_stage_validation() {
     use gateway_plugin_sdk::call::{
-        catalog::{ModelAlias, ModelCatalogRegistration},
+        catalog::{AdaptedModel, ModelAlias, ModelCatalogRegistrationV2, ModelPresentation},
         policy::{RetryAction, RetryDecision, RetryDecisionRequest},
     };
     let source = author_manifest(
-        json!({"model_catalog":{},"retry_policy":{"version":2}}),
+        json!({"model_catalog":{"version":2},"retry_policy":{"version":2}}),
         json!([]),
     );
     let manifest = gateway_plugin_sdk::Manifest::from_author_slice(&source).unwrap();
     let contributions = manifest.contributes.clone();
-    let catalog = ModelCatalogRegistration {
-        models: vec![ModelAlias {
+    let catalog = ModelCatalogRegistrationV2 {
+        aliases: vec![ModelAlias {
             id: "public-model".into(),
             provider: "openai".into(),
             model: "upstream-model".into(),
+        }],
+        models: vec![AdaptedModel {
+            id: "adapted-model".into(),
+            adapter_id: "example".into(),
+            features: vec![],
+            max_output_tokens: None,
+            presentation: ModelPresentation::default(),
         }],
     };
     let plugin = PluginBuilder::from_manifest(manifest)
@@ -255,7 +264,7 @@ async fn catalog_and_retry_entries_use_typed_registration_and_stage_validation()
     let (result, payload) = unwrap_result(receive(&mut host).await, 1);
     assert_eq!(result, json!({}));
     assert_eq!(
-        serde_json::from_slice::<ModelCatalogRegistration>(&payload).unwrap(),
+        serde_json::from_slice::<ModelCatalogRegistrationV2>(&payload).unwrap(),
         catalog
     );
     let request = serde_json::to_value(RetryDecisionRequest {
@@ -438,7 +447,6 @@ async fn start_session<H: PluginHandler + 'static>(
                 maximum_callbacks: 4,
                 maximum_buffered_stream_chunks: 16,
                 handshake_timeout: Duration::from_secs(1),
-                maximum_call_timeout: Duration::from_secs(2),
             },
         )
         .await?
@@ -471,6 +479,7 @@ async fn start_session<H: PluginHandler + 'static>(
             message: Message::Ready {
                 protocol_version: PROTOCOL_VERSION,
                 ref incarnation,
+                ..
             },
             ref payload,
         } if incarnation == "test-incarnation" && payload.is_empty()
@@ -517,10 +526,25 @@ async fn send_call(
 }
 
 async fn receive(host: &mut HostPeer) -> Frame {
-    tokio::time::timeout(Duration::from_secs(1), read_frame(&mut host.reader))
-        .await
-        .expect("plugin response timed out")
-        .expect("plugin response frame must be valid")
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let frame = read_frame(&mut host.reader).await?;
+            match frame.message {
+                Message::Suspend { .. } | Message::CallbackConsumed { .. } => {}
+                Message::Resume { id, epoch } => {
+                    write_frame(
+                        &mut host.writer,
+                        &Frame::control(Message::Resumed { id, epoch }),
+                    )
+                    .await?;
+                }
+                _ => return Ok::<_, gateway_plugin_sdk::FrameError>(frame),
+            }
+        }
+    })
+    .await
+    .expect("plugin response timed out")
+    .expect("plugin response frame must be valid")
 }
 
 fn unwrap_result(frame: Frame, expected_id: u64) -> (Value, Vec<u8>) {

@@ -239,7 +239,8 @@ fn request_dump_rotates_small_files_when_the_time_window_elapses() {
     if env::var_os(CHILD_PROCESS_ENV).is_some() {
         let directory = PathBuf::from(env::var_os(LOG_DIRECTORY_ENV).unwrap());
         let mut config = logging_config(directory.clone(), true);
-        config.logging.request_dump_retention_days = 1.0 / 86_400.0;
+        let retention = std::time::Duration::from_millis(100);
+        config.logging.request_dump_retention_days = retention.as_secs_f64() / 86_400.0;
         with_logging(config, || {
             tracing::info!(target: REQUEST_DUMP_LOG_TARGET, "before retention window");
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
@@ -254,7 +255,7 @@ fn request_dump_rotates_small_files_when_the_time_window_elapses() {
                 );
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
-            std::thread::sleep(std::time::Duration::from_millis(1100));
+            std::thread::sleep(retention + std::time::Duration::from_millis(10));
             tracing::info!(target: REQUEST_DUMP_LOG_TARGET, "after retention window");
         });
         return;

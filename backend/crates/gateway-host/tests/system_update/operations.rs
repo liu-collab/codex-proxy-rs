@@ -38,6 +38,113 @@ async fn restart_should_request_process_restart_inside_docker() {
         .expect("shutdown requested");
 }
 
+#[tokio::test(start_paused = true)]
+async fn accepted_restart_excludes_system_operations_until_service_release() {
+    let fixture = Fixture::new();
+    let mut config = fixture.config("http://127.0.0.1:1/repos");
+    config.self_restart_enabled = true;
+    config.deployment_mode = "docker".to_owned();
+    let shutdown = CancellationToken::new();
+    let service = ProcessSystemOperations::new(shutdown.clone(), config.clone());
+    service
+        .restart(Arc::new(AllowingUpdatePreflight))
+        .await
+        .expect("restart accepted");
+
+    assert!(!shutdown.is_cancelled(), "response delivery still has time");
+    assert_system_operations_rejected(&service, "服务正在重启").await;
+    assert!(fixture.lock().exists());
+    let competing = ProcessSystemOperations::new(CancellationToken::new(), config);
+    assert_eq!(
+        competing
+            .restart(Arc::new(AllowingUpdatePreflight))
+            .await
+            .expect_err("another service cannot replace files during restart")
+            .kind(),
+        SystemOperationErrorKind::Conflict
+    );
+
+    shutdown.cancelled().await;
+    assert_system_operations_rejected(&service, "服务正在重启").await;
+    service
+        .update_status()
+        .await
+        .expect("status remains readable");
+    assert!(fixture.lock().exists(), "draining retains the file lock");
+
+    drop(service);
+    assert!(
+        !fixture.lock().exists(),
+        "service release clears the file lock"
+    );
+}
+
+#[tokio::test]
+async fn shutdown_rejects_new_system_operations() {
+    let fixture = Fixture::new();
+    let mut config = fixture.config("http://127.0.0.1:1/repos");
+    config.self_restart_enabled = true;
+    config.deployment_mode = "docker".to_owned();
+    let shutdown = CancellationToken::new();
+    let service = ProcessSystemOperations::new(shutdown.clone(), config);
+    shutdown.cancel();
+
+    assert_system_operations_rejected(&service, "服务正在关闭").await;
+    assert!(!fixture.lock().exists());
+}
+
+#[tokio::test]
+async fn shutdown_during_restart_preflight_does_not_schedule_replacement() {
+    struct CancellingPreflight(CancellationToken);
+    #[async_trait::async_trait]
+    impl gateway_admin::ports::system::SystemRestartPreflight for CancellingPreflight {
+        async fn prepare(
+            &self,
+            _: Option<SystemUpdateCandidate>,
+        ) -> Result<(), SystemOperationError> {
+            self.0.cancel();
+            Ok(())
+        }
+    }
+
+    let fixture = Fixture::new();
+    let mut config = fixture.config("http://127.0.0.1:1/repos");
+    config.self_restart_enabled = true;
+    config.deployment_mode = "docker".to_owned();
+    let shutdown = CancellationToken::new();
+    let service = ProcessSystemOperations::new(shutdown.clone(), config);
+    let error = service
+        .restart(Arc::new(CancellingPreflight(shutdown)))
+        .await
+        .expect_err("shutdown won during preflight");
+
+    assert_eq!(error.kind(), SystemOperationErrorKind::Conflict);
+    assert_eq!(error.message(), "服务正在关闭");
+    assert!(!fixture.lock().exists());
+}
+
+async fn assert_system_operations_rejected(service: &ProcessSystemOperations, reason: &str) {
+    for result in [
+        service.restart(Arc::new(AllowingUpdatePreflight)).await,
+        service.rollback(Arc::new(AllowingUpdatePreflight)).await,
+        service
+            .perform_test_update(Some(TARGET_VERSION.to_owned()))
+            .await,
+    ] {
+        let error = result.expect_err("system operation must not be accepted");
+        assert_eq!(error.kind(), SystemOperationErrorKind::Conflict);
+        assert_eq!(error.message(), reason);
+    }
+    assert_eq!(
+        service
+            .restart_candidate()
+            .await
+            .expect_err("no restart plan")
+            .message(),
+        reason
+    );
+}
+
 #[tokio::test]
 async fn restart_should_spawn_replacement_before_shutdown_outside_docker() {
     let fixture = Fixture::new();

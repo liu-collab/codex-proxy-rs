@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import type { PrivacyRule, PrivacySample, PrivacyStep } from '@/api/modules/settings/privacy'
+
 import { ZButton, ZDialog, ZFormItem, ZInput, ZTextarea } from '@codex-proxy/ui'
 import { Play } from '@lucide/vue'
 import { cloneDeep } from 'es-toolkit'
 import { computed, ref, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { usePrivacyPreview } from '../../composables/usePrivacyPreview'
 import { exampleRequest, newRule, newStep } from './presets'
 import StepFields from './StepFields.vue'
 import StepList from './StepList.vue'
 
 const props = defineProps<{ rule: PrivacyRule | null, maxSteps: number, isNew: boolean, disabled: boolean }>()
+
 const emit = defineEmits<{ apply: [rule: PrivacyRule] }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const open = defineModel<boolean>({ required: true })
 const draft = ref<PrivacyRule>(newRule())
 const selectedIndex = shallowRef(0)
@@ -20,13 +26,18 @@ const step = computed({
 })
 const sample = shallowRef('')
 const fixedValues = ref<string[]>(['""'])
-const fixedValue = computed({ get: () => fixedValues.value[selectedIndex.value] ?? '""', set: (value: string) => {
-  fixedValues.value[selectedIndex.value] = value
-} })
+const fixedValue = computed({
+  get: () => fixedValues.value[selectedIndex.value] ?? '""',
+  set: (value: string) => {
+    fixedValues.value[selectedIndex.value] = value
+  },
+})
 const localError = shallowRef('')
 const preview = usePrivacyPreview()
 const { loading, result } = preview
-const processed = computed(() => result.value ? JSON.stringify({ body: result.value.body, headers: result.value.headers, turnMetadata: result.value.turnMetadata }, null, 2) : '')
+const processed = computed(() => result.value
+  ? JSON.stringify({ body: result.value.body, headers: result.value.headers, turnMetadata: result.value.turnMetadata }, null, 2)
+  : '')
 const outcome = computed(() => result.value?.outcomes[0])
 
 watch(open, (value) => {
@@ -73,17 +84,17 @@ function reorderSteps(steps: PrivacyStep[]) {
 function preparedRule() {
   const rule = cloneDeep(draft.value)
   if (!rule.name.trim())
-    throw new Error('请填写规则名称')
+    throw new Error(t('settings.privacy.rules.fillInRuleName'))
   if (rule.steps.length > props.maxSteps)
-    throw new Error('所有规则合计最多 32 个处理步骤')
+    throw new Error(t('settings.privacy.rules.stepLimit'))
   rule.steps.forEach((step, index) => {
     if (!step.selector.trim())
-      throw new Error(`请填写步骤 ${index + 1} 的字段路径`)
+      throw new Error(t('settings.privacy.rules.enterFieldPathForStep', { value: index + 1 }))
     if (step.action === 'set_value') {
       try {
         step.value = JSON.parse(fixedValues.value[index] ?? '""')
       }
-      catch { throw new Error(`步骤 ${index + 1} 的固定值应为 JSON，例如 "别名"、false 或 123`) }
+      catch { throw new Error(t('settings.privacy.rules.fixedValueForStepMustBeJson', { value: index + 1 })) }
     }
   })
   return rule
@@ -92,59 +103,77 @@ async function test() {
   try {
     const rule = preparedRule()
     const value: PrivacySample = JSON.parse(sample.value)
-    await preview.run({ enabled: true, onError: 'skip_rule', rules: [{ ...rule, enabled: true }] }, value)
+    await preview.run({
+      enabled: true,
+      onError: 'skip_rule',
+      rules: [
+        { ...rule, enabled: true },
+      ],
+    }, value)
   }
-  catch (cause) { localError.value = cause instanceof Error ? cause.message : '样本格式无效' }
+  catch (cause) {
+    localError.value = cause instanceof Error
+      ? cause.message
+      : t('settings.privacy.rules.invalidSampleFormat')
+  }
 }
 async function apply() {
   if (props.disabled)
     return
   try {
     const rule = preparedRule()
-    const validated = await preview.run({ enabled: false, onError: 'skip_rule', rules: [rule] }, { body: {}, headers: {}, turnMetadata: null })
+    const validated = await preview.run({
+      enabled: false,
+      onError: 'skip_rule',
+      rules: [rule],
+    }, { body: {}, headers: {}, turnMetadata: null })
     if (!validated || !open.value)
       return
     emit('apply', rule)
     open.value = false
   }
-  catch (cause) { localError.value = cause instanceof Error ? cause.message : '规则格式无效' }
+  catch (cause) {
+    localError.value = cause instanceof Error
+      ? cause.message
+      : t('settings.privacy.rules.ruleFormatIsInvalid')
+  }
 }
 </script>
 
 <template>
-  <ZDialog v-model="open" :title="isNew ? '添加规则' : '编辑规则'" description="配置字段处理方式，预览隐私信息处理效果" width="64rem">
+  <ZDialog v-model="open" :title="isNew ? t('settings.privacy.addRule') : t('settings.privacy.rules.editRule')" :description="t('settings.privacy.rules.description')" width="64rem">
     <div class="grid gap-4">
-      <ZFormItem label="规则名称" required>
-        <ZInput v-model="draft.name" placeholder="例如：统一工作区信息" aria-label="规则名称" maxlength="64" />
+      <ZFormItem :label="t('settings.privacy.rules.ruleName')" required>
+        <ZInput v-model="draft.name" :placeholder="t('settings.privacy.rules.namePlaceholder')" :aria-label="t('settings.privacy.rules.ruleName')" maxlength="64" />
       </ZFormItem>
       <div class="grid min-w-0 gap-5 md:h-128 md:grid-cols-[18rem_minmax(0,1fr)]">
         <StepList v-model="selectedIndex" :steps="draft.steps" :fixed-values="fixedValues" :can-add="draft.steps.length < maxSteps" @add="addStep" @remove="removeStep" @reorder="reorderSteps" />
         <!-- 表单按内容排布，预览文本域填充余下高度，切换步骤不会撑动列表或弹窗 -->
         <div class="grid h-224 min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-5 sm:h-128 md:h-auto">
-          <section class="min-w-0" aria-label="当前步骤设置">
+          <section class="min-w-0" :aria-label="t('settings.privacy.rules.currentStepSettings')">
             <StepFields v-model="step" v-model:fixed-value="fixedValue" />
           </section>
-          <section class="flex min-h-0 flex-col gap-2.5" aria-label="测试预览">
+          <section class="flex min-h-0 flex-col gap-2.5" :aria-label="t('settings.privacy.rules.testPreview')">
             <div class="flex shrink-0 items-center justify-between gap-3">
               <h3 class="m-0 text-cp-sm font-emphasis">
-                整条规则预览
+                {{ t('settings.privacy.rules.previewOfEntireRule') }}
               </h3>
               <div class="flex items-center gap-2">
-                <span v-if="outcome" class="text-cp-xs text-cp-text-quaternary">{{ outcome.status === 'skipped' ? '规则已跳过' : `命中 ${outcome.matches} 处` }}</span>
-                <ZButton size="small" variant="text" :loading="loading" aria-label="测试本条规则" @click="test">
+                <span v-if="outcome" class="text-cp-xs text-cp-text-quaternary">{{ outcome.status === 'skipped' ? t('settings.privacy.rules.ruleSkipped') : t('settings.privacy.rules.matches', { matches: outcome.matches }) }}</span>
+                <ZButton size="small" variant="text" :loading="loading" :aria-label="t('settings.privacy.rules.testThisRule')" @click="test">
                   <template #icon>
                     <Play class="size-3.5" />
-                  </template>测试
+                  </template>{{ t('settings.privacy.rules.test') }}
                 </ZButton>
               </div>
             </div>
             <div class="grid min-h-0 min-w-0 flex-1 grid-rows-2 gap-3 sm:grid-cols-2 sm:grid-rows-1">
-              <ZFormItem label="测试样本" class="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] [&>div:last-child]:min-h-0">
-                <ZTextarea v-model="sample" size="small" resize="none" placeholder="粘贴包含 body、headers、turnMetadata 的请求样本" maxlength="262144" aria-label="测试样本" class="h-full font-mono [&_textarea]:block [&_textarea]:h-full" spellcheck="false" />
+              <ZFormItem :label="t('settings.privacy.rules.testSample')" class="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] [&>div:last-child]:min-h-0">
+                <ZTextarea v-model="sample" size="small" resize="none" :placeholder="t('settings.privacy.rules.samplePlaceholder')" maxlength="262144" :aria-label="t('settings.privacy.rules.testSample')" class="h-full font-mono [&_textarea]:block [&_textarea]:h-full" spellcheck="false" />
               </ZFormItem>
               <div class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
-                <span class="flex min-h-4 items-center text-cp leading-none font-medium text-cp-text-secondary">处理后</span>
-                <pre class="cp-scrollbar m-0 min-h-0 overflow-auto rounded-cp bg-cp-fill-quaternary p-3 font-mono text-cp-xs break-all whitespace-pre-wrap" data-preview-output>{{ processed || '点击测试查看结果' }}</pre>
+                <span class="flex min-h-4 items-center text-cp leading-none font-medium text-cp-text-secondary">{{ t('settings.privacy.rules.afterProcessing') }}</span>
+                <pre class="cp-scrollbar m-0 min-h-0 overflow-auto rounded-cp bg-cp-fill-quaternary p-3 font-mono text-cp-xs break-all whitespace-pre-wrap" data-preview-output>{{ processed || t('settings.privacy.testPlaceholder') }}</pre>
               </div>
             </div>
             <p v-if="localError || outcome?.reason" role="alert" class="m-0 shrink-0 text-cp-sm text-cp-error-text">
@@ -156,10 +185,10 @@ async function apply() {
     </div>
     <template #footer>
       <ZButton @click="open = false">
-        取消
+        {{ t('common.actions.cancel') }}
       </ZButton>
       <ZButton type="primary" :loading="loading" :disabled="disabled" @click="apply">
-        应用到草稿
+        {{ t('settings.privacy.rules.applyToDraft') }}
       </ZButton>
     </template>
   </ZDialog>

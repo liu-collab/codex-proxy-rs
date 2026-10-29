@@ -260,6 +260,7 @@ impl ClientProfileSelection {
                 verified_at: None,
             },
         };
+        let deployment = state.snapshot();
         let mut profile = CodexWireProfile {
             client_kind: self.client,
             originator: self
@@ -283,7 +284,8 @@ impl ClientProfileSelection {
                 .clone()
                 .unwrap_or_else(|| self.platform.default_terminal().to_owned()),
             exact_user_agent: None,
-            residency: state.snapshot().residency,
+            residency: deployment.residency,
+            account_routing_override: deployment.account_routing_override,
             verified_at: release.verified_at.unwrap_or(DateTime::UNIX_EPOCH),
         };
         if let Some(entry) = self.cli_entry {

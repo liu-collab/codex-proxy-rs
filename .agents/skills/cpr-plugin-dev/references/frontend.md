@@ -1,6 +1,6 @@
 # 插件页面
 
-仅在创建或修改插件页面时读取，先执行[前端流程](../../cpr-dev-guide/references/frontend.md)，再核对以下插件特有合同
+创建、修改或审查插件页面时完整读取，先完成[插件入口](../SKILL.md#先读职责边界)的边界判断并执行[前端流程](../../cpr-dev-guide/references/frontend.md)，再核对以下插件特有合同
 
 - 优先参考独立示例仓库的 `examples/workbench/frontend/src/api/`：业务路由放在 `modules/`，`request.ts` 封装公开宿主桥；按需使用 `@codex-proxy/ui` 包出口，不跨仓导入宿主或 UI 的内部源码
 - Vue 页面保留 SFC，逻辑、脚本和配置使用 TypeScript；只实现业务内容，标题和副标题由 `ManagementPage` 交给宿主显示

@@ -86,6 +86,14 @@ impl BindingScope {
         !self.providers.is_empty()
     }
 
+    /// 静态目录只能继承账号范围，不能丢失请求级 Key 或组条件
+    pub(crate) fn matches_catalog(&self, provider: &ProviderKind, model: &str) -> bool {
+        self.client_keys.is_empty()
+            && self.account_groups.is_empty()
+            && self.matches_provider(Some(provider))
+            && self.matches_model(Some(model))
+    }
+
     pub(crate) fn matches_observation(&self, observation: &RequestObservation) -> bool {
         self.matches_identity(observation.client_key_id(), observation.account_group_ids())
             && self.matches_provider(observation.provider())

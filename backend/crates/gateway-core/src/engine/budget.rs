@@ -44,9 +44,9 @@ pub struct ClientBudgetCharge {
 pub struct ClientBudgetError(#[source] pub Option<crate::error::ErrorSource>);
 
 pub trait ClientBudgetPort: Send + Sync {
-    /// 原子检查当前限额与已用金额，不创建预扣费或待结算记录
+    /// 检查当前限额、已用金额与已接管的费用，不预占未来费用
     fn admit(&self, key_id: ClientApiKeyId) -> BoxFuture<'_, Result<(), GatewayError>>;
 
-    /// 按网关请求 ID 幂等累计已取得费用；写入失败由 Store 重试
+    /// 按网关请求 ID 幂等接管已取得费用；运行时入队后返回，由 Store 后台落库和重试
     fn settle(&self, charge: ClientBudgetCharge) -> BoxFuture<'_, Result<(), ClientBudgetError>>;
 }

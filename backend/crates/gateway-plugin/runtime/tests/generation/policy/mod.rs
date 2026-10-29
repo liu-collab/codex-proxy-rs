@@ -5,6 +5,7 @@ mod facts;
 mod http;
 mod lifecycle;
 mod mounts;
+mod outbound;
 mod retry;
 mod scheduling;
 mod service;
@@ -368,54 +369,85 @@ async fn retry_policy_preserves_decisions_and_leaves_replay_safety_to_core() {
 }
 
 #[tokio::test]
-async fn retry_policy_timeout_exhausts_the_chain_budget_and_delegates() {
+async fn retry_policy_combines_instance_budgets_with_one_request_bounded_chain() {
     use gateway_core::{
         engine::policy::{RetryDecision, RetryFacts},
         error::ProviderErrorKind,
         upstream::UpstreamSendState,
     };
-    let records = tempfile::tempdir().unwrap();
-    let second_marker = records.path().join("second.jsonl");
-    let (_cache, runtime) = setup(
-        vec![
+    for (
+        first_budget,
+        first_delay,
+        second_budget,
+        second_delay,
+        request_budget,
+        expected,
+        reached_second,
+    ) in [
+        (100, 500, 1000, 100, 2000, RetryDecision::Stop, true),
+        (1000, 100, 50, 300, 2000, RetryDecision::Delegate, true),
+        (1000, 300, 1000, 800, 2000, RetryDecision::Delegate, true),
+        (1000, 500, 1000, 0, 100, RetryDecision::Delegate, false),
+        (3000, 2100, 3000, 0, 5000, RetryDecision::Stop, true),
+    ] {
+        let records = tempfile::tempdir().unwrap();
+        let second_marker = records.path().join("second.jsonl");
+        let (_cache, runtime) = setup(vec![
             InstanceFixture {
                 id: "retry-delayed",
-                configuration: serde_json::json!({"retry_delay_ms":500,"retry_decision":{"decision":"stop"}}),
-
-                bindings: vec![binding("test.example.retryPolicy", "retry", 0, PluginFailurePolicy::Delegate)],
+                configuration: serde_json::json!({
+                    "call_budgets_ms":{"retry":first_budget},
+                    "retry_delay_ms":first_delay,
+                    "retry_decision":{"decision":"delegate"},
+                }),
+                bindings: vec![binding(
+                    "test.example.retryPolicy",
+                    "retry",
+                    0,
+                    PluginFailurePolicy::Delegate,
+                )],
             },
             InstanceFixture {
                 id: "retry-next",
-                configuration: serde_json::json!({"retry_marker":second_marker,"retry_decision":{"decision":"stop"}}),
-
-                bindings: vec![binding("test.example.retryPolicy", "retry", 1, PluginFailurePolicy::Delegate)],
+                configuration: serde_json::json!({
+                    "call_budgets_ms":{"retry":second_budget},
+                    "retry_delay_ms":second_delay,
+                    "retry_marker":second_marker,
+                    "retry_decision":{"decision":"stop"},
+                }),
+                bindings: vec![binding(
+                    "test.example.retryPolicy",
+                    "retry",
+                    1,
+                    PluginFailurePolicy::Delegate,
+                )],
             },
-        ],
-
-    ).await;
-    let context = policy_context(&runtime, prepare(&runtime).await, "req_retry_timeout");
-    let decision = tokio::time::timeout(
-        Duration::from_secs(2),
-        context.retry_decision(RetryFacts {
-            attempt_index: NonZeroU32::MIN,
-            provider: ProviderKind::new("openai").unwrap(),
-            model: Some("gpt-test".into()),
-            error_kind: ProviderErrorKind::RateLimited,
-            upstream_status: Some(429),
-            send_state: UpstreamSendState::NotSent,
-            remaining_routing_attempts: 1,
-            remaining_deadline: Duration::from_millis(100),
-            retry_allowed: true,
-        }),
-    )
-    .await
-    .expect("the shared deadline bounds the whole retry chain");
-    assert_eq!(decision, RetryDecision::Delegate);
-    assert!(
-        !second_marker.exists(),
-        "later policies cannot restart an exhausted budget"
-    );
-    runtime.shutdown().await;
+        ])
+        .await;
+        let context = policy_context(&runtime, prepare(&runtime).await, "req_retry_timeout");
+        let decision = tokio::time::timeout(
+            Duration::from_secs(6),
+            context.retry_decision(RetryFacts {
+                attempt_index: NonZeroU32::MIN,
+                provider: ProviderKind::new("openai").unwrap(),
+                model: Some("gpt-test".into()),
+                error_kind: ProviderErrorKind::RateLimited,
+                upstream_status: Some(429),
+                send_state: UpstreamSendState::NotSent,
+                remaining_routing_attempts: 1,
+                remaining_deadline: Duration::from_millis(request_budget),
+                retry_allowed: true,
+            }),
+        )
+        .await
+        .expect("重试链不能重置总预算");
+        assert_eq!(
+            decision, expected,
+            "{first_budget}/{second_budget}/{request_budget}"
+        );
+        assert_eq!(second_marker.exists(), reached_second);
+        runtime.shutdown().await;
+    }
 }
 
 async fn marker_lines(path: &std::path::Path, count: usize) -> Vec<serde_json::Value> {
@@ -1308,7 +1340,7 @@ async fn real_request_plugins_rewrite_settings_in_onion_order() {
         InstanceFixture { id: "settings-first", configuration: serde_json::json!({"mode":"settings","expected_settings":baseline_json,"settings":first}), bindings: vec![binding(MIDDLEWARE_CONTRIBUTION,"request",0,PluginFailurePolicy::Reject)] },
         InstanceFixture { id: "settings-second", configuration: serde_json::json!({"mode":"settings","expected_settings":first,"settings":last}), bindings: vec![binding(MIDDLEWARE_CONTRIBUTION,"request",1,PluginFailurePolicy::Reject)] },
         InstanceFixture { id: "settings-pass", configuration: serde_json::json!({"mode":"settings","expected_settings":last}), bindings: vec![binding(MIDDLEWARE_CONTRIBUTION,"request",2,PluginFailurePolicy::Reject)] },
-    ], package).await;
+    ], package.clone()).await;
     let generation = prepare(&runtime).await;
     let plan = runtime
         .execution_registry()
@@ -1366,6 +1398,43 @@ async fn real_request_plugins_rewrite_settings_in_onion_order() {
         assert!(body.next_frame().await.unwrap().is_none());
         body.close().await;
     }
+    drop(plan);
+    drop(generation);
+    super::wait_until_empty(cache.path()).await;
+
+    // 根对象 null 也是显式替换，必须由设置合同拒绝，不能悄悄沿用原配置
+    let (cache, runtime) = setup_package(vec![InstanceFixture {
+        id: "settings-null",
+        configuration: serde_json::json!({"mode":"settings", "expected_settings":baseline_json, "settings":null}),
+        bindings: vec![binding(MIDDLEWARE_CONTRIBUTION, "request", 0, PluginFailurePolicy::Reject)],
+    }], package).await;
+    let generation = prepare(&runtime).await;
+    let plan = runtime
+        .execution_registry()
+        .middleware(&generation)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    assert!(
+        plan.handle(
+            middleware_context(ClientTransport::HttpJson),
+            MiddlewareRequest::new(
+                "openai",
+                middleware_headers(),
+                Bytes::from_static(br#"{"input":"hello"}"#)
+            )
+            .with_settings(configuration),
+            (Downstream {
+                calls: Arc::clone(&calls),
+                closes: Arc::default(),
+                reads: Arc::default(),
+                error: false
+            })
+            .into_next(),
+        )
+        .await
+        .is_err()
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
     drop(plan);
     drop(generation);
     super::wait_until_empty(cache.path()).await;
@@ -1593,7 +1662,7 @@ impl CapabilitiesNext {
 
 #[tokio::test]
 async fn sdk_capability_declarations_require_request_stage() {
-    for (version, attempt) in [(5, false), (5, true)] {
+    for (version, attempt) in [(6, false), (6, true)] {
         let stage = if attempt {
             Stage::Attempt
         } else {

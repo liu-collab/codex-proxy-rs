@@ -1,10 +1,10 @@
 import type { Ref } from 'vue'
 import type { Account, AccountQuotaForecastResponse } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { onScopeDispose, shallowRef, watch } from 'vue'
 import { getAccountQuotaForecast, refreshAccountQuota } from '@/api'
 import { useRequestState } from '@/composables/useRequestState'
-import { errorMessage } from '@/utils/operation'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 
 export function useAccountQuotaForecast(
   accountId: Ref<string>,
@@ -13,7 +13,7 @@ export function useAccountQuotaForecast(
 ) {
   const report = shallowRef<AccountQuotaForecastResponse | null>(null)
   const request = useRequestState()
-  const { loading, error } = request
+  const { loading } = request
   const refreshing = shallowRef(false)
   let disposed = false
 
@@ -43,21 +43,20 @@ export function useAccountQuotaForecast(
     const targetAccountId = accountId.value
     request.invalidate()
     refreshing.value = true
-    error.value = ''
     try {
       // 刷新属于现有额度动作；预测查询本身始终只读。
       const result = await refreshAccountQuota({ accountId: targetAccountId })
       if (disposed)
         return
       onAccountUpdated(result.account)
-      if (accountId.value === targetAccountId && await load())
-        ZNotification.success({ message: '额度已刷新' })
-    }
-    catch (cause) {
-      if (!disposed && accountId.value === targetAccountId) {
-        if (!report.value)
-          error.value = errorMessage(cause)
+      if (accountId.value === targetAccountId && await load()) {
+        ZNotification.success({
+          message: t('accounts.actions.quotaRefreshed'),
+        })
       }
+    }
+    catch {
+      // 请求层统一提示失败，保留上次可用的预测
     }
     finally {
       refreshing.value = false
@@ -69,7 +68,6 @@ export function useAccountQuotaForecast(
     if (!isOpen)
       return
     report.value = null
-    error.value = ''
     void load()
   }, { immediate: true })
 
@@ -77,5 +75,10 @@ export function useAccountQuotaForecast(
     disposed = true
   })
 
-  return { report, loading, refreshing, error, load, refresh }
+  return {
+    report,
+    loading,
+    refreshing,
+    refresh,
+  }
 }

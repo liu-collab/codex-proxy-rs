@@ -1,7 +1,6 @@
 import type { Ref } from 'vue'
 import type { Account, AccountImportTask } from '@/api'
 import type { RequestOptions } from '@/api/request'
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, ref, shallowReactive, watch } from 'vue'
 import {
   batchUpdateAccounts,
@@ -15,6 +14,8 @@ import {
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useDownload } from '@/composables/useDownload'
 import { useIdSet } from '@/composables/useIdSet'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, withMinimumDuration } from '@/utils/operation'
 import { isSupportedProvider } from '@/utils/providers'
 
@@ -64,9 +65,9 @@ export function useAccountMutations(options: {
     for (const id of options.selectedIds.value) {
       const account = selectedAccountsById.get(id)
       if (!account)
-        return '所选账号数据已失效，请重新选择'
+        return t('accounts.actions.staleSelection')
       if (!isSupportedProvider(account.provider))
-        return '所选账号包含不支持导出的平台'
+        return t('accounts.actions.exportUnsupported')
     }
     return ''
   })
@@ -104,7 +105,9 @@ export function useAccountMutations(options: {
         options.selectedIds.value = remaining
         showSingleDeleteModal.value = false
         await loadAccounts()
-        ZNotification.success({ message: '账号已删除' })
+        ZNotification.success({
+          message: t('accounts.actions.deleted'),
+        })
       },
     )
   }
@@ -128,15 +131,22 @@ export function useAccountMutations(options: {
         }
         showDeleteModal.value = false
         await loadAccounts()
-        ZNotification.success({ message: `已删除 ${deletedCount} 个账号` })
+        ZNotification.success({
+          message: t('accounts.actions.deletedAccountDeletedAccounts', { count: deletedCount }),
+        })
       },
       {
         errorText: false,
         onError: (error) => {
           void loadAccounts().catch(() => undefined)
-          ZNotification.error({ message: deletedCount > 0
-            ? `已删除 ${deletedCount} 个账号，其余未删除：${errorMessage(error, '操作失败')}`
-            : errorMessage(error, '批量删除失败') })
+          ZNotification.error({
+            message: deletedCount > 0
+              ? t('accounts.actions.partialDeletion', {
+                  count: deletedCount,
+                  value: errorMessage(error, t('common.errors.operation')),
+                })
+              : errorMessage(error, t('accounts.actions.batchDeletionFailed')),
+          })
         },
       },
     )
@@ -147,7 +157,9 @@ export function useAccountMutations(options: {
       return
     const selected = [...options.selectedIds.value]
     if (selected.length === 0) {
-      ZNotification.warning({ message: '请选择要导出的账号' })
+      ZNotification.warning({
+        message: t('accounts.actions.exportSelectionRequired'),
+      })
       return
     }
     if (exportDisabledReason.value) {
@@ -163,9 +175,13 @@ export function useAccountMutations(options: {
         })
         const fileName = payload.fileName
         await downloadJson(payload, fileName)
-        ZNotification.success({ message: `已导出 ${selected.length} 个账号` })
+        ZNotification.success({
+          message: t('accounts.actions.exported', { count: selected.length }),
+        })
       },
-      { errorText: '导出失败' },
+      {
+        errorText: t('accounts.actions.exportFailed'),
+      },
     )
   }
 
@@ -176,7 +192,9 @@ export function useAccountMutations(options: {
         const plan = account.planTypeDisplay.trim().replace(/[^\p{L}\p{N}_-]/gu, '_') || 'unknown-plan'
         const name = account.name.trim().replace(/[^\p{L}\p{N}_-]/gu, '_') || 'account'
         await downloadJson(result.catalog, `cpr-model-catalog-${plan}-${name}.json`)
-        ZNotification.success({ message: `已下载模型目录，共 ${result.modelCount} 个模型` })
+        ZNotification.success({
+          message: t('accounts.actions.modelCatalogDownloadedModels', { count: result.modelCount }),
+        })
       }
       catch {}
     })
@@ -192,14 +210,16 @@ export function useAccountMutations(options: {
         )
         await loadAccounts()
         if (result.result === 'skipped') {
-          ZNotification.warning({ message: result.error || 'Token 正在刷新中' })
+          ZNotification.warning({ message: result.error || t('accounts.actions.tokenIsBeingRefreshed') })
           return
         }
         if (result.result === 'failed') {
-          ZNotification.error({ message: result.error || '刷新失败' })
+          ZNotification.error({ message: result.error || t('accounts.actions.refreshFailed') })
           return
         }
-        ZNotification.success({ message: 'Token 已刷新' })
+        ZNotification.success({
+          message: t('accounts.actions.tokenRefreshed'),
+        })
       }
       catch {}
     })
@@ -208,9 +228,16 @@ export function useAccountMutations(options: {
   async function handleToggleScheduling(account: Account) {
     await togglingSchedulingAccounts.run(account.id, async () => {
       try {
-        await batchUpdateAccounts({ accountIds: [account.id], enabled: !account.enabled })
+        await batchUpdateAccounts({
+          accountIds: [account.id],
+          enabled: !account.enabled,
+        })
         await loadAccounts()
-        ZNotification.success({ message: account.enabled ? '调度已停用' : '调度已启用' })
+        ZNotification.success({
+          message: account.enabled
+            ? t('accounts.actions.schedulingIsDisabled')
+            : t('accounts.actions.schedulingIsEnabled'),
+        })
       }
       catch {}
     })
@@ -226,7 +253,9 @@ export function useAccountMutations(options: {
           selectedIds.delete(accountId)
           options.selectedIds.value = selectedIds
         }
-        ZNotification.success({ message: '额度已刷新' })
+        ZNotification.success({
+          message: t('accounts.actions.quotaRefreshed'),
+        })
       }
       catch {}
     })
@@ -240,7 +269,12 @@ export function useAccountMutations(options: {
       await options.replaceAccount(result.account)
     }
     catch (error: unknown) {
-      ZNotification.warning({ message: `额度已重置，但最新额度加载失败：${errorMessage(error, '请手动刷新额度')}`, ...({ duration: 5000 }) })
+      ZNotification.warning({
+        message: t('accounts.actions.resetRefreshFailed', {
+          value: errorMessage(error, t('accounts.actions.refreshQuotaManually')),
+        }),
+        ...({ duration: 5000 }),
+      })
     }
   }
 
@@ -254,7 +288,9 @@ export function useAccountMutations(options: {
           selectedIds.delete(accountId)
           options.selectedIds.value = selectedIds
         }
-        ZNotification.success({ message: '账号状态已恢复' })
+        ZNotification.success({
+          message: t('accounts.actions.statusRestored'),
+        })
       }
       catch {}
     })
@@ -265,7 +301,7 @@ export function useAccountMutations(options: {
     for (const id of ids) {
       const account = selectedAccountsById.get(id)
       if (!account)
-        throw new Error(`账号 ${id} 的页面数据已失效，请重新选择`)
+        throw new Error(t('accounts.actions.staleAccount', { id }))
       accounts.push(account)
     }
     return accounts
@@ -281,7 +317,7 @@ export function useAccountMutations(options: {
     }
     const result = await deleteAccounts(payload, options)
     if (!result)
-      throw new Error(`不支持的 Provider：${account.provider}`)
+      throw new Error(t('accounts.actions.unsupportedProvider', { provider: account.provider }))
   }
 
   function accountDeletionGroups(accounts: Account[]) {

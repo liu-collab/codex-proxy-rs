@@ -44,6 +44,8 @@ use crate::{
 
 const MAXIMUM_BODY_BYTES: usize = 1024 * 1024;
 const MAXIMUM_MODEL_BODY_BYTES: usize = 8 * 1024 * 1024;
+// 传输归属由宿主写入，不能用插件可覆盖的安全响应头识别管理错误
+const PLUGIN_RESPONSE_HEADER: &str = "x-cpr-plugin-response";
 // HTML/SVG 即使被直接导航打开也不能获得管理端 origin；执行入口由隔离 iframe 的消息桥承载
 const RESOURCE_CSP: &str = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline' blob:; style-src 'unsafe-inline' blob:; img-src data: blob:; font-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'";
 
@@ -124,17 +126,17 @@ async fn model_responses(
         match decode_request_with_body(&body, &headers, MAXIMUM_MODEL_BODY_BYTES) {
             Ok(decoded) => decoded,
             Err(error) => {
-                return Ok(protocol_error_response(
+                return Ok(plugin_response(protocol_error_response(
                     StatusCode::BAD_REQUEST,
                     error.protocol_body(),
-                ));
+                )));
             }
         };
     let service = state.openai().clone();
     let execution = service.execution();
     let prepared = match execution.prepare_plugin_execution(&client_key_id).await {
         Ok(prepared) => prepared,
-        Err(error) => return Ok(gateway_error_response(&error)),
+        Err(error) => return Ok(plugin_response(gateway_error_response(&error))),
     };
     let authorization: Arc<dyn ResponseAuthorization> =
         Arc::new(PluginModelsAuthorization { state, target });
@@ -158,7 +160,7 @@ async fn model_responses(
         Some(authorization),
     )
     .await;
-    Ok(response)
+    Ok(plugin_response(response))
 }
 
 struct PluginModelsAuthorization {
@@ -431,5 +433,12 @@ fn raw_response(result: PluginManagementResponse) -> Result<Response, AdminError
     );
     // 宿主提供默认值，插件显式字段随后覆盖；保留同名多值，只验证 HTTP 语法
     headers.extend(decode_headers(result.headers).map_err(|_| AdminError::bad_gateway())?);
-    Ok(response)
+    Ok(plugin_response(response))
+}
+
+fn plugin_response(mut response: Response) -> Response {
+    response
+        .headers_mut()
+        .insert(PLUGIN_RESPONSE_HEADER, HeaderValue::from_static("1"));
+    response
 }

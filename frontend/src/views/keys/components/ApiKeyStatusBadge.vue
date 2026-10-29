@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
+
 defineProps<{
   apiKey: {
     enabled: boolean
   }
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 </script>
 
 <template>
@@ -14,6 +18,6 @@ defineProps<{
       'bg-cp-fill-quaternary text-cp-text-secondary': !apiKey.enabled,
     }"
   >
-    {{ apiKey.enabled ? '已启用' : '已禁用' }}
+    {{ apiKey.enabled ? t('common.status.enabled') : t('common.status.disabled') }}
   </span>
 </template>

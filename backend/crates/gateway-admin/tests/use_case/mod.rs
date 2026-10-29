@@ -49,7 +49,7 @@ use gateway_admin::{
             DashboardDesktopRelease, DashboardObservation, DashboardQuery, DashboardWireAttribute,
             DashboardWireProfile, DashboardWireTarget, DesktopReleaseStatus, DiagnosticDimension,
             DiagnosticsObservation, Granularity, OpsErrorPage, OpsErrorQuery, RequestMetricPoint,
-            TimeRange, UsageDetail, UsageFilter, UsageOverview, UsagePage, UsageQuery,
+            TimeRange, UsageDetail, UsageFilter, UsagePage, UsageQuery, UsageSummaryObservation,
         },
         provider_credentials::{
             AuthorizationCommit, AuthorizationStarted, CompleteAuthorization, CredentialDetails,
@@ -99,6 +99,7 @@ pub(super) struct AdminHarness {
     proxy_probe: Arc<dyn gateway_admin::ports::proxy::ProxyProbe>,
     account_runtime: Arc<dyn AccountRuntimeStore>,
     account_groups: Arc<dyn AccountGroupStore>,
+    snapshot: Arc<dyn SnapshotControl>,
     auth: Arc<dyn AuthStore>,
     client_keys: Arc<dyn ClientKeyStore>,
     observability: Arc<dyn ObservabilityStore>,
@@ -125,6 +126,7 @@ impl AdminHarness {
             proxy_probe: Arc::new(proxies::TestProxies::default()),
             account_runtime: unavailable.clone(),
             account_groups: Arc::new(UnavailableAccountGroupStore),
+            snapshot: Arc::new(NoopSnapshot),
             auth: Arc::new(BootstrapAuthStore::default()),
             client_keys: unavailable.clone(),
             observability: unavailable.clone(),
@@ -165,6 +167,11 @@ impl AdminHarness {
 
     pub(super) fn account_groups(mut self, store: Arc<dyn AccountGroupStore>) -> Self {
         self.account_groups = store;
+        self
+    }
+
+    pub(super) fn snapshot(mut self, snapshot: Arc<dyn SnapshotControl>) -> Self {
+        self.snapshot = snapshot;
         self
     }
 
@@ -291,7 +298,7 @@ impl AdminHarness {
                     self.providers,
                 )
                 .unwrap(),
-                snapshot: Arc::new(NoopSnapshot),
+                snapshot: self.snapshot,
                 account_probe: self.probe,
                 proxy_probe: self.proxy_probe,
                 client_distribution: Arc::new(NoopClientDistribution),
@@ -607,15 +614,6 @@ impl AccountStore for UnavailableStore {
         Err(unavailable("account enabled"))
     }
 
-    async fn lower_concurrency_limit(
-        &self,
-        _: &gateway_core::account::ProviderAccountId,
-        _: gateway_core::account::AccountConcurrencyLimit,
-        _: &MutationContext,
-    ) -> AdminStoreResult<Option<gateway_admin::model::accounts::AccountUpdateResult>> {
-        Ok(None)
-    }
-
     async fn recover_account(
         &self,
         _: &ProviderAccountId,
@@ -675,13 +673,6 @@ impl AccountRuntimeStore for UnavailableStore {
     async fn active_freezes(
         &self,
     ) -> AdminStoreResult<BTreeMap<String, gateway_admin::model::accounts::AccountFreeze>> {
-        Ok(BTreeMap::new())
-    }
-
-    async fn capacity_peaks(
-        &self,
-        _account_ids: &[String],
-    ) -> AdminStoreResult<BTreeMap<String, u32>> {
         Ok(BTreeMap::new())
     }
 
@@ -826,7 +817,11 @@ impl ObservabilityStore for UnavailableStore {
         Err(unavailable("usage detail"))
     }
 
-    async fn usage_summary(&self, _: TimeRange, _: UsageFilter) -> AdminStoreResult<UsageOverview> {
+    async fn usage_summary(
+        &self,
+        _: TimeRange,
+        _: UsageFilter,
+    ) -> AdminStoreResult<UsageSummaryObservation> {
         Err(unavailable("usage summary"))
     }
 
@@ -1033,7 +1028,7 @@ pub(super) fn dashboard_profile_provider() -> Arc<dyn ProviderAdmin> {
             },
             user_agent: "gateway-admin-test".to_owned(),
             attributes: vec![DashboardWireAttribute {
-                label: "Core".to_owned(),
+                key: "core".to_owned(),
                 value: "test".to_owned(),
             }],
             verified_at: Some(chrono::Utc::now()),

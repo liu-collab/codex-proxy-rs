@@ -10,6 +10,188 @@ use gateway_plugin_sdk::Contributions;
 use gateway_plugin_sdk::Stage;
 
 #[tokio::test]
+async fn adapted_catalog_freezes_adapter_accounts_and_preserves_the_active_generation() {
+    use gateway_admin::model::plugins::instances::{PluginCapabilityBinding, PluginFailurePolicy};
+    let catalog = crate::support::contribution(
+        Capability::ModelCatalog,
+        vec![Stage::Registration],
+        vec![],
+        vec![],
+    );
+    let adapter = crate::support::contribution(
+        Capability::UpstreamAdapter,
+        vec![Stage::Upstream],
+        vec!["openai".into()],
+        vec!["openai".into()],
+    );
+    let (cache, store, runtime) =
+        super::super::setup_with_contributions(Contributions::from([catalog, adapter])).await;
+    let mut snapshot = store.snapshot.lock().unwrap().clone();
+    snapshot.instances[0].bindings = vec![PluginCapabilityBinding {
+        contribution: "test.example.upstreamAdapter".into(),
+        stage: "upstream".into(),
+        order: 0,
+        failure_policy: PluginFailurePolicy::Reject,
+        client_key_ids: vec![],
+        account_group_ids: vec![],
+        provider_ids: vec!["openai".into()],
+        models: vec!["shared-model".into()],
+        event: None,
+        identity_bindings: vec![],
+    }];
+    snapshot.instances[0].configuration = serde_json::json!({
+        "upstream_registration":{"adapters":[{
+            "id":"example","provider":"openai","base_url":"https://example.invalid/",
+            "paths":[{"path":"responses","purpose":"inference"}], "authentication_kinds":["oauth"],
+            "account_ids":["acct_b"], "models":["shared-model"], "transport":"http_sse","protocol":"openai"
+        }]},
+        "model_catalog":{"aliases":[{"id":"native-alias","provider":"openai","model":"native-model"}],"models":[{
+            "id":"shared-model","adapter_id":"example","features":["tools"],"presentation":{"display_name":"Shared"}
+        }]}
+    });
+    *store.snapshot.lock().unwrap() = snapshot.clone();
+    let active = ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(1).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(active.models().len(), 1);
+    assert_eq!(
+        active.models()[0].accounts.iter().next().unwrap().as_str(),
+        "acct_b"
+    );
+    assert_eq!(active.model_aliases().len(), 1);
+    assert_eq!(active.model_aliases()[0].id.as_str(), "native-alias");
+    for scenario in ["accounts", "model", "binding", "key", "group"] {
+        let mut invalid = snapshot.clone();
+        invalid.config_revision = Revision::new(2).unwrap();
+        invalid.instances[0].revision = invalid.config_revision;
+        let instance = &mut invalid.instances[0];
+        match scenario {
+            "accounts" => {
+                instance.configuration["upstream_registration"]["adapters"][0]["account_ids"] =
+                    serde_json::json!([])
+            }
+            "model" => {
+                instance.configuration["upstream_registration"]["adapters"][0]["models"] =
+                    serde_json::json!(["other"])
+            }
+            "binding" => instance.bindings[0].models = vec!["other".into()],
+            "key" => instance.bindings[0].client_key_ids = vec!["key_one".into()],
+            "group" => {
+                instance.bindings[0].account_group_ids =
+                    vec!["grp_0123456789abcdef0123456789abcdef".into()]
+            }
+            _ => unreachable!(),
+        }
+        let error = PluginPreparation::prepare(&runtime, invalid)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.message(),
+            "适配模型必须关联同实例的静态账号适配器",
+            "{scenario}"
+        );
+        assert!(active.is_ready());
+    }
+    for conflict in [
+        None,
+        Some("accounts"),
+        Some("presentation"),
+        Some("features"),
+        Some("alias"),
+    ] {
+        let mut candidate = snapshot.clone();
+        candidate.config_revision = Revision::new(2).unwrap();
+        candidate.instances[0].revision = candidate.config_revision;
+        let config = &mut candidate.instances[0].configuration;
+        let mut adapter = config["upstream_registration"]["adapters"][0].clone();
+        adapter["id"] = "second".into();
+        adapter["account_ids"] = serde_json::json!([if conflict == Some("accounts") {
+            "acct_b"
+        } else {
+            "acct_a"
+        }]);
+        config["upstream_registration"]["adapters"]
+            .as_array_mut()
+            .unwrap()
+            .push(adapter);
+        let mut model = config["model_catalog"]["models"][0].clone();
+        model["adapter_id"] = "second".into();
+        if conflict == Some("presentation") {
+            model["presentation"]["display_name"] = "Other".into();
+        }
+        if conflict == Some("features") {
+            model["features"] = serde_json::json!([]);
+        }
+        config["model_catalog"]["models"]
+            .as_array_mut()
+            .unwrap()
+            .push(model);
+        if conflict == Some("alias") {
+            config["model_catalog"]["aliases"] =
+                serde_json::json!([{"id":"shared-model","provider":"openai","model":"target"}]);
+        }
+        let result = PluginPreparation::prepare(&runtime, candidate).await;
+        if conflict.is_some() {
+            assert_eq!(result.unwrap_err().message(), "适配模型目录声明冲突");
+        } else {
+            let prepared = result.unwrap();
+            assert_eq!(prepared.models().len(), 2);
+            assert!(
+                prepared.models()[0]
+                    .accounts
+                    .is_disjoint(&prepared.models()[1].accounts)
+            );
+        }
+        assert!(active.is_ready());
+    }
+    snapshot.config_revision = Revision::new(2).unwrap();
+    snapshot.instances[0].revision = snapshot.config_revision;
+    snapshot.instances[0].configuration = serde_json::json!({"startup":"fail"});
+    *store.snapshot.lock().unwrap() = snapshot.clone();
+    assert!(
+        ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(2).unwrap())
+            .await
+            .is_err()
+    );
+    snapshot.instances[0].enabled = false;
+    *store.snapshot.lock().unwrap() = snapshot;
+    let disabled = ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(2).unwrap())
+        .await
+        .unwrap();
+    assert!(disabled.models().is_empty());
+    assert_eq!(active.models().len(), 1);
+    drop(disabled);
+    drop(active);
+    runtime.shutdown().await;
+    super::super::wait_until_empty(cache.path()).await;
+}
+
+#[tokio::test]
+async fn adapted_catalog_requires_its_registered_adapter() {
+    let catalog = crate::support::contribution(
+        Capability::ModelCatalog,
+        vec![Stage::Registration],
+        vec![],
+        vec![],
+    );
+    let (cache, store, runtime) =
+        super::super::setup_with_contributions(Contributions::from([catalog])).await;
+    let mut snapshot = store.snapshot.lock().unwrap().clone();
+    snapshot.instances[0].configuration = serde_json::json!({
+        "model_catalog": {"aliases":[], "models":[{
+            "id":"shared-model", "adapter_id":"missing", "features":[],
+            "max_output_tokens":null, "presentation":{}
+        }]}
+    });
+    let error = PluginPreparation::prepare(&runtime, snapshot)
+        .await
+        .unwrap_err();
+    assert_eq!(error.message(), "适配模型必须关联同实例的静态账号适配器");
+    runtime.shutdown().await;
+    super::super::wait_until_empty(cache.path()).await;
+}
+
+#[tokio::test]
 async fn initial_registration_http_uses_the_prepared_settings_without_a_publication() {
     use wiremock::{Mock, MockServer, ResponseTemplate, matchers::method};
     for limit in [63, 64] {
@@ -31,7 +213,7 @@ async fn initial_registration_http_uses_the_prepared_settings_without_a_publicat
             .await;
         store.snapshot.lock().unwrap().instances[0].configuration = serde_json::json!({
             "registration_http": {"params": {"method":"POST", "url":server.uri(), "headers":[]}, "body":"x".repeat(64)},
-            "model_catalog":{"models":[{"id":"fixture-alias","provider":"openai","model":"fixture-upstream"}]}
+            "model_catalog":{"aliases":[{"id":"fixture-alias","provider":"openai","model":"fixture-upstream"}],"models":[]}
         });
         let prepared = ExtensionPreparationPort::prepare_with_request_body_limit(
             &runtime,
@@ -59,7 +241,7 @@ async fn model_catalog_is_frozen_without_entering_the_request_chain() {
     ]))
     .await;
     store.snapshot.lock().unwrap().instances[0].configuration = serde_json::json!({
-        "model_catalog": {"models": [{"id": "my-model", "provider": "openai", "model": "upstream-model"}]}
+        "model_catalog": {"aliases": [{"id": "my-model", "provider": "openai", "model": "upstream-model"}], "models": []}
     });
     let generation = ExtensionPreparationPort::prepare(&runtime, ConfigRevision::new(1).unwrap())
         .await
@@ -114,7 +296,7 @@ async fn model_catalog_is_frozen_without_entering_the_request_chain() {
 
 #[tokio::test]
 async fn model_catalog_prepares_plugin_aliases_without_semantic_validation() {
-    for models in [
+    for aliases in [
         serde_json::json!([{"id":"alias","provider":"custom","model":"target"}]),
         serde_json::json!([{"id":"alias","provider":"openai","model":"alias"}]),
         serde_json::json!([
@@ -135,8 +317,8 @@ async fn model_catalog_prepares_plugin_aliases_without_semantic_validation() {
             .await;
         let mut snapshot = store.snapshot.lock().unwrap().clone();
         snapshot.instances[0].configuration =
-            serde_json::json!({"model_catalog":{"models":models}});
-        let expected = models.as_array().unwrap().len();
+            serde_json::json!({"model_catalog":{"aliases":aliases,"models":[]}});
+        let expected = aliases.as_array().unwrap().len();
         let prepared = PluginPreparation::prepare(&runtime, snapshot)
             .await
             .unwrap();
@@ -157,7 +339,7 @@ async fn model_catalog_prepares_plugin_aliases_without_semantic_validation() {
     .await;
     let mut snapshot = store.snapshot.lock().unwrap().clone();
     snapshot.instances[0].configuration = serde_json::json!({
-        "model_catalog":{"models":[{"id":"alias","provider":"openai","model":"target"}]}
+        "model_catalog":{"aliases":[{"id":"alias","provider":"openai","model":"target"}],"models":[]}
     });
     let mut other = snapshot.instances[0].clone();
     other.id = "instance-two".into();

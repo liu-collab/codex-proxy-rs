@@ -962,27 +962,28 @@ async fn oauth_import_does_not_use_top_level_identity_fields() {
 }
 
 #[tokio::test]
-async fn oauth_import_rejects_legacy_bare_token_field() {
+async fn oauth_import_requires_access_or_refresh_token() {
     let service = CodexCredentialAdminService::new(
         Arc::new(UnusedRefresher),
         Arc::new(TestLeaseCoordinator::default()),
         runtime_policy(),
         Arc::new(crate::RecordingDiagnostics::default()),
     );
-    let error = service
-        .prepare_import_document_with_proxy(
-            serde_json::json!({
-                "token": "header.payload.signature"
-            }),
-            None,
-        )
-        .await
-        .expect_err("ambiguous token field must not be accepted");
+    for document in [
+        serde_json::json!({}),
+        serde_json::json!({"accessToken": null, "refreshToken": null}),
+        serde_json::json!({"idToken": "header.payload.signature"}),
+    ] {
+        let error = service
+            .prepare_import_document_with_proxy(document, None)
+            .await
+            .expect_err("access or refresh token is required");
 
-    assert_eq!(
-        error,
-        provider_openai::credential::CodexCredentialAdminError::InvalidCredential
-    );
+        assert_eq!(
+            error,
+            provider_openai::credential::CodexCredentialAdminError::InvalidCredential
+        );
+    }
 }
 
 #[tokio::test]

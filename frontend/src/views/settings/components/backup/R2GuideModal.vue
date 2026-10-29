@@ -1,69 +1,71 @@
 <script setup lang="ts">
 import { ZButton, ZDialog } from '@codex-proxy/ui'
 
+import { I18nT, useI18n } from 'vue-i18n'
+
+const { t } = useI18n({ useScope: 'global' })
+
 const open = defineModel<boolean>({ default: false })
 </script>
 
 <template>
   <ZDialog
     v-model="open"
-    title="Cloudflare R2 接入指南"
+    :title="t('settings.backup.r2.cloudflareR2OnboardingGuide')"
     width="48rem"
   >
     <div class="flex flex-col gap-4 text-cp leading-relaxed text-cp-text-secondary">
       <section class="flex flex-col gap-1.5">
         <h3 class="text-cp-lg font-heavy text-cp-primary-text">
-          1. 创建存储桶
+          {{ t('settings.backup.r2.createBucket') }}
+        </h3>
+        <I18nT keypath="settings.backup.r2.bucketDescription" tag="p" scope="global" class="m-0">
+          <template #bucket>
+            <code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">codex-proxy-backups</code>
+          </template>
+        </I18nT>
+      </section>
+
+      <section class="flex flex-col gap-1.5">
+        <h3 class="text-cp-lg font-heavy text-cp-primary-text">
+          {{ t('settings.backup.r2.createApiToken') }}
         </h3>
         <p class="m-0">
-          在 Cloudflare Dashboard 进入 R2，创建一个私有存储桶（例如
-          <code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">codex-proxy-backups</code>），
-          桶必须保持私有，不要开放公共读取
+          {{ t('settings.backup.r2.tokenDescription') }}
         </p>
       </section>
 
       <section class="flex flex-col gap-1.5">
         <h3 class="text-cp-lg font-heavy text-cp-primary-text">
-          2. 创建 API Token
-        </h3>
-        <p class="m-0">
-          在「管理 API Token」创建对象存储专用 Token，只授予目标桶的对象
-          <code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">对象读</code>、
-          <code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">对象写</code>、
-          <code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">对象查看</code> 与
-          <code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">对象删除</code> 权限，
-          不要授予整个账号权限
-        </p>
-      </section>
-
-      <section class="flex flex-col gap-1.5">
-        <h3 class="text-cp-lg font-heavy text-cp-primary-text">
-          3. 填写连接参数
+          {{ t('settings.backup.r2.fillInConnectionParameters') }}
         </h3>
         <ul class="m-0 list-disc space-y-1 pl-5">
           <li>
-            Endpoint：<code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">https://&#123;ACCOUNT_ID&#125;.r2.cloudflarestorage.com</code>
+            {{ t('settings.backup.r2.endpointLabel') }} <code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">https://&#123;ACCOUNT_ID&#125;.r2.cloudflarestorage.com</code>
           </li>
-          <li>Region：<code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">auto</code>（R2 固定值）</li>
-          <li>Access Key ID / Secret Access Key：上一步生成的 Token</li>
-          <li>Force Path Style：关闭</li>
+          <I18nT keypath="settings.backup.r2.regionDescription" tag="li" scope="global">
+            <template #region>
+              <code class="rounded bg-cp-fill-quaternary px-1.5 py-0.5">auto</code>
+            </template>
+          </I18nT>
+          <li>{{ t('settings.backup.r2.credentialsHelp') }}</li>
+          <li>{{ t('settings.backup.r2.forcePathStyleOff') }}</li>
         </ul>
       </section>
 
       <section class="flex flex-col gap-1.5">
         <h3 class="text-cp-lg font-heavy text-cp-primary-text">
-          4. 完成连接测试
+          {{ t('settings.backup.r2.completeConnectionTest') }}
         </h3>
         <p class="m-0">
-          保存配置后点击「测试连接」，系统会写入一个探针对象并校验读写权限，测试通过后
-          才能启用自动计划或手动创建备份，凭据只保存在服务端，不会写入浏览器
+          {{ t('settings.backup.r2.testDescription') }}
         </p>
       </section>
     </div>
 
     <template #footer>
       <ZButton type="primary" @click="open = false">
-        知道了
+        {{ t('settings.backup.r2.gotIt') }}
       </ZButton>
     </template>
   </ZDialog>

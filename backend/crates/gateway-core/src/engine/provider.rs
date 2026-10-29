@@ -3,13 +3,13 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::Instant;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures::{Stream, StreamExt, future::BoxFuture};
+use futures::{Stream, StreamExt, TryStreamExt, channel::oneshot, future::BoxFuture};
 use thiserror::Error;
 
 use crate::account::{
@@ -50,6 +50,7 @@ pub struct ProviderCallMetadata {
     transport: UpstreamTransport,
     selection_observation: Option<ProviderSelectionObservation>,
     account_snapshot: Option<AccountHistorySnapshot>,
+    credential_revision: Option<crate::account::CredentialRevision>,
 }
 
 /// Provider 账号选择阶段输出的中立运行压力事实
@@ -99,6 +100,7 @@ impl ProviderCallMetadata {
             transport,
             selection_observation: None,
             account_snapshot: None,
+            credential_revision: None,
         }
     }
 
@@ -117,7 +119,23 @@ impl ProviderCallMetadata {
             transport,
             selection_observation: None,
             account_snapshot: None,
+            credential_revision: None,
         }
+    }
+
+    /// 账号实际选定时冻结的凭据版本，不在反馈时重新读取当前账号
+    #[must_use]
+    pub const fn with_credential_revision(
+        mut self,
+        revision: crate::account::CredentialRevision,
+    ) -> Self {
+        self.credential_revision = Some(revision);
+        self
+    }
+
+    #[must_use]
+    pub const fn credential_revision(&self) -> Option<crate::account::CredentialRevision> {
+        self.credential_revision
     }
 
     #[must_use]
@@ -236,6 +254,9 @@ pub struct ProviderStream {
     _lease: Box<dyn ResourceLease>,
     native_response_translator: Option<Box<dyn NativeResponseTranslator>>,
     account_feedback: Option<ProviderStreamAccountFeedback>,
+    account_protection: Option<super::account_protection::AttemptProtection>,
+    protection_feedback:
+        Option<futures::future::BoxFuture<'static, Option<Result<ProviderEvent, ProviderError>>>>,
     validator: Result<EventSequenceValidator, EventSequenceError>,
     strict_canonical_seen: bool,
     terminated: bool,
@@ -343,10 +364,30 @@ impl ProviderStream {
             _lease: Box::new(lease),
             native_response_translator: None,
             account_feedback: None,
+            account_protection: None,
+            protection_feedback: None,
             validator: Ok(EventSequenceValidator::new()),
             strict_canonical_seen: false,
             terminated: false,
         }
+    }
+
+    /// 在第一次发送前捕获反馈栅栏，诊断调用由协调器排除
+    #[must_use]
+    pub async fn with_account_error_protection(
+        mut self,
+        store: Arc<dyn crate::provider_ports::ProviderCooldownPort>,
+        policy: Arc<crate::account::CompiledAccountErrorProtection>,
+        policy_revision: u64,
+    ) -> Self {
+        self.account_protection = super::account_protection::AttemptProtection::begin(
+            store,
+            policy,
+            policy_revision,
+            &self.metadata,
+        )
+        .await;
+        self
     }
 
     /// 让公共 stream 边界统一回灌账号成功率与首个有效输出延迟
@@ -485,6 +526,9 @@ fn provider_middleware_next(
     operation: Operation,
     transport: ClientTransport,
     terminal: ProviderMiddlewareTerminal,
+    prepared: oneshot::Sender<ProviderCallMetadata>,
+    activate: oneshot::Receiver<()>,
+    observation: Arc<Mutex<MiddlewareSendObservation>>,
 ) -> MiddlewareNext {
     crate::middleware::compose(Vec::new(), move |request| {
         Box::pin(async move {
@@ -501,11 +545,17 @@ fn provider_middleware_next(
                 .await
                 .map_err(MiddlewareError::Provider)?;
             let metadata = stream.metadata().clone();
+            prepared
+                .send(metadata.clone())
+                .map_err(|_| MiddlewareError::InvalidState)?;
+            // Core 先校验 metadata 并登记 attempt，首次轮询外层冷流后才放行 next
+            activate.await.map_err(|_| MiddlewareError::InvalidState)?;
             let protocol = stream.middleware_protocol(&fallback_protocol);
             let body = ProviderMiddlewareBody {
                 stream,
                 pending: VecDeque::new(),
                 transport,
+                observation,
             };
             Ok(
                 MiddlewareResponse::new(protocol, 200, Vec::new(), Box::new(body))
@@ -550,6 +600,40 @@ struct ProviderMiddlewareBody {
     stream: ProviderStream,
     pending: VecDeque<(ProviderEvent, bool)>,
     transport: ClientTransport,
+    observation: Arc<Mutex<MiddlewareSendObservation>>,
+}
+
+struct MiddlewareSendObservation {
+    observed: UpstreamSendState,
+    reading: bool,
+}
+
+impl MiddlewareSendObservation {
+    fn state(&self) -> UpstreamSendState {
+        if self.reading && self.observed == UpstreamSendState::NotSent {
+            UpstreamSendState::Ambiguous
+        } else {
+            self.observed
+        }
+    }
+
+    fn complete(&mut self, observed: UpstreamSendState) {
+        self.reading = false;
+        self.observed = match (self.observed, observed) {
+            (UpstreamSendState::Sent, _) | (_, UpstreamSendState::Sent) => UpstreamSendState::Sent,
+            (UpstreamSendState::Ambiguous, _) | (_, UpstreamSendState::Ambiguous) => {
+                UpstreamSendState::Ambiguous
+            }
+            _ => UpstreamSendState::NotSent,
+        };
+    }
+}
+
+fn middleware_send_state(observation: &Mutex<MiddlewareSendObservation>) -> UpstreamSendState {
+    observation
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .state()
 }
 
 impl MiddlewareBody for ProviderMiddlewareBody {
@@ -561,7 +645,21 @@ impl MiddlewareBody for ProviderMiddlewareBody {
                         .map(Some)
                         .map_err(MiddlewareError::Provider);
                 }
-                let Some(event) = self.stream.next().await else {
+                self.observation
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .reading = true;
+                let event = self.stream.next().await;
+                let observed = match &event {
+                    Some(Ok(_)) => UpstreamSendState::Sent,
+                    Some(Err(error)) => error.send_state(),
+                    None => UpstreamSendState::Ambiguous,
+                };
+                self.observation
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .complete(observed);
+                let Some(event) = event else {
                     return Ok(None);
                 };
                 let event = event.map_err(MiddlewareError::Provider)?;
@@ -689,30 +787,71 @@ pub async fn execute_attempt_middleware(
             .middleware_body()
             .map_err(|_| middleware_protocol_error(UpstreamSendState::NotSent))?,
     );
-    let response = plan
-        .handle(
-            context,
-            request,
-            provider_middleware_next(operation, transport, terminal),
-        )
-        .await
-        .map_err(middleware_prepare_error)?;
-    let (protocol, status_code, headers, body, envelope) = response.into_parts();
-    if status_code != 200 || !headers.is_empty() {
-        return Err(middleware_protocol_error(UpstreamSendState::NotSent));
-    }
-    crate::validation::validate_text(&protocol, 64, true, None)
-        .map_err(|_| middleware_protocol_error(UpstreamSendState::NotSent))?;
-    let metadata = envelope
-        .ok_or_else(|| middleware_protocol_error(UpstreamSendState::NotSent))?
-        .into_provider_metadata();
-    let events = futures::stream::try_unfold((body, protocol), |(mut body, protocol)| async move {
-        let Some(frame) = body.next_frame().await.map_err(middleware_body_error)? else {
-            return Ok(None);
-        };
-        let event = middleware_frame_to_provider_event(frame, &protocol)?;
-        Ok(Some((event, (body, protocol))))
-    });
+    let (prepared, metadata) = oneshot::channel();
+    let (activate, activation) = oneshot::channel();
+    let observation = Arc::new(Mutex::new(MiddlewareSendObservation {
+        observed: UpstreamSendState::NotSent,
+        reading: false,
+    }));
+    let response = plan.handle(
+        context,
+        request,
+        provider_middleware_next(
+            operation,
+            transport,
+            terminal,
+            prepared,
+            activation,
+            observation.clone(),
+        ),
+    );
+    let (metadata, response) = match futures::future::select(metadata, response).await {
+        futures::future::Either::Left((Ok(metadata), response)) => (metadata, response),
+        futures::future::Either::Left((Err(_), response)) => {
+            return Err(unprepared_middleware_response(response.await));
+        }
+        futures::future::Either::Right((response, _)) => {
+            return Err(unprepared_middleware_response(response));
+        }
+    };
+    let expected_metadata = metadata.clone();
+    // 不创建后台任务，未激活的 handler、stream 与账号 lease 随返回的冷流一起回收
+    let events = futures::stream::once(async move {
+        activate
+            .send(())
+            .map_err(|_| middleware_protocol_error(middleware_send_state(&observation)))?;
+        let response = response
+            .await
+            .map_err(|error| middleware_error(error, middleware_send_state(&observation)))?;
+        let (protocol, status_code, headers, body, envelope) = response.into_parts();
+        if status_code != 200
+            || !headers.is_empty()
+            || envelope
+                .map(|envelope| envelope.into_provider_metadata())
+                .as_ref()
+                != Some(&expected_metadata)
+        {
+            return Err(middleware_protocol_error(middleware_send_state(
+                &observation,
+            )));
+        }
+        crate::validation::validate_text(&protocol, 64, true, None)
+            .map_err(|_| middleware_protocol_error(middleware_send_state(&observation)))?;
+        Ok(futures::stream::try_unfold(
+            (body, protocol, observation),
+            |(mut body, protocol, observation)| async move {
+                let Some(frame) = body.next_frame().await.map_err(|error| {
+                    middleware_error(error, middleware_send_state(&observation))
+                })?
+                else {
+                    return Ok(None);
+                };
+                let event = middleware_frame_to_provider_event(frame, &protocol)?;
+                Ok(Some((event, (body, protocol, observation))))
+            },
+        ))
+    })
+    .try_flatten();
     Ok(ProviderStream::new(metadata, events, ()))
 }
 
@@ -786,37 +925,29 @@ fn middleware_frame_to_provider_event(
     Ok(event)
 }
 
-fn middleware_prepare_error(error: MiddlewareError) -> ProviderError {
-    match error {
-        MiddlewareError::Provider(error) => error,
-        MiddlewareError::Rejected | MiddlewareError::Remote { rejected: true, .. } => {
-            ProviderError::new(
-                ProviderErrorKind::RequestPolicyDenied,
-                UpstreamSendState::NotSent,
-            )
-        }
-        MiddlewareError::Fault
-        | MiddlewareError::Remote { .. }
-        | MiddlewareError::InvalidState
-        | MiddlewareError::Gateway(_)
-        | MiddlewareError::Engine(_) => middleware_protocol_error(UpstreamSendState::NotSent),
+fn unprepared_middleware_response(
+    response: Result<MiddlewareResponse, MiddlewareError>,
+) -> ProviderError {
+    match response {
+        Err(error) => middleware_error(error, UpstreamSendState::NotSent),
+        Ok(_) => middleware_protocol_error(UpstreamSendState::NotSent),
     }
 }
 
-fn middleware_body_error(error: MiddlewareError) -> ProviderError {
+pub(super) fn middleware_error(
+    error: MiddlewareError,
+    send_state: UpstreamSendState,
+) -> ProviderError {
     match error {
         MiddlewareError::Provider(error) => error,
         MiddlewareError::Rejected | MiddlewareError::Remote { rejected: true, .. } => {
-            ProviderError::new(
-                ProviderErrorKind::RequestPolicyDenied,
-                UpstreamSendState::Ambiguous,
-            )
+            ProviderError::new(ProviderErrorKind::RequestPolicyDenied, send_state)
         }
         MiddlewareError::Fault
         | MiddlewareError::Remote { .. }
         | MiddlewareError::InvalidState
         | MiddlewareError::Gateway(_)
-        | MiddlewareError::Engine(_) => middleware_protocol_error(UpstreamSendState::Ambiguous),
+        | MiddlewareError::Engine(_) => middleware_protocol_error(send_state),
     }
 }
 
@@ -838,6 +969,40 @@ impl Stream for ProviderStream {
 
     fn poll_next(self: Pin<&mut Self>, context: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+        if let Some(feedback) = this.protection_feedback.as_mut() {
+            return match feedback.as_mut().poll(context) {
+                Poll::Pending => Poll::Pending,
+                Poll::Ready(result) => {
+                    this.protection_feedback = None;
+                    Poll::Ready(result)
+                }
+            };
+        }
+        let result = this.poll_event(context);
+        // 客户端可在成功终态后停止拉取，不能依赖之后的 EOF 才清除保护证据
+        let protection_terminal = matches!(&result, Poll::Ready(Some(Err(_)) | None))
+            || (matches!(&result, Poll::Ready(Some(Ok(_))))
+                && this
+                    .account_protection
+                    .as_ref()
+                    .is_some_and(super::account_protection::AttemptProtection::is_completed));
+        if protection_terminal
+            && let Some(protection) = this.account_protection.take()
+            && let Poll::Ready(result) = result
+        {
+            this.protection_feedback = Some(protection.complete(result));
+            return Pin::new(this).poll_next(context);
+        }
+        result
+    }
+}
+
+impl ProviderStream {
+    fn poll_event(
+        &mut self,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Result<ProviderEvent, ProviderError>>> {
+        let this = self;
         if this.terminated {
             return Poll::Ready(None);
         }
@@ -870,6 +1035,9 @@ impl Stream for ProviderStream {
                 }
                 if let Some(feedback) = this.account_feedback.as_mut() {
                     feedback.observe(&event);
+                }
+                if let Some(protection) = this.account_protection.as_mut() {
+                    protection.observe(&event);
                 }
                 Poll::Ready(Some(Ok(event)))
             }
@@ -925,7 +1093,7 @@ pub struct ProviderRequest {
 pub struct ProviderRequestObservation {
     /// 独立 Provider 端点声明的请求模型，仅用于观测，不参与文本模型目录路由
     pub requested_model: Option<PublicModelId>,
-    /// 客户端原始请求中的推理强度
+    /// Provider 从客户端请求与续接配置中解析的推理强度
     pub reasoning_effort: Option<String>,
     pub reasoning_preset: Option<String>,
     pub request_kind: Option<String>,

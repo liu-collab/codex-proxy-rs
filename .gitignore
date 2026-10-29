@@ -34,6 +34,7 @@ Thumbs.db
 
 # Local tools and worktrees
 /.codegraph/
+/.playwright-cli/
 /.codex-ws-audit/
 /.reasonix/
 /.claude

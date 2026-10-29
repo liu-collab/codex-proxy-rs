@@ -3,15 +3,7 @@ import { ZButton, ZCard, ZCheckbox, ZForm, ZFormItem, ZInput } from '@codex-prox
 
 import { CircleAlert, CircleCheck, DatabaseZap, Save } from '@lucide/vue'
 
-interface StorageForm {
-  endpoint: string
-  region: string
-  bucket: string
-  accessKeyId: string
-  secretAccessKey: string
-  prefix: string
-  forcePathStyle: boolean
-}
+import { I18nT, useI18n } from 'vue-i18n'
 
 defineProps<{
   disabled: boolean
@@ -26,6 +18,18 @@ const emit = defineEmits<{
   openR2Guide: []
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
+interface StorageForm {
+  endpoint: string
+  region: string
+  bucket: string
+  accessKeyId: string
+  secretAccessKey: string
+  prefix: string
+  forcePathStyle: boolean
+}
+
 const storage = defineModel<StorageForm>('storage', { required: true })
 
 function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageForm[Key]) {
@@ -34,19 +38,19 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
 </script>
 
 <template>
-  <ZCard title="S3 存储配置">
+  <ZCard :title="t('settings.backup.storage.s3StorageConfiguration')">
     <template #description>
-      <span class="text-cp-text-secondary">
-        配置 S3 兼容存储（支持
-        <button
-          type="button"
-          class="cursor-pointer border-0 bg-transparent p-0 text-cp-link underline underline-offset-2 hover:text-cp-link-hover"
-          @click="emit('openR2Guide')"
-        >
-          Cloudflare R2
-        </button>
-        ）
-      </span>
+      <I18nT keypath="settings.backup.storage.description" tag="span" scope="global" class="text-cp-text-secondary">
+        <template #service>
+          <button
+            type="button"
+            class="cursor-pointer border-0 bg-transparent p-0 text-cp-link underline underline-offset-2 hover:text-cp-link-hover"
+            @click="emit('openR2Guide')"
+          >
+            Cloudflare R2
+          </button>
+        </template>
+      </I18nT>
     </template>
 
     <template #actions>
@@ -54,30 +58,30 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
         <ZButton
           :loading="testing"
           :disabled="disabled"
-          :title="verified ? '已通过连接测试' : '尚未通过连接测试'"
+          :title="verified ? t('settings.backup.storage.connectionTestPassed') : t('settings.backup.storage.connectionTestHasNotPassed')"
           @click="emit('test')"
         >
           <template #icon>
             <CircleCheck v-if="verified" class="size-4 text-cp-success-text" />
             <CircleAlert v-else class="size-4 text-cp-warning-text" />
           </template>
-          {{ testing ? '测试中...' : '测试连接' }}
+          {{ testing ? t('settings.backup.storage.testing') : t('settings.backup.storage.test') }}
         </ZButton>
         <ZButton type="primary" :loading="saving" :disabled="disabled" @click="emit('save')">
           <template #icon>
             <Save class="size-4" />
           </template>
-          {{ saving ? '保存中...' : '保存' }}
+          {{ saving ? t('settings.backup.schedule.saving') : t('common.actions.save') }}
         </ZButton>
       </div>
     </template>
 
     <div class="@container">
       <ZForm class="max-w-6xl @min-[640px]:grid-cols-2">
-        <ZFormItem label="端点地址" description="S3 兼容服务的 HTTPS 地址">
+        <ZFormItem :label="t('settings.backup.storage.endpointAddress')" :description="t('settings.backup.storage.endpointHelp')">
           <ZInput
             :model-value="storage.endpoint" :disabled="disabled"
-            aria-label="端点地址"
+            :aria-label="t('settings.backup.storage.endpointAddress')"
             placeholder="https://<account_id>.r2.cloudflarestorage.com"
             @update:model-value="updateStorage('endpoint', $event)"
           >
@@ -87,32 +91,32 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
           </ZInput>
         </ZFormItem>
 
-        <ZFormItem label="区域" description="R2 使用固定值 auto，其它服务按提供方填写">
-          <ZInput :model-value="storage.region" :disabled="disabled" aria-label="区域" @update:model-value="updateStorage('region', $event)" />
+        <ZFormItem :label="t('settings.backup.storage.region')" :description="t('settings.backup.storage.regionHelp')">
+          <ZInput :model-value="storage.region" :disabled="disabled" :aria-label="t('settings.backup.storage.region')" @update:model-value="updateStorage('region', $event)" />
         </ZFormItem>
 
-        <ZFormItem label="存储桶" description="私有存储桶名称">
-          <ZInput :model-value="storage.bucket" :disabled="disabled" aria-label="存储桶" @update:model-value="updateStorage('bucket', $event)" />
+        <ZFormItem :label="t('settings.backup.storage.bucket')" :description="t('settings.backup.storage.privateBucketName')">
+          <ZInput :model-value="storage.bucket" :disabled="disabled" :aria-label="t('settings.backup.storage.bucket')" @update:model-value="updateStorage('bucket', $event)" />
         </ZFormItem>
 
-        <ZFormItem label="对象键前缀" description="备份对象的存储路径前缀，不影响已有备份">
-          <ZInput :model-value="storage.prefix" :disabled="disabled" aria-label="对象键前缀" @update:model-value="updateStorage('prefix', $event)" />
+        <ZFormItem :label="t('settings.backup.storage.objectKeyPrefix')" :description="t('settings.backup.storage.prefixHelp')">
+          <ZInput :model-value="storage.prefix" :disabled="disabled" :aria-label="t('settings.backup.storage.objectKeyPrefix')" @update:model-value="updateStorage('prefix', $event)" />
         </ZFormItem>
 
-        <ZFormItem label="Access Key ID" description="对象存储专用凭据">
+        <ZFormItem :label="t('settings.backup.storage.accessKeyId')" :description="t('settings.backup.storage.credentialsLabel')">
           <ZInput
             :model-value="storage.accessKeyId" :disabled="disabled"
-            aria-label="Access Key ID"
+            :aria-label="t('settings.backup.storage.accessKeyId')"
             show-password
             autocomplete="off"
             @update:model-value="updateStorage('accessKeyId', $event)"
           />
         </ZFormItem>
 
-        <ZFormItem label="Secret Access Key" description="对象存储专用 Secret">
+        <ZFormItem :label="t('settings.backup.storage.secretAccessKey')" :description="t('settings.backup.storage.objectStorageSpecificSecret')">
           <ZInput
             :model-value="storage.secretAccessKey" :disabled="disabled"
-            aria-label="Secret Access Key"
+            :aria-label="t('settings.backup.storage.secretAccessKey')"
             show-password
             autocomplete="new-password"
             @update:model-value="updateStorage('secretAccessKey', $event)"
@@ -120,7 +124,7 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
         </ZFormItem>
 
         <div class="col-span-2 flex items-center gap-4 @max-[640px]:col-span-1">
-          <ZCheckbox :model-value="storage.forcePathStyle" :disabled="disabled" label="强制路径式访问" @update:model-value="updateStorage('forcePathStyle', $event)" />
+          <ZCheckbox :model-value="storage.forcePathStyle" :disabled="disabled" :label="t('settings.backup.storage.forcePathStyle')" @update:model-value="updateStorage('forcePathStyle', $event)" />
         </div>
       </ZForm>
     </div>

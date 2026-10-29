@@ -1,0 +1,30 @@
+{
+  "navigation": {
+    "overview": "概覽",
+    "accounts": "賬號管理",
+    "proxies": "代理管理",
+    "groups": "分組管理",
+    "apiKeys": "API密鑰",
+    "usage": "分析統計",
+    "plugins": "插件",
+    "appearance": "主題設置",
+    "settings": "系統設置",
+    "update": {
+      "available": "發現新版本，打開系統更新",
+      "open": "打開系統更新"
+    },
+    "switchLanguage": "切換語言（{value}）",
+    "languageLoadFailed": "語言加載失敗，請刷新重試",
+    "mainLabel": "主導航",
+    "pluginsLabel": "插件導航",
+    "pluginManagement": "插件管理",
+    "online": "在線",
+    "sidebar": {
+      "close": "關閉側邊欄",
+      "expand": "展開側邊欄",
+      "collapse": "收縮側邊欄",
+      "open": "打開側邊欄"
+    },
+    "missingEntryPoint": "未配置 {role} 身份的默認入口"
+  }
+}

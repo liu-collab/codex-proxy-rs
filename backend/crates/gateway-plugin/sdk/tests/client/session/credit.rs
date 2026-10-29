@@ -2,7 +2,7 @@
 
 use super::*;
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn stream_waits_for_credit_and_rejects_uncreditable_buffered_chunk_before_result() {
     let (mut host, task) = start_session(TestHandler::default()).await;
     send_call(&mut host, 1, "stream", json!({}), Vec::new()).await;
@@ -217,7 +217,7 @@ async fn dynamic_stream_ends_with_one_error_when_a_later_chunk_cannot_fit_credit
     shutdown(&mut host, task).await;
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn resource_stream_keeps_callbacks_and_credit_alive_after_the_initial_deadline() {
     let (mut host, task) = start_session(TestHandler::default()).await;
     let mut context = context(1, Duration::from_millis(500));

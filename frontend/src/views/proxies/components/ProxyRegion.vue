@@ -1,25 +1,34 @@
 <script setup lang="ts">
 import type { OutboundProxyRecord } from '@/api'
+
 import { Globe } from '@lucide/vue'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { countryFlagUrl, countryName, proxyExitLocation } from '../utils/location'
 
 const props = defineProps<{ proxy: OutboundProxyRecord }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const location = computed(() => proxyExitLocation(props.proxy))
 const customLocation = computed(() => props.proxy.autoLocation ? null : props.proxy.location)
-const customLabel = computed(() => customLocation.value ? `${countryName(customLocation.value.country)} · ${customLocation.value.city}` : '')
-const flag = computed(() => location.value ? countryFlagUrl(location.value.country) : undefined)
+const customLabel = computed(() => customLocation.value
+  ? `${countryName(customLocation.value.country)} · ${customLocation.value.city}`
+  : '')
+const flag = computed(() => location.value
+  ? countryFlagUrl(location.value.country)
+  : undefined)
 const label = computed(() => {
   if (props.proxy.lastTest?.success === false)
-    return '连接失败'
+    return t('proxies.region.connectionFailed')
   if (location.value)
     return `${countryName(location.value.country)} · ${location.value.city}`
   const detection = props.proxy.lastTest?.location
   if (detection?.status === 'conflict')
-    return '地区冲突'
+    return t('proxies.region.regionalConflict')
   if (detection?.status === 'failed')
-    return '解析失败'
-  return '出口未识别'
+    return t('proxies.region.parsingFailed')
+  return t('proxies.region.exitNotRecognized')
 })
 const description = computed(() => {
   if (props.proxy.lastTest?.success === false)
@@ -28,8 +37,10 @@ const description = computed(() => {
   if (detection?.status === 'failed')
     return detection.message
   if (detection?.status === 'conflict')
-    return 'IPv4 与 IPv6 出口时区不一致'
-  return location.value ? `出口地区：${label.value} · ${location.value.timezone}` : '测试代理时解析出口地区'
+    return t('proxies.region.ipv4AndIpv6EgressTimeZonesAre')
+  return location.value
+    ? t('proxies.region.exitLocation', { label: label.value, timezone: location.value.timezone })
+    : t('proxies.region.detectHelp')
 })
 </script>
 
@@ -38,8 +49,8 @@ const description = computed(() => {
     <img v-if="flag" :src="flag" alt="" aria-hidden="true" class="size-4.5 shrink-0" loading="lazy" decoding="async">
     <Globe v-else class="size-4 shrink-0 text-cp-text-tertiary" aria-hidden="true" />
     <span class="truncate">{{ label }}</span>
-    <span v-if="customLocation" class="col-start-2 truncate text-cp-xs text-cp-text-secondary" :title="`自定义位置：${customLabel} · ${customLocation.timezone}`">
-      自定义：{{ customLabel }}
+    <span v-if="customLocation" class="col-start-2 truncate text-cp-xs text-cp-text-secondary" :title="t('proxies.region.customLocation', { customLabel, timezone: customLocation.timezone })">
+      {{ t('proxies.region.custom', { customLabel }) }}
     </span>
   </span>
 </template>

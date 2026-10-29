@@ -13,6 +13,16 @@ pub(crate) fn test_env(name: &str) -> Option<String> {
     value
 }
 
+/// Store 配置单独接收原始密码，不能把 URL 中的百分号编码当作密码内容。
+pub(crate) fn config_connection(mut url: url::Url) -> serde_json::Value {
+    let password = percent_encoding::percent_decode_str(url.password().expect("test password"))
+        .decode_utf8()
+        .expect("UTF-8 fixture password")
+        .into_owned();
+    url.set_password(None).unwrap();
+    serde_json::json!({"url": url.as_str(), "password": password})
+}
+
 /// 按 is-ci 约定判定 CI：`CI` 存在且非 falsey（`0`/`false`/空）
 /// 开发者用 `CI=false` 显式声明「非 CI」时不应把跳过变成 panic
 fn running_in_ci() -> bool {

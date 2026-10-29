@@ -32,7 +32,7 @@ pub(super) async fn settle_budget(
             diagnostics,
             &request_id,
             "settle_client_budget",
-            "Client budget settlement failed; storage will retry on the next request",
+            "Client budget settlement could not be accepted",
             error,
         )
         .await;

@@ -114,10 +114,14 @@ impl DefaultAccountGroupService {
         result: Result<AccountGroupMutation, crate::ports::store::AdminStoreError>,
     ) -> Result<AccountGroupMutation, AdminError> {
         let mut result = result.map_err(|error| map_store_error(error, "account group"))?;
-        if let Some(record) = result.record.as_mut() {
-            self.enrich_records(std::slice::from_mut(record)).await?;
-        }
         publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
+        if let Some(record) = result.record.as_mut()
+            && let Err(error) = self.enrich_records(std::slice::from_mut(record)).await
+        {
+            tracing::warn!(group_id = %result.id.as_str(), error = %error, "committed account group runtime projection is unavailable");
+            // record 可缺省；不要用未完成的容量投影冒充有效展示数据。
+            result.record = None;
+        }
         Ok(result)
     }
 }

@@ -4,7 +4,7 @@ use std::{fmt, sync::Arc};
 
 use futures::future::BoxFuture;
 
-use crate::routing::{ConfigRevision, ContributedModelAlias};
+use crate::routing::{ConfigRevision, ContributedModel, ContributedModelAlias};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ExtensionSetId(String);
@@ -34,6 +34,10 @@ pub trait ExtensionSetLease: Send + Sync {
 
     /// 与集合一起冻结的目录事实，读取不调用插件进程
     fn model_aliases(&self) -> &[ContributedModelAlias] {
+        &[]
+    }
+
+    fn models(&self) -> &[ContributedModel] {
         &[]
     }
 
@@ -70,6 +74,11 @@ impl ExtensionSetReference {
     #[must_use]
     pub fn model_aliases(&self) -> &[ContributedModelAlias] {
         self.lease.model_aliases()
+    }
+
+    #[must_use]
+    pub fn models(&self) -> &[ContributedModel] {
+        self.lease.models()
     }
 }
 

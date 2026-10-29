@@ -32,7 +32,7 @@ use gateway_core::routing::extensions::ExtensionSetLease;
 use gateway_core::routing::extensions::ExtensionSetReference;
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 use tower::ServiceExt as _;
 
@@ -41,6 +41,7 @@ use super::super::AdminTestFixture;
 #[derive(Debug, Clone, Copy)]
 enum ModelReply {
     Complete,
+    SessionError,
     PendingResponse,
     PendingBody,
 }
@@ -50,6 +51,7 @@ struct ModelExecution {
     cancellation: Mutex<Option<CancellationToken>>,
     entered: Arc<tokio::sync::Notify>,
     closed: Arc<AtomicBool>,
+    body_control: Arc<ModelBodyControl>,
 }
 
 impl ModelExecution {
@@ -59,6 +61,7 @@ impl ModelExecution {
             cancellation: Mutex::new(None),
             entered: Arc::default(),
             closed: Arc::default(),
+            body_control: Arc::default(),
         })
     }
 }
@@ -92,6 +95,7 @@ impl ExecutionService for ModelExecution {
                 reply: self.reply,
                 entered: self.entered.clone(),
                 closed: self.closed.clone(),
+                body_control: self.body_control.clone(),
             }),
             ExtensionSetReference::new(
                 ExtensionSetId::new("model-bridge-test".into()).unwrap(),
@@ -122,6 +126,7 @@ struct ModelMiddleware {
     reply: ModelReply,
     entered: Arc<tokio::sync::Notify>,
     closed: Arc<AtomicBool>,
+    body_control: Arc<ModelBodyControl>,
 }
 
 impl MiddlewarePlan for ModelMiddleware {
@@ -152,12 +157,19 @@ impl MiddlewarePlan for ModelMiddleware {
         let reply = self.reply;
         let closed = self.closed.clone();
         let entered = self.entered.clone();
+        let body_control = self.body_control.clone();
         Box::pin(async move {
             entered.notify_one();
             if matches!(reply, ModelReply::PendingResponse) {
                 return futures::future::pending().await;
             }
-            let (bytes, framing, terminal) = if matches!(reply, ModelReply::PendingBody) {
+            let (bytes, framing, terminal) = if matches!(reply, ModelReply::SessionError) {
+                (
+                    "{\"code\":40101,\"message\":\"plugin error\",\"data\":null}",
+                    MiddlewareFraming::JsonDocument,
+                    true,
+                )
+            } else if matches!(reply, ModelReply::PendingBody) {
                 (
                     "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_bridge\",\"object\":\"response\",\"status\":\"in_progress\",\"output\":[]}}\n\n",
                     MiddlewareFraming::SseEvent,
@@ -172,32 +184,67 @@ impl MiddlewarePlan for ModelMiddleware {
             };
             Ok(MiddlewareResponse::new(
                 "openai".into(),
-                200,
+                if matches!(reply, ModelReply::SessionError) {
+                    401
+                } else {
+                    200
+                },
                 vec![
                     MiddlewareHeader::new("set-cookie", "fixture=value".into()),
                     MiddlewareHeader::new("www-authenticate", "Bearer".into()),
                     MiddlewareHeader::new("x-plugin-response", "complete".into()),
+                    MiddlewareHeader::new("x-cpr-plugin-response", "untrusted".into()),
                 ],
                 Box::new(ModelBody {
                     frame: Some(MiddlewareFrame::new(bytes.into(), framing, terminal)),
                     pending: !terminal,
                     closed,
+                    control: body_control,
                 }),
             ))
         })
     }
 }
 
+#[derive(Debug, Default)]
+struct ModelBodyControl {
+    delayed_frame: AtomicBool,
+    pending_reads: AtomicUsize,
+    waiting: tokio::sync::Notify,
+    release: tokio::sync::Notify,
+}
+
 struct ModelBody {
     frame: Option<MiddlewareFrame>,
     pending: bool,
     closed: Arc<AtomicBool>,
+    control: Arc<ModelBodyControl>,
 }
 
 impl MiddlewareBody for ModelBody {
     fn next_frame(&mut self) -> BoxFuture<'_, Result<Option<MiddlewareFrame>, MiddlewareError>> {
+        let frame = self.frame.take();
+        let delayed_frame = if frame.is_none() && self.pending {
+            self.control.pending_reads.fetch_add(1, Ordering::SeqCst);
+            self.control.waiting.notify_one();
+            // 模拟读取在 future 创建时已经消费事件，取消后不能重新取得原帧
+            self.control.delayed_frame.swap(false, Ordering::SeqCst).then(|| {
+                MiddlewareFrame::new(
+                    "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_bridge\",\"object\":\"response\",\"status\":\"completed\",\"output\":[]}}\n\n".into(),
+                    MiddlewareFraming::SseEvent,
+                    true,
+                )
+            })
+        } else {
+            None
+        };
         Box::pin(async move {
-            if let Some(frame) = self.frame.take() {
+            if let Some(frame) = frame {
+                return Ok(Some(frame));
+            }
+            if let Some(frame) = delayed_frame {
+                self.control.release.notified().await;
+                self.pending = false;
                 return Ok(Some(frame));
             }
             if self.pending {
@@ -245,6 +292,7 @@ async fn management_calls_and_callbacks_preserve_headers_and_override_defaults()
                 .header("set-cookie", "first=1")
                 .header("set-cookie", "second=2")
                 .header("content-security-policy", "default-src 'self'")
+                .header("x-cpr-plugin-response", "untrusted")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -273,6 +321,15 @@ async fn management_calls_and_callbacks_preserve_headers_and_override_defaults()
             response.headers()["content-security-policy"],
             "default-src 'self'"
         );
+        assert_eq!(response.headers()["x-cpr-plugin-response"], "1");
+        assert_eq!(
+            response
+                .headers()
+                .get_all("x-cpr-plugin-response")
+                .iter()
+                .count(),
+            1
+        );
     }
 }
 
@@ -288,6 +345,7 @@ async fn model_bridge_preserves_complete_request_and_response_headers() {
     assert_eq!(response.headers()["set-cookie"], "fixture=value");
     assert_eq!(response.headers()["www-authenticate"], "Bearer");
     assert_eq!(response.headers()["x-plugin-response"], "complete");
+    assert_eq!(response.headers()["x-cpr-plugin-response"], "1");
     assert_eq!(response.headers()["cache-control"], "no-store");
     let body = axum::body::to_bytes(response.into_body(), 4096)
         .await
@@ -295,6 +353,40 @@ async fn model_bridge_preserves_complete_request_and_response_headers() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&body).unwrap()["id"],
         "resp_bridge"
+    );
+}
+
+#[tokio::test]
+async fn model_bridge_distinguishes_host_authentication_from_plugin_session_errors() {
+    let fixture = published_fixture().await;
+    let router = crate::openai::api_router_with_admin_and_execution(
+        fixture.services,
+        ModelExecution::new(ModelReply::SessionError),
+    );
+    let mut unauthenticated = model_request(false);
+    unauthenticated.headers_mut().remove("cookie");
+    unauthenticated.headers_mut().remove("authorization");
+    unauthenticated.headers_mut().remove("x-api-key");
+    let response = router.clone().oneshot(unauthenticated).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert!(!response.headers().contains_key("x-cpr-plugin-response"));
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["code"],
+        40101
+    );
+
+    let response = router.oneshot(model_request(false)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response.headers()["x-cpr-plugin-response"], "1");
+    let body = axum::body::to_bytes(response.into_body(), 4096)
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&body).unwrap()["code"],
+        40101
     );
 }
 
@@ -354,6 +446,52 @@ async fn model_bridge_revokes_and_closes_a_pending_stream() {
             .as_ref()
             .unwrap()
             .is_cancelled()
+    );
+    assert!(execution.closed.load(Ordering::SeqCst));
+}
+
+#[tokio::test(start_paused = true)]
+async fn model_bridge_authorization_rechecks_preserve_the_pending_frame_read() {
+    let fixture = published_fixture().await;
+    let execution = ModelExecution::new(ModelReply::PendingBody);
+    execution
+        .body_control
+        .delayed_frame
+        .store(true, Ordering::SeqCst);
+    let response =
+        crate::openai::api_router_with_admin_and_execution(fixture.services, execution.clone())
+            .oneshot(model_request(true))
+            .await
+            .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = tokio::spawn(axum::body::to_bytes(response.into_body(), 4096));
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        execution.body_control.waiting.notified(),
+    )
+    .await
+    .expect("第二帧读取已开始");
+    for _ in 0..3 {
+        tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(
+            execution.body_control.pending_reads.load(Ordering::SeqCst),
+            1
+        );
+        assert!(!body.is_finished());
+    }
+    execution.body_control.release.notify_one();
+    let body = tokio::time::timeout(std::time::Duration::from_secs(5), body)
+        .await
+        .expect("原先等待的终态帧应完成交付")
+        .unwrap()
+        .unwrap();
+    let body = std::str::from_utf8(&body).unwrap();
+    assert_eq!(body.matches("event: response.completed").count(), 1);
+    assert!(!body.contains("response.failed"));
+    assert_eq!(
+        execution.body_control.pending_reads.load(Ordering::SeqCst),
+        1
     );
     assert!(execution.closed.load(Ordering::SeqCst));
 }

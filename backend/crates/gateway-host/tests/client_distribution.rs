@@ -7,6 +7,7 @@ use gateway_admin::model::client_distribution::{
 use gateway_host::client_distribution::{
     ClientDistributionResolutionErrorKind, complete_with_official_fallback, parse_store_packages,
 };
+use std::time::Duration;
 
 #[test]
 fn parser_selects_latest_valid_package_for_each_architecture() {
@@ -114,10 +115,6 @@ async fn official_package_size_failure_keeps_metadata_optional() {
     for (route, response) in [
         ("/missing.msix", ResponseTemplate::new(404)),
         ("/empty.msix", ResponseTemplate::new(200)),
-        (
-            "/slow.msix",
-            ResponseTemplate::new(200).set_delay(std::time::Duration::from_secs(4)),
-        ),
     ] {
         Mock::given(method("HEAD"))
             .and(path(route))
@@ -127,19 +124,57 @@ async fn official_package_size_failure_keeps_metadata_optional() {
             .await;
     }
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
-    for route in ["/missing.msix", "/empty.msix", "/slow.msix"] {
+    for route in ["/missing.msix", "/empty.msix"] {
         assert_eq!(
-            tokio::time::timeout(
-                std::time::Duration::from_millis(3500),
-                gateway_host::client_distribution::official_package_size(
-                    &client,
-                    &format!("{}{route}", server.uri()),
-                ),
+            gateway_host::client_distribution::official_package_size(
+                &client,
+                &format!("{}{route}", server.uri()),
             )
-            .await
-            .expect("metadata timeout must not wait for the slow response"),
+            .await,
             None
         );
     }
     server.verify().await;
+}
+
+#[tokio::test]
+async fn official_package_size_timeout_keeps_metadata_optional() {
+    use tokio::io::AsyncReadExt as _;
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/slow.msix", listener.local_addr().unwrap());
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let mut request = tokio::spawn(async move {
+        started_tx.send(tokio::time::Instant::now()).unwrap();
+        gateway_host::client_distribution::official_package_size(&client, &url).await
+    });
+    let _stream = tokio::time::timeout(Duration::from_secs(2), async {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            head.push(stream.read_u8().await.unwrap());
+        }
+        assert!(head.starts_with(b"HEAD /slow.msix HTTP/1.1\r\n"));
+        stream
+    })
+    .await
+    .expect("metadata request must reach the endpoint");
+    let started = started_rx.await.unwrap();
+
+    // 先完成真实连接再推进超时，避免暂停时钟抢跑网络 I/O
+    tokio::time::pause();
+    assert!(
+        tokio::time::timeout_at(started + Duration::from_secs(2), &mut request)
+            .await
+            .is_err(),
+        "the three-second budget is still available"
+    );
+    assert_eq!(
+        tokio::time::timeout_at(started + Duration::from_millis(3_100), request)
+            .await
+            .expect("metadata request must stop at its three-second deadline")
+            .unwrap(),
+        None
+    );
 }

@@ -8,6 +8,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use gateway_core::diagnostics::MAX_TRACE_SNAPSHOT_BYTES;
 use gateway_core::engine::{
     AttemptRecord as CoreAttemptRecord, ExecutionStore, IntermediateFailure,
     ModelRequestFinalization as CoreModelRequestFinalization, ModelRequestId,
@@ -247,7 +248,6 @@ pub struct ModelRequestFinalization {
     pub http_version: Option<String>,
     pub websocket_pool: Option<String>,
     pub service_tier: Option<String>,
-    pub upstream_response_model: Option<String>,
     pub provider_metadata_json: Option<Value>,
     pub diagnostic_trace_json: Option<Value>,
     pub error_kind: Option<String>,
@@ -313,12 +313,6 @@ impl ModelRequestFinalization {
                 return Err(invalid("service tier is invalid"));
             }
         }
-        if let Some(model) = self.upstream_response_model.as_deref() {
-            require_nonempty(ENTITY, "upstream_response_model", model)?;
-            if model.len() > 256 || model.chars().any(char::is_control) {
-                return Err(invalid("upstream response model is invalid"));
-            }
-        }
         if self
             .provider_metadata_json
             .as_ref()
@@ -326,13 +320,11 @@ impl ModelRequestFinalization {
         {
             return Err(invalid("provider observation must be a JSON object"));
         }
-        if self
-            .diagnostic_trace_json
-            .as_ref()
-            .is_some_and(|trace| !trace.is_object() || trace.to_string().len() > 64 * 1024)
-        {
+        if self.diagnostic_trace_json.as_ref().is_some_and(|trace| {
+            !trace.is_object() || trace.to_string().len() > MAX_TRACE_SNAPSHOT_BYTES
+        }) {
             return Err(invalid(
-                "diagnostic trace must be a JSON object within 64 KiB",
+                "diagnostic trace must be a JSON object within the snapshot size limit",
             ));
         }
         validate_optional_stable_reason(
@@ -1181,7 +1173,6 @@ impl ExecutionStore for PgExecutionStore {
                 http_version: finalization.http_version,
                 websocket_pool: finalization.websocket_pool,
                 service_tier: finalization.service_tier,
-                upstream_response_model: finalization.upstream_response_model,
                 provider_metadata_json,
                 diagnostic_trace_json: finalization
                     .diagnostic_trace_json

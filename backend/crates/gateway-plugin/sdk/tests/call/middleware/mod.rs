@@ -1,5 +1,7 @@
 //! 验证中间件挂载、正文模式、增量头部与二进制帧的线协议合同
 
+mod outbound;
+
 use gateway_plugin_sdk::{
     Capability, Stage,
     call::middleware::{
@@ -10,6 +12,16 @@ use gateway_plugin_sdk::{
     },
 };
 use serde_json::json;
+
+#[test]
+fn settings_replacement_preserves_explicit_null_for_host_validation() {
+    let preserved: MiddlewareNextRequest =
+        serde_json::from_value(json!({"body":"preserve"})).unwrap();
+    assert!(preserved.settings.is_none());
+    let replaced: MiddlewareNextRequest =
+        serde_json::from_value(json!({"body":"preserve", "settings":null})).unwrap();
+    assert_eq!(replaced.settings, Some(serde_json::Value::Null));
+}
 
 #[test]
 fn middleware_capability_and_mounts_have_one_stable_wire_vocabulary() {

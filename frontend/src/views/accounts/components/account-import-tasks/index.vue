@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { AccountImportTask, AccountImportTaskDetail } from '@/api'
+
 import { ZButton, ZDialog, ZEmpty, ZIconButton, ZPopover, ZSelect } from '@codex-proxy/ui'
 import { CircleAlert, ListTodo } from '@lucide/vue'
 import { computed, shallowRef, useId, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { taskLabel } from './presenter'
 import TaskDetail from './TaskDetail.vue'
 
@@ -14,14 +16,21 @@ const props = defineProps<{
   stopping: boolean
   error: string
 }>()
-const emit = defineEmits<{ select: [id: string], refresh: [], stop: [], viewAccounts: [] }>()
+
+const emit = defineEmits<{ select: [id: string], stop: [], viewAccounts: [] }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const open = defineModel<boolean>({ required: true })
 const retentionOpen = shallowRef(false)
 const retentionId = useId()
 const taskOptions = computed(() => props.tasks.map(task => ({
   value: task.taskId,
   label: task.createdAtDisplay,
-  description: `${task.total} 个条目 · ${taskLabel(task)}`,
+  description: t('accounts.importTasks.items', {
+    total: task.total,
+    value: taskLabel(task),
+  }),
 })))
 
 watch(open, () => {
@@ -39,34 +48,28 @@ function handleRetentionKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <ZDialog v-model="open" title="导入任务" description="关闭页面后继续导入，再次打开即可查看进度" width="48rem">
-    <div v-if="error" role="alert" class="mb-4 flex items-center justify-between gap-3 rounded-cp bg-cp-warning-container p-3 text-xs text-cp-warning-on-container">
-      <span>进度暂未更新：{{ error.replace(/[。.]\s*$/u, '') }}，恢复连接后将自动刷新</span>
-      <ZButton size="small" :loading="loading" @click="emit('refresh')">
-        重试
-      </ZButton>
-    </div>
-    <ZEmpty v-if="!tasks.length" class="min-h-[min(20rem,50dvh)] content-center" :icon="ListTodo" :title="loading ? '正在读取导入任务' : '暂无导入任务'" description="新建一次账号导入，即可在这里查看逐条入库结果" />
-    <div v-else class="min-h-[min(20rem,50dvh)] min-w-0">
+  <ZDialog v-model="open" :title="t('accounts.filters.importTasks')" :description="t('accounts.importTasks.description')" width="48rem">
+    <ZEmpty v-if="!tasks.length && !error" class="min-h-[min(20rem,50dvh)] content-center" :icon="ListTodo" :title="loading ? t('accounts.importTasks.loadingImportTasks') : t('accounts.importTasks.noImportTasks')" :description="t('accounts.importTasks.empty')" />
+    <div v-else-if="tasks.length" class="min-h-[min(20rem,50dvh)] min-w-0">
       <div v-if="tasks.length > 1" class="mb-5">
         <ZSelect
           :model-value="selectedId"
           :options="taskOptions"
           size="small"
-          aria-label="切换导入任务"
+          :aria-label="t('accounts.importTasks.switchImportTasks')"
           class="w-full min-w-0 sm:max-w-96"
           @update:model-value="emit('select', $event ?? selectedId)"
         />
       </div>
       <TaskDetail v-if="detail" :task="detail" :stopping="stopping" @stop="emit('stop')" @view-accounts="emit('viewAccounts')" />
-      <ZEmpty v-else class="min-h-[min(16rem,40dvh)] content-center" :title="loading ? '正在读取条目结果' : '请选择一个任务'" surface="none" />
+      <ZEmpty v-else-if="!error" class="min-h-[min(16rem,40dvh)] content-center" :title="loading ? t('accounts.importTasks.loadingItemResults') : t('accounts.importTasks.selectTask')" surface="none" />
     </div>
     <template #footer>
       <div class="flex w-full flex-wrap items-center justify-between gap-3">
         <ZPopover v-model="retentionOpen" trigger="hover-click" placement="top-start" :hover-delay="240">
           <template #reference>
             <ZIconButton
-              aria-label="任务保留说明"
+              :aria-label="t('accounts.importTasks.taskRetentionInstructions')"
               size="small"
               :aria-expanded="retentionOpen"
               :aria-describedby="retentionOpen ? retentionId : undefined"
@@ -77,15 +80,15 @@ function handleRetentionKeydown(event: KeyboardEvent) {
           </template>
           <div :id="retentionId" role="tooltip" class="grid w-72 max-w-[calc(100vw-2rem)] gap-2 p-4 text-cp-xs leading-relaxed text-cp-text-secondary">
             <p class="m-0">
-              结果保留 1 小时
+              {{ t('accounts.importTasks.resultsRetainedForHour') }}
             </p>
             <p class="m-0">
-              服务重启后任务记录消失，已入库账号保留
+              {{ t('accounts.importTasks.retentionHelp') }}
             </p>
           </div>
         </ZPopover>
         <ZButton @click="open = false">
-          关闭
+          {{ t('common.actions.close') }}
         </ZButton>
       </div>
     </template>

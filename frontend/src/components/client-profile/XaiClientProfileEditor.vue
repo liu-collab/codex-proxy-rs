@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import type { XaiClientProfilePreview, XaiClientProfileSelection } from '@/api/modules/settings/profiles'
-import { ZButton, ZEmpty, ZFormItem, ZInput, ZSegmented, ZSelect } from '@codex-proxy/ui'
+
+import { ZFormItem, ZInput, ZSegmented, ZSelect } from '@codex-proxy/ui'
 import { computed, onMounted, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { getXaiClientProfileOptions, previewXaiClientProfile } from '@/api/modules/settings/profiles'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import ClientProfilePreviewPanel from './ClientProfilePreviewPanel.vue'
 
@@ -11,22 +14,38 @@ const props = withDefaults(defineProps<{ active?: boolean, disabled?: boolean, a
   disabled: false,
   allowInherit: false,
 })
+
+const { t } = useI18n({ useScope: 'global' })
+
 const model = defineModel<XaiClientProfileSelection | null>({ required: true })
 const globalConfiguration = shallowRef<XaiClientProfileSelection>()
 const preview = shallowRef<XaiClientProfilePreview>()
 const loadError = shallowRef('')
-const previewError = shallowRef('')
 const previewing = shallowRef(false)
 const needsVersionInput = computed(() => model.value?.versionMode === 'fixed' && !model.value.clientVersion)
-const fields = [
-  { key: 'clientIdentifier', label: '客户端标识' },
-  { key: 'clientMode', label: '运行模式' },
-  { key: 'targetOs', label: '操作系统' },
-  { key: 'targetArch', label: 'CPU 架构' },
-] as const
+const fields = computed(() => ([
+  {
+    key: 'clientIdentifier',
+    label: t('settings.clientProfile.clientId'),
+  },
+  {
+    key: 'clientMode',
+    label: t('settings.clientProfile.operatingMode'),
+  },
+  {
+    key: 'targetOs',
+    label: t('settings.clientProfile.operatingSystem'),
+  },
+  {
+    key: 'targetArch',
+    label: t('settings.clientProfile.cpuArchitecture'),
+  },
+] as const))
 
 const source = computed({
-  get: () => model.value === null ? 'global' : 'independent',
+  get: () => model.value === null
+    ? 'global'
+    : 'independent',
   set: (value: string) => {
     if (value === 'global')
       model.value = null
@@ -40,16 +59,26 @@ const versionMode = computed({
     if (model.value) {
       model.value = {
         ...model.value,
-        versionMode: value === 'fixed' ? 'fixed' : 'latest',
-        clientVersion: value === 'fixed' ? preview.value?.clientVersion ?? null : null,
+        versionMode: value === 'fixed'
+          ? 'fixed'
+          : 'latest',
+        clientVersion: value === 'fixed'
+          ? preview.value?.clientVersion ?? null
+          : null,
       }
     }
   },
 })
 
 function updateField(key: keyof XaiClientProfileSelection, value: string) {
-  if (model.value)
-    model.value = { ...model.value, [key]: key === 'clientVersion' ? value || null : value }
+  if (model.value) {
+    model.value = {
+      ...model.value,
+      [key]: key === 'clientVersion'
+        ? value || null
+        : value,
+    }
+  }
 }
 
 async function load() {
@@ -62,12 +91,14 @@ async function load() {
   }
 }
 
-watch([model, () => props.active], ([configuration, active], _, onCleanup) => {
+watch([
+  model,
+  () => props.active,
+], ([configuration, active], _, onCleanup) => {
   if (!active)
     return
   let cancelled = false
   preview.value = undefined
-  previewError.value = ''
   previewing.value = !needsVersionInput.value
   if (needsVersionInput.value)
     return
@@ -78,8 +109,12 @@ watch([model, () => props.active], ([configuration, active], _, onCleanup) => {
         preview.value = result
     }
     catch (error) {
-      if (!cancelled)
-        previewError.value = errorMessage(error)
+      if (!cancelled) {
+        ZNotification.error({
+          message: errorMessage(error),
+          deduplicate: true,
+        })
+      }
     }
     finally {
       if (!cancelled)
@@ -100,38 +135,31 @@ onMounted(() => props.allowInherit && void load())
     <div v-if="allowInherit" class="flex flex-wrap items-center justify-between gap-3">
       <ZSegmented
         v-model="source"
-        aria-label="xAI 客户端身份来源"
+        :aria-label="t('settings.clientProfile.xaiClientIdentitySource')"
         class="shrink-0"
-        :options="[{ label: '全局配置', value: 'global' }, { label: '独立配置', value: 'independent' }]"
+        :options="[{ label: t('settings.clientProfile.globalConfiguration'), value: 'global' }, { label: t('settings.clientProfile.customConfiguration'), value: 'independent' }]"
         :disabled="disabled || !globalConfiguration"
       />
       <slot name="source-extra" />
     </div>
-    <ZEmpty v-if="loadError" title="全局配置加载失败" :description="loadError" size="small" surface="none" role="alert">
-      <template #action>
-        <ZButton size="small" @click="load">
-          重试
-        </ZButton>
-      </template>
-    </ZEmpty>
     <template v-if="model">
       <div class="grid gap-4 sm:grid-cols-2">
-        <ZFormItem label="客户端类型">
+        <ZFormItem :label="t('settings.clientProfile.clientType')">
           <ZInput model-value="Grok CLI" readonly :disabled="disabled" />
         </ZFormItem>
-        <ZFormItem label="版本策略">
-          <ZSelect v-model="versionMode" class="w-full" :disabled="disabled" :options="[{ label: '跟随最新版本', value: 'latest' }, { label: '自定义版本', value: 'fixed' }]" />
+        <ZFormItem :label="t('settings.clientProfile.versionStrategy')">
+          <ZSelect v-model="versionMode" class="w-full" :disabled="disabled" :options="[{ label: t('settings.clientProfile.followLatestVersion'), value: 'latest' }, { label: t('settings.clientProfile.customVersion'), value: 'fixed' }]" />
         </ZFormItem>
       </div>
       <div v-if="model.versionMode === 'fixed'" class="grid gap-4 sm:grid-cols-2">
-        <ZFormItem label="Grok CLI 版本" required>
-          <ZInput :model-value="model.clientVersion ?? ''" :disabled="disabled" placeholder="例如：1.0.13" @update:model-value="updateField('clientVersion', $event)" />
+        <ZFormItem :label="t('settings.clientProfile.grokCliVersion')" required>
+          <ZInput :model-value="model.clientVersion ?? ''" :disabled="disabled" :placeholder="t('settings.clientProfile.forExample')" @update:model-value="updateField('clientVersion', $event)" />
         </ZFormItem>
         <ZFormItem v-for="field in fields" :key="field.key" :label="field.label" required>
           <ZInput :model-value="model[field.key]" :disabled="disabled" @update:model-value="updateField(field.key, $event)" />
         </ZFormItem>
       </div>
     </template>
-    <ClientProfilePreviewPanel v-if="!loadError" :preview="preview" :previewing="previewing" :needs-version-input="needsVersionInput" :error="previewError" />
+    <ClientProfilePreviewPanel v-if="!loadError" :preview="preview" :previewing="previewing" :needs-version-input="needsVersionInput" />
   </div>
 </template>

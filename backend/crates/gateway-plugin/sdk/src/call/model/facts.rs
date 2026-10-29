@@ -72,7 +72,6 @@ pub struct ResponseObservation {
     pub status_code: Option<u16>,
     pub request_id: Option<String>,
     pub service_tier: Option<String>,
-    pub upstream_response_model: Option<String>,
     #[serde(default)]
     pub timings: ResponseTimings,
     #[serde(default)]
@@ -119,7 +118,6 @@ impl ResponseObservation {
             status_code: None,
             request_id: None,
             service_tier: None,
-            upstream_response_model: None,
             timings: ResponseTimings::default(),
             client_headers: Vec::new(),
             provider_metadata: None,

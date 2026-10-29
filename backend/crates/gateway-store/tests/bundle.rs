@@ -11,6 +11,8 @@ use gateway_store::StoreConfig;
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 
+use crate::support::config_connection;
+
 #[tokio::test]
 async fn inspection_bundle_does_not_migrate_and_rejects_business_writes() {
     let (Some(database), Some(redis)) = (
@@ -227,13 +229,4 @@ async fn store_bundle_authenticates_postgres_password_with_percent_sequences() {
             .iter()
             .all(|state| *state == gateway_core::health::HealthState::Healthy)
     );
-}
-
-fn config_connection(mut url: url::Url) -> serde_json::Value {
-    let password = percent_encoding::percent_decode_str(url.password().unwrap())
-        .decode_utf8()
-        .expect("UTF-8 fixture password")
-        .into_owned();
-    url.set_password(None).unwrap();
-    json!({"url": url.as_str(), "password": password})
 }

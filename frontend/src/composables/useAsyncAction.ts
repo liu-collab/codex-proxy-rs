@@ -1,7 +1,8 @@
-import { ZNotification } from '@codex-proxy/ui'
-
 import { shallowRef } from 'vue'
 import { ApiError } from '@/api/request'
+
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, withMinimumDuration } from '@/utils/operation'
 
 type MaybePromise<T> = T | Promise<T>
@@ -18,7 +19,7 @@ function resolveErrorText(error: unknown, errorText: string | false | undefined)
     return ''
   }
 
-  return errorMessage(error, errorText || '操作失败')
+  return errorMessage(error, errorText || t('common.errors.operation'))
 }
 
 export function useAsyncAction(defaults: AsyncActionRunOptions = {}) {
@@ -30,7 +31,10 @@ export function useAsyncAction(defaults: AsyncActionRunOptions = {}) {
     }
 
     loading.value = true
-    const options = { ...defaults, ...overrides }
+    const options = {
+      ...defaults,
+      ...overrides,
+    }
     try {
       const execute = async () => task()
       return options.minimumMs === undefined

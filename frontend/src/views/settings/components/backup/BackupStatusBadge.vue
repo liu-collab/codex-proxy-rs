@@ -3,6 +3,8 @@ import type { BackupStatus } from '@/api'
 
 import { computed } from 'vue'
 
+import { useI18n } from 'vue-i18n'
+
 const props = withDefaults(
   defineProps<{
     status: BackupStatus
@@ -13,14 +15,16 @@ const props = withDefaults(
   },
 )
 
-const STATUS_LABELS: Record<BackupStatus, string> = {
-  queued: '排队中',
-  dumping: '导出中',
-  uploading: '上传中',
-  completed: '已完成',
-  failed: '失败',
-  deleting: '删除中',
-}
+const { t } = useI18n({ useScope: 'global' })
+
+const STATUS_LABELS = computed<Record<BackupStatus, string>>(() => ({
+  queued: t('settings.backup.status.queuing'),
+  dumping: t('settings.backup.status.exporting'),
+  uploading: t('settings.backup.status.uploading'),
+  completed: t('common.status.completed'),
+  failed: t('common.status.failed'),
+  deleting: t('settings.backup.status.deleting'),
+}))
 
 const STATUS_TONES: Record<BackupStatus, 'success' | 'danger' | 'warning' | 'info' | 'neutral'> = {
   queued: 'info',
@@ -32,7 +36,7 @@ const STATUS_TONES: Record<BackupStatus, 'success' | 'danger' | 'warning' | 'inf
 }
 
 const tone = computed(() => STATUS_TONES[props.status])
-const label = computed(() => STATUS_LABELS[props.status] || props.status)
+const label = computed(() => STATUS_LABELS.value[props.status] || props.status)
 
 const textClass = computed(() => {
   switch (tone.value) {

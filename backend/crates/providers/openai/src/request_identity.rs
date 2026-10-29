@@ -23,6 +23,7 @@ pub(crate) fn follows_session_with_headers(
     gateway_protocol::openai::codex_responses_request_semantics_with_turn_metadata(
         body,
         metadata.or_else(|| context.get("turn_metadata").and_then(Value::as_str)),
+        None,
     )
     .subagent_kind
     .is_some()

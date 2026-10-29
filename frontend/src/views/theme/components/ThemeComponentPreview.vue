@@ -16,23 +16,29 @@ import {
   Trash2,
   TriangleAlert,
 } from '@lucide/vue'
-import { shallowRef } from 'vue'
+
+import { computed, shallowRef } from 'vue'
+
+import { useI18n } from 'vue-i18n'
+import { formatProviderLabel } from '@/utils/providers'
+
+const { t } = useI18n({ useScope: 'global' })
 
 interface PreviewTableRow {
   id: string
   account: string
   provider: string
-  status: '正常' | '限流' | '停用' | '异常'
+  status: 'active' | 'rate_limited' | 'disabled' | 'error'
   requests: string
   latency: string
   updatedAt: string
 }
 
-const search = shallowRef('中继账号')
-const notes = shallowRef('优先保持当前账号，额度耗尽后再切换')
+// 示例文案随语言变化，用户编辑后保留输入内容
+const search = shallowRef<string>()
+const notes = shallowRef<string>()
 const brandColor = shallowRef('#5983F4')
 const invalidKey = shallowRef('sk-invalid')
-const disabledText = shallowRef('不可编辑')
 const provider = shallowRef('openai')
 const view = shallowRef('all')
 const notifications = shallowRef(true)
@@ -43,16 +49,34 @@ const strategy = shallowRef('balanced')
 const controlHeight = shallowRef(38)
 const syncTagVisible = shallowRef(true)
 
-const providerOptions = [
-  { label: 'OpenAI', value: 'openai' },
-  { label: 'xAI', value: 'xai' },
-  { label: '全部平台', value: 'all' },
-]
-const viewOptions = [
-  { label: '全部', value: 'all' },
-  { label: '正常', value: 'active' },
-  { label: '受限', value: 'limited' },
-]
+const providerOptions = computed(() => ([
+  {
+    label: formatProviderLabel('openai'),
+    value: 'openai',
+  },
+  {
+    label: formatProviderLabel('xai'),
+    value: 'xai',
+  },
+  {
+    label: t('appearance.preview.components.allPlatforms'),
+    value: 'all',
+  },
+]))
+const viewOptions = computed(() => ([
+  {
+    label: t('common.values.all'),
+    value: 'all',
+  },
+  {
+    label: t('common.status.healthy'),
+    value: 'active',
+  },
+  {
+    label: t('appearance.preview.components.restricted'),
+    value: 'limited',
+  },
+]))
 const themeSwatches = [
   { label: 'Container', className: 'bg-cp-bg-container' },
   { label: 'Fill Alter', className: 'bg-cp-fill-alter' },
@@ -62,39 +86,136 @@ const themeSwatches = [
   { label: 'Warning', className: 'bg-cp-warning' },
   { label: 'Error', className: 'bg-cp-error' },
 ]
-const progressItems = [
-  { label: '账号可用率', value: '94%', width: '94%' },
-  { label: '今日额度', value: '68%', width: '68%' },
-  { label: '批量导入', value: '12 / 20', width: '60%' },
-]
-const tableColumns = defineTableColumns<PreviewTableRow>([
-  { key: 'account', label: '账号', kind: 'identity', size: '3xl' },
-  { key: 'provider', label: '平台', kind: 'status', size: 'md' },
-  { key: 'status', label: '状态', kind: 'status', size: 'md' },
-  { key: 'requests', label: '今日请求', kind: 'numeric', size: 'lg' },
-  { key: 'latency', label: '首字延迟', kind: 'numeric', size: 'lg' },
-  { key: 'updatedAt', label: '最近使用', kind: 'datetime', size: 'lg' },
-])
-const tableRows: PreviewTableRow[] = [
-  { id: 'relay', account: 'relay@example.com', provider: 'OpenAI', status: '正常', requests: '12,840', latency: '228 ms', updatedAt: '刚刚' },
-  { id: 'gateway', account: 'gateway@example.com', provider: 'xAI', status: '正常', requests: '9,462', latency: '316 ms', updatedAt: '2 分钟前' },
-  { id: 'quota', account: 'quota@example.com', provider: 'OpenAI', status: '限流', requests: '7,318', latency: '486 ms', updatedAt: '5 分钟前' },
-  { id: 'batch', account: 'batch@example.com', provider: 'OpenAI', status: '正常', requests: '5,904', latency: '264 ms', updatedAt: '8 分钟前' },
-  { id: 'fallback', account: 'fallback@example.com', provider: 'xAI', status: '异常', requests: '3,172', latency: '—', updatedAt: '12 分钟前' },
-  { id: 'disabled', account: 'disabled@example.com', provider: 'OpenAI', status: '停用', requests: '0', latency: '—', updatedAt: '2 小时前' },
-]
+const progressItems = computed(() => ([
+  {
+    label: t('appearance.preview.components.accountAvailability'),
+    value: '94%',
+    width: '94%',
+  },
+  {
+    label: t('appearance.preview.components.todaySQuota'),
+    value: '68%',
+    width: '68%',
+  },
+  {
+    label: t('appearance.preview.components.batchImport'),
+    value: '12 / 20',
+    width: '60%',
+  },
+]))
+const tableColumns = computed(() => (defineTableColumns<PreviewTableRow>([
+  {
+    key: 'account',
+    label: t('accounts.account'),
+    kind: 'identity',
+    size: '3xl',
+  },
+  {
+    key: 'provider',
+    label: t('appearance.preview.components.platform'),
+    kind: 'status',
+    size: 'md',
+  },
+  {
+    key: 'status',
+    label: t('common.fields.status'),
+    kind: 'status',
+    size: 'md',
+  },
+  {
+    key: 'requests',
+    label: t('appearance.preview.components.requestToday'),
+    kind: 'numeric',
+    size: 'lg',
+  },
+  {
+    key: 'latency',
+    label: t('usage.firstTokenLatency'),
+    kind: 'numeric',
+    size: 'lg',
+  },
+  {
+    key: 'updatedAt',
+    label: t('appearance.preview.components.recentlyUsed'),
+    kind: 'datetime',
+    size: 'lg',
+  },
+])))
+const tableRows = computed<PreviewTableRow[]>(() => ([
+  {
+    id: 'relay',
+    account: 'relay@example.com',
+    provider: formatProviderLabel('openai'),
+    status: 'active',
+    requests: '12,840',
+    latency: '228 ms',
+    updatedAt: t('appearance.preview.components.justNow'),
+  },
+  {
+    id: 'gateway',
+    account: 'gateway@example.com',
+    provider: formatProviderLabel('xai'),
+    status: 'active',
+    requests: '9,462',
+    latency: '316 ms',
+    updatedAt: t('common.time.minutesAgo', { count: 2 }),
+  },
+  {
+    id: 'quota',
+    account: 'quota@example.com',
+    provider: formatProviderLabel('openai'),
+    status: 'rate_limited',
+    requests: '7,318',
+    latency: '486 ms',
+    updatedAt: t('common.time.minutesAgo', { count: 5 }),
+  },
+  {
+    id: 'batch',
+    account: 'batch@example.com',
+    provider: formatProviderLabel('openai'),
+    status: 'active',
+    requests: '5,904',
+    latency: '264 ms',
+    updatedAt: t('common.time.minutesAgo', { count: 8 }),
+  },
+  {
+    id: 'fallback',
+    account: 'fallback@example.com',
+    provider: formatProviderLabel('xai'),
+    status: 'error',
+    requests: '3,172',
+    latency: '—',
+    updatedAt: t('common.time.minutesAgo', { count: 12 }),
+  },
+  {
+    id: 'disabled',
+    account: 'disabled@example.com',
+    provider: formatProviderLabel('openai'),
+    status: 'disabled',
+    requests: '0',
+    latency: '—',
+    updatedAt: t('appearance.preview.components.hoursAgo'),
+  },
+]))
 const pagination: PaginationState = {
   currentPage: 2,
   pageSize: 20,
   total: 1_182,
 }
 
+const statusLabels = computed(() => ({
+  active: t('common.status.healthy'),
+  rate_limited: t('common.status.rateLimited'),
+  disabled: t('common.status.disabled'),
+  error: t('common.status.error'),
+}))
+
 function statusClass(status: PreviewTableRow['status']) {
-  if (status === '正常')
+  if (status === 'active')
     return 'bg-cp-success-container text-cp-success-on-container'
-  if (status === '限流')
+  if (status === 'rate_limited')
     return 'bg-cp-warning-container text-cp-warning-on-container'
-  if (status === '异常')
+  if (status === 'error')
     return 'bg-cp-error-container text-cp-error-on-container'
   return 'bg-cp-fill-tertiary text-cp-text-secondary'
 }
@@ -105,21 +226,21 @@ function statusClass(status: PreviewTableRow['status']) {
     <header class="flex items-center justify-between gap-8 px-1">
       <div class="min-w-0">
         <p class="m-0 font-mono text-cp-xs font-heavy tracking-[0.16em] text-cp-primary-text uppercase">
-          Component specimen
+          {{ t('appearance.preview.components.eyebrow') }}
         </p>
         <h1 class="mt-2 mb-0 text-[30px] leading-none font-extrabold text-cp-text">
-          组件概览
+          {{ t('appearance.preview.components.componentOverview') }}
         </h1>
         <p class="mt-2 mb-0 text-cp font-emphasis text-cp-text-secondary">
-          在同一张校样板中检查控制态、数据密度与浮层关系
+          {{ t('appearance.preview.components.description') }}
         </p>
       </div>
 
       <div class="flex shrink-0 items-center gap-6">
         <span class="rounded-full bg-cp-primary-container px-3 py-1.5 font-mono text-[10px] font-heavy tracking-wide text-cp-primary-on-container uppercase">
-          21 Base Components
+          {{ t('appearance.preview.components.count', { count: 21 }) }}
         </span>
-        <div class="flex items-center gap-5" aria-label="当前主题语义色">
+        <div class="flex items-center gap-5" :aria-label="t('appearance.preview.components.currentThemeSemanticColor')">
           <div
             v-for="item in themeSwatches"
             :key="item.label"
@@ -132,35 +253,35 @@ function statusClass(status: PreviewTableRow['status']) {
       </div>
     </header>
 
-    <section class="grid min-w-0 grid-cols-12 gap-6" aria-label="基础控制组件">
-      <ZCard padding="compact" class="col-span-7 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="按钮与动作" description="ZButton · ZIconButton · ZMotionIcon">
+    <section class="grid min-w-0 grid-cols-12 gap-6" :aria-label="t('appearance.preview.components.basicControlComponents')">
+      <ZCard padding="compact" class="col-span-7 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.buttonsAndActions')" description="ZButton · ZIconButton · ZMotionIcon">
         <template #body>
           <div class="grid flex-1 content-start gap-6">
             <div>
               <p class="mt-0 mb-3 font-mono text-cp-xs font-heavy text-cp-text-quaternary">
-                Button / action
+                {{ t('appearance.preview.components.buttonLabel') }}
               </p>
               <div class="flex flex-wrap items-center gap-3">
                 <ZButton type="primary">
                   <template #icon>
                     <Plus class="size-4" />
                   </template>
-                  创建账号
+                  {{ t('appearance.preview.components.createAccount') }}
                 </ZButton>
                 <ZButton>
                   <template #icon>
                     <Download class="size-4" />
                   </template>
-                  导出数据
+                  {{ t('appearance.preview.components.exportData') }}
                 </ZButton>
                 <ZButton variant="text">
-                  稍后处理
+                  {{ t('appearance.preview.components.dealWithItLater') }}
                 </ZButton>
                 <ZButton type="danger" variant="plain">
                   <template #icon>
                     <Trash2 class="size-4" />
                   </template>
-                  删除
+                  {{ t('common.actions.delete') }}
                 </ZButton>
               </div>
             </div>
@@ -168,36 +289,36 @@ function statusClass(status: PreviewTableRow['status']) {
             <div class="grid grid-cols-[1fr_auto] items-end gap-5 rounded-cp-lg bg-cp-fill-quaternary p-4">
               <div>
                 <p class="mt-0 mb-3 text-cp-sm font-heavy text-cp-text-secondary">
-                  尺寸与禁用状态
+                  {{ t('appearance.preview.components.sizeAndDisabledStatus') }}
                 </p>
                 <div class="flex flex-wrap items-center gap-3">
                   <ZButton size="small" type="primary">
-                    Small
+                    {{ t('common.sizes.small') }}
                   </ZButton>
                   <ZButton size="default" type="primary">
-                    Medium
+                    {{ t('common.sizes.medium') }}
                   </ZButton>
                   <ZButton size="large" type="primary">
-                    Large
+                    {{ t('common.sizes.large') }}
                   </ZButton>
                   <ZButton disabled>
-                    不可操作
+                    {{ t('appearance.preview.components.inoperable') }}
                   </ZButton>
                   <ZButton loading>
-                    处理中
+                    {{ t('appearance.preview.components.processing') }}
                   </ZButton>
                 </div>
               </div>
               <div class="flex items-center gap-2">
-                <ZIconButton aria-label="通知" variant="solid">
+                <ZIconButton :aria-label="t('appearance.preview.components.notification')" variant="solid">
                   <ZMotionIcon>
                     <Bell />
                   </ZMotionIcon>
                 </ZIconButton>
-                <ZIconButton aria-label="更多操作" variant="solid">
+                <ZIconButton :aria-label="t('appearance.preview.components.moreActions')" variant="solid">
                   <MoreHorizontal />
                 </ZIconButton>
-                <ZIconButton aria-label="删除记录" type="danger">
+                <ZIconButton :aria-label="t('appearance.preview.components.deleteRecord')" type="danger">
                   <Trash2 />
                 </ZIconButton>
               </div>
@@ -206,38 +327,38 @@ function statusClass(status: PreviewTableRow['status']) {
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-5 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="表单与输入" description="ZInput · ZSelect · ZInputNumber · ZSlider · ZTextarea · ZColorPicker">
+      <ZCard padding="compact" class="col-span-5 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.formsAndInput')" description="ZInput · ZSelect · ZInputNumber · ZSlider · ZTextarea · ZColorPicker">
         <template #body>
           <ZForm class="grid-cols-2 gap-3!">
-            <ZInput v-model="search" aria-label="搜索账号" placeholder="搜索账号">
+            <ZInput :model-value="search ?? t('appearance.preview.components.relayAccount')" :aria-label="t('appearance.preview.components.searchAccount')" :placeholder="t('appearance.preview.components.searchAccount')" @update:model-value="search = $event">
               <template #prefix>
                 <Search class="size-4" />
               </template>
             </ZInput>
-            <ZSelect v-model="provider" aria-label="选择平台" :options="providerOptions" />
-            <ZInput v-model="invalidKey" aria-label="访问密钥错误示例" aria-invalid="true">
+            <ZSelect v-model="provider" :aria-label="t('appearance.preview.components.choosePlatform')" :options="providerOptions" />
+            <ZInput v-model="invalidKey" :aria-label="t('appearance.preview.components.accessKeyErrorExample')" aria-invalid="true">
               <template #prefix>
                 <KeyRound class="size-4" />
               </template>
             </ZInput>
-            <ZInput v-model="disabledText" aria-label="禁用输入框" disabled />
-            <FormItem label="品牌颜色" description="ZColorPicker">
+            <ZInput :model-value="t('appearance.preview.components.notEditable')" :aria-label="t('appearance.preview.components.disableInputBox')" disabled />
+            <FormItem :label="t('appearance.preview.components.brandColors')" description="ZColorPicker">
               <ZColorPicker
                 v-model="brandColor"
-                aria-label="编辑品牌颜色"
+                :aria-label="t('appearance.preview.components.editBrandColors')"
                 :allow-alpha="false"
                 :presets="['#5983F4', '#0F766E', '#7C3AED', '#475569']"
               />
             </FormItem>
-            <FormItem label="调度备注" description="ZTextarea">
-              <ZTextarea v-model="notes" aria-label="调度备注" :rows="2" />
+            <FormItem :label="t('appearance.preview.components.schedulingNotes')" description="ZTextarea">
+              <ZTextarea :model-value="notes ?? t('appearance.preview.components.stickyHelp')" :aria-label="t('appearance.preview.components.schedulingNotes')" :rows="2" @update:model-value="notes = $event" />
             </FormItem>
-            <FormItem class="col-span-2" label="控件高度" description="ZInputNumber · ZSlider">
+            <FormItem class="col-span-2" :label="t('appearance.preview.components.controlHeight')" description="ZInputNumber · ZSlider">
               <div class="flex items-center gap-3">
                 <ZInputNumber
                   v-model="controlHeight"
                   size="small"
-                  aria-label="组件示例控件高度"
+                  :aria-label="t('appearance.preview.components.componentExampleControlHeight')"
                   :min="28"
                   :max="52"
                   unit="px"
@@ -245,7 +366,7 @@ function statusClass(status: PreviewTableRow['status']) {
                 <ZSlider
                   v-model="controlHeight"
                   class="min-w-0 flex-1"
-                  aria-label="组件示例控件高度"
+                  :aria-label="t('appearance.preview.components.componentExampleControlHeight')"
                   :min="28"
                   :max="52"
                   unit="px"
@@ -257,63 +378,63 @@ function statusClass(status: PreviewTableRow['status']) {
       </ZCard>
     </section>
 
-    <section class="grid min-w-0 grid-cols-12 gap-6" aria-label="选择与反馈组件">
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="选择与切换" description="ZSegmented · ZSwitch · ZCheckbox · ZRadio">
+    <section class="grid min-w-0 grid-cols-12 gap-6" :aria-label="t('appearance.preview.components.choiceAndFeedbackComponents')">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.selectAndSwitch')" description="ZSegmented · ZSwitch · ZCheckbox · ZRadio">
         <template #body>
           <div class="grid gap-5">
-            <ZSegmented v-model="view" aria-label="账号视图" :options="viewOptions" class="w-full" />
+            <ZSegmented v-model="view" :aria-label="t('appearance.preview.components.accountView')" :options="viewOptions" class="w-full" />
             <div class="flex flex-wrap items-center gap-x-7 gap-y-4">
-              <ZSwitch v-model="notifications" label="实时通知" />
-              <ZSwitch v-model="autoRotate" label="自动轮换" />
-              <ZCheckbox v-model="selected" label="选择当前页" />
-              <ZCheckbox v-model="partialSelected" label="部分选择" indeterminate />
+              <ZSwitch v-model="notifications" :label="t('appearance.preview.components.realTimeNotification')" />
+              <ZSwitch v-model="autoRotate" :label="t('appearance.preview.components.automaticRotation')" />
+              <ZCheckbox v-model="selected" :label="t('appearance.preview.components.selectCurrentPage')" />
+              <ZCheckbox v-model="partialSelected" :label="t('appearance.preview.components.partialSelection')" indeterminate />
             </div>
             <div class="flex items-center gap-6">
-              <ZRadio v-model="strategy" value="balanced" name="strategy" label="均衡" />
-              <ZRadio v-model="strategy" value="sticky" name="strategy" label="粘性" />
-              <ZRadio v-model="strategy" value="manual" name="strategy" label="手动" />
+              <ZRadio v-model="strategy" value="balanced" name="strategy" :label="t('appearance.preview.components.equilibrium')" />
+              <ZRadio v-model="strategy" value="sticky" name="strategy" :label="t('appearance.preview.components.sticky')" />
+              <ZRadio v-model="strategy" value="manual" name="strategy" :label="t('appearance.preview.components.manual')" />
             </div>
           </div>
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="反馈语义" description="Success · Warning · Error · Info">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.feedbackSemantics')" :description="t('appearance.preview.components.feedbackTypes')">
         <template #body>
           <div class="grid gap-2.5">
             <div class="flex items-center gap-3 rounded-cp bg-cp-success-container px-3.5 py-3 text-cp-success-on-container">
-              <Check class="size-4 shrink-0" /><strong class="text-cp-sm">主题设置已保存</strong>
+              <Check class="size-4 shrink-0" /><strong class="text-cp-sm">{{ t('appearance.preview.components.themeSettingsSaved') }}</strong>
             </div>
             <div class="flex items-center gap-3 rounded-cp bg-cp-warning-container px-3.5 py-3 text-cp-warning-on-container">
-              <TriangleAlert class="size-4 shrink-0" /><strong class="text-cp-sm">3 个账号额度接近上限</strong>
+              <TriangleAlert class="size-4 shrink-0" /><strong class="text-cp-sm">{{ t('appearance.preview.components.quotaOfAccountsIsCloseToUpper') }}</strong>
             </div>
             <div class="flex items-center gap-3 rounded-cp bg-cp-error-container px-3.5 py-3 text-cp-error-on-container">
-              <CircleAlert class="size-4 shrink-0" /><strong class="text-cp-sm">连接测试未通过</strong>
+              <CircleAlert class="size-4 shrink-0" /><strong class="text-cp-sm">{{ t('appearance.preview.components.connectionTestFailed') }}</strong>
             </div>
             <div class="flex items-center gap-3 rounded-cp bg-cp-info-container px-3.5 py-3 text-cp-info-on-container">
-              <Info class="size-4 shrink-0" /><strong class="text-cp-sm">调度规则将在下次请求生效</strong>
+              <Info class="size-4 shrink-0" /><strong class="text-cp-sm">{{ t('appearance.preview.components.schedulingNotice') }}</strong>
             </div>
           </div>
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="状态与进度" description="ZTag · Progress Token">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.statusAndProgress')" :description="t('appearance.preview.components.tagComponents')">
         <template #body>
           <div class="grid gap-4">
             <div class="flex flex-wrap gap-2">
               <ZTag type="success" round>
-                运行正常
+                {{ t('appearance.preview.components.runningNormally') }}
               </ZTag>
               <ZTag type="warning" round>
-                额度受限
+                {{ t('appearance.preview.components.quotaLimited') }}
               </ZTag>
               <ZTag type="danger" round>
-                需要处理
+                {{ t('appearance.preview.components.needToBeProcessed') }}
               </ZTag>
               <ZTag v-if="syncTagVisible" type="info" round closable @close="syncTagVisible = false">
-                同步中
+                {{ t('appearance.preview.components.synchronizing') }}
               </ZTag>
               <ZButton v-else size="small" variant="text" @click="syncTagVisible = true">
-                恢复标签
+                {{ t('appearance.preview.components.restoreTag') }}
               </ZButton>
             </div>
             <div v-for="item in progressItems" :key="item.label" class="grid gap-2">
@@ -329,9 +450,9 @@ function statusClass(status: PreviewTableRow['status']) {
       </ZCard>
     </section>
 
-    <ZCard padding="compact" class="h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="数据表格" description="ZTable · ZScrollbar · ZPagination（标准行高）">
+    <ZCard padding="compact" class="h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.dataTable')" :description="t('appearance.preview.components.tableComponents')">
       <template #actions>
-        <ZInput aria-label="筛选表格" size="small" placeholder="筛选账号" class="w-64">
+        <ZInput :aria-label="t('appearance.preview.components.filterForm')" size="small" :placeholder="t('appearance.preview.components.filterAccounts')" class="w-64">
           <template #prefix>
             <Search class="size-3.5" />
           </template>
@@ -348,7 +469,7 @@ function statusClass(status: PreviewTableRow['status']) {
             </template>
             <template #status="{ row }">
               <span class="inline-flex rounded-full px-2.5 py-1 text-cp-xs font-heavy" :class="statusClass(row.status)">
-                {{ row.status }}
+                {{ statusLabels[row.status] }}
               </span>
             </template>
           </ZTable>
@@ -357,20 +478,20 @@ function statusClass(status: PreviewTableRow['status']) {
       </template>
     </ZCard>
 
-    <section class="grid min-w-0 grid-cols-12 gap-6 overflow-hidden" aria-label="边界状态组件">
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="空状态" description="ZEmpty · ZButton">
+    <section class="grid min-w-0 grid-cols-12 gap-6 overflow-hidden" :aria-label="t('appearance.preview.components.boundaryStateComponent')">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.emptyState')" description="ZEmpty · ZButton">
         <template #body>
-          <ZEmpty title="暂无匹配账号" description="调整筛选条件，或添加一个新的上游账号" class="flex-1">
+          <ZEmpty :title="t('appearance.preview.components.noMatchingAccountYet')" :description="t('appearance.preview.components.emptyHelp')" class="flex-1">
             <template #action>
               <ZButton size="small" type="primary">
-                添加账号
+                {{ t('appearance.preview.components.addAccount') }}
               </ZButton>
             </template>
           </ZEmpty>
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="加载与骨架" description="ZSkeleton · ZButton loading">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.loadingAndSkeleton')" :description="t('appearance.preview.components.loadingComponents')">
         <template #body>
           <div class="grid flex-1 content-between gap-5 rounded-cp-lg bg-cp-fill-quaternary p-4">
             <div class="grid gap-4">
@@ -387,34 +508,34 @@ function statusClass(status: PreviewTableRow['status']) {
               </div>
             </div>
             <div class="flex items-center justify-between">
-              <span class="text-cp-sm font-emphasis text-cp-text-secondary">正在同步账号状态</span>
+              <span class="text-cp-sm font-emphasis text-cp-text-secondary">{{ t('appearance.preview.components.synchronizingAccountStatus') }}</span>
               <ZButton size="small" loading>
-                同步中
+                {{ t('appearance.preview.components.synchronizing') }}
               </ZButton>
             </div>
           </div>
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" title="浮层与菜单" description="ZPopover · ZMenuItem · Elevated Surface">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.overlaysAndMenus')" :description="t('appearance.preview.components.overlayComponents')">
         <template #body>
           <div class="grid min-w-0 flex-1 grid-rows-[auto_1fr_auto] overflow-hidden rounded-cp-lg bg-cp-bg-container p-4">
             <div class="flex items-center justify-between rounded-cp bg-cp-bg-container px-4 py-3 shadow-cp-tertiary">
               <div>
                 <strong class="block text-cp-sm text-cp-text">relay@example.com</strong>
-                <span class="mt-1 block text-[10px] text-cp-text-quaternary">OpenAI · OAuth</span>
+                <span class="mt-1 block text-[10px] text-cp-text-quaternary">{{ formatProviderLabel('openai') }} · OAuth</span>
               </div>
               <ZPopover>
                 <template #reference>
-                  <ZIconButton aria-label="账号操作" variant="solid">
+                  <ZIconButton :aria-label="t('appearance.preview.components.accountOperation')" variant="solid">
                     <MoreHorizontal />
                   </ZIconButton>
                 </template>
                 <div class="w-64 max-w-full p-2">
-                  <ZMenuItem>编辑账号</ZMenuItem>
-                  <ZMenuItem>测试连接</ZMenuItem>
+                  <ZMenuItem>{{ t('appearance.preview.components.editAccount') }}</ZMenuItem>
+                  <ZMenuItem>{{ t('accounts.connectionTest.title') }}</ZMenuItem>
                   <ZMenuItem type="danger">
-                    停用账号
+                    {{ t('appearance.preview.components.deactivateAccount') }}
                   </ZMenuItem>
                 </div>
               </ZPopover>
@@ -425,25 +546,25 @@ function statusClass(status: PreviewTableRow['status']) {
                 <template #icon>
                   <KeyRound class="size-3.5" />
                 </template>
-                编辑账号
+                {{ t('appearance.preview.components.editAccount') }}
               </ZMenuItem>
               <ZMenuItem>
                 <template #icon>
                   <Info class="size-3.5" />
                 </template>
-                测试连接
+                {{ t('accounts.connectionTest.title') }}
               </ZMenuItem>
               <ZMenuItem type="danger">
                 <template #icon>
                   <Trash2 class="size-3.5" />
                 </template>
-                停用账号
+                {{ t('appearance.preview.components.deactivateAccount') }}
               </ZMenuItem>
             </div>
 
             <div class="flex min-w-0 items-center gap-3 rounded-cp bg-cp-bg-spotlight px-4 py-3 text-cp-text-light-solid shadow-cp-popup">
               <Info class="size-4 shrink-0" />
-              <span class="min-w-0 text-cp-xs font-heavy">浮层始终使用独立 Surface 与 Shadow Token</span>
+              <span class="min-w-0 text-cp-xs font-heavy">{{ t('appearance.preview.components.overlayHelp') }}</span>
             </div>
           </div>
         </template>

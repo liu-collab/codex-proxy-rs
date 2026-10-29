@@ -2,9 +2,9 @@
 
 # PostgreSQL 服务端镜像：备份客户端（pg_dump/pg_restore）从这里取，与 compose 同源、
 # 版本严格一致。升级数据库版本时只需同步修改这里与 deploy/compose.yaml。
-ARG POSTGRES_IMAGE=postgres:18-bookworm@sha256:d9c83446333daec3f0588cc709adb80c26090b7f9f0f7ec8d43c243385d79818
+ARG POSTGRES_IMAGE=postgres:18-bookworm@sha256:bbf83594798e144bff365a9c191c5d779f181fb3135902064ab8ff11918020fc
 
-FROM node:26.12.0-bookworm-slim@sha256:298992629d69bbd5b2b03ad57094d8e4fcb3a8eeb7c4e25d29de656519568913 AS frontend-builder
+FROM node:26.12.1-bookworm-slim@sha256:28147155d47dc31abe0a46e0d12b59b2fb3d0a2dcc5dc65fce76a074180b16fe AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/pnpm-lock.yaml frontend/pnpm-workspace.yaml ./
@@ -13,7 +13,7 @@ RUN npm install --global "$(node -p 'require("./package.json").packageManager')"
 COPY frontend ./
 RUN pnpm build
 
-FROM rust:1.99.1-bookworm@sha256:e12566d5abc17a0da741628782cdb504b68b8961f5bfcf677936bf3e8b32de29 AS backend-builder
+FROM rust:1.99.1-bookworm@sha256:48b7f435b8fc6378ce43b44f15e3a47fd8919b2825f835c39bd4bd3da50af5b8 AS backend-builder
 
 WORKDIR /app/backend
 ARG TARGETARCH
@@ -40,7 +40,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # 备份客户端来源：与 compose 服务端同一固定镜像，版本一致。
 FROM ${POSTGRES_IMAGE} AS pg-client
 
-FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS runtime-base
+FROM debian:bookworm-slim@sha256:7ff6ba31527b9e336162fa061746c366c4b2032f4d2cff2078bea43f78efe3f8 AS runtime-base
 
 ENV TZ=UTC
 

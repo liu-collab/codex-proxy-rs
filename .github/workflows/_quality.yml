@@ -24,7 +24,7 @@ permissions:
 jobs:
   backend:
     if: inputs.run_backend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
@@ -34,7 +34,7 @@ jobs:
       CPR_TEST_REDIS_URL: redis://127.0.0.1:6379
     services:
       postgres:
-        image: postgres:18-bookworm@sha256:d9c83446333daec3f0588cc709adb80c26090b7f9f0f7ec8d43c243385d79818
+        image: postgres:18-bookworm@sha256:bbf83594798e144bff365a9c191c5d779f181fb3135902064ab8ff11918020fc
         env:
           POSTGRES_DB: codex_proxy
           POSTGRES_USER: codex_proxy
@@ -48,7 +48,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
       redis:
-        image: redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
+        image: redis:8-alpine@sha256:0bf6577d7774e592b29d093e3ac9390eb91e13d72c21e506afce736de5e0eeb0
         ports:
           - 6379:6379
         options: >-
@@ -108,7 +108,7 @@ jobs:
           components: rustfmt,clippy
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: backend -> target
           save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -122,7 +122,7 @@ jobs:
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: Setup nextest
-        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
+        uses: taiki-e/install-action@1e29709c0ec63babbe8f266397a465f29a825f91 # v2.87.31
         with:
           tool: cargo-nextest@0.9.143
           fallback: none
@@ -199,7 +199,7 @@ jobs:
 
   frontend:
     if: inputs.run_frontend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     env:
       CI: 'true'
@@ -213,7 +213,7 @@ jobs:
         uses: ./.github/actions/build-frontend
 
   workflow-lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     steps:
       - name: Checkout
@@ -223,6 +223,8 @@ jobs:
 
       # GitHub 已支持 queue: max，actionlint 尚未支持该字段
       # https://github.com/rhysd/actionlint/issues/657
+      # GitHub 已提供 ubuntu-26.04，actionlint 尚未收录该标签
+      # https://github.com/actions/runner-images#available-images
       - name: Lint GitHub Actions workflows
         run: >-
           docker run --rm
@@ -231,6 +233,7 @@ jobs:
           rhysd/actionlint:1.7.7@sha256:887a259a5a534f3c4f36cb02dca341673c6089431057242cdc931e9f133147e9
           -color
           -ignore '^unexpected key "queue" for "concurrency" section\. expected one of "cancel-in-progress", "group"$'
+          -ignore '^label "ubuntu-26\.04" is unknown\.'
           .github/workflows/*.yml
 
       - name: Check workflow script syntax

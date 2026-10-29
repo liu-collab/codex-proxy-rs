@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { ClientProfileSelection, ProviderRequestProfile, ProviderRequestProfiles, XaiClientProfileSelection } from '@/api/modules/settings/profiles'
+
 import { ZSegmented } from '@codex-proxy/ui'
 import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { formatProviderLabel, PROVIDER_IDS, providerIcon } from '@/utils/providers'
 import ClientProfileEditor from './ClientProfileEditor.vue'
 import XaiClientProfileEditor from './XaiClientProfileEditor.vue'
@@ -15,6 +17,8 @@ withDefaults(defineProps<{
   disabled: false,
   allowInherit: false,
 })
+
+const { t } = useI18n({ useScope: 'global' })
 
 const model = defineModel<ProviderRequestProfiles>({ required: true })
 const provider = shallowRef<(typeof PROVIDER_IDS)[number]>('openai')
@@ -51,7 +55,7 @@ function updateProfile(providerId: string, value: ProviderRequestProfile | null)
       <ZSegmented
         v-model="provider"
         class="ml-auto max-w-full shrink-0"
-        aria-label="客户端身份 Provider"
+        :aria-label="t('settings.clientProfile.clientIdentityProvider')"
         :options="providerOptions"
         :disabled="disabled"
         :style="providerSelectorStyle"
@@ -69,7 +73,7 @@ function updateProfile(providerId: string, value: ProviderRequestProfile | null)
         <ZSegmented
           v-model="provider"
           class="max-w-full shrink-0"
-          aria-label="上游身份平台"
+          :aria-label="t('settings.clientProfile.upstreamIdentityPlatform')"
           :options="providerOptions"
           :disabled="disabled"
           :style="providerSelectorStyle"
@@ -88,7 +92,7 @@ function updateProfile(providerId: string, value: ProviderRequestProfile | null)
         <ZSegmented
           v-model="provider"
           class="max-w-full shrink-0"
-          aria-label="上游身份平台"
+          :aria-label="t('settings.clientProfile.upstreamIdentityPlatform')"
           :options="providerOptions"
           :disabled="disabled"
           :style="providerSelectorStyle"

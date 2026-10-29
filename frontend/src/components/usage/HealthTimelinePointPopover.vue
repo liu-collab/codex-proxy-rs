@@ -2,37 +2,41 @@
 import type { DashboardHealthTimelinePoint } from '@/api'
 
 import { computed } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import { formatHealthCount, healthEligibleRequestCount, healthObservedRequestCount, healthServiceFailureCount, healthStatusMeta } from '@/components/usage/shared/health'
 
 const props = defineProps<{
   point: DashboardHealthTimelinePoint
 }>()
 
-const status = computed(() => healthStatusMeta[props.point.status])
+const { t } = useI18n({ useScope: 'global' })
+
+const status = computed(() => healthStatusMeta.value[props.point.status])
 const eligibleRequests = computed(() => healthEligibleRequestCount(props.point))
 const observedRequests = computed(() => healthObservedRequestCount(props.point))
 // 结果标签、取值与配色集中维护，分段条与明细行都由此派生
 const outcomeMeta = computed(() => [
   {
-    label: '成功',
+    label: t('common.status.success'),
     value: props.point.successRequests,
     dotClass: 'bg-cp-success',
     valueClass: 'text-cp-success-text',
   },
   {
-    label: '服务失败',
+    label: t('usage.health.point.serviceFailed'),
     value: healthServiceFailureCount(props.point),
     dotClass: 'bg-cp-error',
     valueClass: 'text-cp-error-text',
   },
   {
-    label: '客户端取消',
+    label: t('usage.health.point.clientCancel'),
     value: props.point.cancelledRequests,
     dotClass: 'bg-cp-orange-solid',
     valueClass: 'text-cp-orange-text',
   },
   {
-    label: '调用方错误',
+    label: t('usage.health.point.callerError'),
     value: props.point.callerErrorRequests,
     dotClass: 'bg-cp-info',
     valueClass: 'text-cp-info-text',
@@ -57,7 +61,7 @@ const metricItems = outcomeMeta
 <template>
   <section
     role="dialog"
-    :aria-label="`${point.time} 请求健康详情`"
+    :aria-label="t('usage.health.point.requestHealthDetailsFor', { time: point.time })"
     class="overflow-hidden rounded-cp-lg bg-cp-bg-elevated"
   >
     <header class="flex items-center justify-between gap-3 bg-cp-popover-header-bg px-3.5 py-3">
@@ -73,14 +77,14 @@ const metricItems = outcomeMeta
           {{ status.label }}
         </span>
       </div>
-      <span class="shrink-0 text-[10px] leading-none font-emphasis text-cp-text-quaternary"> 15 分钟 </span>
+      <span class="shrink-0 text-[10px] leading-none font-emphasis text-cp-text-quaternary"> {{ t('usage.health.point.minutes') }} </span>
     </header>
 
     <div class="grid gap-3.5 px-3.5 py-3.5">
       <div class="flex items-end justify-between gap-4">
         <div>
           <p class="m-0 text-cp-xs leading-none font-emphasis text-cp-text-quaternary">
-            有效请求可用性
+            {{ t('usage.health.point.validRequestAvailability') }}
           </p>
           <strong
             class="mt-2 block font-mono text-[25px] leading-none font-heavy tabular-nums"
@@ -90,7 +94,7 @@ const metricItems = outcomeMeta
           </strong>
         </div>
         <div class="text-right">
-          <span class="block text-[10px] leading-none font-emphasis text-cp-text-quaternary"> 有效请求 </span>
+          <span class="block text-[10px] leading-none font-emphasis text-cp-text-quaternary"> {{ t('usage.health.point.validRequest') }} </span>
           <strong class="mt-2 block font-mono text-cp-xl leading-none font-heavy tabular-nums text-cp-text">
             {{ formatHealthCount(eligibleRequests) }}
           </strong>

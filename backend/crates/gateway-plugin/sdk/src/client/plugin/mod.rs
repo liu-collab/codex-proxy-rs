@@ -143,16 +143,16 @@ impl PluginBuilder {
         Ok(self)
     }
 
-    /// 冻结模型别名目录；目标校验与发布由宿主负责
+    /// 冻结直接别名与适配模型目录，随实例配置原子发布
     ///
     /// # Errors
     ///
     /// 未声明模型目录能力或重复注册时失败
     pub fn model_catalog(
         self,
-        registration: crate::call::catalog::ModelCatalogRegistration,
+        registration: crate::call::catalog::ModelCatalogRegistrationV2,
     ) -> Result<Self, AuthorError> {
-        self.on(methods::MODEL_CATALOG_REGISTER, move |_| {
+        self.on(methods::MODEL_CATALOG_REGISTER_V2, move |_| {
             let registration = registration.clone();
             async move { Ok(TypedReply::new(registration)) }
         })

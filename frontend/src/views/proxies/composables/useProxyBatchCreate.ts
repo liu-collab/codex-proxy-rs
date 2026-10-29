@@ -2,6 +2,7 @@ import type { ProxyBatchItem } from '../utils/batch'
 import type { ProxyTestExecutor } from './useProxyBatchTest'
 import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import { createProxy } from '@/api'
+import { t } from '@/i18n'
 import { MAX_BATCH_INPUT_BYTES, parseProxyBatch, proxyBatchFailure, proxyBatchInputError, proxyRequestFailure } from '../utils/batch'
 import { useProxyBatchTest } from './useProxyBatchTest'
 
@@ -12,7 +13,7 @@ interface CreateItem extends ProxyBatchItem {
 
 export function useProxyBatchCreate(options: { test: ProxyTestExecutor, reload: () => Promise<unknown> }) {
   const text = shallowRef('')
-  const prefix = shallowRef('代理')
+  const prefix = shallowRef(t('proxies.batchCreate.proxy'))
   const protocol = shallowRef('http')
   const items = ref<CreateItem[]>([])
   const busy = shallowRef(false)
@@ -20,9 +21,13 @@ export function useProxyBatchCreate(options: { test: ProxyTestExecutor, reload: 
   const testingRequested = shallowRef(false)
   const tests = useProxyBatchTest(options.test)
   const stopping = computed(() => stopRequested.value || tests.stopping.value)
-  const parsed = computed(() => text.value.length > MAX_BATCH_INPUT_BYTES ? [] : parseProxyBatch(text.value, prefix.value, protocol.value))
+  const parsed = computed(() => text.value.length > MAX_BATCH_INPUT_BYTES
+    ? []
+    : parseProxyBatch(text.value, prefix.value, protocol.value))
   const inputError = computed(() => proxyBatchInputError(text.value, parsed.value.length))
-  const created = computed(() => items.value.flatMap(item => item.record ? [item.record] : []))
+  const created = computed(() => items.value.flatMap(item => item.record
+    ? [item.record]
+    : []))
   const canEditFailures = computed(() => items.value.some(item => !item.record && item.status !== 'unknown' && Boolean(item.input)))
   let disposed = false
 
@@ -35,7 +40,7 @@ export function useProxyBatchCreate(options: { test: ProxyTestExecutor, reload: 
     if (busy.value)
       return
     text.value = ''
-    prefix.value = '代理'
+    prefix.value = t('proxies.batchCreate.proxy')
     protocol.value = 'http'
     items.value = []
     testingRequested.value = false
@@ -80,21 +85,28 @@ export function useProxyBatchCreate(options: { test: ProxyTestExecutor, reload: 
           item.status = 'running'
         try {
           // 批量新增与单条一致：默认跟随出口 IP 的时区，保存时解析一次
-          const results = await createProxy(group.map(item => ({ name: item.name, proxyUrl: item.proxyUrl, autoLocation: true, location: null })), { silent: true, retry: false })
+          const results = await createProxy(group.map(item => ({
+            name: item.name,
+            proxyUrl: item.proxyUrl,
+            autoLocation: true,
+            location: null,
+          })), { silent: true, retry: false })
           for (const [index, item] of group.entries()) {
             const result = results[index]
             if (result?.status === 'succeeded') {
               item.record = result.data.record
               item.endpoint = result.data.record.endpoint
               item.status = 'succeeded'
-              item.message = '已添加'
+              item.message = t('proxies.batchTest.addedStatus')
               item.input = ''
               item.proxyUrl = ''
             }
             else {
               const failure = proxyBatchFailure(result)
               item.status = failure.status
-              item.message = failure.status === 'conflict' ? '代理已存在或配置冲突，未覆盖已有记录' : failure.message
+              item.message = failure.status === 'conflict'
+                ? t('proxies.batchCreate.conflict')
+                : failure.message
               if (failure.stop)
                 stop()
             }
@@ -117,7 +129,7 @@ export function useProxyBatchCreate(options: { test: ProxyTestExecutor, reload: 
       for (const item of items.value) {
         if (item.status === 'pending') {
           item.status = 'skipped'
-          item.message = '已停止后续添加'
+          item.message = t('proxies.batchCreate.stopped')
         }
       }
       busy.value = false
@@ -152,5 +164,23 @@ export function useProxyBatchCreate(options: { test: ProxyTestExecutor, reload: 
     }
   })
 
-  return { text, prefix, protocol, items, busy, stopping, testingRequested, tests, parsed, inputError, created, canEditFailures, submit, testCreated, stop, clear, editFailures }
+  return {
+    text,
+    prefix,
+    protocol,
+    items,
+    busy,
+    stopping,
+    testingRequested,
+    tests,
+    parsed,
+    inputError,
+    created,
+    canEditFailures,
+    submit,
+    testCreated,
+    stop,
+    clear,
+    editFailures,
+  }
 }

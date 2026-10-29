@@ -22,8 +22,9 @@ use gateway_admin::{
             DiagnosticDimension, DiagnosticObservation, DiagnosticsObservation, Granularity,
             HealthStatus, LatencyPercentiles, ObservabilityPageSize, OpsErrorPage, OpsErrorQuery,
             PercentileMilliseconds, RequestMetricPoint, RequestMetrics, TimeRange, TrendKind,
-            UsageBilling, UsageDetail, UsageFilter, UsageInsightsObservation, UsageListRecord,
-            UsageOverview, UsagePage, UsageProjectedCostPoint, UsageQuery,
+            UsageBilling, UsageConcurrencyPoint, UsageDetail, UsageFilter,
+            UsageInsightsObservation, UsageListRecord, UsageOverview, UsagePage,
+            UsageProjectedCostPoint, UsageQuery, UsageSummaryObservation,
         },
         settings::{
             AdminApiKey, AdminApiKeyMutation, ReplaceRuntimeSettings, RotationStrategy,
@@ -678,10 +679,26 @@ async fn observability_services_should_calculate_usage_insights_and_diagnostic_s
     assert_eq!(insights.health.success_rate, 0.75);
     assert_eq!(insights.health.completion_rate, 1.0);
     assert_eq!(insights.granularity, Granularity::FifteenMinutes);
-    assert_eq!(insights.performance.latency_coverage, 0.5);
-    assert_eq!(insights.performance.admission_decision_coverage, 1.0);
-    assert_eq!(insights.performance.account_selection_wait_coverage, 0.8);
-    assert_eq!(insights.performance.capacity_coverage, 0.8);
+    assert_eq!(
+        insights
+            .performance
+            .load
+            .admission_decision_p95_ms
+            .map(|value| value.as_f64()),
+        Some(5.0)
+    );
+    assert_eq!(
+        insights
+            .performance
+            .load
+            .account_selection_wait_p95_ms
+            .map(|value| value.as_f64()),
+        Some(40.0)
+    );
+    assert_eq!(
+        insights.performance.points[0].load,
+        insights.performance.load
+    );
     assert_eq!(insights.performance.output_throughput_p50, Some(50));
     assert_eq!(insights.cost.tokens_per_request, 100.0);
     assert_eq!(
@@ -740,6 +757,52 @@ async fn observability_services_should_calculate_usage_insights_and_diagnostic_s
     );
     assert_eq!(diagnostics.items[0].request_share, 0.75);
     assert_eq!(diagnostics.items[1].request_share, 0.25);
+}
+
+#[tokio::test]
+async fn usage_insights_should_weight_concurrency_by_effective_bucket_duration() {
+    let bucket_start = DateTime::parse_from_rfc3339("2026-09-01T10:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let range = TimeRange::new(
+        bucket_start + Duration::minutes(5),
+        bucket_start + Duration::minutes(20),
+    )
+    .unwrap();
+    let store = Arc::new(FixtureObservabilityStore::new(range));
+    store.replace_trend(vec![
+        health_metric_point(bucket_start, RequestMetrics::default()),
+        health_metric_point(
+            bucket_start + Duration::minutes(15),
+            RequestMetrics::default(),
+        ),
+    ]);
+    *store.concurrency.lock().unwrap() = vec![
+        UsageConcurrencyPoint {
+            bucket_start,
+            average_concurrency: 1.0,
+            peak_concurrency: 1,
+        },
+        UsageConcurrencyPoint {
+            bucket_start: bucket_start + Duration::minutes(15),
+            average_concurrency: 3.0,
+            peak_concurrency: 4,
+        },
+    ];
+
+    let insights = observability_services(store)
+        .await
+        .observability()
+        .usage_insights(range, UsageFilter::default())
+        .await
+        .unwrap();
+
+    assert!((insights.performance.load.average_concurrency - 5.0 / 3.0).abs() < 1e-10);
+    assert_eq!(insights.performance.load.peak_concurrency, 4);
+    assert_eq!(insights.performance.points[0].load.average_concurrency, 1.0);
+    assert_eq!(insights.performance.points[0].load.peak_concurrency, 1);
+    assert_eq!(insights.performance.points[1].load.average_concurrency, 3.0);
+    assert_eq!(insights.performance.points[1].load.peak_concurrency, 4);
 }
 
 #[tokio::test]
@@ -937,6 +1000,7 @@ async fn dashboard_should_preserve_provider_plan_names() {
             authentication_kind: "oauth".to_owned(),
             name: (*plan).to_owned(),
             email: None,
+            notes: None,
             plan_type: Some((*plan).to_owned()),
             plan_type_display: None,
             request_count: 0,
@@ -987,6 +1051,7 @@ struct FixtureObservabilityStore {
     trend: Mutex<Vec<RequestMetricPoint>>,
     overview: Mutex<UsageOverview>,
     projected_costs: Mutex<Vec<UsageProjectedCostPoint>>,
+    concurrency: Mutex<Vec<UsageConcurrencyPoint>>,
     insights_fail: AtomicBool,
     summary_fail: AtomicBool,
     diagnostics: Mutex<DiagnosticsObservation>,
@@ -1014,6 +1079,7 @@ impl FixtureObservabilityStore {
                 providers: Vec::new(),
             }),
             projected_costs: Mutex::new(Vec::new()),
+            concurrency: Mutex::new(Vec::new()),
             insights_fail: AtomicBool::new(false),
             summary_fail: AtomicBool::new(false),
             diagnostics: Mutex::new(DiagnosticsObservation::default()),
@@ -1144,6 +1210,7 @@ impl ObservabilityStore for FixtureObservabilityStore {
                 .lock()
                 .expect("projected costs")
                 .clone(),
+            concurrency: self.concurrency.lock().expect("concurrency").clone(),
         })
     }
 
@@ -1166,7 +1233,7 @@ impl ObservabilityStore for FixtureObservabilityStore {
         &self,
         range: TimeRange,
         filter: UsageFilter,
-    ) -> AdminStoreResult<UsageOverview> {
+    ) -> AdminStoreResult<UsageSummaryObservation> {
         self.usage_summary_filters
             .lock()
             .expect("summary filters")
@@ -1178,9 +1245,12 @@ impl ObservabilityStore for FixtureObservabilityStore {
         if self.summary_fail.load(Ordering::SeqCst) {
             return Err(super::unavailable("projection summary failed"));
         }
-        Ok(UsageOverview {
+        let overview = self.overview.lock().expect("overview").clone();
+        Ok(UsageSummaryObservation {
             range,
-            ..self.overview.lock().expect("overview").clone()
+            analytics: overview.analytics,
+            requests: (&overview.requests).into(),
+            attempts: overview.attempts,
         })
     }
 
@@ -1250,13 +1320,7 @@ impl SettingsStore for FixtureSettingsStore {
                 usage_retention_days: 31,
                 ops_event_retention_days: 30,
                 audit_retention_days: 30,
-                account_auto_freeze_enabled: true,
-                account_auto_freeze_threshold: 12,
-                account_auto_freeze_window_seconds: 600,
-                account_auto_freeze_duration_seconds: 7_200,
-                account_auto_freeze_probe_enabled: true,
-                account_auto_freeze_probe_model: None,
-                account_auto_freeze_adaptive_concurrency: true,
+                account_error_protection: gateway_core::account::AccountErrorProtection::default(),
                 account_warmup_enabled: false,
                 account_warmup_schedule_time: "08:00".to_owned(),
                 account_warmup_model: None,
@@ -1358,7 +1422,6 @@ fn total_record(
         provider_account_authentication_kind: None,
         upstream_model_id: Some("gpt-5.5".to_owned()),
         upstream_transport: None,
-        upstream_response_model: None,
         service_tier: None,
         input_tokens: Some(800),
         output_tokens: Some(200),
@@ -1504,8 +1567,8 @@ async fn usage_summary_cache_should_coalesce_identical_queries_and_invalidate_de
         .usage_summary(range, filter)
         .await
         .expect("generation refresh");
-    assert_eq!(refreshed.overview.analytics.generation, 1);
-    assert_eq!(refreshed.overview.requests.request_count, 7);
+    assert_eq!(refreshed.observation.analytics.generation, 1);
+    assert_eq!(refreshed.observation.requests.request_count, 7);
     assert_eq!(store.usage_summary_filters.lock().unwrap().len(), 2);
 }
 
@@ -1525,13 +1588,17 @@ async fn usage_summary_cache_should_coalesce_when_generation_advances_during_the
         },
     );
     assert_eq!(
-        first.expect("first summary").overview.analytics.generation,
+        first
+            .expect("first summary")
+            .observation
+            .analytics
+            .generation,
         1
     );
     assert_eq!(
         second
             .expect("coalesced summary")
-            .overview
+            .observation
             .analytics
             .generation,
         1

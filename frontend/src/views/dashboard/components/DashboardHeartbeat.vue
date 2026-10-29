@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { usePreferredReducedMotion } from '@vueuse/core'
+
 import { gsap } from 'gsap'
 import { computed, nextTick, onBeforeUnmount, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = withDefaults(
   defineProps<{
@@ -12,11 +14,15 @@ const props = withDefaults(
   },
 )
 
+const { t } = useI18n({ useScope: 'global' })
+
 const preferredMotion = usePreferredReducedMotion()
 const heartbeatDot = useTemplateRef<HTMLElement>('heartbeatDot')
 const heartbeatRing = useTemplateRef<HTMLElement>('heartbeatRing')
 const statusLabel = computed(() =>
-  props.updatedAt ? `自动刷新 30s，最近刷新 ${props.updatedAt}` : '自动刷新 30s，等待首次刷新',
+  props.updatedAt
+    ? t('dashboard.refresh.lastUpdated', { updatedAt: props.updatedAt })
+    : t('dashboard.refresh.waiting'),
 )
 
 function pulse() {
@@ -71,6 +77,6 @@ onBeforeUnmount(() => {
       <span ref="heartbeatRing" class="absolute size-2 rounded-full bg-cp-success opacity-0" />
       <span ref="heartbeatDot" class="relative size-1.5 rounded-full bg-cp-success" />
     </span>
-    <span>自动刷新 30s</span>
+    <span>{{ t('dashboard.refresh.interval') }}</span>
   </span>
 </template>

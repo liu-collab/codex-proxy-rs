@@ -464,6 +464,21 @@ impl Environment {
         limits: RpcLimits,
         providers: gateway_core::engine::provider::ProviderRegistry,
     ) -> (Arc<PluginRuntime>, gateway_core::CoreBundle) {
+        let (runtime, core) = self.runtime_with_identity_port(limits, providers).await;
+        runtime
+            .bind_model_ports(
+                &core.nested_model_execution_port(),
+                &core.affinity_lookup_port(),
+            )
+            .unwrap();
+        (runtime, core)
+    }
+
+    pub async fn runtime_with_identity_port(
+        &self,
+        limits: RpcLimits,
+        providers: gateway_core::engine::provider::ProviderRegistry,
+    ) -> (Arc<PluginRuntime>, gateway_core::CoreBundle) {
         let runtime = self.plugin_runtime_with_limits(limits);
         let core = gateway_core::prepare(
             self.store.core_ports(),
@@ -487,10 +502,7 @@ impl Environment {
             .insert(Arc::as_ptr(&runtime) as usize, access);
         let core = core.activate().await.unwrap();
         runtime
-            .bind_model_ports(
-                &core.nested_model_execution_port(),
-                &core.affinity_lookup_port(),
-            )
+            .bind_client_identity_port(&core.client_identity_port())
             .unwrap();
         (runtime, core)
     }
@@ -511,6 +523,9 @@ impl Environment {
         .await
         .unwrap();
         runtime.bind_snapshots(&core.snapshots()).unwrap();
+        runtime
+            .bind_client_identity_port(&core.client_identity_port())
+            .unwrap();
         runtime
             .bind_model_ports(
                 &core.nested_model_execution_port(),
@@ -715,6 +730,17 @@ impl Environment {
         database
             .query_pairs_mut()
             .append_pair("options", &format!("-csearch_path={schema}"));
+        // 每个夹具独占 UUID schema，先并行建表，避免完整 DDL 争用数据库级迁移锁
+        // 原 Store 初始化仍会加锁核验同一套迁移记录，保留生产启动屏障
+        let migration_pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect(database.as_str())
+            .await
+            .unwrap();
+        let mut migrator = sqlx::migrate!("../../../migrations");
+        migrator.set_locking(false);
+        migrator.run(&migration_pool).await.unwrap();
+        migration_pool.close().await;
         let connection = |mut url: url::Url| {
             let password = url.password().expect("test password").to_owned();
             url.set_password(None).unwrap();

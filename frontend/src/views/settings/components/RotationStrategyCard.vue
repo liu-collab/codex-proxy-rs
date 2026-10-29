@@ -1,20 +1,24 @@
 <script setup lang="ts">
 import type { rotationOptions } from '../constants'
+
 import type { SmartSchedulingConfig } from '@/api'
 import { ZCard, ZIconButton } from '@codex-proxy/ui'
 import { Settings2 } from '@lucide/vue'
 import { isEqual } from 'es-toolkit'
 import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import SmartSchedulingModal from './SmartSchedulingModal.vue'
-
-type RotationOption = (typeof rotationOptions)[number]
-type RotationStrategy = RotationOption['value']
 
 const props = defineProps<{
   options: readonly RotationOption[]
   smartDefaults?: SmartSchedulingConfig
   disabled: boolean
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
+type RotationOption = (typeof rotationOptions.value)[number]
+type RotationStrategy = RotationOption['value']
 
 const model = defineModel<RotationStrategy | ''>({ required: true })
 const smartScheduling = defineModel<SmartSchedulingConfig | undefined>('smartScheduling', { required: true })
@@ -23,8 +27,8 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
 </script>
 
 <template>
-  <ZCard title="调度策略">
-    <div class="grid max-w-6xl gap-3 sm:grid-cols-2 lg:grid-cols-4">
+  <ZCard :title="t('settings.rotation.title')" class="@container">
+    <div class="grid max-w-6xl gap-3 @md:grid-cols-2 @5xl:grid-cols-4">
       <div
         v-for="option in options"
         :key="option.value"
@@ -32,7 +36,7 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
       >
         <button
           type="button"
-          class="min-h-25 w-full cursor-pointer rounded-cp border-0 px-4 py-3.5 text-left shadow-cp-input outline-none transition-[background-color,box-shadow,color] duration-160 focus-visible:ring-2 focus-visible:ring-cp-control-outline"
+          class="flex min-h-25 w-full cursor-pointer flex-col rounded-cp border-0 px-4 py-3.5 text-left shadow-cp-input outline-none transition-[background-color,box-shadow,color] duration-160 focus-visible:ring-2 focus-visible:ring-cp-control-outline"
           :class="
             model === option.value
               ? 'bg-cp-control-item-bg-active text-cp-primary-text shadow-cp-tertiary'
@@ -53,7 +57,7 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
             </span>
             <span class="inline-flex items-baseline gap-1 text-cp leading-snug font-emphasis">
               {{ option.label }}
-              <span v-if="option.value === 'smart' && customized" class="shrink-0 text-cp-xs font-normal text-cp-text-secondary">自定义</span>
+              <span v-if="option.value === 'smart' && customized" class="shrink-0 text-cp-xs font-normal text-cp-text-secondary">{{ t('settings.rotation.customized') }}</span>
             </span>
           </span>
           <span class="mt-2 block text-cp leading-normal font-emphasis text-cp-text-secondary">
@@ -63,7 +67,7 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
         <ZIconButton
           v-if="option.value === 'smart'"
           class="absolute top-3 right-3 size-6! rounded-cp-sm p-0"
-          aria-label="智能调度设置"
+          :aria-label="t('settings.rotation.smartSchedulingSettings')"
           size="small"
           :disabled="disabled || !smartScheduling || !smartDefaults"
           @click="settingsOpen = true"

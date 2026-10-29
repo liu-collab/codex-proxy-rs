@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { EChartsOption } from 'echarts'
-import type { UsageRecordDetail } from '@/api'
 
+import type { UsageRecordDetail } from '@/api'
 import { defineTableColumns, ZButton, ZDialog, ZTable } from '@codex-proxy/ui'
+
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import BaseChart from '@/components/charts/BaseChart.vue'
 import { chartTooltipStyle } from '@/components/charts/tooltip'
 import {
@@ -17,6 +19,7 @@ import {
   usageUserAgent,
 } from '@/components/usage/shared/presenter'
 import { useChartPalette } from '@/composables/useChartPalette'
+
 import { formatDuration, formatInteger } from '@/utils/format'
 import { attemptOutcomeClass, attemptOutcomeText, displayValue, fieldLabelClass, fieldValueBaseClass, visibleRequestText, visibleResponseText } from '../utils/detail'
 import DiagnosticsDownloadButton from './DiagnosticsDownloadButton.vue'
@@ -28,80 +31,191 @@ const props = defineProps<{
   record: UsageRecordDetail | null
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const open = defineModel<boolean>({ default: false })
 
 const { palette } = useChartPalette()
 
-const requestText = computed(() => props.record ? visibleRequestText(props.record) : '')
-const responseText = computed(() => props.record ? visibleResponseText(props.record) : '')
+const requestText = computed(() => props.record
+  ? visibleRequestText(props.record)
+  : '')
+const responseText = computed(() => props.record
+  ? visibleResponseText(props.record)
+  : '')
 const modelDisplay = computed(() => props.record
   ? usageModelDisplay(props.record)
   : { primary: '—', secondary: '' })
 const tokenDetails = computed(() => props.record?.tokenDetails ?? null)
 const billing = computed(() => props.record ? props.record.billing : null)
-const latencyDetails = computed(() => props.record ? usageLatencyDetails(props.record) : null)
+const latencyDetails = computed(() => props.record
+  ? usageLatencyDetails(props.record)
+  : null)
 
 const panelClass = 'min-w-0 rounded-cp-card bg-cp-fill-quaternary px-4 py-3.5'
 const panelTitleClass = 'm-0 text-cp-sm leading-none font-heavy text-cp-text-secondary'
 
-const accountDisplay = computed(() => props.record ? usageAccountText(props.record) : '—')
+const accountDisplay = computed(() => props.record
+  ? usageAccountText(props.record)
+  : '—')
 const finalAttemptIndex = computed(() => {
   const attempts = props.record?.attempts ?? []
   const last = attempts[attempts.length - 1]
   return last?.attemptIndex ?? props.record?.attemptCount
 })
 const requestItems = computed(() => [
-  { label: '账号', value: accountDisplay.value, mono: true, fullWidth: true },
-  { label: '状态码', value: props.record?.statusCode, mono: true },
-  { label: '消息', value: props.record?.message },
-  { label: '时间', value: props.record?.createdAtDisplay, mono: true },
-  { label: '端点', value: props.record?.route, mono: true },
+  {
+    label: t('accounts.account'),
+    value: accountDisplay.value,
+    mono: true,
+    fullWidth: true,
+  },
+  {
+    label: t('usage.request.statusCode'),
+    value: props.record?.statusCode,
+    mono: true,
+  },
+  {
+    label: t('usage.request.message'),
+    value: props.record?.message,
+  },
+  {
+    label: t('usage.fields.time'),
+    value: props.record?.createdAtDisplay,
+    mono: true,
+  },
+  {
+    label: t('usage.fields.endpoint'),
+    value: props.record?.route,
+    mono: true,
+  },
 ])
 const overviewItems = computed(() => [
-  { label: '客户端传输', value: usageTransportType(props.record?.clientTransport), mono: true },
-  { label: '上游传输', value: usageTransportType(props.record?.upstreamTransport), mono: true },
-  { label: '总耗时', value: props.record?.latencyMsDisplay, mono: true },
-  { label: '上游耗时', value: latencyDetails.value?.upstreamDisplay ?? '—', mono: true },
   {
-    label: '首个输出等待',
+    label: t('usage.error.clientTransfer'),
+    value: usageTransportType(props.record?.clientTransport),
+    mono: true,
+  },
+  {
+    label: t('usage.error.upstreamTransport'),
+    value: usageTransportType(props.record?.upstreamTransport),
+    mono: true,
+  },
+  {
+    label: t('usage.latency.totalLatency'),
+    value: props.record?.latencyMsDisplay,
+    mono: true,
+  },
+  {
+    label: t('usage.request.upstreamTimeConsumption'),
+    value: latencyDetails.value?.upstreamDisplay ?? '—',
+    mono: true,
+  },
+  {
+    label: t('usage.status.firstOutputWaiting'),
     value: latencyDetails.value?.firstOutputDisplay ?? '—',
     mono: true,
   },
-  { label: '总 Token', value: tokenDetails.value?.totalTokensDisplay, mono: true },
+  {
+    label: t('usage.tokens.totalTokens'),
+    value: tokenDetails.value?.totalTokensDisplay,
+    mono: true,
+  },
 ])
 
 const modelRouteItems = computed(() => [
-  { label: '端点', value: props.record?.route, mono: true },
-  { label: '推理强度', value: props.record ? usageReasoningEffort(props.record) : '—' },
-  { label: '请求模型', value: modelDisplay.value.primary, mono: true },
   {
-    label: '上游模型',
+    label: t('usage.fields.endpoint'),
+    value: props.record?.route,
+    mono: true,
+  },
+  {
+    label: t('usage.fields.reasoningEffort'),
+    value: props.record
+      ? usageReasoningEffort(props.record)
+      : '—',
+  },
+  {
+    label: t('usage.error.requestModel'),
+    value: modelDisplay.value.primary,
+    mono: true,
+  },
+  {
+    label: t('usage.error.upstreamModel'),
     value: modelDisplay.value.secondary || props.record?.upstreamModel,
     mono: true,
   },
-  { label: '存储模型', value: props.record?.model, mono: true },
-  { label: '上游返回模型', value: props.record?.upstreamResponseModel, mono: true },
+  {
+    label: t('usage.request.storageModel'),
+    value: props.record?.model,
+    mono: true,
+  },
 ])
 
 const clientUpstreamItems = computed(() => [
-  { label: '客户端 IP', value: props.record ? usageClientIp(props.record) : '—', mono: true },
-  { label: '服务档位', value: props.record?.serviceTier, mono: true },
-  { label: '事件类型', value: props.record?.kind, mono: true },
-  { label: '尝试序号', value: finalAttemptIndex.value },
+  {
+    label: t('usage.request.clientIp'),
+    value: props.record
+      ? usageClientIp(props.record)
+      : '—',
+    mono: true,
+  },
+  {
+    label: t('usage.billing.serviceLevel'),
+    value: props.record?.serviceTier,
+    mono: true,
+  },
+  {
+    label: t('usage.request.eventType'),
+    value: props.record?.kind,
+    mono: true,
+  },
+  {
+    label: t('usage.request.trySerialNumber'),
+    value: finalAttemptIndex.value,
+  },
   {
     label: 'User-Agent',
-    value: props.record ? usageUserAgent(props.record) : '',
+    value: props.record
+      ? usageUserAgent(props.record)
+      : '',
     mono: true,
     fullWidth: true,
   },
 ])
 
 const identifierItems = computed(() => [
-  { label: '请求 ID', value: props.record?.requestId, mono: true, wrap: true, fullWidth: true },
-  { label: '响应 ID', value: props.record?.responseId, mono: true, wrap: true },
-  { label: '上游请求 ID', value: props.record?.upstreamRequestId, mono: true, wrap: true },
-  { label: '账号 ID', value: props.record?.accountId, mono: true, wrap: true },
-  { label: '客户端 Key ID', value: props.record?.clientApiKeyId, mono: true, wrap: true },
+  {
+    label: t('usage.error.requestId'),
+    value: props.record?.requestId,
+    mono: true,
+    wrap: true,
+    fullWidth: true,
+  },
+  {
+    label: t('usage.error.responseId'),
+    value: props.record?.responseId,
+    mono: true,
+    wrap: true,
+  },
+  {
+    label: t('usage.error.upstreamRequestId'),
+    value: props.record?.upstreamRequestId,
+    mono: true,
+    wrap: true,
+  },
+  {
+    label: t('usage.request.accountId'),
+    value: props.record?.accountId,
+    mono: true,
+    wrap: true,
+  },
+  {
+    label: t('usage.error.clientKeyId'),
+    value: props.record?.clientApiKeyId,
+    mono: true,
+    wrap: true,
+  },
 ])
 
 interface AttemptRow {
@@ -117,16 +231,55 @@ interface AttemptRow {
   latencyMs: number | null
 }
 
-const attemptColumns = defineTableColumns<AttemptRow>([
-  { key: 'attemptIndex', label: '序号', kind: 'index' },
-  { key: 'outcome', label: '结果', kind: 'status', size: 'sm' },
-  { key: 'provider', label: '平台', kind: 'meta', size: 'sm' },
-  { key: 'model', label: '模型', kind: 'mono', size: 'lg' },
-  { key: 'transport', label: '上游传输', kind: 'status', size: 'md' },
-  { key: 'statusCode', label: '状态', kind: 'status', size: 'sm' },
-  { key: 'accountLabel', label: '账号', kind: 'mono', size: '2xl' },
-  { key: 'latencyMs', label: '耗时', kind: 'numeric', size: 'sm' },
-])
+const attemptColumns = computed(() => (defineTableColumns<AttemptRow>([
+  {
+    key: 'attemptIndex',
+    label: t('usage.request.serialNumber'),
+    kind: 'index',
+  },
+  {
+    key: 'outcome',
+    label: t('usage.request.result'),
+    kind: 'status',
+    size: 'sm',
+  },
+  {
+    key: 'provider',
+    label: t('usage.error.platform'),
+    kind: 'meta',
+    size: 'sm',
+  },
+  {
+    key: 'model',
+    label: t('usage.fields.model'),
+    kind: 'mono',
+    size: 'lg',
+  },
+  {
+    key: 'transport',
+    label: t('usage.diagnostics.transport'),
+    kind: 'status',
+    size: 'md',
+  },
+  {
+    key: 'statusCode',
+    label: t('common.fields.status'),
+    kind: 'status',
+    size: 'sm',
+  },
+  {
+    key: 'accountLabel',
+    label: t('accounts.account'),
+    kind: 'mono',
+    size: '2xl',
+  },
+  {
+    key: 'latencyMs',
+    label: t('usage.error.duration'),
+    kind: 'numeric',
+    size: 'sm',
+  },
+])))
 
 const attemptRows = computed<AttemptRow[]>(() =>
   (props.record?.attempts ?? []).map(attempt => ({
@@ -146,39 +299,120 @@ const attemptRows = computed<AttemptRow[]>(() =>
 const billingItems = computed(() => {
   const value = billing.value
   if (!value) {
-    return [{
-      label: '总费用',
-      value: props.record ? usageBillingText(props.record) : '—',
-      mono: true,
-    }]
+    return [
+      {
+        label: t('usage.billing.totalCost'),
+        value: props.record
+          ? usageBillingText(props.record)
+          : '—',
+        mono: true,
+      },
+    ]
   }
 
   return [
-    { label: '总费用', value: value.totalAmountDisplay, mono: true },
+    {
+      label: t('usage.billing.totalCost'),
+      value: value.totalAmountDisplay,
+      mono: true,
+    },
     ...(value.image
       ? [
-          { label: '图像输入费用', value: value.image.inputAmountDisplay, mono: true },
-          { label: '图像缓存费用', value: value.image.cacheReadAmountDisplay, mono: true },
-          { label: '图像输入单价', value: value.image.inputPriceDisplay, mono: true },
-          { label: '图像缓存单价', value: value.image.cacheReadPriceDisplay, mono: true },
+          {
+            label: t('usage.billing.imageInputFee'),
+            value: value.image.inputAmountDisplay,
+            mono: true,
+          },
+          {
+            label: t('usage.billing.imageCachingCharges'),
+            value: value.image.cacheReadAmountDisplay,
+            mono: true,
+          },
+          {
+            label: t('usage.billing.imageInputUnitPrice'),
+            value: value.image.inputPriceDisplay,
+            mono: true,
+          },
+          {
+            label: t('usage.billing.imageCacheUnitPrice'),
+            value: value.image.cacheReadPriceDisplay,
+            mono: true,
+          },
         ]
       : []),
-    { label: value.image ? '文本输入' : '输入', value: value.inputAmountDisplay, mono: true },
-    { label: value.image ? '图像输出' : '输出', value: value.outputAmountDisplay, mono: true },
-    { label: value.image ? '文本缓存读取' : '缓存读取', value: value.cacheReadAmountDisplay, mono: true },
-    { label: '缓存写入', value: value.cacheWriteAmountDisplay, mono: true },
-    { label: '标准费用', value: value.standardAmountDisplay, mono: true },
-    { label: value.image ? '文本输入单价' : '输入单价', value: value.inputPriceDisplay, mono: true },
-    { label: value.image ? '图像输出单价' : '输出单价', value: value.outputPriceDisplay, mono: true },
-    { label: value.image ? '文本缓存单价' : '缓存单价', value: value.cacheReadPriceDisplay, mono: true },
-    { label: '缓存写入单价', value: value.cacheWritePriceDisplay, mono: true },
-    { label: '服务档位', value: value.serviceTierDisplay },
-    { label: '倍率', value: value.multiplierDisplay, mono: true },
+    {
+      label: value.image
+        ? t('usage.request.textInput')
+        : t('usage.request.input'),
+      value: value.inputAmountDisplay,
+      mono: true,
+    },
+    {
+      label: value.image
+        ? t('usage.request.imageOutput')
+        : t('usage.metrics.output'),
+      value: value.outputAmountDisplay,
+      mono: true,
+    },
+    {
+      label: value.image
+        ? t('usage.request.textCacheRead')
+        : t('usage.request.cacheRead'),
+      value: value.cacheReadAmountDisplay,
+      mono: true,
+    },
+    {
+      label: t('usage.request.cacheWrites'),
+      value: value.cacheWriteAmountDisplay,
+      mono: true,
+    },
+    {
+      label: t('usage.billing.standardFee'),
+      value: value.standardAmountDisplay,
+      mono: true,
+    },
+    {
+      label: value.image
+        ? t('usage.billing.textInputUnitPrice')
+        : t('usage.billing.inputUnitPrice'),
+      value: value.inputPriceDisplay,
+      mono: true,
+    },
+    {
+      label: value.image
+        ? t('usage.billing.imageOutputUnitPrice')
+        : t('usage.billing.outputUnitPrice'),
+      value: value.outputPriceDisplay,
+      mono: true,
+    },
+    {
+      label: value.image
+        ? t('usage.request.textCacheUnitPrice')
+        : t('usage.request.cacheUnitPrice'),
+      value: value.cacheReadPriceDisplay,
+      mono: true,
+    },
+    {
+      label: t('usage.billing.cacheWriteUnitPrice'),
+      value: value.cacheWritePriceDisplay,
+      mono: true,
+    },
+    {
+      label: t('usage.billing.serviceLevel'),
+      value: value.serviceTierDisplay,
+    },
+    {
+      label: t('settings.pricing.multiplier'),
+      value: value.multiplierDisplay,
+      mono: true,
+    },
   ]
 })
 
 function tokenCount(value: number | null | undefined): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : null
 }
 
 function remainingTokenCount(total: number | null | undefined, ...parts: (number | null | undefined)[]): number | null {
@@ -194,7 +428,9 @@ function remainingTokenCount(total: number | null | undefined, ...parts: (number
     remainder -= knownPart
   }
   // 未上报或子项越界时不能补零，否则环图会伪造完整的占比
-  return remainder >= 0 ? remainder : null
+  return remainder >= 0
+    ? remainder
+    : null
 }
 
 const tokenChartItems = computed(() => {
@@ -203,31 +439,35 @@ const tokenChartItems = computed(() => {
   const nonReasoningOutputTokens = remainingTokenCount(details?.outputTokens, details?.reasoningOutputTokens)
   return [
     {
-      label: '新增输入',
+      label: t('usage.metrics.newInput'),
       value: freshInputTokens,
-      display: freshInputTokens === null ? '—' : formatInteger(freshInputTokens),
+      display: freshInputTokens === null
+        ? '—'
+        : formatInteger(freshInputTokens),
       color: palette.value.info,
     },
     {
-      label: '非推理输出',
+      label: t('usage.request.nonInferentialOutput'),
       value: nonReasoningOutputTokens,
-      display: nonReasoningOutputTokens === null ? '—' : formatInteger(nonReasoningOutputTokens),
+      display: nonReasoningOutputTokens === null
+        ? '—'
+        : formatInteger(nonReasoningOutputTokens),
       color: palette.value.success,
     },
     {
-      label: '缓存读取',
+      label: t('usage.request.cacheRead'),
       value: tokenCount(details?.cachedInputTokens),
       display: details?.cachedInputTokensDisplay ?? '—',
       color: palette.value.warning,
     },
     {
-      label: '缓存写入',
+      label: t('usage.request.cacheWrites'),
       value: tokenCount(details?.cacheWriteInputTokens),
       display: details?.cacheWriteInputTokensDisplay ?? '—',
       color: palette.value.danger,
     },
     {
-      label: '推理',
+      label: t('usage.metrics.reasoning'),
       value: tokenCount(details?.reasoningOutputTokens),
       display: details?.reasoningOutputTokensDisplay ?? '—',
       color: palette.value.reasoning,
@@ -237,23 +477,37 @@ const tokenChartItems = computed(() => {
 const tokenChartComplete = computed(() => tokenChartItems.value.every(item => item.value !== null))
 const tokenDetailItems = computed(() => [
   ...tokenChartItems.value,
-  { label: '总输出', display: tokenDetails.value?.outputTokensDisplay ?? '—', color: null },
+  {
+    label: t('usage.request.totalOutput'),
+    display: tokenDetails.value?.outputTokensDisplay ?? '—',
+    color: null,
+  },
 ])
 
 const tokenDonutOption = computed<EChartsOption>(() => {
   const items = tokenChartComplete.value
-    ? tokenChartItems.value.flatMap(item => item.value !== null && item.value > 0 ? [{ ...item, value: item.value }] : [])
+    ? tokenChartItems.value.flatMap(item => item.value !== null && item.value > 0
+        ? [
+            { ...item, value: item.value },
+          ]
+        : [])
     : []
 
   return {
     tooltip: {
       trigger: 'item',
-      ...chartTooltipStyle(palette.value, { padding: [9, 12] }),
+      ...chartTooltipStyle(palette.value, {
+        padding: [9, 12],
+      }),
       formatter: (params: unknown) => {
         if (typeof params !== 'object' || params === null)
           return ''
-        const name = 'name' in params && typeof params.name === 'string' ? params.name : ''
-        const marker = 'marker' in params && typeof params.marker === 'string' ? params.marker : ''
+        const name = 'name' in params && typeof params.name === 'string'
+          ? params.name
+          : ''
+        const marker = 'marker' in params && typeof params.marker === 'string'
+          ? params.marker
+          : ''
         const item = tokenChartItems.value.find(entry => entry.label === name)
         if (!item)
           return ''
@@ -279,7 +533,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
             }))
           : [
               {
-                name: '暂无',
+                name: t('usage.request.noneYet'),
                 value: 1,
                 itemStyle: { color: palette.value.surfaceMuted },
               },
@@ -294,8 +548,8 @@ const tokenDonutOption = computed<EChartsOption>(() => {
 <template>
   <ZDialog
     v-model="open"
-    title="使用记录详情"
-    description="单次请求的完整链路信息"
+    :title="t('usage.request.usageRecordDetails')"
+    :description="t('usage.request.description')"
     type="info"
     width="64rem"
   >
@@ -303,13 +557,13 @@ const tokenDonutOption = computed<EChartsOption>(() => {
       <section class="grid min-w-0 gap-3 lg:grid-cols-2">
         <section :class="panelClass">
           <h3 :class="panelTitleClass">
-            请求信息
+            {{ t('usage.request.requestInformation') }}
           </h3>
           <UsageDetailFieldGrid :items="requestItems" />
         </section>
         <section :class="panelClass">
           <h3 :class="panelTitleClass">
-            传输与用量
+            {{ t('usage.request.transportAndUsage') }}
           </h3>
           <UsageDetailFieldGrid :items="overviewItems" />
         </section>
@@ -318,14 +572,14 @@ const tokenDonutOption = computed<EChartsOption>(() => {
       <section class="grid min-w-0 gap-3 lg:grid-cols-2">
         <section :class="panelClass">
           <h3 :class="panelTitleClass">
-            模型与路由
+            {{ t('usage.request.modelsAndRouting') }}
           </h3>
           <UsageDetailFieldGrid :items="modelRouteItems" />
         </section>
 
         <section :class="panelClass">
           <h3 :class="panelTitleClass">
-            客户端与上游
+            {{ t('usage.request.clientAndUpstream') }}
           </h3>
           <UsageDetailFieldGrid :items="clientUpstreamItems" />
         </section>
@@ -333,7 +587,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
 
       <section :class="panelClass">
         <h3 :class="panelTitleClass">
-          请求标识
+          {{ t('usage.request.requestId') }}
         </h3>
         <UsageDetailFieldGrid :items="identifierItems" />
       </section>
@@ -342,9 +596,9 @@ const tokenDonutOption = computed<EChartsOption>(() => {
         <section class="flex min-h-0 flex-col" :class="panelClass">
           <div class="flex items-center justify-between gap-2">
             <h3 :class="panelTitleClass">
-              Token
+              {{ t('common.units.tokens') }}
             </h3>
-            <span v-if="!tokenChartComplete" class="text-cp-xs text-cp-text-tertiary">明细不完整</span>
+            <span v-if="!tokenChartComplete" class="text-cp-xs text-cp-text-tertiary">{{ t('usage.request.incompleteDetails') }}</span>
           </div>
           <div
             class="mt-3 grid min-h-38 min-w-0 flex-1 grid-cols-1 content-center items-center gap-3 sm:grid-cols-[150px_minmax(0,1fr)]"
@@ -354,7 +608,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
               <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
                 <div class="grid text-center">
                   <span class="text-cp-xs leading-none font-bold text-cp-text-quaternary">
-                    总计
+                    {{ t('usage.request.total') }}
                   </span>
                   <strong
                     class="mt-1 font-mono text-[16px] leading-none font-extrabold tabular-nums text-cp-text"
@@ -388,7 +642,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
 
         <section :class="panelClass">
           <h3 :class="panelTitleClass">
-            费用
+            {{ t('usage.fields.cost') }}
           </h3>
           <UsageDetailFieldGrid :items="billingItems" />
         </section>
@@ -396,7 +650,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
 
       <section v-if="attemptRows.length" :class="panelClass">
         <h3 :class="panelTitleClass">
-          尝试链路
+          {{ t('usage.error.attempts') }}
         </h3>
         <ZTable
           class="attempt-table mt-2.5 h-auto! min-w-0 font-mono tabular-nums"
@@ -436,17 +690,17 @@ const tokenDonutOption = computed<EChartsOption>(() => {
         class="grid min-h-0 grid-cols-1 gap-3 lg:grid-cols-2"
       >
         <div v-if="requestText" class="min-h-0" :class="[panelClass]">
-          <UsageDetailCodePanel title="请求内容" max-height="180px" :content="requestText" />
+          <UsageDetailCodePanel :title="t('usage.request.requestContent')" max-height="180px" :content="requestText" />
         </div>
 
         <div v-if="responseText" class="min-h-0" :class="[panelClass]">
-          <UsageDetailCodePanel title="响应内容" max-height="180px" :content="responseText" />
+          <UsageDetailCodePanel :title="t('usage.error.responseContent')" max-height="180px" :content="responseText" />
         </div>
       </section>
 
       <section v-if="record.metadata" class="min-h-0" :class="[panelClass]">
         <UsageDetailCodePanel
-          title="元数据"
+          :title="t('usage.error.metadata')"
           max-height="min(32dvh, 340px)"
           :content="JSON.stringify(record.metadata, null, 2)"
         />
@@ -456,7 +710,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
     <template #footer>
       <DiagnosticsDownloadButton v-if="record" :request-id="record.requestId" :active="open" />
       <ZButton type="primary" @click="open = false">
-        关闭
+        {{ t('common.actions.close') }}
       </ZButton>
     </template>
   </ZDialog>

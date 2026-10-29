@@ -2,6 +2,7 @@ import type { LineSeriesOption } from 'echarts'
 import type { useChartPalette } from '@/composables/useChartPalette'
 import { sampleGapBridgeSeries } from '@/components/charts/timeSeriesGap'
 import { chartTooltipStyle } from '@/components/charts/tooltip'
+
 import { formatLocalizedCompactNumber } from '@/utils/format'
 
 type UsageChartPalette = ReturnType<typeof useChartPalette>['palette']['value']
@@ -28,7 +29,9 @@ function usageLineSeries(
   const area = options.area ?? (options.stack ? 'strong' : false)
   const alpha = area ? areaAlpha[area] : null
   const sampleCount = data.reduce<number>(
-    (count, value) => count + (value == null ? 0 : 1),
+    (count, value) => count + (value == null
+      ? 0
+      : 1),
     0,
   )
   const showSymbols = sampleCount > 0 && sampleCount <= 12
@@ -45,7 +48,9 @@ function usageLineSeries(
     showSymbol: showSymbols,
     showAllSymbol: showSymbols,
     symbol: 'circle',
-    symbolSize: sampleCount === 1 ? 7 : 5,
+    symbolSize: sampleCount === 1
+      ? 7
+      : 5,
     lineStyle: { color, width: 2.2 },
     itemStyle: { color },
     areaStyle: alpha
@@ -92,18 +97,9 @@ export function usageTooltip(
 ) {
   return {
     trigger: 'axis' as const,
-    ...chartTooltipStyle(theme, { axisPointer: true }),
+    ...chartTooltipStyle(theme, { axisPointer: true, fontWeight: 600 }),
     formatter,
   }
-}
-
-export function usageTooltipContent(
-  theme: UsageChartPalette,
-  label: string,
-  lines: string[],
-) {
-  const title = escapeTooltip(label)
-  return `<div style="margin:0 0 7px;padding:0 0 7px;border-bottom:1px solid ${theme.divider};color:${theme.textPrimary};font-family:'JetBrains Mono Variable','JetBrains Mono',monospace;font-size:11px;font-weight:750;line-height:1.2">${title}</div><div style="line-height:1.55">${lines.join('<br/>')}</div>`
 }
 
 export function usageTooltipItem(label: string, value: string, color: string) {
@@ -117,7 +113,7 @@ export function usageCategoryAxis(labels: string[], theme: UsageChartPalette) {
     axisLabel: {
       color: theme.textMuted,
       fontSize: 10,
-      fontFamily: 'JetBrains Mono Variable, JetBrains Mono, monospace',
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace',
       hideOverlap: true,
     },
     axisLine: { show: false },
@@ -141,7 +137,7 @@ export function usageValueAxis(
       show: true,
       color: theme.textMuted,
       fontSize: 10,
-      fontFamily: 'JetBrains Mono Variable, JetBrains Mono, monospace',
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-mono').trim() || 'monospace',
       formatter,
     },
     splitLine: {
@@ -162,7 +158,7 @@ export function usageLegend(theme: UsageChartPalette, data: string[]) {
     textStyle: {
       color: theme.textSecondary,
       fontSize: 11,
-      fontFamily: 'Inter Variable, Inter, system-ui, sans-serif',
+      fontFamily: getComputedStyle(document.documentElement).fontFamily,
       fontWeight: 650,
     },
   }
@@ -172,17 +168,23 @@ export function formatDurationAxis(value: number) {
   if (!Number.isFinite(value))
     return '—'
   if (value < 1_000)
-    return `${Math.round(value)}ms`
-  return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}s`
+    return `${Math.round(value)} ms`
+  return `${(value / 1_000).toFixed(value >= 10_000
+    ? 0
+    : 1)} s`
 }
 
 export function formatUsdAxis(value: number) {
-  const safeValue = Number.isFinite(value) ? value : 0
+  const safeValue = Number.isFinite(value)
+    ? value
+    : 0
   if (Math.abs(safeValue) >= 1_000)
     return `$${formatLocalizedCompactNumber(safeValue)}`
   if (Math.abs(safeValue) < 0.01 && safeValue !== 0)
     return `$${safeValue.toFixed(3)}`
-  return `$${safeValue.toFixed(safeValue < 1 ? 2 : 1)}`
+  return `$${safeValue.toFixed(safeValue < 1
+    ? 2
+    : 1)}`
 }
 
 function escapeTooltip(value: string) {

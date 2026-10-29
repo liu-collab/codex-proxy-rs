@@ -2,10 +2,11 @@ import type { Ref } from 'vue'
 import type { PluginRefreshContext } from '../utils/actions'
 import type { InstalledPlugin } from '../utils/catalog'
 import type { PluginArtifact, PluginInstance, PluginRollbackPlan, PluginVersionPlan } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { onScopeDispose, shallowRef, watch } from 'vue'
 import { getPluginRollbackPlan, getPluginVersionPlan, rollbackPluginInstance, switchPluginVersion } from '@/api'
 import { ApiError } from '@/api/request'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import { notifyPluginError } from '../utils/actions'
 import { currentPluginInstance } from '../utils/catalog'
@@ -47,12 +48,24 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
   async function applyVersionSwitch(instance: PluginInstance, artifact: PluginArtifact) {
     busyInstanceId.value = instance.id
     try {
+      const plan = await getPluginVersionPlan({ id: instance.id, artifactSha256: artifact.metadata.sha256 }, { silent: true })
+      if (plan.instanceRevision !== instance.revision)
+        throw new Error(t('plugins.configuration.stale'))
+      if (plan.loadError)
+        throw new Error(plan.loadError)
+      if (instance.enabled && plan.compatibilityWarning) {
+        showVersionSwitch.value = false
+        onConfigurationRequired(instance, artifact, plan, plan.compatibilityWarning)
+        return
+      }
       await switchPluginVersion({
         id: instance.id,
         target: { artifactSha256: artifact.metadata.sha256, expectedRevision: instance.revision },
       }, { silent: true })
       showVersionSwitch.value = false
-      ZNotification.success({ message: `已切换至 ${artifact.metadata.version}` })
+      ZNotification.success({
+        message: t('plugins.switchedTo', { version: artifact.metadata.version }),
+      })
       await refresh(true)
       onApplied()
     }
@@ -63,16 +76,16 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
         try {
           const plan = await getPluginVersionPlan({ id: instance.id, artifactSha256: artifact.metadata.sha256 }, { silent: true })
           if (plan.instanceRevision !== instance.revision)
-            throw new Error('插件设置已变更，请刷新后重试')
+            throw new Error(t('plugins.configuration.stale'))
           showVersionSwitch.value = false
-          onConfigurationRequired(current, artifact, plan, errorMessage(error, '请调整不兼容的设置后重试'))
+          onConfigurationRequired(current, artifact, plan, errorMessage(error, t('plugins.configuration.incompatible')))
         }
         catch (planError) {
-          notifyPluginError('版本设置加载失败', planError)
+          notifyPluginError(t('plugins.versionSettingFailedToLoad'), planError)
         }
       }
       else {
-        notifyPluginError('版本切换失败', error)
+        notifyPluginError(t('plugins.versionSwitchingFailed'), error)
       }
     }
     finally {
@@ -95,7 +108,7 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
     }
     catch (error) {
       if (rollbackController === controller)
-        notifyPluginError('回退版本加载失败', error)
+        notifyPluginError(t('plugins.fallbackVersionLoadingFailed'), error)
     }
     finally {
       if (rollbackController === controller) {
@@ -113,13 +126,18 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
       return
     busyInstanceId.value = instance.id
     try {
-      await rollbackPluginInstance({ id: instance.id, target: { artifactSha256, expectedRevision: plan.instanceRevision } }, { silent: true })
+      await rollbackPluginInstance({
+        id: instance.id,
+        target: { artifactSha256, expectedRevision: plan.instanceRevision },
+      }, { silent: true })
       showRollback.value = false
-      ZNotification.success({ message: `已回退至 ${target.version}，并恢复对应设置` })
+      ZNotification.success({
+        message: t('plugins.rollback.completed', { version: target.version }),
+      })
       await refresh(true)
     }
     catch (error) {
-      notifyPluginError('插件版本回退失败', error)
+      notifyPluginError(t('plugins.pluginVersionRollbackFailed'), error)
     }
     finally {
       busyInstanceId.value = ''
@@ -135,5 +153,17 @@ export function usePluginVersions({ catalog, instances, busyInstanceId, refresh,
 
   onScopeDispose(() => rollbackController?.abort())
 
-  return { showRollback, rollbackInstance, rollbackPlan, loadingRollback, pendingVersionSwitch, showVersionSwitch, requestVersionSwitch, confirmVersionSwitch, applyVersionSwitch, openRollback, confirmRollback }
+  return {
+    showRollback,
+    rollbackInstance,
+    rollbackPlan,
+    loadingRollback,
+    pendingVersionSwitch,
+    showVersionSwitch,
+    requestVersionSwitch,
+    confirmVersionSwitch,
+    applyVersionSwitch,
+    openRollback,
+    confirmRollback,
+  }
 }

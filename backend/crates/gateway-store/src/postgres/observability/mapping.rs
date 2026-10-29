@@ -17,6 +17,9 @@ pub(crate) fn store_range(
 
 pub(crate) fn store_usage_filter(filter: admin_observability::UsageFilter) -> UsageRecordFilter {
     UsageRecordFilter {
+        model_contains: filter.model_contains,
+        client_api_key_name: filter.client_api_key_name,
+        provider_account_name: filter.provider_account_name,
         client_api_key_ref: filter.client_api_key_ref,
         request_id: filter.request_id,
         provider_account_ref: filter.provider_account_ref,
@@ -135,6 +138,7 @@ pub(crate) fn admin_dashboard_account_usage(
         authentication_kind: usage.authentication_kind,
         name: usage.name,
         email: usage.email,
+        notes: usage.notes,
         plan_type: usage.plan_type,
         plan_type_display: None,
         request_count: usage.request_count,
@@ -326,7 +330,6 @@ pub(crate) fn usage_list_record_from_row(
         provider_account_authentication_kind: get(row, "provider_account_authentication_kind")?,
         upstream_model_id: get(row, "upstream_model_id")?,
         upstream_transport: get(row, "upstream_transport")?,
-        upstream_response_model: get(row, "upstream_response_model")?,
         service_tier: get(row, "service_tier")?,
         input_tokens: optional_unsigned(row, "input_tokens")?,
         output_tokens: optional_unsigned(row, "output_tokens")?,
@@ -401,7 +404,6 @@ pub(crate) fn usage_record_from_row(row: &sqlx::postgres::PgRow) -> StoreResult<
         upstream_transport: get(row, "upstream_transport")?,
         http_version: get(row, "http_version")?,
         websocket_pool: get(row, "websocket_pool")?,
-        upstream_response_model: get(row, "upstream_response_model")?,
         service_tier: get(row, "service_tier")?,
         provider_metadata_json: get::<Option<serde_json::Value>>(row, "provider_observation_json")?
             .map(|value| serde_json::to_string(&value))

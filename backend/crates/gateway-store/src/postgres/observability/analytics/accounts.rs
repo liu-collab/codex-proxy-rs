@@ -51,7 +51,7 @@ impl AnalyticsSnapshot<'_> {
                 timezone: Default::default(),
                 account_models: Some(by_model),
                 selection: super::query::ReadSelection {
-                    distributions: false,
+                    distributions: super::query::DistributionRead::None,
                     costs: true,
                     keys: Some(account_ids),
                     counters: None,

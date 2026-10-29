@@ -1,4 +1,5 @@
 import type { RequestLocation } from '@/api'
+import { t } from '@/i18n'
 
 export function normalizeRequestLocation(location: RequestLocation): RequestLocation {
   return {
@@ -11,6 +12,6 @@ export function normalizeRequestLocation(location: RequestLocation): RequestLoca
 
 export function requestLocationError(location: RequestLocation): string {
   if (!/^[A-Z]{2}$/.test(location.country) || !location.region || !location.city || !location.timezone)
-    return '请填写两位国家代码、地区、城市和 IANA 时区'
+    return t('common.location.required')
   return ''
 }

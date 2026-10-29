@@ -21,8 +21,6 @@ pub(super) struct RequestObservation {
     #[serde(skip_serializing_if = "Option::is_none")]
     transport: Option<TransportObservation>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    response: Option<ResponseObservation>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     continuation: Option<ContinuationObservation>,
 }
 
@@ -148,13 +146,6 @@ struct ConnectionObservation {
 
 #[derive(Default, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ResponseObservation {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    response_model: Option<String>,
-}
-
-#[derive(Default, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct ContinuationObservation {
     #[serde(skip_serializing_if = "Option::is_none")]
     previous_response_id_hash: Option<String>,
@@ -262,9 +253,6 @@ impl RequestObservation {
                         age_ms: value.upstream_connection_age_ms,
                         idle_ms: value.upstream_connection_idle_ms,
                     }),
-            }),
-            response: Some(ResponseObservation {
-                response_model: value.upstream_response_model.clone(),
             }),
             error: Some(ErrorObservation {
                 provider_error_code: value.provider_error_code.clone(),

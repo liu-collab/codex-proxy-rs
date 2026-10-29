@@ -1,33 +1,38 @@
 <script setup lang="ts">
 import type { AccountGroup } from '@/api'
-import { ZIconButton } from '@codex-proxy/ui'
 
+import { ZIconButton } from '@codex-proxy/ui'
 import { Pencil, Power, Trash2 } from '@lucide/vue'
+
+import { useI18n } from 'vue-i18n'
 
 defineProps<{
   group: AccountGroup
   updatingStatus: boolean
   deleting: boolean
 }>()
+
 const emit = defineEmits<{
   edit: [group: AccountGroup]
   toggle: [group: AccountGroup]
   delete: [group: AccountGroup]
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 </script>
 
 <template>
   <div class="flex items-center gap-1">
     <ZIconButton
       size="small"
-      aria-label="编辑分组"
+      :aria-label="t('groups.actions.editGroup')"
       @click.stop="emit('edit', group)"
     >
       <Pencil class="size-3.5 text-cp-link" />
     </ZIconButton>
     <ZIconButton
       size="small"
-      :aria-label="group.enabled ? '禁用分组' : '启用分组'"
+      :aria-label="group.enabled ? t('groups.actions.disableGroup') : t('groups.actions.enableGroup')"
       :loading="updatingStatus"
       @click.stop="emit('toggle', group)"
     >
@@ -38,7 +43,7 @@ const emit = defineEmits<{
     </ZIconButton>
     <ZIconButton
       size="small"
-      aria-label="删除分组"
+      :aria-label="t('groups.actions.deleteGroup')"
       :disabled="deleting"
       @click.stop="emit('delete', group)"
     >

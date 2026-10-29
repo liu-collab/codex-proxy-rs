@@ -21,6 +21,17 @@ pub struct ContributedModelAlias {
     pub target: UpstreamModelId,
 }
 
+/// 适配模型的冻结账号支持事实；没有选择账号或改写请求的能力
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContributedModel {
+    pub owner: String,
+    pub id: PublicModelId,
+    pub provider: ProviderKind,
+    pub accounts: BTreeSet<ProviderAccountId>,
+    pub capabilities: ModelCapabilities,
+    pub presentation: ModelPresentation,
+}
+
 /// Provider 客户端目录条目；缺少原生协议正文时使用已编译的通用画像
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderModelDescriptor {

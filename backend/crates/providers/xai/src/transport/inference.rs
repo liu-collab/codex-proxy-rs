@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::time::Duration;
 
 use futures::Stream;
+use gateway_core::engine::middleware::MiddlewareHeader;
 use gateway_core::error::{
     ClientVisibleUpstreamError, ErrorSource, OpaqueUpstreamValue, ProviderDiagnostic,
     RawUpstreamError,
@@ -20,8 +21,9 @@ use super::{GrokHeader, GrokSessionBinding};
 /// 交给注入的 HTTP SSE transport 的自持有请求
 pub struct GrokInferenceRequest {
     trace: gateway_core::diagnostics::TraceContext,
+    method: reqwest::Method,
     endpoint: Url,
-    headers: Vec<GrokHeader>,
+    headers: Vec<MiddlewareHeader>,
     body: Zeroizing<Vec<u8>>,
     binding: GrokSessionBinding,
 }
@@ -35,8 +37,17 @@ impl GrokInferenceRequest {
     ) -> Self {
         Self {
             trace: gateway_core::diagnostics::TraceContext::default(),
+            method: reqwest::Method::POST,
             endpoint,
-            headers,
+            headers: headers
+                .into_iter()
+                .map(|header| {
+                    MiddlewareHeader::new(
+                        header.name().to_owned(),
+                        bytes::Bytes::copy_from_slice(header.value().expose().as_bytes()),
+                    )
+                })
+                .collect(),
             body: Zeroizing::new(body),
             binding,
         }
@@ -52,7 +63,13 @@ impl GrokInferenceRequest {
         &self.trace
     }
 
-    /// 返回严格限定的官方 Responses 端点
+    /// 返回交给 transport 的最终方法
+    #[must_use]
+    pub const fn method(&self) -> &reqwest::Method {
+        &self.method
+    }
+
+    /// 返回交给 transport 的最终目标，仍受其端点策略约束
     #[must_use]
     pub const fn endpoint(&self) -> &Url {
         &self.endpoint
@@ -60,11 +77,11 @@ impl GrokInferenceRequest {
 
     /// 返回类型化 header；适配层不得记录敏感值
     #[must_use]
-    pub fn headers(&self) -> &[GrokHeader] {
+    pub fn headers(&self) -> &[MiddlewareHeader] {
         &self.headers
     }
 
-    /// 返回序列化后的类型化 Responses body
+    /// 返回最终出站字节，不要求仍是 JSON
     #[must_use]
     pub fn body(&self) -> &[u8] {
         &self.body
@@ -75,13 +92,28 @@ impl GrokInferenceRequest {
     pub const fn binding(&self) -> &GrokSessionBinding {
         &self.binding
     }
+
+    pub(crate) fn with_prepared(
+        mut self,
+        method: reqwest::Method,
+        endpoint: Url,
+        headers: Vec<MiddlewareHeader>,
+        body: bytes::Bytes,
+    ) -> Self {
+        self.method = method;
+        self.endpoint = endpoint;
+        self.headers = headers;
+        self.body = Zeroizing::new(body.into());
+        self
+    }
 }
 
 impl fmt::Debug for GrokInferenceRequest {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("GrokInferenceRequest")
-            .field("endpoint", &self.endpoint)
+            .field("method", &self.method)
+            .field("endpoint", &"[REDACTED]")
             .field("headers", &self.headers)
             .field(
                 "body",
@@ -329,6 +361,7 @@ pub struct GrokInferenceTransportError {
     raw_upstream_error: Option<Box<RawUpstreamError>>,
     send_state: UpstreamSendState,
     status: Option<u16>,
+    upstream_fields: Option<Box<gateway_core::upstream::UpstreamFailureFields>>,
     retry_after: Option<Duration>,
     http_version: Option<UpstreamHttpVersion>,
     request_id: Option<OpaqueUpstreamValue>,
@@ -350,6 +383,7 @@ impl GrokInferenceTransportError {
             raw_upstream_error: None,
             send_state,
             status: None,
+            upstream_fields: None,
             retry_after: None,
             http_version: None,
             request_id: None,
@@ -363,6 +397,22 @@ impl GrokInferenceTransportError {
             credential_recovery_required: false,
             sensitive_context_redacted: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_upstream_failure_fields(
+        mut self,
+        fields: gateway_core::upstream::UpstreamFailureFields,
+    ) -> Self {
+        self.upstream_fields = Some(Box::new(fields));
+        self
+    }
+
+    #[must_use]
+    pub fn upstream_failure_fields(
+        &self,
+    ) -> Option<&gateway_core::upstream::UpstreamFailureFields> {
+        self.upstream_fields.as_deref()
     }
 
     /// 保存 transport 提取的安全诊断，避免 Provider 映射时丢失原因

@@ -17,28 +17,28 @@
 | `package` | CLI 生成的协议版本、单一目标平台与文件摘要，不需作者手写 |
 
 作者清单不能包含 `package`。使用 `Manifest::from_author_slice()` 校验并规范化；直接反序列化的 `Manifest`
-不会执行作者清单的 ID 与固定阶段推导，声明的可选字段仍使用其默认值。打包后，`main` 和所有资源都必须进入 `package.files`；宿主用
-`package_for(host, os, architecture)` 检查版本与平台。运行模式为 `trustedProcess`，信任边界见[完整信任](#完整信任)
+不会执行作者清单的 ID 与固定阶段推导，声明的可选字段仍使用其默认值。打包后，`main` 和所有资源都必须进入 `package.files`，
+宿主校验包结构、目标平台与文件完整性，宿主范围和能力版本另行进行兼容检查。运行模式为 `trustedProcess`，信任边界见[完整信任](#完整信任)
 
 宿主实际开放的合同由 [plugin-host-compatibility.json](../../runtime/plugin-host-compatibility.json)
 声明，SDK 的 `Capability::contract_versions()` 只表示 SDK 能描述的行为版本，不能代替宿主支持检查
 
-| 版本字段 | 对应合同 |
-| --- | --- |
-| `manifestVersion` / `manifest_schema_versions` | 插件清单格式 |
-| `package.protocolVersion` / `protocol_versions` | 插件进程 RPC 封装，不是 OpenAI 或 xAI 的业务协议 |
-| `contributes.<capability>.version` / `capabilities[].versions` | 指定扩展能力的行为合同 |
-| 宿主声明的 `schema_version` | 宿主兼容声明自身的格式 |
+| 版本字段 | 当前值 | 对应合同 |
+| --- | --- | --- |
+| `manifestVersion` / `manifest_schema_versions` | `2` | 插件清单格式 |
+| `package.protocolVersion` / `protocol_versions` | `7` | 插件进程 RPC 封装，不是 OpenAI 或 xAI 的业务协议 |
+| `contributes.<capability>.version` / `capabilities[].versions` | 见[扩展项简写](#扩展项简写) | 指定扩展能力的行为合同 |
+| 宿主声明的 `schema_version` | `2` | 宿主兼容声明自身的格式 |
 
 `capabilities` 使用扩展能力标识；Provider、模型和账号 ID 不属于这个集合
 
-清单与宿主兼容声明的格式版本为 `2`，进程协议版本为 `4`；清单不接受 `permissions` 字段
+清单不接受 `permissions` 字段；插件按[完整信任](#完整信任)运行
 
-RPC v5 的帧布局、编码与会话生命周期见[通信边界](../README.md#通信边界)。插件使用 SDK 构建，并由 CLI 生成包含协议版本的安装包
+RPC v7 的帧布局、编码与会话生命周期见[通信边界](../README.md#通信边界)。插件使用 SDK 构建，并由 CLI 生成包含协议版本的安装包
 
 安装包清单校验与已安装元数据读取是两个边界：清单拒绝未知字段，并检查必需字段、类型和版本；
 数据库元数据的读取规则见[制品与发布](../../../../../docs/architecture.md#制品配置与发布)，不改变清单或 RPC 合同。
-`engines.codex-proxy-rs` 声明插件所需的宿主范围。范围或能力版本不匹配时持续提示风险，允许尝试启动；包结构、平台与 RPC 封装校验失败阻止加载。CLI 严格校验作者声明是否符合 SDK 支持的合同
+`engines.codex-proxy-rs` 声明插件所需的宿主范围。范围或已声明能力版本不匹配时不自动启动，管理员确认风险后可尝试本次启动；确认不跨宿主重启保留。包结构、清单格式、平台与 RPC 封装校验失败阻止加载，不能通过风险确认绕过。CLI 严格校验作者声明是否符合 SDK 支持的合同
 
 ## 接口弃用
 
@@ -49,7 +49,18 @@ RPC v5 的帧布局、编码与会话生命周期见[通信边界](../README.md#
 
 ## 扩展项简写
 
-作者声明可以省略 `id` 和固定阶段。版本字段省略时为 `1`，适用于 `model_catalog`、`command_line` 和 `maintenance`；其余能力显式声明当前版本：`middleware` 为 `5`，`scheduler` 为 `3`，`upstream_adapter` 为 `4`，认证、路由、重试、观察和管理能力为 `2`：
+作者声明可以省略 `id` 和固定阶段。版本字段省略时为 `1`，其余版本必须显式声明：
+
+| 能力 | 当前版本 |
+| --- | --- |
+| `middleware` | `6` |
+| `scheduler` | `3` |
+| `upstream_adapter` | `5` |
+| `frontend_authentication`、`model_router`、`retry_policy`、`observer`、`management` | `2` |
+| `model_catalog` | `2` |
+| `command_line`、`maintenance` | `1` |
+
+例如，仅声明管理页面、命令行和模型请求中间件：
 
 ```json
 {
@@ -57,7 +68,7 @@ RPC v5 的帧布局、编码与会话生命周期见[通信边界](../README.md#
     "management": { "version": 2 },
     "command_line": {},
     "middleware": {
-      "version": 5,
+      "version": 6,
       "stages": ["request"],
       "inputFormats": ["openai"],
       "outputFormats": ["openai"]
@@ -80,7 +91,7 @@ capability 固定并由工具生成：
 
 `observer` 使用一个处理器接收完成与上游 WebSocket 事件，实例绑定按 `event` 选择订阅类型；具体合同见[观察事件](capabilities.md#路由调度与观察)
 
-`middleware` 必须从 `http`、`websocket`、`service`、`request`、`attempt` 中显式选择挂载；同一处理器可覆盖多个边界，协议格式等真实业务选择也不能省略。
+`middleware` 必须从 `http`、`websocket`、`service`、`request`、`attempt`、`outbound` 中显式选择挂载；同一处理器可覆盖多个边界，协议格式等真实业务选择也不能省略。
 安装清单若携带不同的固定阶段会被拒绝，而不是在加载时静默改写
 
 ## 完整信任

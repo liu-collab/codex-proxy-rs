@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 
+import AppLanguageMenu from '@/components/AppLanguageMenu.vue'
 import { useAuthStore } from '@/stores/modules/auth'
 
 import LoginBackground from './components/LoginBackground.vue'
 import LoginPanel from './components/LoginPanel.vue'
 import LoginThemeToggle from './components/LoginThemeToggle.vue'
+
+const { t } = useI18n({ useScope: 'global' })
 
 type LoginRealm = 'admin' | 'key'
 
@@ -33,7 +37,10 @@ async function handleSubmit(): Promise<void> {
   loginPending.value = true
   const selectedRealm = realm.value
   const result = await authStore.login(selectedRealm === 'key'
-    ? { mode: 'key', apiKey: apiKey.value.trim() }
+    ? {
+        mode: 'key',
+        apiKey: apiKey.value.trim(),
+      }
     : {
         mode: 'admin',
         username: username.value.trim(),
@@ -58,7 +65,9 @@ async function handleSubmit(): Promise<void> {
 }
 
 function normalizeRealm(value: unknown): LoginRealm {
-  return value === 'key' ? 'key' : 'admin'
+  return value === 'key'
+    ? 'key'
+    : 'admin'
 }
 
 function resolveDestination(): string {
@@ -73,13 +82,14 @@ function resolveDestination(): string {
   <main class="login-page relative isolate min-h-dvh overflow-hidden text-(--cp-login-title-color)">
     <LoginBackground />
 
-    <div class="absolute top-5 right-5 z-20 max-[560px]:top-4 max-[560px]:right-4">
+    <div class="absolute top-5 right-5 z-20 flex items-center gap-2 max-[560px]:top-4 max-[560px]:right-4">
+      <AppLanguageMenu size="default" class="[&>button:hover]:bg-cp-bg-text-hover" />
       <LoginThemeToggle />
     </div>
 
     <section
       class="grid min-h-dvh items-center justify-items-center px-5 py-[clamp(24px,5dvh,64px)] min-[980px]:justify-items-end min-[980px]:pr-[clamp(48px,17.3vw,332px)] max-[560px]:p-4.5"
-      aria-label="Codex Proxy RS 登录"
+      :aria-label="t('auth.pageLabel')"
     >
       <div class="min-h-120 w-[min(440px,100%)]">
         <LoginPanel

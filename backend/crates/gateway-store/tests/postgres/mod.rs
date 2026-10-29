@@ -20,6 +20,7 @@ mod analytics_buckets;
 mod analytics_reset;
 mod backup;
 mod backup_export;
+mod client_budget_buffer;
 mod client_budgets;
 mod client_keys;
 mod connection;
@@ -42,7 +43,13 @@ mod snapshots;
 mod usage_data;
 mod usage_paging;
 
-static TEST_MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
+static TEST_MIGRATOR: std::sync::LazyLock<sqlx::migrate::Migrator> =
+    std::sync::LazyLock::new(|| {
+        let mut migrator = sqlx::migrate!("../../migrations");
+        // 每个夹具独占 UUID schema，迁移及其记录不共享对象，无需数据库级迁移锁
+        migrator.set_locking(false);
+        migrator
+    });
 
 pub(super) struct TestDatabase {
     admin: PgPool,
@@ -70,7 +77,8 @@ pub(super) fn admin_account_store(pool: &PgPool) -> PgAdminAccountStore {
 impl TestDatabase {
     pub(super) async fn create(label: &str) -> Option<Self> {
         let database_url = crate::support::test_env("CPR_TEST_DATABASE_URL")?;
-        let schema = format!("cpr_store_{label}_{}", Uuid::new_v4().simple());
+        // UUID 放在前面，长标签被 PostgreSQL 截断时仍保留完整隔离标识
+        let schema = format!("cpr_store_{}_{label}", Uuid::new_v4().simple());
         // 临时 schema 验证事务可见性与回滚，不模拟 PostgreSQL 掉电恢复
         // 仅这些测试连接异步刷 WAL，保持服务端配置和生产连接行为不变
         let options = PgConnectOptions::from_str(&database_url)

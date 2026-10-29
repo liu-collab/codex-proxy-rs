@@ -1,7 +1,5 @@
 //! 验证生成请求编码的模型、位置覆盖与不透明字段保留
 
-use chrono::{Datelike as _, Utc};
-use chrono_tz::America::New_York;
 use gateway_core::operation::{GenerateRequest, ProtocolPayload};
 use serde_json::{Map, Value, json};
 
@@ -9,7 +7,7 @@ use provider_openai::encode_generate_request;
 use provider_openai::transport::profile::CodexRequestLocation;
 
 #[test]
-fn encoder_should_use_the_configured_location_for_tools_and_environment_dates() {
+fn encoder_should_override_location_while_preserving_environment_dates() {
     let location: CodexRequestLocation = serde_json::from_value(json!({
         "country": "NZ", "region": "Auckland", "city": "Auckland", "timezone": "Pacific/Auckland"
     }))
@@ -28,27 +26,15 @@ fn encoder_should_use_the_configured_location_for_tools_and_environment_dates() 
             {"type": "web_search_preview"}
         ]
     }).as_object().expect("request object").clone();
-    let before = Utc::now()
-        .with_timezone(&location.timezone)
-        .format("%Y-%m-%d")
-        .to_string();
     let encoded =
         encode_generate_request(&request(body), "gpt-test", Some(&location)).expect("encode");
-    let after = Utc::now()
-        .with_timezone(&location.timezone)
-        .format("%Y-%m-%d")
-        .to_string();
     let encoded = Value::Object(encoded.body().clone());
     let environment = encoded
         .pointer("/input/0/content/0/text")
         .and_then(Value::as_str)
         .expect("environment");
     assert!(environment.contains("<timezone>Pacific/Auckland</timezone>"));
-    assert!(
-        [before, after]
-            .iter()
-            .any(|date| environment.contains(&format!("<current_date>{date}</current_date>")))
-    );
+    assert!(environment.contains("<current_date>2020-01-01</current_date>"));
     for index in 0..2 {
         assert_eq!(
             encoded.pointer(&format!("/tools/{index}/user_location")),
@@ -116,32 +102,22 @@ fn encoder_should_align_official_environment_context_without_content_kinds() {
             .as_object()
             .expect("request object")
             .clone();
-        let before = Utc::now()
-            .with_timezone(&New_York)
-            .format("%Y-%m-%d")
-            .to_string();
         let encoded = encode_generate_request(
             &request(body.clone()),
             "gpt-test",
             Some(&CodexRequestLocation::default()),
         )
         .expect("encode unclassified official context");
-        let after = Utc::now()
-            .with_timezone(&New_York)
-            .format("%Y-%m-%d")
-            .to_string();
         let encoded = Value::Object(encoded.body().clone());
         let aligned = encoded
             .pointer("/input/0/content/1/text")
             .and_then(Value::as_str)
             .expect("aligned environment");
         assert!(aligned.contains("<timezone>America/New_York</timezone>"));
-        assert!([before, after].iter().any(|date| {
-            aligned
-                == environment
-                    .replace("2020-01-01", date)
-                    .replace("Asia/Shanghai", "America/New_York")
-        }));
+        assert_eq!(
+            aligned,
+            environment.replace("Asia/Shanghai", "America/New_York")
+        );
         let original = Value::Object(body.clone());
         assert_eq!(
             encoded.pointer("/input/0/content/0"),
@@ -159,7 +135,7 @@ fn encoder_should_align_official_environment_context_without_content_kinds() {
 }
 
 #[test]
-fn encoder_should_align_desktop_time_context_with_environment_dates() {
+fn encoder_should_align_desktop_timezones_without_refreshing_dates() {
     // Desktop Core 0.162.0-alpha.17.2 的应用附加上下文使用 developer role
     let desktop = " <codex_apps_client_time_context><timezone>Asia/Shanghai</timezone>\n\
         <current_date>2020-01-01</current_date>\n\
@@ -191,41 +167,77 @@ fn encoder_should_align_desktop_time_context_with_environment_dates() {
         .as_object()
         .expect("request object")
         .clone();
-        let before = Utc::now()
-            .with_timezone(&New_York)
-            .format("%Y-%m-%d")
-            .to_string();
         let encoded = encode_generate_request(
             &request(body.clone()),
             "gpt-test",
             Some(&CodexRequestLocation::default()),
         )
         .expect("encode Desktop time context");
-        let after = Utc::now()
-            .with_timezone(&New_York)
-            .format("%Y-%m-%d")
-            .to_string();
-        assert!(
-            [before, after].iter().any(|date| {
-                let mut expected = body["input"].clone();
-                expected[0]["content"][0]["text"] = json!(
-                    environment
-                        .replace("2020-01-01", date)
-                        .replace("Asia/Shanghai", "America/New_York")
-                );
-                expected[1]["content"][1]["text"] = json!(
-                    desktop
-                        .replace("2020-01-01", date)
-                        .replace("Asia/Shanghai", "America/New_York")
-                );
-                encoded.body().get("input") == Some(&expected)
-            }),
-            "both time contexts must agree while preserving other content and metadata"
+        let mut expected = body["input"].clone();
+        expected[0]["content"][0]["text"] =
+            json!(environment.replace("Asia/Shanghai", "America/New_York"));
+        expected[1]["content"][1]["text"] =
+            json!(desktop.replace("Asia/Shanghai", "America/New_York"));
+        assert_eq!(
+            encoded.body().get("input"),
+            Some(&expected),
+            "timezones must agree while preserving dates, other content and metadata"
         );
         let unchanged = encode_generate_request(&request(body.clone()), "gpt-test", None)
             .expect("encode without override");
         assert_eq!(unchanged.body().get("input"), body.get("input"));
     }
+}
+
+#[test]
+fn encoder_should_preserve_history_when_a_new_day_context_is_appended() {
+    let location = CodexRequestLocation::default();
+    let initial = json!({
+        "prompt_cache_key": "stable-session",
+        "input": [{
+            "type": "message", "id": "msg_environment", "role": "user",
+            "content": [{"type": "input_text", "text": "<environment_context><current_date>2026-10-22</current_date><timezone>Asia/Shanghai</timezone></environment_context>"}]
+        }, {
+            "type": "message", "id": "msg_desktop", "role": "developer",
+            "content": [{"type": "input_text", "text": "<codex_apps_client_time_context><current_date>2026-10-22</current_date><timezone>Asia/Shanghai</timezone></codex_apps_client_time_context>"}]
+        }]
+    }).as_object().expect("initial request").clone();
+    let first = encode_generate_request(&request(initial.clone()), "gpt-test", Some(&location))
+        .expect("encode initial history");
+    let mut continued = initial.clone();
+    let input = continued["input"].as_array_mut().expect("history");
+    input.push(json!({
+        "type": "message", "id": "msg_new_day", "role": "user",
+        "content": [{"type": "input_text", "text": "<environment_context><current_date>2026-10-23</current_date></environment_context>"}]
+    }));
+    input.push(json!({
+        "type": "message", "role": "user",
+        "content": [{"type": "input_text", "text": "Continue after midnight"}]
+    }));
+    let second = encode_generate_request(&request(continued), "gpt-test", Some(&location))
+        .expect("encode next day history");
+    let mut expected = initial["input"]
+        .as_array()
+        .expect("initial history")
+        .clone();
+    for item in &mut expected {
+        let text = item["content"][0]["text"].as_str().expect("time context");
+        item["content"][0]["text"] = json!(text.replace("Asia/Shanghai", "America/New_York"));
+    }
+    assert_eq!(first.body().get("input"), Some(&json!(expected)));
+    let second_input = second.body()["input"]
+        .as_array()
+        .expect("continued history");
+    assert_eq!(&second_input[..expected.len()], &expected);
+    assert_eq!(
+        second_input[2]["content"][0]["text"],
+        "<environment_context><current_date>2026-10-23</current_date></environment_context>"
+    );
+    assert_eq!(second.body()["prompt_cache_key"], "stable-session");
+    let replay =
+        encode_generate_request(&request(second.body().clone()), "gpt-test", Some(&location))
+            .expect("encode replay");
+    assert_eq!(replay.body(), second.body());
 }
 
 #[test]
@@ -413,8 +425,6 @@ fn encoder_should_align_structured_location_fields_without_rewriting_chat_text()
     .as_object()
     .expect("request object")
     .clone();
-    let before = Utc::now().with_timezone(&New_York);
-
     let encoded = encode_generate_request(
         &request(body),
         "gpt-test",
@@ -422,31 +432,12 @@ fn encoder_should_align_structured_location_fields_without_rewriting_chat_text()
     )
     .expect("encode");
 
-    let after = Utc::now().with_timezone(&New_York);
     let encoded = Value::Object(encoded.body().clone());
     let environment = encoded
         .pointer("/input/0/content/0/text")
         .and_then(Value::as_str)
         .expect("environment context text");
-    let expected_dates = [
-        format!(
-            "{:04}-{:02}-{:02}",
-            before.year(),
-            before.month(),
-            before.day()
-        ),
-        format!(
-            "{:04}-{:02}-{:02}",
-            after.year(),
-            after.month(),
-            after.day()
-        ),
-    ];
-    assert!(
-        expected_dates
-            .iter()
-            .any(|date| environment.contains(&format!("<current_date>{date}</current_date>")))
-    );
+    assert!(environment.contains("<current_date>2026-09-13</current_date>"));
     assert!(environment.contains("<timezone>America/New_York</timezone>"));
     assert_eq!(
         encoded.pointer("/tools/0/user_location"),
@@ -784,7 +775,7 @@ fn observability_semantics_should_reuse_codex_turn_metadata() {
 
     let semantics = encode_generate_request(&request, "observability", None)
         .expect("observability request should encode")
-        .semantics();
+        .semantics(None);
 
     assert_eq!(semantics.request_kind.as_deref(), Some("compaction"));
     assert_eq!(semantics.subagent_kind.as_deref(), Some("review"));
@@ -854,7 +845,7 @@ fn observability_semantics_should_use_the_transparent_openai_payload() {
 
     let semantics = encode_generate_request(&request, "observability", None)
         .expect("transparent OpenAI request should encode")
-        .semantics();
+        .semantics(None);
 
     assert_eq!(semantics.reasoning_preset, Some("ultra"));
     assert!(semantics.compact);

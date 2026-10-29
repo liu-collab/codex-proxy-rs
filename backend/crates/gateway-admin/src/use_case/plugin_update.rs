@@ -161,53 +161,24 @@ impl PluginSystemUpdatePreflight {
                             .await,
                     ) {
                         (_, Err(error)) if error.kind() == AdminErrorKind::Invalid => {
-                            Some("插件包或协议与目标版本不兼容".to_owned())
+                            Some(error.message().to_owned())
                         }
                         (_, Err(error)) => return Err(map_inspection_error(error)),
                         (None, _) => Some("无法确认插件与目标版本兼容".to_owned()),
                         (Some(host), Ok(requirements)) => {
-                            if !semver::VersionReq::parse(&requirements.host_version)
-                                .is_ok_and(|versions| versions.matches(target))
-                            {
-                                Some(format!("要求网关版本 {}", requirements.host_version))
-                            } else if !host
-                                .manifest_schema_versions
-                                .contains(&requirements.manifest_schema_version)
-                                || !host
-                                    .protocol_versions
-                                    .contains(&requirements.protocol_version)
-                                || requirements
-                                    .capabilities
-                                    .iter()
-                                    .any(|(capability, version)| {
-                                        !host.supports_capability(capability, *version)
-                                    })
-                            {
-                                Some("插件协议或能力与目标版本不兼容".to_owned())
-                            } else {
-                                None
-                            }
+                            let reasons = host.incompatibilities(&requirements, target);
+                            (!reasons.is_empty()).then(|| reasons.join("，"))
                         }
                     }
                 } else {
                     match self
                         .inspector
-                        .inspect(
-                            artifact.archive.clone(),
-                            Some(instance.artifact_sha256.clone()),
-                        )
+                        .compatibility_warning(artifact.archive, instance.artifact_sha256.clone())
                         .await
                     {
-                        Ok(_) => self
-                            .inspector
-                            .compatibility_warning(
-                                artifact.archive,
-                                instance.artifact_sha256.clone(),
-                            )
-                            .await
-                            .map_err(map_inspection_error)?,
+                        Ok(warning) => warning,
                         Err(error) if error.kind() == AdminErrorKind::Invalid => {
-                            Some("插件与当前宿主不兼容".to_owned())
+                            Some(error.message().to_owned())
                         }
                         Err(error) => return Err(map_inspection_error(error)),
                     }

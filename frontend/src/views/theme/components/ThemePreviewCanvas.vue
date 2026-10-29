@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import type { ThemeName } from '@codex-proxy/ui/theme'
+
 import type { CSSProperties } from 'vue'
 import { ZButton, ZIconButton } from '@codex-proxy/ui'
-
 import { Maximize2, Minus, Move, Plus } from '@lucide/vue'
+
 import { computed, useTemplateRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 import { useThemePreviewCanvas } from '../composables/useThemePreviewCanvas'
 import ThemePreviewScope from './ThemePreviewScope.vue'
@@ -14,12 +16,19 @@ defineProps<{
   style: CSSProperties
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const viewport = useTemplateRef<HTMLElement>('viewport')
 const stage = useTemplateRef<HTMLElement>('stage')
 const boardWidth = 1600
 const boardHeight = 1808
 const { canZoomIn, canZoomOut, dragging, fitToViewport, resetScale, scale, scalePercent, zoomIn, zoomOut }
-  = useThemePreviewCanvas({ viewport, stage, boardWidth, boardHeight })
+  = useThemePreviewCanvas({
+    viewport,
+    stage,
+    boardWidth,
+    boardHeight,
+  })
 
 const stageStyle = computed<CSSProperties>(() => ({
   width: `${boardWidth * scale.value}px`,
@@ -35,11 +44,11 @@ const boardStyle = computed<CSSProperties>(() => ({
 <template>
   <div
     ref="viewport"
-    class="relative min-h-0 overflow-hidden rounded-cp-lg bg-cp-bg-layout bg-[radial-gradient(circle,color-mix(in_srgb,var(--cp-color-text-quaternary)_24%,transparent)_1px,transparent_1px)] bg-size-[18px_18px] shadow-cp-secondary select-none"
+    class="@container/preview relative min-h-0 overflow-hidden rounded-cp-lg bg-cp-bg-layout bg-[radial-gradient(circle,color-mix(in_srgb,var(--cp-color-text-quaternary)_24%,transparent)_1px,transparent_1px)] bg-size-[18px_18px] shadow-cp-secondary select-none"
     :class="dragging ? 'cursor-grabbing' : 'cursor-grab'"
     role="application"
     tabindex="0"
-    aria-label="首页主题预览画板"
+    :aria-label="t('appearance.preview.canvas.homeThemePreviewArtboard')"
   >
     <div
       ref="stage"
@@ -56,10 +65,10 @@ const boardStyle = computed<CSSProperties>(() => ({
     </div>
 
     <div
-      class="pointer-events-none absolute top-3 left-3 z-10 inline-flex items-center gap-2 rounded-cp bg-cp-bg-container/92 px-2.5 py-2 text-[10px] font-emphasis text-cp-text-secondary shadow-cp-tertiary backdrop-blur-sm"
+      class="pointer-events-none absolute top-3 left-3 z-10 hidden items-center gap-2 rounded-cp bg-cp-bg-container/92 px-2.5 py-2 text-[10px] font-emphasis text-cp-text-secondary shadow-cp-tertiary backdrop-blur-sm @min-[36rem]/preview:inline-flex"
     >
       <Move class="size-3.5 text-cp-primary-text" />
-      拖动空白处平移 · 滚轮缩放
+      {{ t('appearance.preview.canvas.dragBlankSpaceToPanUseScroll') }}
     </div>
 
     <div
@@ -69,22 +78,22 @@ const boardStyle = computed<CSSProperties>(() => ({
       @dblclick.stop
       @wheel.stop
     >
-      <ZIconButton aria-label="缩小画板" size="small" :disabled="!canZoomOut" @click="zoomOut">
+      <ZIconButton :aria-label="t('appearance.preview.canvas.reduceArtboard')" size="small" :disabled="!canZoomOut" @click="zoomOut">
         <Minus class="size-3.5" />
       </ZIconButton>
       <ZButton
         size="small" variant="text"
         class="min-w-14 px-2! font-mono tabular-nums"
-        title="恢复 100%"
+        :title="t('appearance.preview.canvas.recovery')"
         @click="resetScale"
       >
         {{ scalePercent }}%
       </ZButton>
-      <ZIconButton aria-label="放大画板" size="small" :disabled="!canZoomIn" @click="zoomIn">
+      <ZIconButton :aria-label="t('appearance.preview.canvas.enlargeArtboard')" size="small" :disabled="!canZoomIn" @click="zoomIn">
         <Plus class="size-3.5" />
       </ZIconButton>
       <span class="mx-0.5 h-4 w-px bg-cp-fill-secondary" />
-      <ZIconButton aria-label="适应画板" size="small" @click="fitToViewport()">
+      <ZIconButton :aria-label="t('appearance.preview.canvas.adaptToArtboard')" size="small" @click="fitToViewport()">
         <Maximize2 class="size-3.5" />
       </ZIconButton>
     </div>

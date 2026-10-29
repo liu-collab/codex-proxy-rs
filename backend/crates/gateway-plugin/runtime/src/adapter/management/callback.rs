@@ -165,9 +165,10 @@ impl ManagementEntry {
         {
             return Err(invalid_state());
         }
-        let mut context = self
-            .session
-            .context(Stage::PublicManagement, limits.maximum_call_timeout);
+        let mut context = self.session.context(
+            Stage::PublicManagement,
+            self.session.budget(Stage::PublicManagement),
+        );
         context.request = crate::adapter::request_context(request.request_context.as_deref());
         context.request_id = Some(request.request_id);
         let _scope = self
@@ -198,11 +199,7 @@ impl ManagementEntry {
             .map_err(|_| {
                 AdminError::unavailable("插件登录回调未完成；state 已消费，请重新发起登录")
             })?;
-        super::decode_response(reply, &descriptor.response_content_types, limits).inspect_err(
-            |_| {
-                self.session.invalid_response(Stage::PublicManagement);
-            },
-        )
+        super::decode_response(reply, &descriptor.response_content_types, limits)
     }
 }
 

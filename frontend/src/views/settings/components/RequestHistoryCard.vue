@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { ZCard, ZForm, ZFormItem, ZInput } from '@codex-proxy/ui'
 
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({ useScope: 'global' })
+
 const model = defineModel<string>({ required: true })
 </script>
 
 <template>
-  <ZCard title="历史保留" description="自动清理过期请求及对应统计">
+  <ZCard :title="t('settings.history.title')" :description="t('settings.history.retentionHelp')">
     <ZForm class="max-w-6xl sm:grid-cols-2 sm:items-end">
-      <ZFormItem label="保留天数" description="至少 1 天，过期数据自动分批清理，清理后无法恢复">
-        <ZInput v-model="model" aria-label="历史保留天数" type="number" min="1" max="31" step="1" placeholder="请输入 1–31 天">
+      <ZFormItem :label="t('settings.retentionDays')" :description="t('settings.history.retentionConstraints')">
+        <ZInput v-model="model" :aria-label="t('settings.history.retentionDaysLabel')" type="number" min="1" max="31" step="1" :placeholder="t('settings.enterDays')">
           <template #suffix>
-            天
+            {{ t('settings.day') }}
           </template>
         </ZInput>
       </ZFormItem>

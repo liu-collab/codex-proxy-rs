@@ -2,13 +2,17 @@
 import type { UsageListRecord } from '@/api'
 
 import { Zap } from '@lucide/vue'
+
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import UsageDetailPopover from '@/components/usage/UsageDetailPopover.vue'
 import { usageBillingText } from './shared/presenter'
 
 const props = defineProps<{
   record: Pick<UsageListRecord, 'billing'>
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 const billing = computed(() => props.record.billing)
 const billingItems = computed(() => {
@@ -17,10 +21,26 @@ const billingItems = computed(() => {
     return []
 
   return [
-    { label: '服务档位', value: value.serviceTierDisplay, tone: 'info' },
-    { label: '倍率', value: value.multiplierDisplay, tone: 'info' },
-    { label: '总费用', value: value.totalAmountDisplay, tone: 'success' },
-    { label: '标准费用', value: value.standardAmountDisplay, tone: 'default' },
+    {
+      label: t('usage.billing.serviceLevel'),
+      value: value.serviceTierDisplay,
+      tone: 'info',
+    },
+    {
+      label: t('settings.pricing.multiplier'),
+      value: value.multiplierDisplay,
+      tone: 'info',
+    },
+    {
+      label: t('usage.billing.totalCost'),
+      value: value.totalAmountDisplay,
+      tone: 'success',
+    },
+    {
+      label: t('usage.billing.standardFee'),
+      value: value.standardAmountDisplay,
+      tone: 'default',
+    },
   ]
 })
 
@@ -30,21 +50,75 @@ const amountItems = computed(() => {
     return []
 
   return [
-    { label: value.image ? '文本输入费用' : '输入费用', value: value.inputAmountDisplay, accent: false },
+    {
+      label: value.image
+        ? t('usage.billing.textInputCost')
+        : t('usage.billing.inputCost'),
+      value: value.inputAmountDisplay,
+      accent: false,
+    },
     ...(value.image
       ? [
-          { label: '图像输入费用', value: value.image.inputAmountDisplay, accent: false },
-          { label: '图像缓存费用', value: value.image.cacheReadAmountDisplay, accent: false },
-          { label: '图像输入单价', value: value.image.inputPriceDisplay, accent: true },
-          { label: '图像缓存单价', value: value.image.cacheReadPriceDisplay, accent: true },
+          {
+            label: t('usage.billing.imageInputFee'),
+            value: value.image.inputAmountDisplay,
+            accent: false,
+          },
+          {
+            label: t('usage.billing.imageCachingCharges'),
+            value: value.image.cacheReadAmountDisplay,
+            accent: false,
+          },
+          {
+            label: t('usage.billing.imageInputUnitPrice'),
+            value: value.image.inputPriceDisplay,
+            accent: true,
+          },
+          {
+            label: t('usage.billing.imageCacheUnitPrice'),
+            value: value.image.cacheReadPriceDisplay,
+            accent: true,
+          },
         ]
       : []),
-    { label: value.image ? '图像输出费用' : '输出费用', value: value.outputAmountDisplay, accent: false },
-    { label: value.image ? '文本输入单价' : '输入单价', value: value.inputPriceDisplay, accent: true },
-    { label: value.image ? '图像输出单价' : '输出单价', value: value.outputPriceDisplay, accent: true },
-    { label: value.image ? '文本缓存读取费用' : '缓存读取费用', value: value.cacheReadAmountDisplay, accent: false },
-    { label: '缓存写入费用', value: value.cacheWriteAmountDisplay, accent: false },
-    { label: '缓存写入单价', value: value.cacheWritePriceDisplay, accent: true },
+    {
+      label: value.image
+        ? t('usage.billing.imageOutputFee')
+        : t('usage.billing.outputFee'),
+      value: value.outputAmountDisplay,
+      accent: false,
+    },
+    {
+      label: value.image
+        ? t('usage.billing.textInputUnitPrice')
+        : t('usage.billing.inputUnitPrice'),
+      value: value.inputPriceDisplay,
+      accent: true,
+    },
+    {
+      label: value.image
+        ? t('usage.billing.imageOutputUnitPrice')
+        : t('usage.billing.outputUnitPrice'),
+      value: value.outputPriceDisplay,
+      accent: true,
+    },
+    {
+      label: value.image
+        ? t('usage.billing.textCacheReadCost')
+        : t('usage.billing.cacheReadCost'),
+      value: value.cacheReadAmountDisplay,
+      accent: false,
+    },
+    {
+      label: t('usage.billing.cacheWriteCost'),
+      value: value.cacheWriteAmountDisplay,
+      accent: false,
+    },
+    {
+      label: t('usage.billing.cacheWriteUnitPrice'),
+      value: value.cacheWritePriceDisplay,
+      accent: true,
+    },
   ]
 })
 
@@ -67,15 +141,15 @@ function itemValueClass(tone?: string, accent?: boolean) {
       <span
         v-if="billing.serviceTierDisplay === 'Fast'"
         class="inline-flex size-4 items-center justify-center rounded-full bg-cp-warning-container text-cp-warning-on-container"
-        title="Fast 模式"
+        :title="t('usage.billing.fastMode')"
         role="img"
-        aria-label="Fast 模式"
+        :aria-label="t('usage.billing.fastMode')"
       >
         <Zap class="size-3" stroke-width="2.2" aria-hidden="true" />
       </span>
       <UsageDetailPopover
-        :title="billing.longContextBillingApplied ? '长上下文计费明细' : '计费明细'"
-        :trigger-label="billing.longContextBillingApplied ? '查看长上下文计费明细' : '查看费用明细'"
+        :title="billing.longContextBillingApplied ? t('usage.billing.longContextBillingDetails') : t('usage.billing.billingDetails')"
+        :trigger-label="billing.longContextBillingApplied ? t('usage.billing.viewLongContextBillingDetails') : t('usage.billing.viewCostDetails')"
         :tone="billing.longContextBillingApplied ? 'warning' : 'primary'"
       >
         <div class="grid gap-1.5 text-cp-text-secondary">

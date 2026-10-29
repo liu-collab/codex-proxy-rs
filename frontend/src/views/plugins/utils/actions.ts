@@ -1,5 +1,5 @@
-import { ZNotification } from '@codex-proxy/ui'
 import { ApiError } from '@/api/request'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 export interface PluginRefreshContext {
@@ -10,5 +10,7 @@ export interface PluginRefreshContext {
 export function notifyPluginError(title: string, error: unknown): void {
   if (error instanceof ApiError && error.kind === 'cancelled')
     return
-  ZNotification.error({ message: errorMessage(error, title) })
+  ZNotification.error({
+    message: errorMessage(error, title),
+  })
 }

@@ -20,7 +20,6 @@ pub(super) async fn invoke(
     context: core::Context,
     request: core::Request,
     next: core::Next,
-    timeout: std::time::Duration,
 ) -> Result<core::Response, MiddlewareError> {
     let Some(ports) = &entry.invocation else {
         return if entry.failure_policy == PluginFailurePolicy::Delegate {
@@ -35,7 +34,9 @@ pub(super) async fn invoke(
         .and_then(|settings| settings.runtime.as_ref())
         .map_or(serde_json::Value::Null, |settings| settings.inspect());
     let (invocation, request) = Invocation::new(request, next, entry.instance_id.clone())?;
-    let mut call = ports.session.context(Stage::Http, timeout);
+    let mut call = ports
+        .session
+        .context(Stage::Http, ports.session.budget(Stage::Http));
     call.request = crate::adapter::request_context(context.extensions.request());
     call.request_id = Some(context.request_id.clone());
     call.resource_stream = true;
@@ -50,7 +51,9 @@ pub(super) async fn invoke(
                     request_id: context.request_id.clone(),
                     call_id: context.call_id.clone(),
                     cancellation: context.cancellation.clone(),
-                    plan,
+                    plan: Some(plan),
+                    extensions: context.extensions.clone(),
+                    effects: None,
                 }),
             context.extensions.clone(),
             invocation.clone(),
@@ -66,24 +69,21 @@ pub(super) async fn invoke(
         .decode_response(Stage::Http, std::mem::take(&mut stream.initial.result))
         .map_err(|_| MiddlewareError::InvalidState)?;
     let payload = std::mem::take(&mut stream.initial.payload);
-    let invalid = || {
-        ports.session.invalid_response(Stage::Http);
-        MiddlewareError::InvalidState
-    };
     if response.session {
-        let status = invocation.session_status().ok_or_else(invalid)?;
+        let status = invocation
+            .session_status()
+            .ok_or(MiddlewareError::InvalidState)?;
         if response.status != status.as_u16()
             || response.response.is_none()
             || !matches!(response.body, wire::Body::Empty)
             || !payload.is_empty()
         {
-            return Err(invalid());
+            return Err(MiddlewareError::InvalidState);
         }
         let mut response = invocation
             .complete(response, payload, None)
             .await
-            .map_err(|_| invalid())?;
-        let session = ports.session.clone();
+            .map_err(|_| MiddlewareError::InvalidState)?;
         let task = Box::pin(async move {
             let _binding = _binding;
             tokio::select! {
@@ -94,7 +94,7 @@ pub(super) async fn invoke(
                     match stream.next().await {
                         Ok(None) => Ok(()),
                         Ok(Some(_)) => {
-                            let error = session.invalid_response(Stage::Http);
+                            let error = crate::RpcError::InvalidResponse(Stage::Http, None);
                             Err(session_error(error, &entry.instance_id))
                         }
                         Err(error) => Err(session_error(error, &entry.instance_id)),
@@ -108,23 +108,19 @@ pub(super) async fn invoke(
         return Ok(response);
     }
     let body = if matches!(response.body, wire::Body::Stream) {
-        let body = StreamBody::new(stream::try_unfold((stream, invocation.clone(), context.cancellation, ports.session.clone()), |(mut stream, invocation, cancellation, session)| async move {
+        let body = StreamBody::new(stream::try_unfold((stream, invocation.clone(), context.cancellation), |(mut stream, invocation, cancellation)| async move {
             let chunk = tokio::select! {
                 biased;
                 () = cancellation.cancelled() => return Err(Box::new(MiddlewareError::Fault) as Box<dyn std::error::Error + Send + Sync>),
                 chunk = stream.next() => chunk.map_err(|error| Box::new(crate::callback::error::rpc_middleware(error)) as Box<dyn std::error::Error + Send + Sync>)?,
             };
             let Some(chunk) = chunk else { return Ok(None); };
-            let invalid = || {
-                session.invalid_response(Stage::Http);
-                MiddlewareError::InvalidState
-            };
             let frame = match chunk.split_first() {
                 Some((0, data)) => Frame::data(bytes::Bytes::copy_from_slice(data)),
-                Some((1, data)) => Frame::trailers(headers(serde_json::from_slice(data).map_err(|_| invalid())?).map_err(|_| invalid())?),
-                _ => return Err(Box::new(invalid()) as _),
+                Some((1, data)) => Frame::trailers(headers(serde_json::from_slice(data).map_err(|_| MiddlewareError::InvalidState)?).map_err(|_| MiddlewareError::InvalidState)?),
+                _ => return Err(Box::new(MiddlewareError::InvalidState) as _),
             };
-            Ok(Some((frame, (stream, invocation, cancellation, session))))
+            Ok(Some((frame, (stream, invocation, cancellation))))
         })).boxed_unsync();
         Some(body)
     } else {
@@ -135,14 +131,14 @@ pub(super) async fn invoke(
             .map_err(crate::callback::error::rpc_middleware)?
             .is_some()
         {
-            return Err(invalid());
+            return Err(MiddlewareError::InvalidState);
         }
         None
     };
     invocation
         .complete(response, payload, body)
         .await
-        .map_err(|_| invalid())
+        .map_err(|_| MiddlewareError::InvalidState)
 }
 
 fn session_error(error: crate::RpcError, instance_id: &str) -> core::upgrade::SessionError {

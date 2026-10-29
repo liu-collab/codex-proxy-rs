@@ -1,22 +1,62 @@
 import type { AccountImportTask, AccountImportTaskItem, ImportItemStatus } from '@/api'
+import { computed } from 'vue'
+import { t } from '@/i18n'
 
-export const itemStates: Record<ImportItemStatus, { label: string, color: string, fill: string }> = {
-  pending: { label: '等待中', color: 'bg-cp-fill-alter text-cp-text-secondary', fill: 'bg-cp-fill-secondary' },
-  running: { label: '处理中', color: 'bg-cp-primary-container text-cp-primary-on-container', fill: 'bg-cp-primary' },
-  succeeded: { label: '已入库', color: 'bg-cp-success-container text-cp-success-on-container', fill: 'bg-cp-success' },
-  failed: { label: '失败', color: 'bg-cp-error-container text-cp-error-on-container', fill: 'bg-cp-error' },
-  unknown: { label: '待核对', color: 'bg-cp-warning-container text-cp-warning-on-container', fill: 'bg-cp-warning' },
-  skipped: { label: '未执行', color: 'bg-cp-fill-tertiary text-cp-text-secondary', fill: 'bg-cp-text-quaternary' },
-}
+export const itemStates = computed<Record<ImportItemStatus, { label: string, color: string, fill: string }>>(() => ({
+  pending: {
+    label: t('common.status.pending'),
+    color: 'bg-cp-fill-alter text-cp-text-secondary',
+    fill: 'bg-cp-fill-secondary',
+  },
+  running: {
+    label: t('accounts.importTasks.processing'),
+    color: 'bg-cp-primary-container text-cp-primary-on-container',
+    fill: 'bg-cp-primary',
+  },
+  succeeded: {
+    label: t('accounts.importTasks.alreadyInStock'),
+    color: 'bg-cp-success-container text-cp-success-on-container',
+    fill: 'bg-cp-success',
+  },
+  failed: {
+    label: t('common.status.failed'),
+    color: 'bg-cp-error-container text-cp-error-on-container',
+    fill: 'bg-cp-error',
+  },
+  unknown: {
+    label: t('accounts.importTasks.toBeVerified'),
+    color: 'bg-cp-warning-container text-cp-warning-on-container',
+    fill: 'bg-cp-warning',
+  },
+  skipped: {
+    label: t('accounts.importTasks.notExecuted'),
+    color: 'bg-cp-fill-tertiary text-cp-text-secondary',
+    fill: 'bg-cp-text-quaternary',
+  },
+}))
 
-export const outcomeOrder: ImportItemStatus[] = ['succeeded', 'failed', 'unknown', 'running', 'pending', 'skipped']
+export const outcomeOrder: ImportItemStatus[] = [
+  'succeeded',
+  'failed',
+  'unknown',
+  'running',
+  'pending',
+  'skipped',
+]
 
 export function taskLabel(task: AccountImportTask) {
-  if (!task.finishedAt)
-    return task.stopRequested ? '正在停止' : task.counts.running > 0 ? '导入中' : '排队中'
+  if (!task.finishedAt) {
+    return task.stopRequested
+      ? t('accounts.importTasks.stopping')
+      : task.counts.running > 0
+        ? t('accounts.importTasks.importing')
+        : t('accounts.importTasks.queuing')
+  }
   if (task.stopRequested)
-    return '已停止'
-  return task.counts.failed + task.counts.unknown > 0 ? '已结束 · 有待处理项' : '全部完成'
+    return t('accounts.importTasks.stopped')
+  return task.counts.failed + task.counts.unknown > 0
+    ? t('accounts.importTasks.endedPendingItems')
+    : t('accounts.importTasks.allDone')
 }
 
 export function processed(task: AccountImportTask) {
@@ -27,11 +67,11 @@ export function itemDescription(item: AccountImportTaskItem) {
   if (item.message)
     return item.message.replace(/[。.]\s*$/u, '')
   switch (item.status) {
-    case 'succeeded': return `已保存 ${item.accountIds.length} 个账号`
-    case 'running': return '正在校验凭据并入库'
-    case 'pending': return '等待执行'
-    case 'skipped': return '本条未执行'
-    case 'failed': return '本条导入未成功'
-    case 'unknown': return '请检查账号列表，确认是否已入库'
+    case 'succeeded': return t('accounts.importTasks.savedAccountSavedAccounts', { count: item.accountIds.length })
+    case 'running': return t('accounts.importTasks.verifying')
+    case 'pending': return t('accounts.importTasks.waitingForExecution')
+    case 'skipped': return t('accounts.importTasks.thisArticleIsNotImplemented')
+    case 'failed': return t('accounts.importTasks.entryFailed')
+    case 'unknown': return t('accounts.importTasks.checkAccountList')
   }
 }

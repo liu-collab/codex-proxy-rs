@@ -72,22 +72,25 @@ fn plaintext_provider_schema_round_trips_dynamic_cookie_data() {
 }
 
 #[test]
-fn provider_schema_rejects_unknown_public_layer_fields() {
-    let value = serde_json::json!({
+fn provider_schema_requires_installation_id_and_rejects_unknown_fields() {
+    let valid = serde_json::json!({
         "schema_version": 1,
         "principal": {"oauth_subject": "subject-private", "poid": null},
         "installation_id": "00000000-0000-4000-8000-000000000001",
         "access_token": "at",
-        "cookies": [],
-        "unknown_field": 9
+        "cookies": []
     });
-    assert!(serde_json::from_value::<CodexCredentialData>(value).is_err());
-    assert!(
-        serde_json::from_value::<CodexCredentialData>(serde_json::json!({
-            "schema_version": 1,
-            "access_token": "at",
-            "cookies": []
-        }))
-        .is_err()
-    );
+    serde_json::from_value::<CodexCredentialData>(valid.clone())
+        .expect("valid credential baseline");
+
+    let mut unknown = valid.clone();
+    unknown["unknown_field"] = serde_json::json!(9);
+    assert!(serde_json::from_value::<CodexCredentialData>(unknown).is_err());
+
+    let mut missing_installation = valid;
+    missing_installation
+        .as_object_mut()
+        .unwrap()
+        .remove("installation_id");
+    assert!(serde_json::from_value::<CodexCredentialData>(missing_installation).is_err());
 }

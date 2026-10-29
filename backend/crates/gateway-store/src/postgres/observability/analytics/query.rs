@@ -10,8 +10,16 @@ pub(crate) struct AnalyticsSnapshot<'a> {
 }
 
 #[derive(Clone, Copy)]
+pub(super) enum DistributionRead {
+    None,
+    // 只供窄摘要读取样本统计；不把缺少桶的状态用于百分位或持久化
+    Statistics,
+    Full,
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct ReadSelection<'a> {
-    pub(super) distributions: bool,
+    pub(super) distributions: DistributionRead,
     pub(super) costs: bool,
     pub(super) keys: Option<&'a [String]>,
     pub(super) counters: Option<&'a [&'a str]>,
@@ -157,7 +165,7 @@ impl<'a> AnalyticsSnapshot<'a> {
                 None,
                 Default::default(),
                 ReadSelection {
-                    distributions: false,
+                    distributions: DistributionRead::None,
                     costs: false,
                     keys: None,
                     counters: Some(&[
@@ -172,6 +180,62 @@ impl<'a> AnalyticsSnapshot<'a> {
             )
             .await?;
         merge_states(states.into_values())?.request_metrics()
+    }
+
+    pub async fn summary(
+        &mut self,
+        range: ObservabilityRange,
+        filter: &UsageRecordFilter,
+    ) -> StoreResult<UsageSummaryObservation> {
+        // 摘要只需要均值的样本数，不排序分位数、展开直方图或再按 Provider 聚合
+        let states = self
+            .load_selected(
+                range,
+                filter,
+                None,
+                None,
+                Default::default(),
+                ReadSelection {
+                    distributions: DistributionRead::Statistics,
+                    costs: true,
+                    keys: None,
+                    counters: Some(&[
+                        "request_count",
+                        "success_count",
+                        "failure_count",
+                        "cancelled_count",
+                        "incomplete_count",
+                        "caller_error_count",
+                        "input_tokens",
+                        "output_tokens",
+                        "cached_input_tokens",
+                        "cache_write_input_tokens",
+                        "reasoning_output_tokens",
+                        "total_tokens",
+                        "latency_ms_sum",
+                        "attempt_count",
+                        "attempt_success_count",
+                        "attempt_failure_count",
+                        "attempt_cancelled_count",
+                        "attempt_incomplete_count",
+                        "rate_limited_count",
+                        "auth_failure_count",
+                        "provider_5xx_count",
+                        "provider_reported_count",
+                        "calculated_count",
+                        "unavailable_count",
+                    ]),
+                    distribution_names: Some(&["latency_ms"]),
+                },
+            )
+            .await?;
+        let state = merge_states(states.into_values())?;
+        Ok(UsageSummaryObservation {
+            analytics: self.metadata(),
+            range,
+            requests: state.request_summary_metrics(),
+            attempts: state.attempts()?,
+        })
     }
 
     pub async fn overview(
@@ -201,7 +265,7 @@ impl<'a> AnalyticsSnapshot<'a> {
                 None,
                 Default::default(),
                 ReadSelection {
-                    distributions: false,
+                    distributions: DistributionRead::None,
                     costs: false,
                     keys: None,
                     counters: Some(&[
@@ -254,7 +318,7 @@ impl<'a> AnalyticsSnapshot<'a> {
                 Some(granularity),
                 timezone,
                 ReadSelection {
-                    distributions: true,
+                    distributions: DistributionRead::Full,
                     costs: include_costs,
                     keys: None,
                     counters: None,
@@ -275,6 +339,7 @@ impl<'a> AnalyticsSnapshot<'a> {
         UsageOverview,
         Vec<RequestMetricPoint>,
         Vec<admin_observability::UsageProjectedCostPoint>,
+        Vec<admin_observability::UsageConcurrencyPoint>,
     )> {
         let states = self
             .load(range, filter, None, Some(granularity), timezone, true)
@@ -290,6 +355,9 @@ impl<'a> AnalyticsSnapshot<'a> {
                 })
             })
             .collect::<StoreResult<Vec<_>>>()?;
+        let concurrency = self
+            .concurrency(range, filter, granularity, timezone)
+            .await?;
         // 趋势已包含可合并的完整指标和情景费用，概览直接复用同一份状态
         // 精确分位数不可跨桶合并，明细回退时仍按完整区间单独计算概览
         let overview = if states.values().any(MetricState::has_exact_percentiles) {
@@ -298,7 +366,98 @@ impl<'a> AnalyticsSnapshot<'a> {
             self.overview_from_state(range, filter, merge_states(states.into_values())?)
                 .await?
         };
-        Ok((overview, trend, costs))
+        Ok((overview, trend, costs, concurrency))
+    }
+
+    async fn concurrency(
+        &mut self,
+        range: ObservabilityRange,
+        filter: &UsageRecordFilter,
+        granularity: ObservationGranularity,
+        timezone: gateway_core::time::DeploymentTimeZone,
+    ) -> StoreResult<Vec<admin_observability::UsageConcurrencyPoint>> {
+        filter.validate()?;
+        self.require_visible(Some(range))?;
+        let boundaries = if granularity == ObservationGranularity::Day {
+            calendar_buckets(range, timezone)?
+        } else {
+            let seconds = granularity.seconds();
+            let mut bucket =
+                DateTime::from_timestamp(range.start.timestamp().div_euclid(seconds) * seconds, 0)
+                    .ok_or_else(|| invalid("invalid concurrency bucket"))?;
+            let step = TimeDelta::seconds(seconds);
+            let mut boundaries = Vec::new();
+            while bucket < range.end {
+                boundaries.push(bucket);
+                bucket = bucket
+                    .checked_add_signed(step)
+                    .ok_or_else(|| invalid("invalid next concurrency bucket"))?;
+            }
+            boundaries
+        };
+        // 按生命周期分开筛选，使终态请求复用 completed_at 索引，运行中请求沿用独立索引
+        let mut query = QueryBuilder::<Postgres>::new(
+            "with buckets as materialized (select greatest(bucket_start,",
+        );
+        query
+            .push_bind(range.start)
+            .push("::timestamptz) as effective_start,least(coalesce(lead(bucket_start) over(order by bucket_start),")
+            .push_bind(range.end)
+            .push("::timestamptz),")
+            .push_bind(range.end)
+            .push("::timestamptz) as bucket_end,bucket_start from unnest(")
+            .push_bind(boundaries)
+            .push("::timestamptz[]) input(bucket_start)), matching as (select mr.started_at,mr.completed_at from model_request_observations mr where mr.outcome <> 'running' and mr.completed_at > ")
+            .push_bind(range.start)
+            .push(" and mr.started_at < ")
+            .push_bind(range.end);
+        push_analytics_filter(&mut query, filter, "mr");
+        query
+            .push(" union all select mr.started_at,")
+            .push_bind(range.end)
+            .push("::timestamptz as completed_at from model_request_observations mr where mr.outcome = 'running' and mr.started_at < ")
+            .push_bind(range.end);
+        push_analytics_filter(&mut query, filter, "mr");
+        // 每个请求只产生两个事件，桶边界只切分时间轴，避免请求与所有桶逐一连接
+        // 同时刻先合并增减，再计算下一段并发，遵循左闭右开的执行区间
+        query
+            .push("), events as (select e.occurred_at,e.delta,null::timestamptz as bucket_start from matching m cross join lateral (values (greatest(m.started_at,")
+            .push_bind(range.start)
+            .push("::timestamptz),1::bigint),(least(m.completed_at,")
+            .push_bind(range.end)
+            .push("::timestamptz),-1::bigint)) e(occurred_at,delta) union all select effective_start,0::bigint,bucket_start from buckets union all select ")
+            .push_bind(range.end)
+            .push("::timestamptz,0::bigint,null::timestamptz),
+                event_points as (
+                    select occurred_at,sum(delta)::bigint as delta,max(bucket_start) as bucket_start
+                    from events group by occurred_at
+                ), timeline as (
+                    select occurred_at,sum(delta) over timeline_order::bigint as concurrency,
+                        max(bucket_start) over timeline_order as bucket_start,
+                        lead(occurred_at) over(order by occurred_at) as next_occurred_at
+                    from event_points
+                    window timeline_order as (order by occurred_at rows between unbounded preceding and current row)
+                )
+                select b.bucket_start,
+                    coalesce(sum(t.concurrency*extract(epoch from t.next_occurred_at-t.occurred_at))
+                        /nullif(extract(epoch from b.bucket_end-b.effective_start),0),0)::float8 as average_concurrency,
+                    coalesce(max(t.concurrency),0)::bigint as peak_concurrency
+                from buckets b left join timeline t on t.bucket_start=b.bucket_start and t.next_occurred_at>t.occurred_at
+                group by b.bucket_start,b.effective_start,b.bucket_end order by b.bucket_start");
+        let rows = query
+            .build()
+            .fetch_all(&mut *self.tx)
+            .await
+            .map_err(|error| postgres_unavailable("aggregate request concurrency", error))?;
+        rows.iter()
+            .map(|row| {
+                Ok(admin_observability::UsageConcurrencyPoint {
+                    bucket_start: get(row, "bucket_start")?,
+                    average_concurrency: get(row, "average_concurrency")?,
+                    peak_concurrency: unsigned(row, "peak_concurrency")?,
+                })
+            })
+            .collect()
     }
 
     pub async fn diagnostics(
@@ -335,7 +494,7 @@ impl<'a> AnalyticsSnapshot<'a> {
                 None,
                 Default::default(),
                 ReadSelection {
-                    distributions: true,
+                    distributions: DistributionRead::Full,
                     costs: true,
                     keys: selected_keys,
                     counters: Some(&[
@@ -631,7 +790,11 @@ impl<'a> AnalyticsSnapshot<'a> {
             granularity,
             timezone,
             ReadSelection {
-                distributions: read_distributions,
+                distributions: if read_distributions {
+                    DistributionRead::Full
+                } else {
+                    DistributionRead::None
+                },
                 costs: true,
                 keys: None,
                 counters: None,
@@ -679,12 +842,13 @@ impl<'a> AnalyticsSnapshot<'a> {
         selection: ReadSelection<'_>,
     ) -> StoreResult<BTreeMap<(DateTime<Utc>, String), MetricState>> {
         let ReadSelection {
-            distributions: read_distributions,
+            distributions,
             costs: read_costs,
             keys: selected_keys,
             counters,
             distribution_names,
         } = selection;
+        let read_distributions = !matches!(distributions, DistributionRead::None);
         filter.validate()?;
         self.require_visible(Some(range))?;
         let selected = collection_for(filter, dimension);
@@ -735,12 +899,12 @@ impl<'a> AnalyticsSnapshot<'a> {
                 } else {
                     "'{}'::jsonb as costs"
                 };
-                let distributions = if read_distributions {
+                let distribution_sql = if read_distributions {
                     "distributions"
                 } else {
                     "'{}'::jsonb as distributions"
                 };
-                query.push(format!(" as output_bucket,{name} as name,counts,{costs},{distributions},last_used_at from {table} a where collection="))
+                query.push(format!(" as output_bucket,{name} as name,counts,{costs},{distribution_sql},last_used_at from {table} a where collection="))
                     .push_bind(collection).push(" and schema_version=").push_bind(SCHEMA_VERSION)
                     .push(" and histogram_version=").push_bind(HISTOGRAM_VERSION);
                 push_summary_buckets(&mut query, &buckets, seconds);
@@ -764,7 +928,7 @@ impl<'a> AnalyticsSnapshot<'a> {
                 query.push(")");
                 aggregate::push_summary_aggregation(
                     &mut query,
-                    read_distributions,
+                    distributions,
                     read_costs,
                     counters,
                     distribution_names,
@@ -857,7 +1021,7 @@ impl<'a> AnalyticsSnapshot<'a> {
             &mut query,
             exact,
             read_costs,
-            read_distributions,
+            distributions,
             counters,
             distribution_names,
         );
@@ -868,7 +1032,10 @@ impl<'a> AnalyticsSnapshot<'a> {
             .map_err(|error| postgres_unavailable("aggregate analytics facts", error))?
         {
             let key = (get(&row, "bucket_start")?, get(&row, "name")?);
-            let state = MetricState::decode_aggregate(&row, exact)?;
+            let state = MetricState::decode_aggregate(
+                &row,
+                exact && matches!(distributions, DistributionRead::Full),
+            )?;
             if exact {
                 result.insert(key, state);
             } else {
@@ -953,6 +1120,9 @@ pub(super) fn collection_for(
         || filter.response_id.is_some()
         || filter.upstream_request_id.is_some()
         || filter.search.is_some()
+        || filter.model_contains.is_some()
+        || filter.client_api_key_name.is_some()
+        || filter.provider_account_name.is_some()
     {
         return None;
     }
@@ -1004,10 +1174,17 @@ pub(crate) fn push_analytics_filter(
 ) {
     let mut typed = filter.clone();
     typed.search = None;
+    typed.client_api_key_name = None;
+    typed.provider_account_name = None;
     push_usage_filter(query, &typed, alias);
-    if filter.search.is_some() {
+    if filter.search.is_some()
+        || filter.client_api_key_name.is_some()
+        || filter.provider_account_name.is_some()
+    {
         query.push(format!(" and exists(select 1 from model_request_observations searched where searched.id={alias}.id"));
         let text = UsageRecordFilter {
+            client_api_key_name: filter.client_api_key_name.clone(),
+            provider_account_name: filter.provider_account_name.clone(),
             search: filter.search.clone(),
             ..Default::default()
         };

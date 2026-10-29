@@ -8,7 +8,7 @@ export interface InstalledPlugin {
   source?: PluginUpdateSourceBinding
 }
 
-export type PluginCatalogStatus = 'unaccepted' | 'unconfigured' | 'enabled' | 'disabled' | 'pending' | 'failed'
+export type PluginCatalogStatus = 'unaccepted' | 'unconfigured' | 'enabled' | 'disabled' | 'pending' | 'failed' | 'unknown' | 'incompatible'
 
 export function groupInstalledPlugins(artifacts: PluginArtifact[], instances: PluginInstance[], sources: PluginUpdateSourceBinding[]): InstalledPlugin[] {
   const groups = new Map<string, InstalledPlugin>()
@@ -16,9 +16,18 @@ export function groupInstalledPlugins(artifacts: PluginArtifact[], instances: Pl
   for (const artifact of [...artifacts].sort((a, b) => b.installedAt.localeCompare(a.installedAt))) {
     const id = artifact.metadata.pluginId
     const group = groups.get(id)
-    if (group)
+    if (group) {
       group.artifacts.push(artifact)
-    else groups.set(id, { id, artifact, artifacts: [artifact], configurations: [], source: sources.find(source => source.pluginId === id) })
+    }
+    else {
+      groups.set(id, {
+        id,
+        artifact,
+        artifacts: [artifact],
+        configurations: [],
+        source: sources.find(source => source.pluginId === id),
+      })
+    }
   }
   const artifactPlugins = new Map(artifacts.map(artifact => [artifact.metadata.sha256, artifact.metadata.pluginId]))
   for (const instance of instances) {
@@ -30,19 +39,27 @@ export function groupInstalledPlugins(artifacts: PluginArtifact[], instances: Pl
     const current = currentPluginInstance(plugin)
     plugin.artifact = plugin.artifacts.find(artifact => artifact.metadata.sha256 === current?.artifactSha256) ?? plugin.artifact
   }
-  return [...groups.values()]
+  return [
+    ...groups.values(),
+  ]
 }
 
 export function configurationStatus(instance: PluginInstance): PluginCatalogStatus {
+  if (instance.runtime.failure?.code === 'version_incompatible')
+    return 'incompatible'
   if (instance.loadError)
     return 'failed'
   if (instance.configurationRequired)
     return 'unconfigured'
   if (!instance.enabled)
     return 'disabled'
+  if (instance.runtime.status === 'unknown')
+    return 'unknown'
   if (['blocked', 'preparation_failed', 'faulted'].includes(instance.runtime.status))
     return 'failed'
-  return instance.runtime.status === 'running' ? 'enabled' : 'pending'
+  return instance.runtime.status === 'running'
+    ? 'enabled'
+    : 'pending'
 }
 
 export function pluginStatus(plugin: InstalledPlugin): PluginCatalogStatus {
@@ -51,7 +68,9 @@ export function pluginStatus(plugin: InstalledPlugin): PluginCatalogStatus {
   if (plugin.configurations.filter(instance => instance.enabled).length > 1)
     return 'failed'
   const instance = currentPluginInstance(plugin)
-  return instance ? configurationStatus(instance) : 'unconfigured'
+  return instance
+    ? configurationStatus(instance)
+    : 'unconfigured'
 }
 
 export function pluginStatusType(status: PluginCatalogStatus) {
@@ -59,7 +78,7 @@ export function pluginStatusType(status: PluginCatalogStatus) {
     return 'success' as const
   if (status === 'failed')
     return 'danger' as const
-  if (status === 'pending' || status === 'unconfigured' || status === 'unaccepted')
+  if (status === 'incompatible' || status === 'pending' || status === 'unconfigured' || status === 'unaccepted')
     return 'warning' as const
   return 'default' as const
 }

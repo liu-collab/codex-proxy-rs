@@ -119,17 +119,29 @@ fn min_client_versions_should_reject_missing_and_old_recognized_clients() {
 
 #[test]
 fn min_client_versions_should_follow_semver_precedence() {
-    let min = CodexClientVersion::parse("1.0.0").expect("min version");
-    let policy = CodexClientMinVersions::new(None, Some(min));
-    let prerelease = CodexClientVersion::parse("1.0.0-rc.1").expect("prerelease");
-    let release = CodexClientVersion::parse("1.0.0").expect("release");
-    let newer = CodexClientVersion::parse("1.0.1").expect("newer release");
-
-    assert!(
-        policy
-            .enforce(CodexClientKind::Cli, Some(&prerelease))
-            .is_err()
-    );
-    assert_eq!(policy.enforce(CodexClientKind::Cli, Some(&release)), Ok(()));
-    assert_eq!(policy.enforce(CodexClientKind::Cli, Some(&newer)), Ok(()));
+    for (minimum, current, allowed) in [
+        ("1.0.0", "1.0.0-rc.1", false),
+        ("1.0.0", "1.0.0", true),
+        ("1.0.0", "1.0.1", true),
+        ("1.0.0-rc.2", "1.0.0-rc.1", false),
+        ("1.0.0-rc.2", "1.0.0-rc.10", true),
+        ("1.0.0+build.2", "1.0.0", true),
+        ("1.0.0", "1.0.0+build.2", true),
+        ("1.0.0+build.2", "1.0.0+build.1", true),
+        ("1.0.0-rc.2+build.2", "1.0.0-rc.2+build.1", true),
+        ("1.0.0+build.1", "1.0.0-rc.1+build.9", false),
+        ("1.0.1+build.1", "1.0.0+build.9", false),
+    ] {
+        let minimum_version = CodexClientVersion::parse(minimum).unwrap();
+        let current_version = CodexClientVersion::parse(current).unwrap();
+        let policy =
+            CodexClientMinVersions::new(Some(minimum_version.clone()), Some(minimum_version));
+        for kind in [CodexClientKind::Cli, CodexClientKind::Desktop] {
+            assert_eq!(
+                policy.enforce(kind, Some(&current_version)).is_ok(),
+                allowed,
+                "{kind:?}: {current} >= {minimum}"
+            );
+        }
+    }
 }

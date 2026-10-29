@@ -149,6 +149,9 @@ async fn group_options_query_should_preserve_store_failures() {
 
 #[derive(Default)]
 struct FakeGroupStore {
+    projection_failure: bool,
+    missing_record: bool,
+    published_revision: Option<Arc<std::sync::atomic::AtomicU64>>,
     requested_groups: Mutex<Vec<String>>,
     members: Option<Vec<AccountGroupMemberFact>>,
 }
@@ -223,6 +226,16 @@ impl AccountGroupStore for FakeGroupStore {
         &self,
         group_ids: &[AccountGroupId],
     ) -> AdminStoreResult<Vec<AccountGroupMemberFact>> {
+        if self.projection_failure {
+            assert_eq!(
+                self.published_revision
+                    .as_ref()
+                    .expect("publication counter")
+                    .load(std::sync::atomic::Ordering::SeqCst),
+                2
+            );
+            return Err(unused());
+        }
         *self.requested_groups.lock().expect("requested groups") = group_ids
             .iter()
             .map(|group_id| group_id.as_str().to_owned())
@@ -251,10 +264,16 @@ impl AccountGroupStore for FakeGroupStore {
 
     async fn set_account_group_enabled(
         &self,
-        _: SetAccountGroupEnabled,
+        command: SetAccountGroupEnabled,
         _: &MutationContext,
     ) -> AdminStoreResult<AccountGroupMutation> {
-        Err(unused())
+        let mut record = group_record();
+        record.enabled = command.enabled;
+        Ok(AccountGroupMutation {
+            config_revision: Revision::new(2).expect("committed revision"),
+            id: record.id.clone(),
+            record: (!self.missing_record).then_some(record),
+        })
     }
 
     async fn delete_account_group(
@@ -296,6 +315,7 @@ impl AccountRuntimeStore for FakeRuntimeStore {
     ) -> AdminStoreResult<AccountRuntimeSnapshot> {
         *self.requested_accounts.lock().expect("requested accounts") = account_ids.to_vec();
         Ok(AccountRuntimeSnapshot {
+            protection_rules: std::collections::BTreeMap::new(),
             cooldown: BTreeMap::from([(
                 "acct_limited".to_owned(),
                 std::time::SystemTime::from(Utc::now() + Duration::minutes(5)).into(),
@@ -307,13 +327,6 @@ impl AccountRuntimeStore for FakeRuntimeStore {
     async fn active_freezes(
         &self,
     ) -> AdminStoreResult<BTreeMap<String, gateway_admin::model::accounts::AccountFreeze>> {
-        Ok(BTreeMap::new())
-    }
-
-    async fn capacity_peaks(
-        &self,
-        _account_ids: &[String],
-    ) -> AdminStoreResult<BTreeMap<String, u32>> {
         Ok(BTreeMap::new())
     }
 
@@ -430,4 +443,51 @@ async fn invalid_group_fields_are_rejected_before_store_mutations() {
         .unwrap_err();
     assert_eq!(created.kind(), AdminErrorKind::Invalid);
     assert_eq!(updated.kind(), AdminErrorKind::Invalid);
+}
+
+struct RecordingPublication(Arc<std::sync::atomic::AtomicU64>);
+
+impl gateway_core::runtime::SnapshotControl for RecordingPublication {
+    fn publish_committed(
+        &self,
+        revision: gateway_core::routing::ConfigRevision,
+    ) -> futures::future::BoxFuture<'_, ()> {
+        Box::pin(async move {
+            self.0
+                .store(revision.get(), std::sync::atomic::Ordering::SeqCst);
+        })
+    }
+}
+
+#[tokio::test]
+async fn committed_group_mutations_publish_even_when_the_display_projection_is_unavailable() {
+    for missing_record in [false, true] {
+        let published = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let groups = Arc::new(FakeGroupStore {
+            projection_failure: true,
+            missing_record,
+            published_revision: Some(published.clone()),
+            ..Default::default()
+        });
+        let services = AdminHarness::new()
+            .account_groups(groups)
+            .snapshot(Arc::new(RecordingPublication(published.clone())))
+            .build()
+            .await;
+        let mutation = services
+            .account_groups()
+            .set_enabled(
+                &crate::backup::support::system_context(),
+                SetAccountGroupEnabled {
+                    id: group_id(),
+                    enabled: false,
+                },
+            )
+            .await
+            .expect("committed mutation remains successful");
+        assert_eq!(mutation.config_revision.get(), 2);
+        assert_eq!(mutation.id, group_id());
+        assert!(mutation.record.is_none());
+        assert_eq!(published.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
 }

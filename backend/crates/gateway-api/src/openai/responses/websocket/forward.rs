@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
-use axum::http::StatusCode;
+use axum::{extract::ws::Utf8Bytes, http::StatusCode};
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use gateway_core::engine::CommitRequirement;
@@ -268,7 +268,7 @@ pub(super) async fn forward_response(
             return fail_body(connection, body, MiddlewareError::InvalidState, &request_id).await;
         }
         let terminal = frame.terminal();
-        let Ok(message) = String::from_utf8(frame.into_bytes().to_vec()) else {
+        let Ok(message) = Utf8Bytes::try_from(frame.into_bytes()) else {
             return fail_body(connection, body, MiddlewareError::InvalidState, &request_id).await;
         };
         let phase = match (first_frame_written, terminal) {

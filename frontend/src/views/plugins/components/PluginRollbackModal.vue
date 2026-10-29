@@ -4,6 +4,8 @@ import type { PluginInstance, PluginRollbackPlan } from '@/api'
 import { ZButton, ZDialog, ZForm, ZFormItem, ZSelect } from '@codex-proxy/ui'
 
 import { computed, shallowRef, watch } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import { shortDigest } from '../utils/model'
 import PluginHelpPopover from './PluginHelpPopover.vue'
 
@@ -18,6 +20,8 @@ defineEmits<{
   confirm: [artifactSha256: string]
   reload: [instance: PluginInstance]
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 const open = defineModel<boolean>({ required: true })
 const selected = shallowRef('')
@@ -34,18 +38,18 @@ watch(() => props.plan, () => {
 </script>
 
 <template>
-  <ZDialog v-model="open" title="回退插件版本" description="恢复对应版本的设置，保持当前启停状态" width="36rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
+  <ZDialog v-model="open" :title="t('plugins.rollback.rollBackPluginVersion')" :description="t('plugins.rollback.description')" width="36rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
     <ZForm class="grid gap-4">
-      <ZFormItem label="当前版本">
+      <ZFormItem :label="t('plugins.catalog.currentVersion')">
         <p class="m-0 break-all text-cp-sm text-cp-text">
           {{ instance?.name }} <span v-if="plan" class="font-mono">· {{ plan.currentVersion }}</span>
         </p>
       </ZFormItem>
-      <ZFormItem v-if="loading || options.length" label="目标版本" required>
+      <ZFormItem v-if="loading || options.length" :label="t('plugins.rollback.targetVersion')" required>
         <template #label-extra>
-          <PluginHelpPopover label="回退说明">
+          <PluginHelpPopover :label="t('plugins.rollback.fallbackInstructions')">
             <p class="m-0">
-              恢复目标版本上次启用时的参数和密钥，私有数据仍须通过兼容检查
+              {{ t('plugins.rollback.restoreHelp') }}
             </p>
             <p v-if="selected" class="m-0 break-all font-mono">
               SHA-256 {{ selected }}
@@ -57,23 +61,23 @@ watch(() => props.plan, () => {
           class="w-full"
           :options="options"
           :disabled="loading || saving"
-          :placeholder="loading ? '正在加载旧版' : '请选择回退目标'"
-          aria-label="回退目标版本"
+          :placeholder="loading ? t('plugins.rollback.loadingOlderVersions') : t('plugins.rollback.selectRollbackVersion')"
+          :aria-label="t('plugins.rollback.rollBackToTargetVersion')"
         />
       </ZFormItem>
       <p v-else-if="plan" role="status" class="m-0 text-cp-sm text-cp-text-secondary">
-        没有保留恢复设置的旧版，其他版本可在“版本”中切换
+        {{ t('plugins.rollback.empty') }}
       </p>
     </ZForm>
     <template #footer>
       <ZButton v-if="instance" :disabled="saving" :loading="loading" @click="$emit('reload', instance)">
-        重新加载
+        {{ t('plugins.rollback.reload') }}
       </ZButton>
       <ZButton :disabled="saving" @click="open = false">
-        取消
+        {{ t('common.actions.cancel') }}
       </ZButton>
       <ZButton type="primary" :disabled="!canConfirm" :loading="saving" @click="$emit('confirm', selected)">
-        确认回退
+        {{ t('plugins.rollback.confirmRollback') }}
       </ZButton>
     </template>
   </ZDialog>

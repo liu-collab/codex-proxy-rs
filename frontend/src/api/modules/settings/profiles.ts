@@ -69,7 +69,6 @@ export function getClientProfileOptions() {
   return request<ClientProfileOptions>({
     url: '/api/admin/settings/client-profiles/openai',
     method: 'GET',
-    silent: true,
   })
 }
 
@@ -120,7 +119,6 @@ export function getXaiClientProfileOptions() {
   return request<XaiClientProfileOptions>({
     url: '/api/admin/settings/client-profiles/xai',
     method: 'GET',
-    silent: true,
   })
 }
 

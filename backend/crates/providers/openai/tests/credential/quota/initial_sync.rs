@@ -82,7 +82,7 @@ async fn zero_initial_delay_keeps_immediate_first_observation() {
     assert_eq!(
         service.synchronize().await.expect("first cycle").updated,
         1,
-        "零延迟必须保持首轮即查的旧行为"
+        "零延迟必须在首轮查询额度"
     );
     // 已产生快照后退出首查路径，正常账号也不满足周期复核条件。
     service.synchronize().await.expect("second cycle");

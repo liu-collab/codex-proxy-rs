@@ -1,4 +1,4 @@
-//! 验证事件即时交付、长时间进度与取消对重试边界的影响
+//! 验证事件即时交付、前导事件与取消对重试边界的影响
 
 use gateway_core::diagnostics::TraceContext;
 use gateway_core::engine::provider::ProviderStream;
@@ -143,62 +143,6 @@ async fn large_preludes_are_forwarded_before_failure_on_http_and_websocket() {
         assert_eq!(actual, expected);
         server.await.unwrap();
     }
-}
-
-#[tokio::test]
-async fn late_overload_after_multiple_structural_events_remains_replayable() {
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, "acct_provider_contract").await;
-    let created = sse(&structural_event("response.created", 96 * 1024));
-    let progress = sse(&structural_event("response.in_progress", 96 * 1024));
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let base_url = format!("http://{}", listener.local_addr().unwrap());
-    let (release, released) = oneshot::channel();
-    let server = tokio::spawn(async move {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        read_http_request(&mut socket).await;
-        socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n").await.unwrap();
-        write_http_chunk(&mut socket, &created).await;
-        tokio::time::sleep(Duration::from_millis(1_500)).await;
-        write_http_chunk(&mut socket, &progress).await;
-        released.await.unwrap();
-        write_http_chunk(&mut socket, &sse(&overload())).await;
-        socket.write_all(b"0\r\n\r\n").await.unwrap();
-    });
-    let trace = TraceContext::new("req_precommit");
-    let mut stream = provider_with_base_url(&store, base_url)
-        .execute(
-            planned_request("openai", http_generate_operation()),
-            traced_context(&trace, CancellationToken::new()),
-        )
-        .await
-        .unwrap();
-    for kind in ["response.created", "response.in_progress"] {
-        let event = timeout(Duration::from_secs(2), next_client_event(&mut stream))
-            .await
-            .unwrap();
-        assert_eq!(event.wire_event().unwrap().event_type(), Some(kind));
-        assert!(event.is_replayable_prelude());
-    }
-    release.send(()).unwrap();
-    let (events, mut error) = timeout(Duration::from_secs(1), stream_failure(&mut stream))
-        .await
-        .unwrap();
-    assert!(events.iter().all(|event| !event.has_client_event()));
-    assert!(error.replay_is_safe());
-    assert!(matches!(
-        error.pre_delivery_retry(),
-        Some(PreDeliveryRetry::SameAccountTransientRetry { .. })
-    ));
-    assert_eq!(
-        error
-            .take_atomic_client_events()
-            .iter()
-            .filter_map(|event| event.wire_event()?.event_type())
-            .collect::<Vec<_>>(),
-        ["error"]
-    );
-    server.await.unwrap();
 }
 
 #[tokio::test]

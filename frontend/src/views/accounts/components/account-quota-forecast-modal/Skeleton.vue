@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { ZSkeleton } from '@codex-proxy/ui'
+
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({ useScope: 'global' })
 </script>
 
 <template>
   <div role="status" aria-busy="true">
-    <span class="sr-only">正在加载额度预测</span>
+    <span class="sr-only">{{ t('accounts.quotaForecast.loadingQuotaForecast') }}</span>
     <div aria-hidden="true">
       <div class="flex flex-col gap-5 rounded-cp-card bg-cp-fill-tertiary/70 p-4 [html[data-theme=light]_&]:bg-cp-fill-quaternary/70">
         <div>

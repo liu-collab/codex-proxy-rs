@@ -4,7 +4,9 @@ import type { Account } from '@/api'
 import { ZIconButton, ZMenuItem, ZPopover } from '@codex-proxy/ui'
 
 import { Download, KeyRound, MoreHorizontal, Pencil, Power, RefreshCw, RotateCcw, Trash2, Wifi } from '@lucide/vue'
+
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
   account: Account
@@ -15,6 +17,7 @@ const props = defineProps<{
   testing: boolean
   togglingScheduling: boolean
 }>()
+
 const emit = defineEmits<{
   edit: [account: Account]
   delete: [account: Account]
@@ -26,6 +29,8 @@ const emit = defineEmits<{
   toggleScheduling: [account: Account]
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const credentialEligible = computed(() => props.account.authenticationKind === 'oauth')
 </script>
 
@@ -33,7 +38,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
   <div class="relative flex items-center justify-start gap-1">
     <ZIconButton
       size="small"
-      aria-label="编辑账号"
+      :aria-label="t('accounts.editor.title')"
       @click.stop="emit('edit', account)"
     >
       <Pencil class="size-3.5 text-cp-link" />
@@ -41,7 +46,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
 
     <ZIconButton
       size="small"
-      aria-label="删除账号"
+      :aria-label="t('accounts.actions.deleteAccount')"
       :disabled="deleting"
       @click.stop="emit('delete', account)"
     >
@@ -50,7 +55,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
 
     <ZPopover placement="bottom-end">
       <template #reference="{ open }">
-        <ZIconButton size="small" aria-label="更多操作" :pressed="open">
+        <ZIconButton size="small" :aria-label="t('accounts.actions.moreActions')" :pressed="open">
           <MoreHorizontal class="size-4" />
         </ZIconButton>
       </template>
@@ -65,7 +70,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             <template #icon>
               <Wifi class="size-3.5 text-cp-text-quaternary" />
             </template>
-            测试连接
+            {{ t('accounts.connectionTest.title') }}
           </ZMenuItem>
           <ZMenuItem
             :loading="togglingScheduling"
@@ -75,7 +80,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             <template #icon>
               <Power class="size-3.5 text-cp-text-quaternary" />
             </template>
-            {{ account.enabled ? '停用调度' : '启用调度' }}
+            {{ account.enabled ? t('accounts.actions.disableScheduling') : t('accounts.actions.enableScheduling') }}
           </ZMenuItem>
           <ZMenuItem
             v-if="credentialEligible"
@@ -89,13 +94,13 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             <template #icon>
               <RefreshCw class="size-3.5 text-cp-text-quaternary" />
             </template>
-            刷新令牌
+            {{ t('accounts.actions.refreshToken') }}
           </ZMenuItem>
           <ZMenuItem v-if="credentialEligible" @click.stop="(close(), emit('reauthorize', account))">
             <template #icon>
               <KeyRound class="size-3.5 text-cp-text-quaternary" />
             </template>
-            重新授权
+            {{ t('accounts.actions.reauthorize') }}
           </ZMenuItem>
           <ZMenuItem
             v-if="account.provider === 'openai' && account.authenticationKind === 'oauth'"
@@ -109,7 +114,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             <template #icon>
               <Download class="size-3.5 text-cp-text-quaternary" />
             </template>
-            下载模型目录
+            {{ t('accounts.actions.downloadModelCatalog') }}
           </ZMenuItem>
           <ZMenuItem
             :loading="recovering"
@@ -119,7 +124,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             <template #icon>
               <RotateCcw class="size-3.5 text-cp-text-quaternary" />
             </template>
-            恢复状态
+            {{ t('accounts.actions.restoreState') }}
           </ZMenuItem>
         </div>
       </template>

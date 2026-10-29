@@ -1,4 +1,5 @@
 import type { RequestContext, RequestNext } from './index'
+import { t } from '@/i18n'
 import { ApiError, isTransientApiError } from './error'
 
 export async function retryPlugin(context: RequestContext, next: RequestNext) {
@@ -6,7 +7,7 @@ export async function retryPlugin(context: RequestContext, next: RequestNext) {
   const retry = config.retry ?? ['GET', 'HEAD'].includes((config.method ?? 'GET').toUpperCase())
   for (let attempt = 0; ; attempt += 1) {
     if (!context.isCurrent())
-      throw new ApiError('请求已取消', 0, undefined, undefined, 'cancelled')
+      throw new ApiError(t('common.errors.canceled'), 0, undefined, undefined, 'cancelled')
     try {
       return await next()
     }

@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { InstalledPlugin } from '../utils/catalog'
+
 import { defineTableColumns, ZButton, ZCard, ZEmpty, ZIconButton, ZInput, ZPagination, ZScrollbar, ZSegmented, ZSelect, ZTable, ZTag } from '@codex-proxy/ui'
 import { LayoutGrid, List, Puzzle, Search, Settings2 } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { PLUGIN_STATUS_LABELS } from '../constants'
 import { currentPluginInstance, pluginStatus, pluginStatusType } from '../utils/catalog'
 import PluginCapabilityTags from './PluginCapabilityTags.vue'
@@ -10,18 +12,44 @@ import PluginIcon from './PluginIcon.vue'
 import PluginStatusNotice from './PluginStatusNotice.vue'
 
 const props = defineProps<{ plugins: InstalledPlugin[], loading: boolean }>()
+
 defineEmits<{ manage: [plugin: InstalledPlugin] }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const search = shallowRef('')
 const status = shallowRef('all')
 const display = shallowRef('cards')
 const page = shallowRef(1)
 const pageSize = shallowRef(20)
-const statusOptions = [{ label: '全部状态', value: 'all' }, ...Object.entries(PLUGIN_STATUS_LABELS).map(([value, label]) => ({ value, label }))]
-const displayOptions = [{ label: '卡片视图', value: 'cards', icon: LayoutGrid }, { label: '列表视图', value: 'list', icon: List }]
+const statusOptions = computed(() => ([
+  {
+    label: t('common.status.all'),
+    value: 'all',
+  },
+  ...Object.entries(PLUGIN_STATUS_LABELS.value).map(([value, label]) => ({ value, label })),
+]))
+const displayOptions = computed(() => ([
+  {
+    label: t('plugins.catalog.cardView'),
+    value: 'cards',
+    icon: LayoutGrid,
+  },
+  {
+    label: t('plugins.catalog.listView'),
+    value: 'list',
+    icon: List,
+  },
+]))
 const filtered = computed(() => props.plugins.filter((plugin) => {
   const metadata = plugin.artifact.metadata
   return (status.value === 'all' || pluginStatus(plugin) === status.value)
-    && [metadata.displayName, metadata.pluginId, metadata.publisher, metadata.description].some(value => value.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))
+    && [
+      metadata.displayName,
+      metadata.pluginId,
+      metadata.publisher,
+      metadata.description,
+    ].some(value => value.toLocaleLowerCase().includes(search.value.trim().toLocaleLowerCase()))
 }))
 const rows = computed(() => filtered.value
   .slice((page.value - 1) * pageSize.value, page.value * pageSize.value)
@@ -30,8 +58,13 @@ const rows = computed(() => filtered.value
     const version = plugin.artifacts.find(artifact => artifact.metadata.sha256 === current?.artifactSha256)?.metadata.version ?? plugin.artifact.metadata.version
     return {
       ...plugin,
+      failureReason: plugin.configurations.filter(instance => instance.enabled).length > 1
+        ? t('plugins.configuration.legacy.multipleEnabledNotice')
+        : undefined,
       versionLabel: version,
-      versionTitle: `${current ? '当前版本' : '已安装版本'}：${version}`,
+      versionTitle: `${current
+        ? t('plugins.catalog.currentVersion')
+        : t('plugins.catalog.installedVersion')}：${version}`,
     }
   }))
 const pagination = computed(() => ({ currentPage: page.value, pageSize: pageSize.value, total: filtered.value.length }))
@@ -41,36 +74,61 @@ watch([search, status, pageSize], () => {
 watch(() => filtered.value.length, (total) => {
   page.value = Math.min(page.value, Math.max(1, Math.ceil(total / pageSize.value)))
 })
-const columns = defineTableColumns<(typeof rows.value)[number]>([
-  { key: 'plugin', label: '插件', kind: 'identity', size: '3xl' },
-  { key: 'status', label: '状态', kind: 'custom', size: 'lg' },
-  { key: 'capabilities', label: '提供功能', kind: 'custom', size: 'xl' },
-  { key: 'configurations', label: '已安装版本', kind: 'custom', size: 'lg' },
-  { key: 'actions', label: '操作', kind: 'actions', size: 'sm' },
-])
+const columns = computed(() => (defineTableColumns<(typeof rows.value)[number]>([
+  {
+    key: 'plugin',
+    label: t('navigation.plugins'),
+    kind: 'identity',
+    size: '3xl',
+  },
+  {
+    key: 'status',
+    label: t('common.fields.status'),
+    kind: 'custom',
+    size: 'lg',
+  },
+  {
+    key: 'capabilities',
+    label: t('plugins.catalog.provideFunctionality'),
+    kind: 'custom',
+    size: 'xl',
+  },
+  {
+    key: 'configurations',
+    label: t('plugins.catalog.versionCount'),
+    kind: 'custom',
+    size: 'lg',
+  },
+  {
+    key: 'actions',
+    label: t('common.fields.actions'),
+    kind: 'actions',
+    size: 'sm',
+  },
+])))
 </script>
 
 <template>
   <div class="flex h-full min-h-0 flex-col gap-2">
     <div class="flex shrink-0 flex-wrap items-center gap-3 p-1">
-      <ZInput v-model="search" aria-label="搜索已安装插件" placeholder="搜索插件、发布者" class="min-w-0 flex-1 basis-full sm:max-w-72 sm:basis-auto">
+      <ZInput v-model="search" :aria-label="t('plugins.catalog.searchForInstalledPlugins')" :placeholder="t('plugins.catalog.searchPluginsPublishers')" class="min-w-0 flex-1 basis-full sm:max-w-72 sm:basis-auto">
         <template #prefix>
           <Search class="size-4" />
         </template>
       </ZInput>
-      <ZSelect v-model="status" :options="statusOptions" aria-label="插件状态" class="w-36" />
-      <ZSegmented v-model="display" :options="displayOptions" aria-label="插件显示方式" display="icon" class="ml-auto w-20 shrink-0" />
+      <ZSelect v-model="status" :options="statusOptions" :aria-label="t('plugins.catalog.pluginStatus')" class="w-36" />
+      <ZSegmented v-model="display" :options="displayOptions" :aria-label="t('plugins.catalog.pluginDisplayMode')" display="icon" class="ml-auto w-20 shrink-0" />
     </div>
-    <div v-if="loading && !plugins.length" class="min-h-0 flex-1" aria-busy="true" />
-    <ZEmpty v-else-if="!filtered.length" :icon="Puzzle" :title="plugins.length ? '没有匹配的插件' : '安装第一个插件'" :description="plugins.length ? '试试其他名称或状态' : '从上方安装插件，请先确认来源可信'" surface="none" class="flex-1 content-center">
+    <ZEmpty v-if="loading && !plugins.length" :icon="Puzzle" :title="t('plugins.catalog.loading')" surface="none" class="flex-1 content-center" role="status" aria-busy="true" />
+    <ZEmpty v-else-if="!filtered.length" :icon="Puzzle" :title="plugins.length ? t('plugins.catalog.noMatchingPlugins') : t('plugins.catalog.installYourFirstPlugin')" :description="plugins.length ? t('plugins.catalog.tryAnotherNameOrStatus') : t('plugins.catalog.emptyDescription')" surface="none" class="flex-1 content-center">
       <template v-if="plugins.length" #action>
         <ZButton @click="search = ''; status = 'all'">
-          清除筛选
+          {{ t('plugins.catalog.clearFilters') }}
         </ZButton>
       </template>
     </ZEmpty>
     <ZScrollbar v-else-if="display === 'cards'" class="min-h-0 flex-1" :aria-busy="loading">
-      <ul class="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,30rem),1fr))] items-start gap-4 p-1" aria-label="已安装插件">
+      <ul class="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(min(100%,30rem),1fr))] items-start gap-4 p-1" :aria-label="t('plugins.catalog.pluginInstalled')">
         <li v-for="plugin in rows" :key="plugin.id">
           <ZCard padding="compact">
             <div class="flex min-w-0 items-start gap-3">
@@ -84,18 +142,18 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
                 </div>
                 <span class="truncate text-cp-xs text-cp-text-secondary">{{ plugin.artifact.metadata.publisher }}</span>
               </div>
-              <PluginStatusNotice v-if="currentPluginInstance(plugin)" :instance="currentPluginInstance(plugin)!" />
-              <ZTag :type="pluginStatusType(pluginStatus(plugin))" size="small">
+              <PluginStatusNotice v-if="currentPluginInstance(plugin)" :instance="currentPluginInstance(plugin)!" :failure-reason="plugin.failureReason" />
+              <ZTag v-if="!['failed', 'incompatible'].includes(pluginStatus(plugin))" :type="pluginStatusType(pluginStatus(plugin))" size="small">
                 {{ PLUGIN_STATUS_LABELS[pluginStatus(plugin)] }}
               </ZTag>
             </div>
             <p class="my-4 line-clamp-2 min-h-10 text-cp-sm leading-relaxed text-cp-text-secondary">
-              {{ plugin.artifact.metadata.description || '发布者未提供说明' }}
+              {{ plugin.artifact.metadata.description || t('plugins.catalog.noDescription') }}
             </p>
             <PluginCapabilityTags :metadata="plugin.artifact.metadata" />
             <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
-              <span class="text-cp-xs text-cp-text-secondary">{{ plugin.artifacts.length }} 个版本</span>
-              <ZIconButton class="ml-auto" :aria-label="`管理 ${plugin.artifact.metadata.displayName}`" variant="solid" size="small" @click="$emit('manage', plugin)">
+              <span class="text-cp-xs text-cp-text-secondary">{{ t('plugins.catalog.versions', { count: plugin.artifacts.length }) }}</span>
+              <ZIconButton class="ml-auto" :aria-label="t('plugins.catalog.manage', { displayName: plugin.artifact.metadata.displayName })" variant="solid" size="small" @click="$emit('manage', plugin)">
                 <Settings2 class="size-4" />
               </ZIconButton>
             </div>
@@ -120,8 +178,8 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
       </template>
       <template #status="{ row }">
         <div class="flex items-center gap-1.5">
-          <PluginStatusNotice v-if="currentPluginInstance(row)" :instance="currentPluginInstance(row)!" />
-          <ZTag :type="pluginStatusType(pluginStatus(row))">
+          <PluginStatusNotice v-if="currentPluginInstance(row)" :instance="currentPluginInstance(row)!" :failure-reason="row.failureReason" />
+          <ZTag v-if="!['failed', 'incompatible'].includes(pluginStatus(row))" :type="pluginStatusType(pluginStatus(row))">
             {{ PLUGIN_STATUS_LABELS[pluginStatus(row)] }}
           </ZTag>
         </div>
@@ -130,10 +188,10 @@ const columns = defineTableColumns<(typeof rows.value)[number]>([
         <PluginCapabilityTags :metadata="row.artifact.metadata" />
       </template>
       <template #configurations="{ row }">
-        {{ row.artifacts.length }} 个版本
+        {{ t('plugins.catalog.versions', { count: row.artifacts.length }) }}
       </template>
       <template #actions="{ row }">
-        <ZIconButton size="small" variant="solid" :aria-label="`管理 ${row.artifact.metadata.displayName}`" @click="$emit('manage', row)">
+        <ZIconButton size="small" variant="solid" :aria-label="t('plugins.catalog.manage', { displayName: row.artifact.metadata.displayName })" @click="$emit('manage', row)">
           <Settings2 class="size-4" />
         </ZIconButton>
       </template>

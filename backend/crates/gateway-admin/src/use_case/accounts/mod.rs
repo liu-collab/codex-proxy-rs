@@ -30,8 +30,9 @@ use crate::{
             AccountDirectoryItem, AccountDirectoryPage, AccountExportBundle, AccountPersonalInfo,
             AccountRefreshResult, AccountUsagePeriod, ConsumeProviderResetCredit,
             PrepareCredentialRefresh, ProviderModelCatalogDocument, ProviderModels,
-            ProviderProfileAvatar, ProviderQuota, ProviderQuotaRequest, ProviderQuotaWindow,
-            ProviderResetCreditResult, ProviderResetCredits, QuotaLocalUsageAttribution,
+            ProviderProfileAvatar, ProviderQuota, ProviderQuotaReadRequest, ProviderQuotaRequest,
+            ProviderQuotaWindow, ProviderResetCreditResult, ProviderResetCredits,
+            QuotaLocalUsageAttribution,
         },
         quota_forecast::{
             AccountQuotaForecastReport, account_quota_forecasts, quota_forecast_source_window,
@@ -86,13 +87,6 @@ pub trait AccountsService: Send + Sync {
         context: &MutationContext,
         command: UpdateAccount,
     ) -> Result<AccountUpdateResult, AdminError>;
-
-    async fn lower_concurrency_limit(
-        &self,
-        context: &MutationContext,
-        account_id: ProviderAccountId,
-        limit: gateway_core::account::AccountConcurrencyLimit,
-    ) -> Result<Option<AccountUpdateResult>, AdminError>;
 
     async fn batch_update(
         &self,
@@ -234,6 +228,78 @@ impl DefaultAccountsService {
                 .entry(account_id.clone())
                 .or_insert_with(|| Arc::new(futures::lock::Mutex::new(()))),
         )
+    }
+
+    async fn read_quotas(
+        providers: &ProviderAdminRegistry,
+        items: &[AccountPageItem],
+        rolling_usage: &BTreeMap<String, AccountUsage>,
+    ) -> Vec<ProviderQuota> {
+        let mut groups = BTreeMap::<_, Vec<usize>>::new();
+        for (index, item) in items.iter().enumerate() {
+            groups
+                .entry(&item.account.provider_kind)
+                .or_default()
+                .push(index);
+        }
+        let batches = groups.into_iter().map(|(kind, indices)| async move {
+            let provider = match providers.require(kind) {
+                Ok(provider) => provider,
+                Err(error) => {
+                    tracing::warn!(
+                        provider = %kind,
+                        error = %error,
+                        "account directory provider is not registered; showing empty quota"
+                    );
+                    return Vec::new();
+                }
+            };
+            let requests = indices
+                .iter()
+                .map(|&index| {
+                    let account = &items[index].account;
+                    ProviderQuotaReadRequest {
+                        account,
+                        rolling_usage: rolling_usage.get(&account.id),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let results = provider.read_quotas(&requests).await;
+            if results.len() != indices.len() {
+                tracing::warn!(
+                    provider = %kind,
+                    expected = indices.len(),
+                    actual = results.len(),
+                    "account directory quota batch has invalid length; showing empty quota"
+                );
+                return Vec::new();
+            }
+            indices
+                .into_iter()
+                .zip(results)
+                .map(|(index, result)| {
+                    let quota = result.unwrap_or_else(|error| {
+                        tracing::warn!(
+                            account_id = %items[index].account.id,
+                            error = %error,
+                            "account directory quota projection failed; showing empty quota"
+                        );
+                        empty_quota()
+                    });
+                    (index, quota)
+                })
+                .collect::<Vec<_>>()
+        });
+        // Provider 可独立完成，回填原页顺序并保留未注册或失败账号的位置
+        let mut quotas = vec![empty_quota(); items.len()];
+        for (index, quota) in futures::future::join_all(batches)
+            .await
+            .into_iter()
+            .flatten()
+        {
+            quotas[index] = quota;
+        }
+        quotas
     }
 
     async fn load_account(
@@ -401,6 +467,7 @@ impl DefaultAccountsService {
                     .and_then(|(window, _)| window.local_usage.clone())
             });
         Ok(AccountDirectoryItem {
+            protection_rules: stored.protection_rules,
             capacity: stored.capacity,
             capabilities: provider
                 .account_capabilities(account_id, &stored.account.authentication_kind),
@@ -487,45 +554,7 @@ impl AccountsService for DefaultAccountsService {
             .into_iter()
             .map(|usage| (usage.account_id.clone(), usage))
             .collect::<BTreeMap<_, _>>();
-        let mut quotas = futures::future::join_all(page.items.iter().map(|item| async {
-            let account = &item.account;
-            let account_id = ProviderAccountId::new(account.id.clone())
-                .map_err(|_| AdminError::invalid("Provider 账号 ID 不合法"))?;
-            // 单个账号的 quota 投影失败（Provider 未注册或 quota 读取失败）不拖垮整页：
-            // 该账号降级为空额度投影，其余账号与页面状态照常返回
-            let provider = match providers.require(&account.provider_kind) {
-                Ok(provider) => provider,
-                Err(error) => {
-                    tracing::warn!(
-                        account_id = %account.id,
-                        error = %error,
-                        "account directory provider is not registered; showing empty quota"
-                    );
-                    return Ok(empty_quota());
-                }
-            };
-            match provider
-                .quota(ProviderQuotaRequest {
-                    account_id,
-                    refresh: false,
-                    rolling_usage: rolling_usage.get(&account.id).cloned(),
-                })
-                .await
-            {
-                Ok(quota) => Ok(quota),
-                Err(error) => {
-                    tracing::warn!(
-                        account_id = %account.id,
-                        error = %error,
-                        "account directory quota projection failed; showing empty quota"
-                    );
-                    Ok(empty_quota())
-                }
-            }
-        }))
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, AdminError>>()?;
+        let mut quotas = Self::read_quotas(providers, &page.items, &rolling_usage).await;
         self.attach_quota_local_usage(&page.items, &mut quotas)
             .await?;
         let mut api_key_usage = self.load_api_key_usage(&page.items).await?;
@@ -548,6 +577,7 @@ impl AccountsService for DefaultAccountsService {
                         .and_then(|(window, _)| window.local_usage.clone())
                 });
                 Ok(AccountDirectoryItem {
+                    protection_rules: item.protection_rules,
                     capacity: crate::model::accounts::AccountCapacity {
                         used_slots: in_flight
                             .as_ref()
@@ -728,27 +758,6 @@ impl AccountsService for DefaultAccountsService {
             .account_facts_changed(std::slice::from_ref(&account_id))
             .await;
         publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
-        Ok(result)
-    }
-
-    async fn lower_concurrency_limit(
-        &self,
-        context: &MutationContext,
-        account_id: ProviderAccountId,
-        limit: gateway_core::account::AccountConcurrencyLimit,
-    ) -> Result<Option<AccountUpdateResult>, AdminError> {
-        let (_, provider) = self.provider_for_account(&account_id).await?;
-        let result = self
-            .accounts
-            .lower_concurrency_limit(&account_id, limit, context)
-            .await
-            .map_err(|error| map_store_error(error, "provider account"))?;
-        if let Some(result) = &result {
-            provider
-                .account_facts_changed(std::slice::from_ref(&account_id))
-                .await;
-            publish_committed(self.snapshot.as_ref(), result.config_revision).await?;
-        }
         Ok(result)
     }
 

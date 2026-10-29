@@ -492,6 +492,8 @@ pub struct ResponsesSseFailure {
     pub message: String,
     /// 上游错误码
     pub upstream_code: Option<String>,
+    /// 上游显式 message，保留缺失与空串的区别
+    pub upstream_message: Option<String>,
     /// 上游显式错误类型；不从业务码推导
     pub upstream_type: Option<String>,
     /// 上游显式状态码；不从业务码或错误类型推导
@@ -528,6 +530,7 @@ impl ResponsesSseFailure {
             event: event.to_string(),
             message: failure_message(value).unwrap_or_else(|| "Codex upstream SSE failed".into()),
             upstream_code: failure_code(value),
+            upstream_message: failure_message(value),
             upstream_type: failure_type(value),
             explicit_status_code: failure_explicit_status_code(value),
             retry_after_seconds: events::retry_after_seconds_from_value(value),
@@ -765,10 +768,14 @@ impl CodexResponsesRequest {
     }
 
     /// 提取 Codex 请求类型、子代理类型、推理预设与压缩语义
-    pub fn semantics(&self) -> CodexRequestSemantics {
+    pub fn semantics(
+        &self,
+        previous_reasoning_effort_override: Option<&str>,
+    ) -> CodexRequestSemantics {
         let mut semantics = codex_responses_request_semantics_with_turn_metadata(
             self.body(),
             self.turn_metadata.as_deref(),
+            previous_reasoning_effort_override,
         );
         // 官方 generate=false 只准备连接与上下文，不是模型推理
         // 预热分类参与用量筛选，不能仅凭客户端的 request_kind 提示排除真实推理
@@ -787,7 +794,7 @@ impl CodexResponsesRequest {
     /// 它不拆分根会话的账号首选项；
     /// `thread_spawn` 仍用它派生独立 WebSocket/continuation transport identity
     pub fn subagent_kind(&self) -> Option<String> {
-        self.semantics()
+        self.semantics(None)
             .subagent_kind
             .filter(|value| !value.trim().is_empty())
             .or_else(|| {

@@ -8,7 +8,7 @@ use chrono::{DateTime, Duration, Utc};
 use gateway_admin::{
     model::observability as admin_observability, ports::store::ObservabilityStore as _,
 };
-use gateway_core::diagnostics::TraceContext;
+use gateway_core::diagnostics::{MAX_TRACE_SNAPSHOT_BYTES, TraceContext};
 use gateway_core::engine::{
     ExecutionOutcome, ExecutionStore, ModelRequestFailureObservation,
     ModelRequestFinalization as CoreModelRequestFinalization, ModelRequestId,
@@ -23,9 +23,9 @@ use gateway_core::policy::ClientApiKeyId;
 use gateway_core::routing::{AccountRoutingSnapshot, ConfigRevision, PublicModelId};
 use gateway_core::upstream::UpstreamSendState;
 use gateway_store::postgres::{
-    AttemptMetrics, ModelRequestAttemptStart, ModelRequestRepository, NewModelRequest,
-    ObservabilityPageSize, ObservabilityRange, OpsErrorFilter, OpsErrorQuery, PgExecutionStore,
-    UsageRecordFilter, UsageRecordQuery,
+    ModelRequestAttemptStart, ModelRequestRepository, NewModelRequest, ObservabilityPageSize,
+    ObservabilityRange, OpsErrorFilter, OpsErrorQuery, PgExecutionStore, UsageRecordFilter,
+    UsageRecordQuery,
 };
 use serde_json::{Value, json};
 use sqlx::PgPool;
@@ -407,7 +407,6 @@ async fn core_adapter_should_persist_calculated_cost_exactly() {
     finalization.downstream_committed_at = Some(std::time::SystemTime::now());
     finalization.websocket_pool = Some("reuse".to_owned());
     finalization.service_tier = Some("priority".to_owned());
-    finalization.upstream_response_model = Some("grok-4.6-build".to_owned());
     finalization.cost = CalculatedCost::from_usd_ticks(12_345)
         .expect("calculated cost")
         .into_estimate();
@@ -452,10 +451,6 @@ async fn core_adapter_should_persist_calculated_cost_exactly() {
         detail.request.upstream_model_id.as_deref(),
         Some("grok-4.5")
     );
-    assert_eq!(
-        detail.request.upstream_response_model.as_deref(),
-        Some("grok-4.6-build")
-    );
     let page = observation
         .list_usage_records(UsageRecordQuery {
             status: Default::default(),
@@ -471,10 +466,6 @@ async fn core_adapter_should_persist_calculated_cost_exactly() {
         .await
         .expect("request list");
     assert_eq!(page.items.len(), 1);
-    assert_eq!(
-        page.items[0].upstream_response_model.as_deref(),
-        Some("grok-4.6-build")
-    );
     database.close().await;
 }
 
@@ -668,7 +659,6 @@ fn successful_core_finalization(id: &str) -> CoreModelRequestFinalization {
         upstream_transport: Some("websocket".to_owned()),
         http_version: Some("HTTP/2".to_owned()),
         websocket_pool: None,
-        upstream_response_model: None,
         service_tier: None,
         provider_metadata_json: None,
         error: None,
@@ -1429,54 +1419,100 @@ async fn seed_running_request(pool: &sqlx::PgPool, id: &str) -> Result<(), sqlx:
 }
 
 #[tokio::test]
-async fn diagnostic_trace_is_finalized_atomically_and_available_for_failed_request_details() {
+async fn diagnostic_trace_pressure_preserves_terminal_outcomes_and_usage() {
     let Some(database) = TestDatabase::create("diagnostic_trace").await else {
         return;
     };
-    seed_running_request(&database.pool, "req_diagnostic_failed")
-        .await
-        .unwrap();
     let store = PgExecutionStore::new(database.pool.clone());
-    let mut finalization = successful_core_finalization("req_diagnostic_failed");
-    finalization.outcome = ExecutionOutcome::Failed;
-    finalization.client_status_code = Some(502);
-    let diagnostic = gateway_core::error::ProviderDiagnostic::new(
-        "OpenAI WebSocket receive idle timeout after 300s",
-    )
-    .with_classification("receive", "receive_idle_timeout");
-    let provider_error = gateway_core::error::ProviderError::new(
-        gateway_core::error::ProviderErrorKind::Timeout,
-        UpstreamSendState::Ambiguous,
-    )
-    .with_diagnostic(diagnostic);
-    finalization.error = Some(GatewayError::from_provider(&provider_error));
-    let trace = serde_json::json!({"schemaVersion": 1, "requestId": "req_diagnostic_failed", "events": [
-        {"attemptIndex": 1, "stage": "attempt.failed", "data": {"diagnostic": {
-            "stage": "receive", "code": "receive_idle_timeout", "message": "OpenAI WebSocket receive idle timeout after 300s"
-        }}},
-    ]});
-    finalization.diagnostic_trace_json = Some(trace.to_string());
-    ExecutionStore::finalize_model_request(&store, finalization)
-        .await
-        .unwrap();
-    let persisted: (String, serde_json::Value, String) = sqlx::query_as(
-        "select outcome, diagnostic_trace_json, error_message from model_request_observations where id = 'req_diagnostic_failed'"
-    ).fetch_one(&database.pool).await.unwrap();
-    assert_eq!(
-        persisted,
-        (
-            "failed".to_owned(),
-            trace.clone(),
-            "OpenAI WebSocket receive idle timeout after 300s".to_owned()
-        )
-    );
     let repository = super::observability_repository(&database.pool);
-    let detail = repository
-        .usage_record_detail("req_diagnostic_failed")
+    for (id, outcome, expected_outcome) in [
+        (
+            "req_diagnostic_success",
+            ExecutionOutcome::Succeeded,
+            "succeeded",
+        ),
+        ("req_diagnostic_failed", ExecutionOutcome::Failed, "failed"),
+    ] {
+        seed_running_request(&database.pool, id).await.unwrap();
+        let mut finalization = successful_core_finalization(id);
+        finalization.outcome = outcome;
+        finalization.usage.input_tokens = Some(100_000);
+        finalization.usage.output_tokens = Some(2000);
+        finalization.usage.total_tokens = Some(102_000);
+        finalization.cost = CalculatedCost::from_usd_ticks(10_000_000_000)
+            .unwrap()
+            .into_estimate();
+        finalization.timings.first_token_ms = Some(120);
+        finalization.timings.latency_ms = Some(42_000);
+        let trace = TraceContext::new(id);
+        trace.record("request.routed", json!({"scope": "all"}));
+        for stage in ["provider.request.input", "provider.request.outbound"] {
+            trace.record_evidence(stage, json!({"hashes": "a".repeat(6000)}));
+        }
+        for index in 0..500 {
+            trace.record(
+                "stream.sample",
+                json!({"index": index, "detail": "x".repeat(2000)}),
+            );
+        }
+        let error_message = if outcome == ExecutionOutcome::Failed {
+            finalization.client_status_code = Some(502);
+            let message = "OpenAI WebSocket receive idle timeout after 300s";
+            let provider_error = gateway_core::error::ProviderError::new(
+                gateway_core::error::ProviderErrorKind::Timeout,
+                UpstreamSendState::Ambiguous,
+            )
+            .with_diagnostic(
+                gateway_core::error::ProviderDiagnostic::new(message)
+                    .with_classification("receive", "receive_idle_timeout"),
+            );
+            trace.record_provider_failure(&provider_error);
+            finalization.error = Some(GatewayError::from_provider(&provider_error));
+            Some(message)
+        } else {
+            None
+        };
+        trace.record("request.finished", json!({"outcome": expected_outcome}));
+        let snapshot = trace.snapshot().unwrap();
+        let encoded = snapshot.to_string();
+        assert!(encoded.len() > 64 * 1024);
+        assert!(encoded.len() <= MAX_TRACE_SNAPSHOT_BYTES);
+        assert!(snapshot["droppedEvents"].as_u64().unwrap() > 0);
+        finalization.diagnostic_trace_json = Some(encoded);
+        ExecutionStore::finalize_model_request(&store, finalization)
+            .await
+            .expect("trace pressure must not discard the terminal result");
+        let persisted: Value = sqlx::query_scalar(
+            "select jsonb_build_object(
+               'outcome', outcome, 'input', input_tokens, 'output', output_tokens,
+               'cost', cost_amount::text, 'firstToken', first_token_ms,
+               'latency', latency_ms, 'error', error_message)
+             from model_request_observations where id = $1",
+        )
+        .bind(id)
+        .fetch_one(&database.pool)
         .await
         .unwrap();
-    assert_eq!(detail.trace, Some(trace));
-    assert!(detail.related_requests.is_empty());
+        assert_eq!(
+            persisted,
+            json!({
+                "outcome": expected_outcome, "input": 100_000, "output": 2000,
+                "cost": "1.0000000000", "firstToken": 120, "latency": 42_000,
+                "error": error_message,
+            })
+        );
+        let detail = repository.usage_record_detail(id).await.unwrap();
+        assert_eq!(detail.trace, Some(snapshot));
+        assert!(detail.related_requests.is_empty());
+    }
+    assert_eq!(
+        store
+            .recover_expired_model_requests(Utc::now() + Duration::minutes(20))
+            .await
+            .unwrap()
+            .requests,
+        0,
+    );
     database.close().await;
 }
 
@@ -1543,7 +1579,6 @@ pub(super) fn early_failure(request: &CoreNewModelRequest) -> CoreModelRequestFi
         upstream_transport: None,
         http_version: None,
         websocket_pool: None,
-        upstream_response_model: None,
         service_tier: None,
         provider_metadata_json: None,
         diagnostic_trace_json: trace.snapshot().map(|value| value.to_string()),
@@ -1784,7 +1819,7 @@ async fn zero_attempt_finalization_rejects_sent_or_missing_attempt_facts_atomica
     for invalid_trace in [
         "not JSON".to_owned(),
         "[]".to_owned(),
-        json!({"data": "x".repeat(65_536)}).to_string(),
+        json!({"data": "x".repeat(MAX_TRACE_SNAPSHOT_BYTES)}).to_string(),
     ] {
         let mut finalization = early_failure(&request);
         finalization.diagnostic_trace_json = Some(invalid_trace);
@@ -1997,8 +2032,13 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
     let repository = observability_repository(&database.pool);
     super::drain_analytics(&database.pool).await;
     let before = repository
-        .usage_summary(zero_attempt_range(&request), UsageRecordFilter::default())
+        .usage_insights_observation(
+            zero_attempt_range(&request),
+            UsageRecordFilter::default(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("baseline usage");
     assert_eq!(before.requests.total_tokens, 120);
     assert!(!before.attempts.costs.is_empty());
@@ -2011,8 +2051,13 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
         .expect("finalize failure");
     super::drain_analytics(&database.pool).await;
     let after = repository
-        .usage_summary(zero_attempt_range(&request), UsageRecordFilter::default())
+        .usage_insights_observation(
+            zero_attempt_range(&request),
+            UsageRecordFilter::default(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("usage after failure");
     assert_eq!(
         after.requests.request_count,
@@ -2031,14 +2076,16 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
     assert_eq!(after.requests.latency_count, before.requests.latency_count);
     assert_eq!(after.attempts, before.attempts);
     let successes = repository
-        .usage_summary(
+        .usage_insights_observation(
             zero_attempt_range(&request),
             UsageRecordFilter {
                 outcome: Some("succeeded".to_owned()),
                 ..Default::default()
             },
+            gateway_admin::model::observability::Granularity::Hour,
         )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("successful aggregation unchanged");
     assert_eq!(successes.range, before.range);
     assert_eq!(successes.requests, before.requests);
@@ -2061,14 +2108,22 @@ async fn zero_attempt_failure_does_not_enter_successful_usage_or_cost_aggregates
         ..Default::default()
     };
     let failed = repository
-        .usage_summary(zero_attempt_range(&request), filter.clone())
+        .usage_insights_observation(
+            zero_attempt_range(&request),
+            filter.clone(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("failed request metrics");
     assert_eq!(failed.requests.request_count, 1);
     assert_eq!(failed.requests.failure_count, 1);
     assert_eq!(failed.requests.total_tokens, 0);
     assert_eq!(failed.requests.latency_count, 0);
-    assert_eq!(failed.attempts, AttemptMetrics::default());
+    assert_eq!(
+        failed.attempts,
+        admin_observability::AttemptMetrics::default()
+    );
     let page = repository
         .list_usage_records(UsageRecordQuery {
             status: Default::default(),

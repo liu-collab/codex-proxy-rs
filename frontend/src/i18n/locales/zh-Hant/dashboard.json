@@ -1,0 +1,111 @@
+{
+  "dashboard": {
+    "scheduling": {
+      "defaultConcurrency": "默認併發",
+      "totalSlots": "總槽位",
+      "freeSlots": "空閒槽位",
+      "smart": "智能調度",
+      "quotaReset": "額度重置優先",
+      "sticky": "粘滯",
+      "title": "賬號調度",
+      "description": "容量、併發與分配策略",
+      "occupiedSlots": "槽位佔用",
+      "strategy": "分配策略"
+    },
+    "accountPool": {
+      "empty": "暫無賬號池觀測",
+      "quotaExhausted": "配額耗盡",
+      "rateLimited": "限流中",
+      "pending": "待處理",
+      "issueCountsEmpty": "停用 — · 錯誤 —",
+      "availableDescription": "賬號當前可用",
+      "exhaustedDescription": "賬號額度已耗盡",
+      "limitedDescription": "賬號請求暫時受限",
+      "issueCounts": "停用 {disabled} · 錯誤 {error}",
+      "title": "賬號狀態",
+      "description": "賬號池健康結構",
+      "healthyRate": "正常率",
+      "distribution": "狀態分佈",
+      "unavailableCount": "不可用 {value}"
+    },
+    "activeAccounts": {
+      "todayTokens": "Token",
+      "requestCount": "次數",
+      "title": "活躍賬號用量",
+      "sortByRecent": "最近使用排序",
+      "empty": "暫無賬號請求記錄",
+      "recent": "最近"
+    },
+    "title": "系統概覽",
+    "today": "當日統計",
+    "refresh": {
+      "action": "刷新概覽",
+      "lastUpdated": "自動刷新 30 秒，最近刷新 {updatedAt}",
+      "waiting": "自動刷新 30 秒，等待首次刷新",
+      "interval": "自動刷新 30 秒"
+    },
+    "metrics": {
+      "title": "核心指標",
+      "outputTokens": "輸出",
+      "inputTokens": "輸入",
+      "cachedInputTokens": "緩存",
+      "cacheHits": "緩存命中",
+      "requests": "請求",
+      "firstTokenP95Ms": "TTFT P95",
+      "latencyP95Ms": "總耗時 P95",
+      "outputThroughputP50": "速率 P50",
+      "errors": "錯誤數",
+      "successRate": "成功率",
+      "totalRequests": "總請求",
+      "requestCount": "請求次數",
+      "totalTokens": "總 Token",
+      "totalCharges": "總計費",
+      "totalCacheHits": "總緩存命中",
+      "totalCache": "總緩存"
+    },
+    "comparedWithYesterday": "較昨日",
+    "trends": {
+      "title": "使用趨勢",
+      "metric": "趨勢指標",
+      "highlight": "突出顯示{label}曲線",
+      "empty": "暫無趨勢數據",
+      "latency": "延遲",
+      "errors": "錯誤"
+    },
+    "recentRequests": {
+      "title": "使用記錄",
+      "description": "最近 10 條成功請求",
+      "empty": "暫無成功記錄"
+    },
+    "clientIdentity": {
+      "clientMode": "運行模式",
+      "versionPolicy": "版本策略",
+      "notChecked": "尚未檢查",
+      "customVersion": "固定自定義",
+      "active": "當前生效",
+      "activeDescription": "跟隨通用設置的新請求使用此身份",
+      "upToDate": "製品一致",
+      "upToDateDescription": "當前生效版本與官方最新發布一致",
+      "updateAvailable": "發現新版",
+      "latestRelease": "官方最新版本 {releaseLabel}",
+      "checkFailed": "檢查失敗",
+      "checkFailedDescription": "官方版本檢查失敗",
+      "pending": "待檢查",
+      "pendingDescription": "尚未檢查官方發佈渠道",
+      "verifiedAt": "畫像覈驗 {verifiedAt}",
+      "checkedAt": "發佈檢查 {checkedAt}",
+      "clientId": "客戶端 ID",
+      "title": "通用上游身份",
+      "provider": "上游平臺",
+      "empty": "暫無請求身份",
+      "attributes": "請求身份組成",
+      "authProtocol": "認證協議",
+      "emulatedEnvironment": "模擬運行環境",
+      "environment": "運行環境"
+    },
+    "health": {
+      "title": "請求健康時間線",
+      "description": "有效請求可用性"
+    }
+  }
+}

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import type { PricingRow } from './model'
+
 import type { ModelPricing, PricingChange } from '@/api'
-import { ZButton, ZConfirmDialog, ZEmpty, ZPagination } from '@codex-proxy/ui'
-import { CircleAlert } from '@lucide/vue'
+import { ZConfirmDialog, ZPagination } from '@codex-proxy/ui'
 import { computed, ref, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import PricingBatchModal from './PricingBatchModal.vue'
 import PricingEditor from './PricingEditor.vue'
 import PricingSyncModal from './PricingSyncModal.vue'
@@ -11,7 +12,9 @@ import PricingTable from './PricingTable.vue'
 import PricingToolbar from './PricingToolbar.vue'
 import { usePricing } from './usePricing'
 
-const { catalog, providers, provider, search, source, page, pageSize, selected, error, rows, visible, pagination, loading, saving, syncing, preview, syncOpen, syncCatalog, load, save, startSync, confirmSync, toggle, togglePage } = usePricing()
+const { t } = useI18n({ useScope: 'global' })
+
+const { catalog, providers, provider, search, source, page, pageSize, selected, error, rows, visible, pagination, loading, saving, syncing, preview, syncOpen, syncCatalog, save, startSync, confirmSync, toggle, togglePage } = usePricing()
 const editorOpen = ref(false)
 const editing = shallowRef<PricingRow>()
 const deleting = shallowRef<PricingRow>()
@@ -49,7 +52,7 @@ function requestDelete(row: PricingRow) {
 </script>
 
 <template>
-  <section class="flex min-h-0 min-w-0 flex-col rounded-cp-card bg-cp-bg-container p-3 shadow-cp-card sm:p-4" aria-label="模型定价">
+  <section class="flex min-h-0 min-w-0 flex-col rounded-cp-card bg-cp-bg-container p-3 shadow-cp-card sm:p-4" :aria-label="t('settings.page.tabs.pricing')">
     <PricingToolbar
       v-model:search="search"
       v-model:provider="provider"
@@ -66,20 +69,10 @@ function requestDelete(row: PricingRow) {
       @reset="batch(true)"
       @clear="selected = []"
     />
-    <PricingTable class="min-h-0 flex-1" :rows="error ? [] : visible" :selected="selected" :loading="loading" :disabled="disabled" @toggle="toggle" @toggle-page="togglePage" @edit="edit" @delete="requestDelete">
-      <template v-if="error" #empty>
-        <ZEmpty title="价目加载失败" :description="error" :icon="CircleAlert" surface="none" class="w-full max-w-80" role="alert">
-          <template #action>
-            <ZButton :loading="loading" @click="load">
-              重试
-            </ZButton>
-          </template>
-        </ZEmpty>
-      </template>
-    </PricingTable>
+    <PricingTable class="min-h-0 flex-1" :rows="visible" :selected="selected" :loading="loading" :disabled="disabled" @toggle="toggle" @toggle-page="togglePage" @edit="edit" @delete="requestDelete" />
     <ZPagination v-bind="pagination" :disabled="loading" @current-change="page = $event" @size-change="pageSize = $event" />
     <PricingEditor v-model="editorOpen" :row="editing" :provider="provider" :saving="saving" @save="saveModel" />
-    <ZConfirmDialog v-model="deleteOpen" title="删除模型价目" description="删除该模型的同步与自定义价格，历史账单不变" destructive confirm-text="删除" :loading="saving" @confirm="deleteModel">
+    <ZConfirmDialog v-model="deleteOpen" :title="t('settings.pricing.deleteModelPriceList')" :description="t('settings.pricing.deleteDescription')" destructive :confirm-text="t('common.actions.delete')" :loading="saving" @confirm="deleteModel">
       <span class="break-all font-mono text-cp-sm font-normal">{{ deleting?.model }}</span>
     </ZConfirmDialog>
     <PricingBatchModal v-model="batchOpen" :rows="targets" :reset="batchReset" :saving="saving" @confirm="saveBatch" />

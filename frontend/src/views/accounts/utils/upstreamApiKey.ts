@@ -1,4 +1,5 @@
 import type { Account, ApiKeyConfiguration } from '@/api'
+import { t } from '@/i18n'
 
 export function isOpenAiApiKeyAccount(account: Pick<Account, 'provider' | 'authenticationKind'> | null | undefined): boolean {
   return account?.provider === 'openai' && account.authenticationKind === 'api_key'
@@ -8,13 +9,19 @@ export function isOpenAiOAuthAccount(account: Pick<Account, 'provider' | 'authen
   return account?.provider === 'openai' && account.authenticationKind === 'oauth'
 }
 
-export interface ApiKeyAccountForm extends ApiKeyConfiguration {
+export interface ApiKeyAccountForm extends Omit<ApiKeyConfiguration, 'transport'> {
   name: string
   apiKey: string
+  transport: ApiKeyConfiguration['transport'] | ''
 }
 
 export function emptyApiKeyAccountForm(): ApiKeyAccountForm {
-  return { name: '', base_url: '', apiKey: '', transport: 'http' }
+  return {
+    name: '',
+    base_url: '',
+    apiKey: '',
+    transport: 'http',
+  }
 }
 
 export function parseApiKeyConfiguration(value: Record<string, unknown> | undefined): ApiKeyConfiguration | undefined {
@@ -25,20 +32,22 @@ export function parseApiKeyConfiguration(value: Record<string, unknown> | undefi
 
 export function apiKeyAccountError(form: ApiKeyAccountForm, editing = false): string | undefined {
   if (!editing && !form.name.trim())
-    return '请输入账号名称'
+    return t('accounts.credentials.nameRequired')
+  if (!form.transport)
+    return t('accounts.credentials.validation.transportRequired')
   if (form.base_url.trim().length > 2048)
-    return '上游 API 地址不能超过 2048 个字符'
+    return t('accounts.credentials.validation.urlLength')
   try {
     const url = new URL(form.base_url)
     if (!['https:', 'http:'].includes(url.protocol) || !url.hostname || url.username || url.password || url.search || url.hash)
-      return '请输入不含认证、查询参数或片段的 HTTP 或 HTTPS 地址'
+      return t('accounts.credentials.validation.urlFormat')
   }
   catch {
-    return '请输入完整的上游 API 地址'
+    return t('accounts.credentials.validation.urlRequired')
   }
   if (!editing && !form.apiKey)
-    return '请输入 API Key'
+    return t('accounts.credentials.apiKeyRequired')
   if (form.apiKey && (!/^[\x21-\x7E]+$/.test(form.apiKey) || form.apiKey.length > 16384))
-    return 'API Key 不能包含空格或控制字符'
+    return t('accounts.credentials.validation.apiKeyFormat')
   return undefined
 }

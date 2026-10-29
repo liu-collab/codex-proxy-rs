@@ -1,7 +1,8 @@
 //! 验证 Codex 会话身份优先级、轮次元数据与多代理模式解析
 
 use gateway_protocol::openai::{
-    codex_responses_request_semantics, codex_session_id, codex_thread_id,
+    codex_responses_request_semantics, codex_responses_request_semantics_with_turn_metadata,
+    codex_session_id, codex_thread_id,
 };
 use serde_json::{Map, Value, json};
 
@@ -21,6 +22,56 @@ fn reasoning_effort_should_observe_unsigned_numbers_without_changing_the_body() 
         let semantics = codex_responses_request_semantics(&body, &Map::new());
         assert_eq!(semantics.reasoning_effort.as_deref(), expected);
         assert_eq!(body["reasoning"]["effort"], effort);
+    }
+}
+
+#[test]
+fn reasoning_effort_should_follow_the_latest_configuration_update() {
+    for (input, previous_id, inherited, expected) in [
+        (json!([]), None, None, "medium"),
+        (json!([]), Some("resp_previous"), Some("high"), "high"),
+        (json!([]), None, Some("high"), "medium"),
+        (
+            json!([
+                {"type":"configuration_update","reasoning":{"effort":"high"}},
+                {"type":"message","role":"user","content":"first turn"},
+                {"type":"configuration_update","reasoning":{"effort":"low"}},
+                {"type":"message","role":"user","content":"next turn"}
+            ]),
+            Some("resp_previous"),
+            Some("max"),
+            "low",
+        ),
+        (
+            json!([{"type":"configuration_update","reasoning":{"effort":64}}]),
+            None,
+            None,
+            "64",
+        ),
+        (
+            json!([{"type":"configuration_update","reasoning":{"effort":" future-value "}}]),
+            None,
+            None,
+            "future-value",
+        ),
+        (
+            json!([{"type":"message","role":"user","reasoning":{"effort":"high"},
+                "content":"configuration_update: high"}]),
+            None,
+            None,
+            "medium",
+        ),
+    ] {
+        let body = object(json!({
+            "reasoning":{"effort":"medium"},
+            "input":input,
+            "previous_response_id":previous_id,
+        }));
+        let original = body.clone();
+        let semantics =
+            codex_responses_request_semantics_with_turn_metadata(&body, None, inherited);
+        assert_eq!(semantics.reasoning_effort.as_deref(), Some(expected));
+        assert_eq!(body, original);
     }
 }
 
@@ -147,7 +198,7 @@ fn codex_semantics_should_use_protocol_context_before_body_metadata() {
 
 #[test]
 fn codex_semantics_should_detect_ultra_preset_from_proactive_multi_agent() {
-    let body = object(json!({
+    let mut body = object(json!({
         "model": "gpt-test",
         "reasoning": {"effort": "max"},
         "input": [
@@ -167,6 +218,16 @@ fn codex_semantics_should_detect_ultra_preset_from_proactive_multi_agent() {
     assert_eq!(semantics.reasoning_effort.as_deref(), Some("max"));
     assert_eq!(semantics.reasoning_preset, Some("ultra"));
     assert!(!semantics.compact);
+
+    for (effort, expected_preset) in [("high", None), ("max", Some("ultra"))] {
+        body["input"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type":"configuration_update","reasoning":{"effort":effort}}));
+        let semantics = codex_responses_request_semantics(&body, &Map::new());
+        assert_eq!(semantics.reasoning_effort.as_deref(), Some(effort));
+        assert_eq!(semantics.reasoning_preset, expected_preset);
+    }
 }
 
 fn object(value: Value) -> Map<String, Value> {

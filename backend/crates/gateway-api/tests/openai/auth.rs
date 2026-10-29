@@ -229,29 +229,67 @@ fn desktop_headers_should_take_precedence_over_embedded_cli_marker() {
 }
 
 #[test]
-fn cli_user_agent_should_expose_semver_or_recognized_missing_version() {
-    let mut headers = HeaderMap::new();
-    headers.insert(
-        "user-agent",
-        HeaderValue::from_static("codex_cli_rs/0.39.0 (Linux; x86_64)"),
-    );
-    let identified = identify_codex_client(&headers).expect("recognized CLI");
-    assert_eq!(identified.kind(), CodexClientKind::Cli);
-    assert_eq!(
-        identified.version().map(ToString::to_string).as_deref(),
-        Some("0.39.0")
-    );
+fn official_core_clients_should_use_the_core_version_instead_of_the_app_suffix() {
+    for product in [
+        "codex_cli_rs",
+        "codex-cli",
+        "codex-tui",
+        "codex_exec",
+        "codex_vscode",
+        "codex_sdk_ts",
+        "codex_python_sdk",
+        "codex-app-server",
+        "codex-app-server-sdk",
+        "codex_mcp_server",
+        "CoDeX-TuI",
+    ] {
+        for (version, expected) in [
+            (Some("0.158.0"), Some("0.158.0")),
+            (
+                Some("0.165.0-alpha.1+build.2"),
+                Some("0.165.0-alpha.1+build.2"),
+            ),
+            (Some("not-a-version"), None),
+            (Some(""), None),
+            (None, None),
+        ] {
+            let prefix = version.map_or_else(|| product.to_owned(), |v| format!("{product}/{v}"));
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "user-agent",
+                HeaderValue::from_str(&format!(
+                    "{prefix} (Mac OS 26.6.2; arm64) Apple_Terminal ({product}; 0.165.0)"
+                ))
+                .unwrap(),
+            );
+            let identified = identify_codex_client(&headers).expect("recognized official client");
+            assert_eq!(identified.kind(), CodexClientKind::Cli, "{prefix}");
+            assert_eq!(
+                identified.version().map(ToString::to_string).as_deref(),
+                expected,
+                "{prefix}"
+            );
+        }
+    }
+}
 
-    headers.insert(
-        "user-agent",
-        HeaderValue::from_static("codex-cli/not-a-version"),
-    );
-    assert!(
-        identify_codex_client(&headers)
-            .expect("recognized invalid CLI")
-            .version()
-            .is_none()
-    );
+#[test]
+fn unknown_codex_like_products_should_remain_unrestricted() {
+    for product in [
+        "custom-codex-tui",
+        "codex-tui-custom",
+        "codex_cli_rs_custom",
+        "codex_python_sdk_custom",
+        "my_app",
+        "deepseek-harness",
+    ] {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "user-agent",
+            HeaderValue::from_str(&format!("{product}/0.158.0 (Linux; x86_64)")).unwrap(),
+        );
+        assert_eq!(identify_codex_client(&headers), None, "{product}");
+    }
 }
 
 #[test]

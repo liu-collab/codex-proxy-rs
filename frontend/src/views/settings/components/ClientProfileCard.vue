@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import type { ProviderRequestProfiles } from '@/api/modules/settings/profiles'
+
 import { ZCard } from '@codex-proxy/ui'
+import { useI18n } from 'vue-i18n'
 import ProviderRequestProfilesEditor from '@/components/client-profile/ProviderRequestProfilesEditor.vue'
 
 withDefaults(defineProps<{ active?: boolean, disabled?: boolean }>(), {
   active: true,
   disabled: false,
 })
+
+const { t } = useI18n({ useScope: 'global' })
 
 const model = defineModel<ProviderRequestProfiles>({ required: true })
 </script>
@@ -22,10 +26,10 @@ const model = defineModel<ProviderRequestProfiles>({ required: true })
       <template #heading>
         <div class="min-w-0 pt-0.5">
           <h2 class="m-0 text-xl leading-[1.15] font-heavy text-cp-text text-balance">
-            客户端身份
+            {{ t('settings.clientProfile.clientIdentity') }}
           </h2>
           <p class="mt-1.75 mb-0 text-cp leading-[1.3] font-emphasis text-cp-text-secondary text-pretty">
-            配置网关向上游声明的客户端类型、版本与请求头
+            {{ t('settings.clientProfile.description') }}
           </p>
         </div>
       </template>

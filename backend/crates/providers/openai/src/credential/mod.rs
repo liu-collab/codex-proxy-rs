@@ -5,6 +5,7 @@ mod affinity;
 mod api_key;
 mod catalog;
 mod cookie;
+mod eligibility;
 mod oauth;
 mod profile_statistics;
 mod quota;
@@ -22,6 +23,7 @@ pub(crate) use affinity::{
     derive_codex_transport_key, derive_endpoint_affinity_with_headers,
     derive_live_session_affinity, derive_previous_response_id_hash, derive_turn_alias,
 };
+pub(crate) use eligibility::CodexSelectionModel;
 pub(crate) use oauth::oauth_owner_ref;
 pub(crate) use types::parse_access_token_expiration;
 
@@ -68,9 +70,7 @@ pub use selector::{
     CodexAccountFailure, CodexCredentialLease, CodexCredentialSelector, CredentialSelectionError,
     SelectCodexCredential,
 };
-pub(crate) use selector::{
-    CodexCyberPolicyScope, CodexSelectionModel, SelectCodexProviderEndpointCredential,
-};
+pub(crate) use selector::{CodexCyberPolicyScope, SelectCodexProviderEndpointCredential};
 pub use types::{
     CODEX_AUTHENTICATION_KIND_OAUTH, CodexAccountProfile, CodexCookie, CodexCookieCaptureOutcome,
     CodexCredentialData, CodexCredentialPrincipal, CodexOAuthCredentialData, CodexOAuthSecret,

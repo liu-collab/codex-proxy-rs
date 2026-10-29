@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import type { AccountErrorReason, AccountStatus } from '@/api'
-import { ZPopover, ZScrollbar } from '@codex-proxy/ui'
+import type { AccountErrorReason, AccountProtectionRule, AccountStatus } from '@/api'
 
+import { ZPopover, ZScrollbar } from '@codex-proxy/ui'
 import { computed } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import { resolveAccountStatusPresentation } from './presenter'
 import { useStatusClock } from './useStatusClock'
 
@@ -12,7 +14,8 @@ const props = withDefaults(
     errorReason?: AccountErrorReason | null
     errorMessage?: string | null
     rateLimitRecoveryDisplay?: string | null
-    rateLimitReason?: 'upstream_rate_limit' | 'capacity_freeze' | null
+    rateLimitReason?: 'upstream_rate_limit' | 'error_protection' | null
+    protectionRules?: AccountProtectionRule[]
     recoveryProbeRequired?: boolean
     nextRefreshAt?: string | null
     nextRefreshAtDisplay?: string | null
@@ -23,12 +26,15 @@ const props = withDefaults(
     errorMessage: null,
     rateLimitRecoveryDisplay: null,
     rateLimitReason: null,
+    protectionRules: () => [],
     recoveryProbeRequired: false,
     nextRefreshAt: null,
     nextRefreshAtDisplay: null,
     variant: 'inline',
   },
 )
+
+const { t } = useI18n({ useScope: 'global' })
 
 const now = useStatusClock()
 const presentation = computed(() =>
@@ -38,6 +44,7 @@ const presentation = computed(() =>
     errorMessage: props.errorMessage,
     rateLimitRecoveryDisplay: props.rateLimitRecoveryDisplay,
     rateLimitReason: props.rateLimitReason,
+    protectionRules: props.protectionRules,
     recoveryProbeRequired: props.recoveryProbeRequired,
     nextRefreshAt: props.nextRefreshAt,
     nextRefreshAtDisplay: props.nextRefreshAtDisplay,
@@ -86,7 +93,7 @@ const presentation = computed(() =>
 
         <div class="min-w-0 flex-1">
           <p class="m-0 text-cp-xs leading-none font-heavy tracking-[0.08em] text-cp-text-tertiary">
-            账号状态
+            {{ t('accounts.status.accountStatus') }}
           </p>
           <h3 class="mt-1.5 mb-0 text-cp-lg leading-5 font-heavy text-cp-text text-balance">
             {{ presentation.title }}
@@ -106,6 +113,15 @@ const presentation = computed(() =>
           {{ presentation.description }}
         </p>
 
+        <div v-if="presentation.protectionRules.length" class="grid gap-1.5">
+          <span class="text-cp-xs font-emphasis text-cp-text-tertiary">{{ t('accounts.status.matchedProtectionRules') }}</span>
+          <ul class="m-0 list-none space-y-1 p-0 text-cp-text">
+            <li v-for="rule in presentation.protectionRules" :key="rule.id" class="wrap-anywhere">
+              {{ rule.name }}
+            </li>
+          </ul>
+        </div>
+
         <div
           v-if="presentation.rateLimitRecovery"
           class="flex items-center justify-between gap-3 rounded-cp bg-cp-fill-quaternary px-3 py-2"
@@ -120,7 +136,7 @@ const presentation = computed(() =>
           v-if="presentation.nextRefreshDisplay"
           class="flex items-center justify-between gap-3 rounded-cp bg-cp-fill-quaternary px-3 py-2"
         >
-          <span class="font-heavy text-cp-text-tertiary">下次尝试</span>
+          <span class="font-heavy text-cp-text-tertiary">{{ t('accounts.status.tryNextTime') }}</span>
           <span class="font-mono font-emphasis tabular-nums text-cp-text">
             {{ presentation.nextRefreshDisplay }}
           </span>
@@ -128,7 +144,7 @@ const presentation = computed(() =>
 
         <div class="rounded-cp bg-cp-fill-quaternary px-3 py-2.5">
           <p class="m-0 text-cp-xs leading-none font-heavy text-cp-text-tertiary">
-            建议操作
+            {{ t('accounts.status.recommendedAction') }}
           </p>
           <p class="mt-1.5 mb-0 text-pretty font-emphasis text-cp-text">
             {{ presentation.recoveryHint }}
@@ -137,8 +153,8 @@ const presentation = computed(() =>
 
         <div v-if="presentation.errorText" class="overflow-hidden rounded-cp bg-cp-fill-tertiary">
           <div class="flex items-center justify-between gap-3 px-3 pt-2.5 pb-1.5">
-            <span class="text-cp-xs leading-none font-heavy text-cp-text-tertiary">上游原始反馈</span>
-            <span class="shrink-0 text-[10px] leading-none font-emphasis text-cp-text-quaternary">仅供排查</span>
+            <span class="text-cp-xs leading-none font-heavy text-cp-text-tertiary">{{ t('accounts.status.upstreamOriginalFeedback') }}</span>
+            <span class="shrink-0 text-[10px] leading-none font-emphasis text-cp-text-quaternary">{{ t('accounts.status.forTroubleshootingOnly') }}</span>
           </div>
           <ZScrollbar class="bg-cp-fill-quaternary" max-height="124px">
             <div class="px-3 py-2">

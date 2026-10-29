@@ -93,6 +93,31 @@ impl LiveGateway for Gateway {
     ) -> BoxFuture<'a, Result<LiveRelay, LiveGatewayError>> {
         Box::pin(async move {
             assert!(
+                request
+                    .protocol_headers
+                    .iter()
+                    .any(|header| header.name() == "voice-session-id"
+                        && header.value().as_ref() == b"voice-test")
+            );
+            assert_eq!(
+                request
+                    .protocol_headers
+                    .iter()
+                    .filter(|header| header.name() == "x-test-business")
+                    .map(|header| header.value())
+                    .collect::<Vec<_>>(),
+                [b"first".as_slice(), b"second".as_slice()]
+            );
+            assert!(request.protocol_headers.iter().all(|header| {
+                ![
+                    "authorization",
+                    "originator",
+                    "connection",
+                    "sec-websocket-key",
+                ]
+                .contains(&header.name())
+            }));
+            assert!(
                 request.account_scope.allows(
                     &gateway_core::account::ProviderAccountId::new("acct_api_test").unwrap()
                 )
@@ -154,6 +179,14 @@ async fn blocked_relay(
         "authorization",
         format!("Bearer {LIVE_KEY}").parse().unwrap(),
     );
+    for (name, value) in [
+        ("voice-session-id", "voice-test"),
+        ("x-test-business", "first"),
+        ("x-test-business", "second"),
+        ("originator", "foreign-client"),
+    ] {
+        request.headers_mut().append(name, value.parse().unwrap());
+    }
     let (mut socket, _) = connect_async(request).await.unwrap();
     if trace.block_close {
         socket.send(Message::Close(None)).await.unwrap();

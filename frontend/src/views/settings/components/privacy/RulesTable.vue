@@ -1,25 +1,33 @@
 <script setup lang="ts">
 import type { PrivacyRule } from '@/api/modules/settings/privacy'
+
 import { defineTableColumns, ZIconButton, ZSwitch, ZTable } from '@codex-proxy/ui'
 import { GripVertical, Pencil, Trash2 } from '@lucide/vue'
 import { usePreferredReducedMotion } from '@vueuse/core'
 import { moveArrayElement, useSortable } from '@vueuse/integrations/useSortable'
 import { computed, nextTick, shallowRef, useId, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { actions, scopes } from './presets'
 
 const props = defineProps<{ rules: PrivacyRule[], disabled: boolean }>()
+
 const emit = defineEmits<{
   edit: [rule: PrivacyRule]
   toggle: [rule: PrivacyRule, enabled: boolean]
   reorder: [rules: PrivacyRule[]]
   remove: [rule: PrivacyRule]
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const container = useTemplateRef<HTMLDivElement>('container')
 const tableBody = shallowRef<HTMLTableSectionElement | null>(null)
 const reorderHelpId = useId()
 const announcement = shallowRef('')
 const preferredMotion = usePreferredReducedMotion()
-const animation = computed(() => preferredMotion.value === 'reduce' ? 0 : 200)
+const animation = computed(() => preferredMotion.value === 'reduce'
+  ? 0
+  : 200)
 const sortingDisabled = computed(() => props.disabled || props.rules.length < 2)
 const sortableRules = computed({
   get: () => props.rules,
@@ -44,7 +52,10 @@ const { option: setSortableOption } = useSortable(tableBody, sortableRules, {
 })
 
 // 表格空态没有 tbody，增删规则后重新绑定排序容器
-watch([container, () => props.rules.length], () => {
+watch([
+  container,
+  () => props.rules.length,
+], () => {
   tableBody.value = container.value?.querySelector('tbody') ?? null
 }, { flush: 'post' })
 watch([tableBody, sortingDisabled, animation], async () => {
@@ -63,7 +74,7 @@ async function focusMovedRule(id: string) {
   const index = props.rules.findIndex(rule => rule.id === id)
   const rule = props.rules[index]
   if (rule)
-    announcement.value = `${rule.name}已移到第 ${index + 1} 条`
+    announcement.value = t('settings.privacy.rules.movedToPosition', { name: rule.name, value: index + 1 })
 }
 
 function moveWithKeyboard(id: string, direction: -1 | 1) {
@@ -74,27 +85,54 @@ function moveWithKeyboard(id: string, direction: -1 | 1) {
   void nextTick(() => focusMovedRule(id))
 }
 
-const columns = defineTableColumns<PrivacyRule>([
-  { key: 'enabled', label: '启用', kind: 'status', size: 'sm', fixedWidth: true },
-  { key: 'name', label: '规则 / 字段', kind: 'identity', size: '3xl' },
-  { key: 'scope', label: '作用范围', kind: 'meta', size: 'lg' },
-  { key: 'action', label: '处理方式', kind: 'meta', size: 'md' },
-  { key: 'actions', label: '', kind: 'actions', size: 'lg', fixedWidth: true },
-])
+const columns = computed(() => (defineTableColumns<PrivacyRule>([
+  {
+    key: 'enabled',
+    label: t('common.actions.enable'),
+    kind: 'status',
+    size: 'sm',
+    fixedWidth: true,
+  },
+  {
+    key: 'name',
+    label: t('settings.privacy.rules.ruleField'),
+    kind: 'identity',
+    size: '3xl',
+  },
+  {
+    key: 'scope',
+    label: t('settings.privacy.rules.scope'),
+    kind: 'meta',
+    size: 'lg',
+  },
+  {
+    key: 'action',
+    label: t('settings.privacy.rules.processingMethod'),
+    kind: 'meta',
+    size: 'md',
+  },
+  {
+    key: 'actions',
+    label: '',
+    kind: 'actions',
+    size: 'lg',
+    fixedWidth: true,
+  },
+])))
 </script>
 
 <template>
   <div ref="container">
     <p :id="reorderHelpId" class="sr-only">
-      拖动手柄调整规则顺序，也可聚焦手柄后使用上下方向键移动
+      {{ t('settings.privacy.rules.reorderHelp') }}
     </p>
     <p class="sr-only" role="status" aria-live="polite">
       {{ announcement }}
     </p>
-    <ZTable :columns="columns" :data="rules" size="small" class="[&_tbody>tr>td:last-child]:pr-2!" empty-text="暂无规则，添加一条或从预设开始">
+    <ZTable :columns="columns" :data="rules" size="small" class="[&_tbody>tr>td:last-child]:pr-2!" :empty-text="t('settings.privacy.rules.noRulesYetAddOneOrStart')">
       <template #enabled="{ row }">
         <div class="flex items-center justify-center">
-          <ZSwitch :disabled="disabled" :model-value="row.enabled" :aria-label="`启用规则：${row.name}`" @update:model-value="emit('toggle', row, $event)" />
+          <ZSwitch :disabled="disabled" :model-value="row.enabled" :aria-label="t('settings.privacy.rules.enableRule', { name: row.name })" @update:model-value="emit('toggle', row, $event)" />
         </div>
       </template>
       <template #name="{ row }">
@@ -111,16 +149,16 @@ const columns = defineTableColumns<PrivacyRule>([
       </template>
       <template #actions="{ row }">
         <div class="flex items-center justify-end gap-1">
-          <ZIconButton size="small" :disabled="disabled" :aria-label="`编辑${row.name}`" @click="emit('edit', row)">
+          <ZIconButton size="small" :disabled="disabled" :aria-label="t('settings.privacy.rules.edit', { name: row.name })" @click="emit('edit', row)">
             <Pencil class="size-3.5" />
           </ZIconButton>
-          <ZIconButton size="small" :disabled="disabled" :aria-label="`删除${row.name}`" @click="emit('remove', row)">
+          <ZIconButton size="small" :disabled="disabled" :aria-label="t('settings.privacy.rules.delete', { name: row.name })" @click="emit('remove', row)">
             <Trash2 class="size-3.5" />
           </ZIconButton>
           <ZIconButton
             size="small"
             :disabled="sortingDisabled"
-            :aria-label="`拖动调整${row.name}顺序`"
+            :aria-label="t('settings.privacy.rules.dragToReorder', { name: row.name })"
             :aria-describedby="reorderHelpId"
             :data-rule-handle="row.id"
             class="touch-none cursor-grab active:cursor-grabbing disabled:cursor-not-allowed"

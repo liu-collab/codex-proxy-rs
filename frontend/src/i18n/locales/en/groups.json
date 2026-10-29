@@ -1,0 +1,77 @@
+{
+  "groups": {
+    "selector": {
+      "loading": "Loading groups",
+      "empty": "No groups available, create one in Account groups"
+    },
+    "actions": {
+      "editGroup": "Edit group",
+      "disableGroup": "Disable group",
+      "enableGroup": "Enable group",
+      "deleteGroup": "Delete group",
+      "enterGroupName": "Please enter a group name",
+      "selectValidGroupingColor": "Please select a valid grouping color",
+      "updated": "Group updated",
+      "created": "Group created",
+      "disabled": "Group disabled",
+      "enabled": "Group enabled",
+      "groupDeleted": "Group deleted",
+      "deletedGroupDeletedGroups": "Deleted {count} group | Deleted {count} groups",
+      "partialDeletion": "Deleted {count} groups, the remaining groups were not deleted: {value}",
+      "batchDeletionFailed": "Batch deletion failed"
+    },
+    "filters": {
+      "searchAccountGroup": "Search account group",
+      "searchGroupName": "Search group name",
+      "deleteSelected": "Delete ({count})",
+      "createGroup": "Create group"
+    },
+    "editor": {
+      "editDescription": "Edit group details and request permissions",
+      "createDescription": "After creating the group, add accounts to it in Accounts",
+      "groupName": "Name",
+      "forExampleProductionAccount": "For example: production account",
+      "groupColor": "Color",
+      "selectGroupColor": "Select group color",
+      "fastMode": "Fast mode",
+      "imageGeneration": "Image generation",
+      "descriptionOptional": "Description (optional)",
+      "groupDescription": "Group description",
+      "describePurposeOfThisGroup": "Describe the purpose of this group",
+      "saveGroup": "Save"
+    },
+    "metrics": {
+      "restricted": "Restricted",
+      "total": "Total",
+      "concurrency": "Concurrency",
+      "today": "Today",
+      "cumulative": "Cumulative"
+    },
+    "group": "Group",
+    "fields": {
+      "capacity": "Capacity"
+    },
+    "page": {
+      "description": "Organize accounts and control which accounts each API key can use",
+      "empty": "No groups yet",
+      "selectCurrentPageGroup": "Select current page group",
+      "selectGroup": "Select group",
+      "fastModeIsOn": "Fast mode is on",
+      "fastModeIsOff": "Fast mode is off",
+      "imageGenerationDisabled": "Image generation disabled",
+      "colorLabel": "Group color: {color}",
+      "batchDeleteWarning": "These groups will stop working immediately, deletion cannot be undone",
+      "batchDeleteDescription": "Delete the {count} selected group? Accounts will be kept | Delete the {count} selected groups? Accounts will be kept",
+      "disableAccountGrouping": "Disable account grouping",
+      "disableDescription": "API keys using this group will lose access to its accounts while the group is disabled",
+      "confirmDisable": "Confirm disable",
+      "disable": "Disable “{name}”?",
+      "affectedApiKeys": "Affected API keys ({count}): {value}",
+      "affectedKeys": "Affected API keys: {count}",
+      "deleteAccountGroup": "Delete account group",
+      "deleteWarning": "This group will stop working immediately, deletion cannot be undone",
+      "unnamedGroup": "This group",
+      "deleteAccountsWillBeKept": "Delete “{name}”? Accounts will be kept"
+    }
+  }
+}

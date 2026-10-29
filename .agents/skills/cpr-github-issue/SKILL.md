@@ -13,13 +13,15 @@ description: 草拟、创建、补充或回复 GitHub Issue，包括缺陷、功
 
 补充已有 Issue 先读原帖和讨论，按授权更新或追加，不重复新建；无法推断的目标或关键事实才向用户补齐
 
-## 按需取材
+## 按动作读取与核实
 
-- 新建 Issue 时，本仓库只读[提交 Issue](../../../CONTRIBUTING.md#提交-issue)及本次匹配的一张表单：[接口问题](../../../.github/ISSUE_TEMPLATE/api-bug-report.yml)、[常规问题](../../../.github/ISSUE_TEMPLATE/general-bug-report.yml)或[功能建议](../../../.github/ISSUE_TEMPLATE/feature-request.yml)；协作规则提案可用普通 Issue
+目标、授权、事实与脱敏要求适用于草拟、提交和回复；按下列动作读取必需规则与证据，再组织正文。症状反馈可保留未知根因，进入技术排查或方案判断时补齐对应规范
+
+- 新建 Issue 时，读取本仓库的[提交 Issue](../../../CONTRIBUTING.md#提交-issue)及本次匹配的一张表单：[接口问题](../../../.github/ISSUE_TEMPLATE/api-bug-report.yml)、[常规问题](../../../.github/ISSUE_TEMPLATE/general-bug-report.yml)或[功能建议](../../../.github/ISSUE_TEMPLATE/feature-request.yml)；协作规则提案可用普通 Issue
 - 回复时读取原帖、相关讨论与支撑答复的证据，按下方回复口吻组织内容，不套用新建 Issue 的表单
 - 其他仓库读取它自己的相关规则与实际模板，长文档先定位标题再截取，不预读全部模板或 CONTRIBUTING
 - 搜索同场景 open/closed Issues、相关 PR 和发布记录，区分主分支修复与已发布修复，不凭标题判断重复；没有新证据时返回已有链接，用户仍要求新建则按其要求处理
-- 仅当需要额外排查或修改时使用 [cpr-dev-guide](../cpr-dev-guide/SKILL.md)，提交症状反馈不以找到根因为前提
+- 需要技术排查、判断实现方案或修改时执行 [cpr-dev-guide](../cpr-dev-guide/SKILL.md)的领域必读，不能仅凭症状建议跨职责补偿；提交症状反馈不以找到根因为前提
 - 引用上游行为或提出方案时执行[问题与方案依据](../../../CONTRIBUTING.md#问题与方案依据)，注明适用版本、来源与缺口
 
 ## 正文与证据
@@ -40,7 +42,9 @@ Issue 可记录复现、排查和变更经过；涉及常规文档修改时执�
 
 ## 回复口吻
 
-草拟和发布 Issue 回复时，执行 [GitHub 回复口吻](../../../CONTRIBUTING.md#github-回复口吻)
+草拟、发布或修改 Issue 回复时，按 [GitHub 回复口吻](../../../CONTRIBUTING.md#github-回复口吻)将核实结果写成面向提问者的交流答复，具体口吻规则集中维护在该节
+
+发送或更新前从提问者视角通读：是否接住了他的目标和困难，建议是否便于尝试，补充材料的用途是否清楚，澄清或拒绝是否耐心解释了原因，能提供的替代办法是否说清。发现生硬时调整整句措辞与前后衔接，不能仅加缓和词；保留已核实的结论
 
 ## 发布与收尾
 

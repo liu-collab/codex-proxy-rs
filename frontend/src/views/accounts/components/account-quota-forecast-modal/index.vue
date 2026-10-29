@@ -2,9 +2,11 @@
 import type { Account } from '@/api'
 
 import { ZButton, ZDialog, ZEmpty, ZIconButton, ZPopover, ZSegmented } from '@codex-proxy/ui'
+
 import { ChartNoAxesCombined, CircleAlert, RefreshCw } from '@lucide/vue'
 import { useIntervalFn, useNow } from '@vueuse/core'
 import { computed, ref, toRef, useId, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { useAccountQuotaForecast } from '../../composables/useAccountQuotaForecast'
 import AccountIdentityCell from '../AccountIdentityCell.vue'
@@ -12,12 +14,16 @@ import ForecastCapacity from './ForecastCapacity.vue'
 import ForecastSkeleton from './Skeleton.vue'
 
 const props = defineProps<{ account: Account }>()
+
 const emit = defineEmits<{ accountUpdated: [account: Account] }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const open = defineModel<boolean>({ default: false })
 const period = ref('weekly')
 const explanationOpen = ref(false)
 const explanationId = useId()
-const { report, loading, refreshing, error, load, refresh } = useAccountQuotaForecast(
+const { report, loading, refreshing, refresh } = useAccountQuotaForecast(
   toRef(() => props.account.id),
   open,
   account => emit('accountUpdated', account),
@@ -27,16 +33,24 @@ const { now, pause, resume } = useNow({
   scheduler: callback => useIntervalFn(callback, 30_000),
 })
 const options = computed(() => report.value?.forecasts.map(item => ({
-  label: item.period === 'weekly' ? '周额度' : '月额度',
+  label: item.period === 'weekly'
+    ? t('accounts.quotaForecast.weeklyQuota')
+    : t('accounts.quotaForecast.monthlyQuota'),
   value: item.period,
 })) ?? [
-  { label: '周额度', value: 'weekly' },
-  { label: '月额度', value: 'monthly' },
+  {
+    label: t('accounts.quotaForecast.weeklyQuota'),
+    value: 'weekly',
+  },
+  {
+    label: t('accounts.quotaForecast.monthlyQuota'),
+    value: 'monthly',
+  },
 ])
 const forecast = computed(() => report.value?.forecasts.find(item => item.period === period.value))
 const unavailableReason = computed(() => {
   if (forecast.value?.source && new Date(forecast.value.source.resetAt) <= now.value)
-    return '额度窗口已过期，请刷新账号额度后重试'
+    return t('accounts.quotaForecast.windowExpired')
   return forecast.value?.unavailableReason ?? null
 })
 
@@ -64,8 +78,8 @@ function handleExplanationKeydown(event: KeyboardEvent) {
 <template>
   <ZDialog
     v-model="open"
-    title="额度预测"
-    description="按本周期估算，重置后重新累计"
+    :title="t('accounts.quotaForecast.quotaForecast')"
+    :description="t('accounts.quotaForecast.periodHelp')"
     width="36rem"
     type="info"
   >
@@ -80,23 +94,14 @@ function handleExplanationKeydown(event: KeyboardEvent) {
             <ProviderIconGroup :provider="account.provider" size="xs" />
           </template>
         </AccountIdentityCell>
-        <ZSegmented v-model="period" aria-label="预测周期" :options="options" class="w-48" />
+        <ZSegmented v-model="period" :aria-label="t('accounts.quotaForecast.forecastPeriod')" :options="options" class="w-48" />
       </div>
 
       <div aria-live="polite" :aria-busy="loading || refreshing">
         <ForecastSkeleton v-if="loading || refreshing" />
-        <div v-else-if="error && !report" class="grid rounded-cp-card bg-cp-fill-tertiary/70 [html[data-theme=light]_&]:bg-cp-fill-quaternary/70">
-          <ZEmpty title="预测加载失败" description="暂时无法取得预测数据，请重新加载" surface="none" class="min-h-80 content-center">
-            <template #action>
-              <ZButton @click="load">
-                重新加载
-              </ZButton>
-            </template>
-          </ZEmpty>
-        </div>
         <template v-else-if="forecast">
           <div v-if="unavailableReason" class="grid rounded-cp-card bg-cp-fill-tertiary/70 [html[data-theme=light]_&]:bg-cp-fill-quaternary/70">
-            <ZEmpty title="暂时无法预测" :description="unavailableReason" :icon="ChartNoAxesCombined" surface="none" class="min-h-72 content-center" />
+            <ZEmpty :title="t('accounts.quotaForecast.unpredictableAtMoment')" :description="unavailableReason" :icon="ChartNoAxesCombined" surface="none" class="min-h-72 content-center" />
           </div>
           <ForecastCapacity v-else :forecast="forecast" />
         </template>
@@ -106,12 +111,12 @@ function handleExplanationKeydown(event: KeyboardEvent) {
     <template #footer>
       <div class="mr-auto flex min-w-0 items-center gap-1">
         <span v-if="forecast?.source?.observedAt" class="hidden text-cp-xs text-cp-text-tertiary sm:block">
-          更新于 {{ forecast.source.observedAtDisplay }}
+          {{ t('accounts.quotaForecast.updated', { observedAtDisplay: forecast.source.observedAtDisplay }) }}
         </span>
         <ZPopover v-model="explanationOpen" trigger="hover-click" placement="top-start" :hover-delay="240">
           <template #reference>
             <ZIconButton
-              aria-label="预测说明"
+              :aria-label="t('accounts.quotaForecast.forecastDescription')"
               size="small"
               :aria-expanded="explanationOpen"
               :aria-describedby="explanationOpen ? explanationId : undefined"
@@ -122,28 +127,28 @@ function handleExplanationKeydown(event: KeyboardEvent) {
           </template>
           <section :id="explanationId" role="tooltip" class="grid w-96 max-w-[calc(100vw-2rem)] gap-3 p-4 text-cp-xs leading-relaxed text-cp-text-secondary">
             <h4 class="m-0 font-heavy text-cp-text">
-              仅供参考
+              {{ t('accounts.quotaForecast.forReferenceOnly') }}
             </h4>
             <p class="m-0">
-              本周期预计总量为已记录用量加预计剩余，剩余量按本周期内近期用量估算
+              {{ t('accounts.quotaForecast.methodDescription') }}
             </p>
             <p class="m-0">
-              缺失的用量或费用可能使结果偏低，结果会随使用的模型和方式变化，并非官方承诺额度
+              {{ t('accounts.quotaForecast.limitations') }}
             </p>
             <p v-if="forecast?.lowSample" class="m-0">
-              目前数据还较少，结果可能有较大波动
+              {{ t('accounts.quotaForecast.limitedData') }}
             </p>
             <p v-if="forecast?.extrapolated" class="m-0">
-              本页预测由{{ forecast.source?.label ?? '当前周期' }}按 {{ forecast.targetDays }} 天折算
+              {{ t('accounts.quotaForecast.forecastCalculatedByOverDays', { value: forecast.source?.label ?? t('accounts.quotaForecast.currentPeriod'), targetDays: forecast.targetDays }) }}
             </p>
             <p class="m-0">
-              预测以数据更新时间为准，等价费用不是实际账单或账户余额
+              {{ t('accounts.quotaForecast.equivalentCostHelp') }}
             </p>
           </section>
         </ZPopover>
       </div>
       <ZButton @click="open = false">
-        关闭
+        {{ t('common.actions.close') }}
       </ZButton>
       <ZButton type="primary" :loading="refreshing" :disabled="loading" @click="refresh">
         <template #loading>
@@ -152,7 +157,7 @@ function handleExplanationKeydown(event: KeyboardEvent) {
         <template #icon>
           <RefreshCw class="size-3.5" />
         </template>
-        刷新额度
+        {{ t('accounts.quotaForecast.refreshQuota') }}
       </ZButton>
     </template>
   </ZDialog>

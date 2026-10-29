@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import type { AccountAuthorizationView } from '../../composables/useAccountAuthorization'
-import type { AccountCreateForm, AccountImportMode } from '../../utils/accountCreate'
 
+import type { AccountCreateForm, AccountImportMode } from '../../utils/accountCreate'
 import type { Account, AccountGroupRef } from '@/api'
+
 import { Openai, Xai } from '@boxicons/vue'
 import { ZButton, ZDialog, ZIconButton, ZSegmented } from '@codex-proxy/ui'
 import { Copy, LayoutGrid, Settings2 } from '@lucide/vue'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { useCopyText } from '@/composables/useCopyText'
@@ -28,9 +30,17 @@ const props = withDefaults(defineProps<{
   reauthorizing?: boolean
   account?: Account | null
   authorization: AccountAuthorizationView
-}>(), { saving: false, oauthLoading: false, reauthorizing: false, account: null })
+}>(), {
+  saving: false,
+  oauthLoading: false,
+  reauthorizing: false,
+  account: null,
+})
 
 const emit = defineEmits<{ create: [], generateOauth: [] }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const open = defineModel<boolean>({ default: false })
 const form = defineModel<AccountCreateForm>('form', { required: true })
 const callback = defineModel<string>('callback', { required: true })
@@ -62,7 +72,9 @@ const mode = computed({
   },
 })
 const importText = computed({
-  get: () => form.value.mode === 'oauth' || form.value.mode === 'api_key' ? '' : form.value.importTexts[form.value.mode],
+  get: () => form.value.mode === 'oauth' || form.value.mode === 'api_key'
+    ? ''
+    : form.value.importTexts[form.value.mode],
   set: (value: string) => {
     if (form.value.mode !== 'oauth' && form.value.mode !== 'api_key')
       form.value.importTexts[form.value.mode] = value
@@ -114,9 +126,9 @@ function continueToImport() {
           <ZIconButton
             variant="solid"
             size="small"
-            aria-label="复制账号"
+            :aria-label="t('accounts.onboarding.copyAccount')"
             :disabled="busy || !accountCopyValue"
-            @click="copyWithToast(accountCopyValue, { successText: '账号已复制' })"
+            @click="copyWithToast(accountCopyValue, { successText: t('accounts.onboarding.accountCopied') })"
           >
             <Copy class="size-3.5" />
           </ZIconButton>
@@ -138,7 +150,7 @@ function continueToImport() {
         <ZSegmented
           v-if="!reauthorizing && !view.isBatch"
           v-model="mode"
-          aria-label="账号添加方式"
+          :aria-label="t('accounts.onboarding.howToAddAccount')"
           :options="view.modeOptions"
           :disabled="busy"
           class="w-full"
@@ -149,7 +161,7 @@ function continueToImport() {
           :auth-url="authorization.flow?.authorizationUrl ?? ''"
           :authorization="authorization"
           :can-start="true"
-          :panel-title="`${view.label} ${reauthorizing ? '重新授权' : '授权'}`"
+          :panel-title="`${view.label} ${reauthorizing ? t('accounts.actions.reauthorize') : t('accounts.onboarding.authorize')}`"
           :panel-description="view.oauth.description"
           :loading="oauthLoading"
           :callback-label="view.oauth.callbackLabel"
@@ -172,13 +184,13 @@ function continueToImport() {
 
     <template #footer>
       <ZButton v-if="view.configuring || reauthorizing" :disabled="busy" @click="open = false">
-        取消
+        {{ t('common.actions.cancel') }}
       </ZButton>
       <ZButton v-else class="mr-auto" :disabled="busy" @click="form.step = 'settings'">
-        上一步
+        {{ t('common.actions.previous') }}
       </ZButton>
       <ZButton v-if="view.configuring" type="primary" :disabled="!canSelect || !scheduling.valid || Boolean(modelError) || groupsLoading || Boolean(proxyError) || busy" @click="continueToImport">
-        继续导入
+        {{ t('accounts.onboarding.continueImporting') }}
       </ZButton>
       <ZButton v-else type="primary" :loading="saving || oauthLoading" :disabled="!view.canSubmit" @click="emit('create')">
         {{ view.submitLabel }}

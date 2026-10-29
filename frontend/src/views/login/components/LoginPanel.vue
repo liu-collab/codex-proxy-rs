@@ -2,10 +2,10 @@
 import { ZButton, ZCard, ZInput, ZMotionIcon, ZSegmented } from '@codex-proxy/ui'
 
 import { KeyRound, Mail, ShieldCheck } from '@lucide/vue'
-import { computed } from 'vue'
-import AppBrandMark from '@/components/AppBrandMark.vue'
 
-type LoginRealm = 'admin' | 'key'
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
+import AppBrandMark from '@/components/AppBrandMark.vue'
 
 const props = defineProps<{
   loading: boolean
@@ -16,22 +16,36 @@ const emit = defineEmits<{
   submit: []
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
+type LoginRealm = 'admin' | 'key'
+
 const realm = defineModel<LoginRealm>('realm', { required: true })
 const username = defineModel<string>('username', { required: true })
 const password = defineModel<string>('password', { required: true })
 const apiKey = defineModel<string>('apiKey', { required: true })
 
-const realmOptions = [
-  { label: '管理员登录', value: 'admin', icon: ShieldCheck },
-  { label: 'API Key 登录', value: 'key', icon: KeyRound },
-]
+const realmOptions = computed(() => ([
+  {
+    label: t('auth.adminSignIn'),
+    value: 'admin',
+    icon: ShieldCheck,
+  },
+  {
+    label: t('auth.apiKeySignIn'),
+    value: 'key',
+    icon: KeyRound,
+  },
+]))
 
 const isKeyRealm = computed(() => realm.value === 'key')
-const realmCaption = computed(() => isKeyRealm.value ? 'KEY REALM' : 'ADMIN REALM')
+const realmCaption = computed(() => isKeyRealm.value
+  ? t('auth.keyRealm')
+  : t('auth.adminRealm'))
 const submitLabel = computed(() => {
   if (props.loading)
-    return '正在登录...'
-  return '登录'
+    return t('auth.signingIn')
+  return t('auth.signIn')
 })
 </script>
 
@@ -64,7 +78,7 @@ const submitLabel = computed(() => {
       <ZSegmented
         v-model="realm"
         class="w-18 shrink-0 [--cp-color-bg-container:var(--cp-color-bg-elevated)] [--cp-color-fill-tertiary:var(--cp-login-input-bg)] [--cp-control-height-sm:34px] [&_svg]:size-4"
-        aria-label="选择登录方式"
+        :aria-label="t('auth.method')"
         :options="realmOptions"
         display="icon"
         size="small"
@@ -77,22 +91,22 @@ const submitLabel = computed(() => {
         id="login-title"
         class="m-0 text-[34px] leading-[1.02] font-semibold text-(--cp-login-title-color) max-[560px]:text-[30px]"
       >
-        控制台登录
+        {{ t('auth.title') }}
       </h1>
-      <p class="m-0 -ml-2 text-sm leading-[1.45] font-normal text-(--cp-login-description-color)">
-        「 欢迎回来，登录以开始您的数据之旅 」
+      <p class="m-0 text-sm leading-[1.45] font-normal text-(--cp-login-description-color) [&:lang(zh)]:-ml-2">
+        {{ t('auth.welcome') }}
       </p>
     </section>
 
     <div class="grid gap-3">
       <template v-if="!isKeyRealm">
         <div class="grid min-w-0 gap-2">
-          <span id="admin-username-label" class="text-cp leading-[1.1] font-bold text-(--cp-login-label-color)">管理员账号</span>
+          <span id="admin-username-label" class="text-cp leading-[1.1] font-bold text-(--cp-login-label-color)">{{ t('auth.username') }}</span>
           <ZInput
             v-model="username"
             name="username"
-            aria-label="管理员账号"
-            placeholder="输入会话账号"
+            :aria-label="t('auth.username')"
+            :placeholder="t('auth.usernamePlaceholder')"
             autocomplete="username"
           >
             <template #prefix>
@@ -102,12 +116,12 @@ const submitLabel = computed(() => {
         </div>
 
         <div class="grid min-w-0 gap-2">
-          <span class="text-cp leading-[1.1] font-bold text-(--cp-login-label-color)">访问密钥</span>
+          <span class="text-cp leading-[1.1] font-bold text-(--cp-login-label-color)">{{ t('auth.password') }}</span>
           <ZInput
             v-model="password"
             name="password"
-            aria-label="访问密钥"
-            placeholder="输入会话密钥"
+            :aria-label="t('auth.password')"
+            :placeholder="t('auth.passwordPlaceholder')"
             show-password
             autocomplete="current-password"
           >
@@ -119,13 +133,13 @@ const submitLabel = computed(() => {
       </template>
 
       <div v-else class="grid min-w-0 gap-2">
-        <span id="client-api-key-label" class="text-cp leading-[1.1] font-bold text-(--cp-login-label-color)">访问密钥</span>
+        <span id="client-api-key-label" class="text-cp leading-[1.1] font-bold text-(--cp-login-label-color)">{{ t('auth.apiKey') }}</span>
         <ZInput
           id="client-api-key"
           v-model="apiKey"
           name="apiKey"
           aria-labelledby="client-api-key-label"
-          placeholder="输入 API Key"
+          :placeholder="t('auth.apiKeyPlaceholder')"
           show-password
           autocomplete="off"
           autocapitalize="none"

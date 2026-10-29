@@ -1,0 +1,30 @@
+{
+  "navigation": {
+    "overview": "Overview",
+    "accounts": "Accounts",
+    "proxies": "Proxies",
+    "groups": "Groups",
+    "apiKeys": "API keys",
+    "usage": "Analytics",
+    "plugins": "Plugins",
+    "appearance": "Theme",
+    "settings": "Settings",
+    "update": {
+      "available": "Update available, open System update",
+      "open": "Open System update"
+    },
+    "switchLanguage": "Switch language ({value})",
+    "languageLoadFailed": "Unable to load language, reload to try again",
+    "mainLabel": "Main navigation",
+    "pluginsLabel": "Plugin navigation",
+    "pluginManagement": "Manage",
+    "online": "Online",
+    "sidebar": {
+      "close": "Close sidebar",
+      "expand": "Expand sidebar",
+      "collapse": "Collapse sidebar",
+      "open": "Open sidebar"
+    },
+    "missingEntryPoint": "No default entry point is configured for the {role} identity"
+  }
+}

@@ -46,6 +46,15 @@ pub trait PluginPreparation: PluginRuntimeDiagnostics + PluginStateLifecycle {
         &self,
         snapshot: PluginInstanceSnapshot,
     ) -> Result<ExtensionSetReference, AdminError>;
+
+    /// 确认由 Admin 校验配置版本，Runtime 复核宿主并仅放行目标实例
+    async fn prepare_confirmed(
+        &self,
+        _snapshot: PluginInstanceSnapshot,
+        _confirmation: crate::model::plugins::instances::PluginCompatibilityConfirmation,
+    ) -> Result<ExtensionSetReference, AdminError> {
+        Err(AdminError::invalid("插件运行时不支持确认启动"))
+    }
 }
 
 /// 运行诊断独立于发布准备；没有进程事实时显式返回 None
@@ -175,6 +184,10 @@ pub trait PluginDistribution: Send + Sync {
 /// Runtime 只解释插件包格式；安装事务与来源选择归 Admin
 #[async_trait]
 pub trait PluginPackageInspector: Send + Sync {
+    /// 当前宿主版本、兼容声明与平台的稳定身份，不含敏感信息
+    fn compatibility_host_fingerprint(&self) -> Result<String, AdminError> {
+        Err(AdminError::internal("宿主兼容声明不可用"))
+    }
     /// 完整校验包并返回版本范围诊断；校验失败与可加载但未经宿主承诺的提醒分开
     async fn compatibility_warning(
         &self,

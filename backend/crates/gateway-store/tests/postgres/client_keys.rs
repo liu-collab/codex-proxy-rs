@@ -26,18 +26,18 @@ use gateway_store::postgres::{
 use super::TestDatabase;
 
 #[tokio::test]
-async fn migrated_keys_persist_exactly_and_keep_short_keys_masked() {
+async fn custom_keys_persist_exactly_and_keep_short_keys_masked() {
     use gateway_admin::model::{MutationActor, MutationContext, client_keys::NewClientKey};
     use gateway_core::policy::RateLimits;
     use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
 
-    let Some(database) = TestDatabase::create("migrated_keys").await else {
+    let Some(database) = TestDatabase::create("custom_keys").await else {
         return;
     };
     let store = PgAdminClientKeyStore::new(database.pool.clone());
     let context = MutationContext {
         actor: MutationActor::System,
-        request_id: "migration-test".to_owned(),
+        request_id: "custom-key-test".to_owned(),
     };
     let long_key: String = (0..160)
         .map(|_| uuid::Uuid::new_v4().simple().to_string())
@@ -45,17 +45,17 @@ async fn migrated_keys_persist_exactly_and_keep_short_keys_masked() {
     let values = [
         "q".to_owned(),
         "abc".to_owned(),
-        "sk-legacy/key+value=:!@\\".to_owned(),
+        "sk-custom/key+value=:!@\\".to_owned(),
         long_key,
     ];
     for (index, key) in values.iter().enumerate() {
-        let id = ClientApiKeyId::new(format!("key_migrated_{index}")).unwrap();
+        let id = ClientApiKeyId::new(format!("key_custom_{index}")).unwrap();
         let (_, record) = store
             .create_client_key(
                 NewClientKey {
                     request_profile_overrides: Default::default(),
                     id: id.clone(),
-                    name: format!("Migrated {index}"),
+                    name: format!("Custom {index}"),
                     label: None,
                     group_ids: Vec::new(),
                     limits: RateLimits {
@@ -91,7 +91,7 @@ async fn migrated_keys_persist_exactly_and_keep_short_keys_masked() {
 }
 
 #[tokio::test]
-async fn duplicate_migrated_keys_conflict_atomically_without_extra_audits() {
+async fn duplicate_custom_keys_conflict_atomically_without_extra_audits() {
     use gateway_admin::{
         model::{MutationActor, MutationContext, client_keys::NewClientKey},
         ports::store::AdminStoreErrorKind,
@@ -106,7 +106,7 @@ async fn duplicate_migrated_keys_conflict_atomically_without_extra_audits() {
         actor: MutationActor::System,
         request_id: "duplicate-test".to_owned(),
     };
-    let key = "legacy-key-case-sensitive!";
+    let key = "custom-key-case-sensitive!";
     let command = |id: &str| NewClientKey {
         request_profile_overrides: Default::default(),
         id: ClientApiKeyId::new(id).unwrap(),
@@ -256,7 +256,7 @@ async fn client_key_search_matches_names_and_labels_but_never_credential_values(
     let generated = format!("sk_{}", "K".repeat(43));
     for (id, name, key) in [
         ("key_generated", "Production", generated.as_str()),
-        ("key_custom", "生产_%专用", "legacy-token+/123"),
+        ("key_custom", r"生产_%专用\测试", "legacy-token+/123"),
     ] {
         sqlx::query(
             "insert into client_api_keys (id, name, label, key, created_at, updated_at)
@@ -272,9 +272,17 @@ async fn client_key_search_matches_names_and_labels_but_never_credential_values(
     let repository = PgClientApiKeyRepository::new(database.pool.clone());
     for (search, expected) in [
         ("PROD", 1),
+        ("DUCt", 1),
+        ("tion", 1),
         ("生产_%", 1),
+        ("_%专", 1),
+        ("%", 1),
+        ("_", 1),
+        (r"\", 1),
         ("生产X", 0),
         ("backend", 2),
+        ("END LAB", 2),
+        ("label", 2),
         (generated.as_str(), 0),
         (&generated[..10], 0),
         ("legacy-token+/123", 0),

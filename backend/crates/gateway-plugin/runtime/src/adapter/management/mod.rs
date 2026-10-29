@@ -98,7 +98,7 @@ impl ManagementEntry {
         .map_err(|_| AdminError::invalid("插件管理请求无法编码"))?;
         let mut context = self
             .session
-            .context(Stage::Management, limits.maximum_call_timeout);
+            .context(Stage::Management, self.session.budget(Stage::Management));
         context.request = crate::adapter::request_context(request.request_context.as_deref());
         context.request_id = Some(request.request_id);
         let _scope = self
@@ -112,9 +112,7 @@ impl ManagementEntry {
             .map_err(|_| {
                 AdminError::unavailable("插件管理调用未完成；副作用可能已发生，请查询后再重试")
             })?;
-        decode_response(reply, &route.response_content_types, limits).inspect_err(|_| {
-            self.session.invalid_response(Stage::Management);
-        })
+        decode_response(reply, &route.response_content_types, limits)
     }
 }
 

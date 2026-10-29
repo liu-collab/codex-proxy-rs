@@ -369,15 +369,15 @@ impl ProviderAdmin for XaiAdminProvider {
         view.target.terminal = profile.client_mode.clone();
         view.attributes = vec![
             DashboardWireAttribute {
-                label: "客户端标识".to_owned(),
+                key: "client_identifier".to_owned(),
                 value: profile.client_identifier,
             },
             DashboardWireAttribute {
-                label: "运行模式".to_owned(),
+                key: "client_mode".to_owned(),
                 value: profile.client_mode,
             },
             DashboardWireAttribute {
-                label: "Token 认证".to_owned(),
+                key: "token_auth".to_owned(),
                 value: "xai-grok-cli".to_owned(),
             },
         ];
@@ -429,15 +429,15 @@ impl ProviderAdmin for XaiAdminProvider {
             user_agent: profile.user_agent(),
             attributes: vec![
                 DashboardWireAttribute {
-                    label: "客户端标识".to_owned(),
+                    key: "client_identifier".to_owned(),
                     value: profile.client_identifier,
                 },
                 DashboardWireAttribute {
-                    label: "运行模式".to_owned(),
+                    key: "client_mode".to_owned(),
                     value: profile.client_mode,
                 },
                 DashboardWireAttribute {
-                    label: "Token 认证".to_owned(),
+                    key: "token_auth".to_owned(),
                     value: "xai-grok-cli".to_owned(),
                 },
             ],

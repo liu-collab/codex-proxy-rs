@@ -820,6 +820,13 @@ pub struct ProviderQuotaRequest {
     pub rolling_usage: Option<AccountUsage>,
 }
 
+/// 当前目录页已读取的账号事实；批量投影不触发上游刷新
+#[derive(Debug, Clone, Copy)]
+pub struct ProviderQuotaReadRequest<'a> {
+    pub account: &'a AccountRecord,
+    pub rolling_usage: Option<&'a AccountUsage>,
+}
+
 /// Provider 已解析的 quota 结果及其不透明差异字段
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProviderQuota {
@@ -1239,6 +1246,7 @@ impl fmt::Debug for ProviderExport {
 /// 统一账号目录的一行完整结果
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccountDirectoryItem {
+    pub protection_rules: Vec<gateway_core::account::AccountProtectionMatch>,
     pub account: AccountRecord,
     pub capacity: super::accounts::AccountCapacity,
     pub capabilities: super::accounts::ProviderAccountCapabilities,

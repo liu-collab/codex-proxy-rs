@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ZButton, ZFormItem, ZTextarea } from '@codex-proxy/ui'
+
 import { Upload } from '@lucide/vue'
 import { useFileDialog } from '@vueuse/core'
 import { onScopeDispose, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 defineProps<{
   label: string
@@ -10,6 +12,9 @@ defineProps<{
   uploadable: boolean
   disabled: boolean
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const text = defineModel<string>({ required: true })
 const fileError = ref('')
 const { open: openFile, onChange } = useFileDialog({ accept: 'application/json,.json', multiple: false, reset: true })
@@ -33,7 +38,7 @@ onChange(async (files) => {
   }
   catch {
     if (version === readVersion)
-      fileError.value = '文件读取失败，请重新选择'
+      fileError.value = t('accounts.onboarding.fileReadingFailedTryAgain')
   }
 })
 
@@ -51,7 +56,7 @@ function updateText(value: string) {
         <template #icon>
           <Upload class="size-3.5" aria-hidden="true" />
         </template>
-        上传文件
+        {{ t('accounts.onboarding.uploadFiles') }}
       </ZButton>
     </template>
     <ZTextarea

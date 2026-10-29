@@ -191,6 +191,7 @@ export interface PluginCapabilityBinding {
 
 export type PluginInstanceRuntimeStatus
   = | 'disabled'
+    | 'unknown'
     | 'awaiting_publication'
     | 'preparing'
     | 'running'
@@ -204,12 +205,22 @@ export interface PluginInstanceRuntimeFailure {
   message: string
 }
 
+export interface PluginInstanceRuntimeLoad {
+  activeCalls: number
+  executingCalls: number
+  queuedCalls: number
+  resumingCalls: number
+  pendingCallbacks: number
+  activeStreams: number
+}
+
 export interface PluginInstanceRuntime {
   status: PluginInstanceRuntimeStatus
   actualRevision: number | null
   actualArtifactSha256: string | null
   failure: PluginInstanceRuntimeFailure | null
   drainingRevisions: number[]
+  load?: PluginInstanceRuntimeLoad | null
 }
 
 export interface PluginInstance {
@@ -239,7 +250,15 @@ export interface PluginApiDeprecation {
   migration: string
 }
 
+export interface PluginCompatibilityConfirmation {
+  hostFingerprint: string
+  instanceId: string
+  instanceRevision: number
+  artifactSha256: string
+}
+
 export interface ConfigurePluginInstanceRequest {
+  compatibilityConfirmation?: PluginCompatibilityConfirmation
   creationId?: string
   expectedRevision?: number
   replaceInstances?: { id: string, expectedRevision: number }[]
@@ -496,6 +515,9 @@ export function deletePluginInstance(data: PluginInstanceIdParam, options: Reque
 }
 
 export interface PluginVersionPlan {
+  compatibilityWarning: string | null
+  compatibilityConfirmation: PluginCompatibilityConfirmation | null
+  loadError: string | null
   instanceRevision: number
   artifactSha256: string
   configuration: Record<string, unknown>

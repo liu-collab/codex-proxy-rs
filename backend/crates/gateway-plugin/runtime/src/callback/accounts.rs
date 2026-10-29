@@ -20,8 +20,8 @@ use gateway_core::{
 use gateway_plugin_sdk::{
     CallContext, ErrorCode, PluginFault,
     call::host::{
-        AuthCredential, AuthGetRequest, AuthListRequest, AuthListResult, AuthRuntimeAccount,
-        AuthSaveRequest, AuthSaveResult, CredentialFacts,
+        self as wire, AuthCredential, AuthGetRequest, AuthListRequest, AuthListResult,
+        AuthRuntimeAccount, AuthSaveRequest, AuthSaveResult, CredentialFacts,
     },
 };
 
@@ -66,6 +66,32 @@ impl PluginAccounts {
         Self { slot }
     }
 
+    pub(super) async fn http_proxy(
+        &self,
+        account_id: String,
+        credential_revision: u64,
+    ) -> Result<Option<gateway_core::account::OutboundProxy>, PluginFault> {
+        let id = ProviderAccountId::new(account_id).map_err(|_| invalid())?;
+        let expected = Revision::new(credential_revision).map_err(|_| invalid())?;
+        let account = self
+            .slot
+            .upgrade()
+            .map_err(map_admin_error)?
+            .get_runtime(&id)
+            .await
+            .map_err(map_admin_error)?;
+        if !account.enabled {
+            return Err(denied());
+        }
+        if account.credential_revision != expected {
+            return Err(PluginFault::new(
+                ErrorCode::Conflict,
+                "account credential revision has changed",
+            ));
+        }
+        Ok(account.effective_outbound_proxy().cloned())
+    }
+
     pub(super) async fn call(
         &self,
         context: &CallContext,
@@ -79,7 +105,7 @@ impl PluginAccounts {
         }
         let access = self.slot.upgrade().map_err(map_admin_error)?;
         match method {
-            "host.auth.list" => {
+            wire::AUTH_LIST => {
                 let request: AuthListRequest = decode(payload)?;
                 let limit = PageSize::new(request.limit).map_err(|_| invalid())?;
                 let cursor = request
@@ -105,7 +131,7 @@ impl PluginAccounts {
                     next_cursor: page.next_cursor.map(|cursor| cursor.as_str().to_owned()),
                 })
             }
-            "host.auth.get_runtime" => {
+            wire::AUTH_GET_RUNTIME => {
                 let request: AuthGetRequest = decode(payload)?;
                 let account_id =
                     ProviderAccountId::new(request.account_id).map_err(|_| invalid())?;
@@ -115,7 +141,7 @@ impl PluginAccounts {
                     .map_err(map_admin_error)?;
                 encode(&runtime_account(&account))
             }
-            "host.auth.get" => {
+            wire::AUTH_GET => {
                 let request: AuthGetRequest = decode(payload)?;
                 let account_id =
                     ProviderAccountId::new(request.account_id).map_err(|_| invalid())?;
@@ -131,7 +157,7 @@ impl PluginAccounts {
                     facts: credential_facts(account, credential.provider_material),
                 })
             }
-            "host.auth.save" => {
+            wire::AUTH_SAVE => {
                 let request: AuthSaveRequest = decode(payload)?;
                 encode(&self.save(context, scope, request).await?)
             }

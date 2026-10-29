@@ -1,17 +1,20 @@
+import type { ProtectionDraft } from '../components/error-protection/form'
 import type { rotationOptions } from '../constants'
 import type { AccountAffinity, CodexPrivacyPolicy, SmartSchedulingConfig } from '@/api'
 import type { ProviderRequestProfiles, ProviderRequestProfileUpdates } from '@/api/modules/settings/profiles'
-import { ZNotification } from '@codex-proxy/ui'
 import { cloneDeep, isEqual } from 'es-toolkit'
-
 import { computed, reactive, ref, shallowRef } from 'vue'
 import { detectRequestLocation, getSettings, updateSettings } from '@/api'
+
 import { ApiError } from '@/api/request'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { t } from '@/i18n'
 import { normalizeRequestLocation, requestLocationError } from '@/utils/location'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
+import { protectionSettingsError, trimProtectionText } from '../components/error-protection/form'
 
-type RotationStrategy = (typeof rotationOptions)[number]['value']
+type RotationStrategy = (typeof rotationOptions.value)[number]['value']
 
 const MIB = 1024 * 1024
 
@@ -30,7 +33,12 @@ export function useSettingsForm() {
     providerRequestProfiles: {} as ProviderRequestProfiles,
     codexPrivacyPolicy: { enabled: false, onError: 'skip_rule', rules: [] } as CodexPrivacyPolicy,
     requestLocationEnabled: false,
-    requestLocation: { country: '', region: '', city: '', timezone: '' },
+    requestLocation: {
+      country: '',
+      region: '',
+      city: '',
+      timezone: '',
+    },
     refreshMarginSeconds: null as number | null,
     refreshConcurrency: null as number | null,
     maxConcurrentPerAccount: null as number | null,
@@ -50,13 +58,15 @@ export function useSettingsForm() {
     opsEventRetentionDays: 30,
     auditRetentionDays: 90,
 
-    accountAutoFreezeEnabled: false,
-    accountAutoFreezeThreshold: null as number | null,
-    accountAutoFreezeWindowSeconds: null as number | null,
-    accountAutoFreezeDurationSeconds: null as number | null,
-    accountAutoFreezeProbeEnabled: true,
-    accountAutoFreezeProbeModel: '',
-    accountAutoFreezeAdaptiveConcurrency: true,
+    accountErrorProtection: {
+      enabled: false,
+      rules: [],
+      threshold: 12,
+      windowSeconds: 600,
+      durationSeconds: 7200,
+      probeEnabled: true,
+      probeModel: '',
+    } as ProtectionDraft,
     accountWarmupEnabled: false,
     accountWarmupScheduleTime: '08:00',
     accountWarmupModel: '',
@@ -80,16 +90,20 @@ export function useSettingsForm() {
     mappings.value = initial.mappings
   }
 
-  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays' | 'accountAutoFreezeThreshold' | 'accountAutoFreezeWindowSeconds' | 'accountAutoFreezeDurationSeconds') {
+  function numericModel(key: 'resetCreditMaxWeeklyRemainingPercent' | 'resetCreditLeadMinutes' | 'refreshMarginSeconds' | 'refreshConcurrency' | 'maxConcurrentPerAccount' | 'openaiGuardianReservedConcurrency' | 'maxAccountRotations' | 'openaiSessionAffinityTtlHours' | 'maxWaitingPerKey' | 'maxWaitingPerAccount' | 'concurrencyWaitTimeoutSeconds' | 'responsesMaxDecompressedBodyMiB' | 'usageRetentionDays') {
     return computed({
-      get: () => (form[key] === null ? '' : String(form[key])),
+      get: () => (form[key] === null
+        ? ''
+        : String(form[key])),
       set: (value: string) => {
         if (!value.trim()) {
           form[key] = null
           return
         }
         const parsed = Number(value)
-        form[key] = Number.isFinite(parsed) ? parsed : null
+        form[key] = Number.isFinite(parsed)
+          ? parsed
+          : null
       },
     })
   }
@@ -107,16 +121,15 @@ export function useSettingsForm() {
   const resetCreditMaxWeeklyRemainingPercentValue = numericModel('resetCreditMaxWeeklyRemainingPercent')
   const usageRetentionDaysValue = numericModel('usageRetentionDays')
   const concurrencyWaitTimeoutSecondsValue = numericModel('concurrencyWaitTimeoutSeconds')
-  const accountAutoFreezeThresholdValue = numericModel('accountAutoFreezeThreshold')
-  const accountAutoFreezeWindowSecondsValue = numericModel('accountAutoFreezeWindowSeconds')
-  const accountAutoFreezeDurationSecondsValue = numericModel('accountAutoFreezeDurationSeconds')
 
   const minCodexDesktopVersionError = computed(() => versionError(form.minCodexDesktopVersion))
   const minCodexCliVersionError = computed(() => versionError(form.minCodexCliVersion))
 
   function versionError(value: string): string {
     const normalized = value.trim()
-    return normalized && !isSemver(normalized) ? '请输入标准 SemVer，例如 0.152.0' : ''
+    return normalized && !isSemver(normalized)
+      ? t('settings.form.enterStandardSemverForExample')
+      : ''
   }
 
   function applySettings(data: Awaited<ReturnType<typeof getSettings>>) {
@@ -145,13 +158,10 @@ export function useSettingsForm() {
     form.usageRetentionDays = data.usageRetentionDays
     form.opsEventRetentionDays = data.opsEventRetentionDays
     form.auditRetentionDays = data.auditRetentionDays
-    form.accountAutoFreezeEnabled = data.accountAutoFreezeEnabled
-    form.accountAutoFreezeThreshold = data.accountAutoFreezeThreshold
-    form.accountAutoFreezeWindowSeconds = data.accountAutoFreezeWindowSeconds
-    form.accountAutoFreezeDurationSeconds = data.accountAutoFreezeDurationSeconds
-    form.accountAutoFreezeProbeEnabled = data.accountAutoFreezeProbeEnabled
-    form.accountAutoFreezeProbeModel = data.accountAutoFreezeProbeModel ?? ''
-    form.accountAutoFreezeAdaptiveConcurrency = data.accountAutoFreezeAdaptiveConcurrency
+    form.accountErrorProtection = {
+      ...cloneDeep(data.accountErrorProtection),
+      probeModel: data.accountErrorProtection.probeModel ?? '',
+    }
     form.accountWarmupEnabled = data.accountWarmupEnabled
     form.accountWarmupScheduleTime = data.accountWarmupScheduleTime ?? '08:00'
     form.accountWarmupModel = data.accountWarmupModel ?? ''
@@ -188,19 +198,30 @@ export function useSettingsForm() {
       if (result.status === 'detected') {
         form.requestLocation = { ...result.location }
         form.requestLocationEnabled = true
-        ZNotification.success({ message: '已填入出口位置' })
+        ZNotification.success({
+          message: t('settings.form.exitLocationFilledIn'),
+        })
       }
       else if (result.status === 'conflict') {
-        ZNotification.warning({ message: 'IPv4 与 IPv6 出口时区不一致，请手动填写' })
+        ZNotification.warning({
+          message: t('settings.form.ipv4AndIpv6ExportTimeZonesAre'),
+        })
       }
       else {
-        ZNotification.warning({ message: result.status === 'failed' ? result.message : '未获取到出口位置' })
+        ZNotification.warning({
+          message: result.status === 'failed'
+            ? result.message
+            : t('settings.form.unableToObtainExitLocation'),
+        })
       }
     })
   }
 
   function addMapping() {
-    mappings.value = [...mappings.value, { requestedModel: '', upstreamModel: '' }]
+    mappings.value = [
+      ...mappings.value,
+      { requestedModel: '', upstreamModel: '' },
+    ]
   }
 
   function updateMapping(index: number, key: 'requestedModel' | 'upstreamModel', value: string) {
@@ -223,9 +244,9 @@ export function useSettingsForm() {
       const requested = row.requestedModel.trim()
       const upstream = row.upstreamModel.trim()
       if (!requested || !upstream)
-        throw new Error('请完整填写模型映射')
+        throw new Error(t('settings.form.fillInModelMappingCompletely'))
       if (entries[requested])
-        throw new Error(`存在重复的客户端模型：${requested}`)
+        throw new Error(t('settings.form.duplicateClientModel', { requested }))
       entries[requested] = upstream
     }
     return entries
@@ -238,54 +259,76 @@ export function useSettingsForm() {
     const savedSettings = saved.value
     if (saving.value || loading.value || detectingLocation.value || !savedSettings)
       return
-    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, responsesMaxDecompressedBodyMiB, accountAutoFreezeThreshold, accountAutoFreezeWindowSeconds, accountAutoFreezeDurationSeconds } = form
+    const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, responsesMaxDecompressedBodyMiB } = form
     if (!openaiAccountAffinity || maxAccountRotations === null || openaiSessionAffinityTtlHours === null || refreshMarginSeconds === null || refreshConcurrency === null || maxConcurrentPerAccount === null || openaiGuardianReservedConcurrency === null || !rotationStrategy || maxWaitingPerKey === null || maxWaitingPerAccount === null || concurrencyWaitTimeoutSeconds === null) {
-      ZNotification.warning({ message: '请完整填写并发、队列、凭据刷新参数和调度策略' })
+      ZNotification.warning({
+        message: t('settings.form.requiredSettings'),
+      })
       return
     }
     if (!Number.isInteger(openaiSessionAffinityTtlHours) || openaiSessionAffinityTtlHours < 1 || openaiSessionAffinityTtlHours > 720) {
-      ZNotification.warning({ message: '亲和时长应为 1～720 小时的整数' })
+      ZNotification.warning({
+        message: t('settings.form.invalidAffinityDuration'),
+      })
       return
     }
     if (!Number.isInteger(maxAccountRotations) || maxAccountRotations < 0 || maxAccountRotations > 31) {
-      ZNotification.warning({ message: '最大换号次数应为 0～31 的整数，0 表示不换号' })
+      ZNotification.warning({
+        message: t('settings.form.invalidSwitchLimit'),
+      })
       return
     }
     if (!Number.isInteger(maxConcurrentPerAccount) || maxConcurrentPerAccount < 0 || maxConcurrentPerAccount > 4294967295) {
-      ZNotification.warning({ message: '默认账号并发上限应为 0～4294967295 的整数，0 表示不限制' })
+      ZNotification.warning({
+        message: t('settings.form.invalidConcurrency'),
+      })
       return
     }
     if (!Number.isInteger(openaiGuardianReservedConcurrency) || openaiGuardianReservedConcurrency < 0 || openaiGuardianReservedConcurrency > 4294967295) {
-      ZNotification.warning({ message: '自动审批独立并发应为 0～4294967295 的整数，0 表示共用普通并发' })
+      ZNotification.warning({
+        message: t('settings.form.invalidReviewConcurrency'),
+      })
       return
     }
     if (responsesMaxDecompressedBodyMiB === null || !Number.isInteger(responsesMaxDecompressedBodyMiB) || responsesMaxDecompressedBodyMiB < 1
       || !Number.isSafeInteger(responsesMaxDecompressedBodyMiB * MIB)) {
-      ZNotification.warning({ message: 'Responses 解压上限应为有效的正整数（MiB）' })
+      ZNotification.warning({
+        message: t('settings.form.invalidBodyLimit'),
+      })
       return
     }
     const resetCreditMaxWeeklyRemainingPercent = form.resetCreditMaxWeeklyRemainingPercent
     if (resetCreditMaxWeeklyRemainingPercent !== null && (!Number.isInteger(resetCreditMaxWeeklyRemainingPercent) || resetCreditMaxWeeklyRemainingPercent < 0 || resetCreditMaxWeeklyRemainingPercent > 100)) {
-      ZNotification.warning({ message: '剩余周额度上限应为 0～100 的整数，留空表示不限制' })
+      ZNotification.warning({
+        message: t('settings.form.invalidQuotaThreshold'),
+      })
       return
     }
     const resetCreditLeadMinutes = form.resetCreditLeadMinutes
     if (resetCreditLeadMinutes === null || !Number.isInteger(resetCreditLeadMinutes) || resetCreditLeadMinutes < 1 || resetCreditLeadMinutes > 1440) {
-      ZNotification.warning({ message: '重置卡提前使用时间应为 1～1440 分钟的整数' })
+      ZNotification.warning({
+        message: t('settings.form.invalidResetLeadTime'),
+      })
       return
     }
     const usageRetentionDays = form.usageRetentionDays
     if (usageRetentionDays === null || !Number.isInteger(usageRetentionDays) || usageRetentionDays < 1 || usageRetentionDays > 31) {
-      ZNotification.warning({ message: '历史保留天数应为 1–31 的整数' })
+      ZNotification.warning({
+        message: t('settings.form.invalidRetention'),
+      })
       return
     }
     if (![maxWaitingPerKey, maxWaitingPerAccount].every(value => Number.isInteger(value) && value >= 0 && value <= 1000)
       || !Number.isInteger(concurrencyWaitTimeoutSeconds) || concurrencyWaitTimeoutSeconds < 1 || concurrencyWaitTimeoutSeconds > 120) {
-      ZNotification.warning({ message: '队列容量应为 0～1000 的整数，排队超时应为 1～120 秒的整数' })
+      ZNotification.warning({
+        message: t('settings.form.invalidQueueSettings'),
+      })
       return
     }
     if (minCodexDesktopVersionError.value || minCodexCliVersionError.value) {
-      ZNotification.warning({ message: '请修正客户端最低版本格式' })
+      ZNotification.warning({
+        message: t('settings.form.invalidClientVersion'),
+      })
       return
     }
     // 关闭时保留已保存的自定义值，未完成的草稿不阻止停止覆盖。
@@ -297,34 +340,30 @@ export function useSettingsForm() {
       ZNotification.warning({ message: locationError })
       return
     }
-    if (accountAutoFreezeThreshold === null || accountAutoFreezeWindowSeconds === null || accountAutoFreezeDurationSeconds === null) {
-      ZNotification.warning({ message: '请完整填写过载保护参数' })
-      return
-    }
-    if (!Number.isInteger(accountAutoFreezeThreshold) || accountAutoFreezeThreshold < 2 || accountAutoFreezeThreshold > 1000
-      || !Number.isInteger(accountAutoFreezeWindowSeconds) || accountAutoFreezeWindowSeconds < 60 || accountAutoFreezeWindowSeconds > 3600
-      || !Number.isInteger(accountAutoFreezeDurationSeconds) || accountAutoFreezeDurationSeconds < 300 || accountAutoFreezeDurationSeconds > 604800) {
-      ZNotification.warning({ message: '失败次数阈值应为 2～1000，统计窗口为 60～3600 秒，冷却时长为 300～604800 秒' })
-      return
-    }
-    const probeModel = form.accountAutoFreezeProbeModel.trim()
-    if (probeModel.length > 128) {
-      ZNotification.warning({ message: '探测模型名称不能超过 128 个字符' })
+    const protectionError = protectionSettingsError(form.accountErrorProtection)
+    if (protectionError) {
+      ZNotification.warning({ message: protectionError })
       return
     }
     const scheduleTime = form.accountWarmupScheduleTime.trim()
     const timeRegex = /^(?:[01]\d|2[0-3]):[0-5]\d(?:,(?:[01]\d|2[0-3]):[0-5]\d)*$/
     if (!scheduleTime || !timeRegex.test(scheduleTime)) {
-      ZNotification.warning({ message: '预激活时间格式无效，请输入 HH:MM 格式（如 08:00 或 08:00,13:00）' })
+      ZNotification.warning({
+        message: t('settings.form.invalidWarmupTimes'),
+      })
       return
     }
     const warmupModel = form.accountWarmupModel.trim()
     if (form.accountWarmupEnabled && !warmupModel) {
-      ZNotification.warning({ message: '启用预激活时请选择模型' })
+      ZNotification.warning({
+        message: t('settings.form.warmupModelRequired'),
+      })
       return
     }
     if (warmupModel.length > 128) {
-      ZNotification.warning({ message: '预激活模型名称不能超过 128 个字符' })
+      ZNotification.warning({
+        message: t('settings.form.invalidWarmupModel'),
+      })
       return
     }
     await saveAction.run(async () => {
@@ -356,13 +395,13 @@ export function useSettingsForm() {
         usageRetentionDays,
         opsEventRetentionDays: form.opsEventRetentionDays,
         auditRetentionDays: form.auditRetentionDays,
-        accountAutoFreezeEnabled: form.accountAutoFreezeEnabled,
-        accountAutoFreezeThreshold,
-        accountAutoFreezeWindowSeconds,
-        accountAutoFreezeDurationSeconds,
-        accountAutoFreezeProbeEnabled: form.accountAutoFreezeProbeEnabled,
-        accountAutoFreezeProbeModel: probeModel || null,
-        accountAutoFreezeAdaptiveConcurrency: form.accountAutoFreezeAdaptiveConcurrency,
+        accountErrorProtection: {
+          ...cloneDeep(form.accountErrorProtection),
+          threshold: form.accountErrorProtection.threshold!,
+          windowSeconds: form.accountErrorProtection.windowSeconds!,
+          durationSeconds: form.accountErrorProtection.durationSeconds!,
+          probeModel: trimProtectionText(form.accountErrorProtection.probeModel) || null,
+        },
         accountWarmupEnabled: form.accountWarmupEnabled,
         accountWarmupScheduleTime: scheduleTime,
         accountWarmupModel: warmupModel || null,
@@ -370,7 +409,9 @@ export function useSettingsForm() {
         resetCreditMaxWeeklyRemainingPercent,
       })
       applySettings(result)
-      ZNotification.success({ message: '设置已保存' })
+      ZNotification.success({
+        message: t('settings.form.settingsSaved'),
+      })
     }, {
       onError: (cause) => {
         if (cause instanceof ApiError && cause.status !== 409)
@@ -406,9 +447,6 @@ export function useSettingsForm() {
     usageRetentionDaysValue,
     resetCreditLeadMinutesValue,
     resetCreditMaxWeeklyRemainingPercentValue,
-    accountAutoFreezeThresholdValue,
-    accountAutoFreezeWindowSecondsValue,
-    accountAutoFreezeDurationSecondsValue,
     minCodexDesktopVersionError,
     minCodexCliVersionError,
     saveSettings,
@@ -422,7 +460,10 @@ function requestProfileUpdates(
 ): ProviderRequestProfileUpdates {
   const updates: ProviderRequestProfileUpdates = {}
   const clonedCurrent = cloneDeep(current)
-  for (const provider of new Set([...Object.keys(previous), ...Object.keys(current)])) {
+  for (const provider of new Set([
+    ...Object.keys(previous),
+    ...Object.keys(current),
+  ])) {
     if (isEqual(previous[provider], current[provider]))
       continue
     updates[provider] = clonedCurrent[provider] ?? null

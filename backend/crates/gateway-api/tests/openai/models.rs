@@ -78,9 +78,9 @@ impl ModelsExecution {
         })
     }
 
-    fn with_cli_min() -> Arc<Self> {
+    pub(super) fn with_cli_min(minimum: &str) -> Arc<Self> {
         Arc::new(Self {
-            client: authenticated_client_with_min_versions("sk_models_test", None, Some("0.40.0")),
+            client: authenticated_client_with_min_versions("sk_models_test", None, Some(minimum)),
             presentation: None,
             native: None,
             requested_versions: Mutex::default(),
@@ -440,7 +440,7 @@ async fn models_should_reject_recognized_cli_below_configured_min() {
         .header("user-agent", "codex_cli_rs/0.39.0 (Linux; x86_64)")
         .body(Body::empty())
         .expect("build models request");
-    let response = api_router(ModelsExecution::with_cli_min())
+    let response = api_router(ModelsExecution::with_cli_min("0.40.0"))
         .await
         .oneshot(request)
         .await
@@ -464,7 +464,7 @@ async fn models_should_reject_recognized_cli_with_invalid_version() {
         .header("user-agent", "codex-cli/not-a-version")
         .body(Body::empty())
         .expect("build models request");
-    let response = api_router(ModelsExecution::with_cli_min())
+    let response = api_router(ModelsExecution::with_cli_min("0.40.0"))
         .await
         .oneshot(request)
         .await
@@ -513,7 +513,7 @@ async fn models_should_allow_cli_at_its_configured_min() {
         .header("user-agent", "codex_cli_rs/0.40.0 (Linux; x86_64)")
         .body(Body::empty())
         .expect("build models request");
-    let response = api_router(ModelsExecution::with_cli_min())
+    let response = api_router(ModelsExecution::with_cli_min("0.40.0"))
         .await
         .oneshot(request)
         .await
@@ -529,7 +529,7 @@ async fn models_should_leave_unknown_clients_unrestricted() {
         .header("user-agent", "curl/8.14.1")
         .body(Body::empty())
         .expect("build models request");
-    let response = api_router(ModelsExecution::with_cli_min())
+    let response = api_router(ModelsExecution::with_cli_min("0.40.0"))
         .await
         .oneshot(request)
         .await
@@ -685,7 +685,7 @@ async fn model_detail_should_hide_unknown_models() {
 
 #[tokio::test]
 async fn models_should_authenticate_before_applying_the_version_gate() {
-    let response = api_router(ModelsExecution::with_cli_min())
+    let response = api_router(ModelsExecution::with_cli_min("0.40.0"))
         .await
         .oneshot(
             Request::get("/v1/models")

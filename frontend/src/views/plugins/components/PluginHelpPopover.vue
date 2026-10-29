@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ZIconButton, ZPopover } from '@codex-proxy/ui'
-import { CircleAlert, Info, TriangleAlert } from '@lucide/vue'
+import { Info, TriangleAlert } from '@lucide/vue'
 import { shallowRef, useId } from 'vue'
 
 defineProps<{ label: string, tone?: 'warning' | 'error' }>()
@@ -30,8 +30,7 @@ function handleKeydown(event: KeyboardEvent) {
         :aria-describedby="open ? descriptionId : undefined"
         @keydown="handleKeydown"
       >
-        <CircleAlert v-if="tone === 'error'" class="size-4 text-cp-error-text" />
-        <TriangleAlert v-else-if="tone === 'warning'" class="size-4 text-cp-warning" />
+        <TriangleAlert v-if="tone" class="size-4" :class="tone === 'error' ? 'text-cp-error-text' : 'text-cp-warning'" />
         <Info v-else class="size-3.5" />
       </ZIconButton>
     </template>

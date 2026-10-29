@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import type { ResolvedTheme, ThemeColorPreset, ThemeColorPresetId, ThemeMode, ThemeSeedOverrides } from '@codex-proxy/ui/theme'
+
 import type { ThemeEditorDraft, ThemeEditorGlobalCategory } from '../composables/useThemeEditor'
-
 import { ZSegmented } from '@codex-proxy/ui'
-import { resolveTheme, THEME_COLOR_PRESETS } from '@codex-proxy/ui/theme'
 
+import { resolveThemeSeedTokens, THEME_COLOR_PRESETS } from '@codex-proxy/ui/theme'
 import { Check, ChevronDown, Laptop, Moon, Sun } from '@lucide/vue'
-import { computed } from 'vue'
+
+import { computed, shallowRef } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { uiLocale } from '@/i18n/ui'
 
 import ThemeColorTokenField from './ThemeColorTokenField.vue'
 import ThemeNumberTokenField from './ThemeNumberTokenField.vue'
@@ -35,26 +38,54 @@ const emit = defineEmits<{
   resetSeed: [key: keyof ThemeSeedOverrides]
 }>()
 
-const category = defineModel<ThemeEditorGlobalCategory>('category', { required: true })
+const { t } = useI18n({ useScope: 'global' })
 
+const category = defineModel<ThemeEditorGlobalCategory>('category', { required: true })
+const derivedOpen = shallowRef(false)
+
+const localizedPresets = computed(() => THEME_COLOR_PRESETS.map(preset => ({
+  ...preset,
+  ...uiLocale.value.theme[preset.id],
+})))
 const colorPresets = THEME_COLOR_PRESETS.map(preset => preset.seed)
-const categoryOptions = [
-  { label: '颜色', value: 'color' },
-  { label: '尺寸', value: 'size' },
-  { label: '风格', value: 'style' },
-]
-const modeOptions = [
-  { label: '跟随系统', value: 'system', icon: Laptop },
-  { label: '浅色', value: 'light', icon: Sun },
-  { label: '深色', value: 'dark', icon: Moon },
-]
+const categoryOptions = computed(() => ([
+  {
+    label: t('common.fields.color'),
+    value: 'color',
+  },
+  {
+    label: t('appearance.globalTokens.size'),
+    value: 'size',
+  },
+  {
+    label: t('appearance.globalTokens.style'),
+    value: 'style',
+  },
+]))
+const modeOptions = computed(() => ([
+  {
+    label: t('appearance.globalTokens.systemMode'),
+    value: 'system',
+    icon: Laptop,
+  },
+  {
+    label: t('appearance.globalTokens.lightColor'),
+    value: 'light',
+    icon: Sun,
+  },
+  {
+    label: t('appearance.globalTokens.dark'),
+    value: 'dark',
+    icon: Moon,
+  },
+]))
 const presetSwatchesById = new Map(
   THEME_COLOR_PRESETS.map(preset => [
     preset.id,
     [
-      resolveTheme('light', preset.id, preset.seed).seedTokens.colorBgBase,
+      resolveThemeSeedTokens('light', preset.seed, undefined, preset.appearance?.light).colorBgBase,
       preset.seed,
-      resolveTheme('dark', preset.id, preset.seed).seedTokens.colorBgBase,
+      resolveThemeSeedTokens('dark', preset.seed, undefined, preset.appearance?.dark).colorBgBase,
     ],
   ]),
 )
@@ -63,52 +94,52 @@ const semanticColorFields = computed(() =>
   [
     {
       key: 'colorSuccess' as const,
-      label: '成功色',
+      label: t('appearance.globalTokens.successColor'),
       token: 'colorSuccess',
       value: props.resolved.seedTokens.colorSuccess,
-      description: '成功反馈与状态',
+      description: t('appearance.globalTokens.successFeedbackAndStatus'),
     },
     {
       key: 'colorWarning' as const,
-      label: '警告色',
+      label: t('appearance.globalTokens.warningColor'),
       token: 'colorWarning',
       value: props.resolved.seedTokens.colorWarning,
-      description: '额度与风险提醒',
+      description: t('appearance.globalTokens.limitAndRiskReminder'),
     },
     {
       key: 'colorError' as const,
-      label: '错误色',
+      label: t('appearance.globalTokens.wrongColor'),
       token: 'colorError',
       value: props.resolved.seedTokens.colorError,
-      description: '失败与破坏性操作',
+      description: t('appearance.globalTokens.dangerHelp'),
     },
     {
       key: 'colorInfo' as const,
-      label: '信息色',
+      label: t('appearance.globalTokens.informationColor'),
       token: 'colorInfo',
       value: props.resolved.seedTokens.colorInfo,
-      description: '系统与请求信息',
+      description: t('appearance.globalTokens.systemAndRequestInformation'),
     },
     {
       key: 'colorLink' as const,
-      label: '链接色',
+      label: t('appearance.globalTokens.linkColor'),
       token: 'colorLink',
       value: props.resolved.seedTokens.colorLink,
-      description: '链接与跳转',
+      description: t('appearance.globalTokens.linksAndJumps'),
     },
     {
       key: 'colorTextBase' as const,
-      label: '基础文本色',
+      label: t('appearance.globalTokens.basicTextColor'),
       token: 'colorTextBase',
       value: props.resolved.seedTokens.colorTextBase,
-      description: '正文与信息层级',
+      description: t('appearance.globalTokens.textAndInformationLevels'),
     },
     {
       key: 'colorBgBase' as const,
-      label: '基础背景色',
+      label: t('appearance.globalTokens.basicBackgroundColor'),
       token: 'colorBgBase',
       value: props.resolved.seedTokens.colorBgBase,
-      description: '页面与容器基底',
+      description: t('appearance.globalTokens.pageAndContainerBase'),
     },
   ].filter(field => matches(`${field.label} ${field.token} ${field.description}`)),
 )
@@ -138,7 +169,7 @@ function presetSwatches(preset: ThemeColorPreset) {
     <div class="grid gap-2 rounded-cp-lg bg-cp-bg-container p-2 shadow-cp-tertiary">
       <ZSegmented
         :model-value="draft.mode"
-        aria-label="主题模式"
+        :aria-label="t('appearance.globalTokens.themeMode')"
         display="icon"
         :options="modeOptions"
         class="w-full"
@@ -146,26 +177,26 @@ function presetSwatches(preset: ThemeColorPreset) {
       />
     </div>
 
-    <ZSegmented v-model="category" aria-label="全局 Token 分类" :options="categoryOptions" class="w-full" />
+    <ZSegmented v-model="category" :aria-label="t('appearance.globalTokens.globalTokenClassification')" :options="categoryOptions" class="w-full" />
 
     <template v-if="category === 'color'">
-      <section v-if="matches('预置主题 品牌色 colorPrimary')" class="grid gap-2" aria-labelledby="theme-preset-title">
+      <section v-if="matches(t('appearance.globalTokens.brandColorLabel'))" class="grid gap-2" aria-labelledby="theme-preset-title">
         <div class="flex items-center justify-between px-1">
           <h3 id="theme-preset-title" class="m-0 text-cp font-heavy text-cp-text">
-            品牌色
+            {{ t('appearance.globalTokens.brandColor') }}
           </h3>
           <code class="font-mono text-[10px] text-cp-text-quaternary">colorPrimary</code>
         </div>
-        <div class="grid grid-cols-2 gap-2" role="radiogroup" aria-label="预置主题">
+        <div class="grid grid-cols-2 gap-2" role="radiogroup" :aria-label="t('appearance.globalTokens.presetThemes')">
           <button
-            v-for="preset in THEME_COLOR_PRESETS"
+            v-for="preset in localizedPresets"
             :key="preset.id"
             type="button"
             role="radio"
             class="relative flex min-h-20 flex-col items-stretch justify-between gap-2 rounded-cp-lg bg-cp-fill-quaternary p-2.5 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-cp-bg-text-hover focus-visible:ring-2 focus-visible:ring-cp-control-outline"
             :class="draft.color === preset.id ? 'bg-cp-control-item-bg-active shadow-cp-tertiary' : undefined"
             :aria-checked="draft.color === preset.id"
-            :aria-label="`${preset.label}：${preset.description}`"
+            :aria-label="`${preset.label}: ${preset.description}`"
             :title="preset.description"
             @click="emit('preset', preset.id)"
           >
@@ -191,10 +222,10 @@ function presetSwatches(preset: ThemeColorPreset) {
           </button>
         </div>
         <ThemeColorTokenField
-          label="品牌主色"
+          :label="t('appearance.globalTokens.brandMainColor')"
           token="colorPrimary"
           :value="resolved.seedTokens.colorPrimary"
-          description="完整色阶与界面基调"
+          :description="t('appearance.globalTokens.paletteDescription')"
           :presets="colorPresets"
           :overridden="draft.color === 'custom'"
           @change="emit('primary', $event)"
@@ -204,7 +235,7 @@ function presetSwatches(preset: ThemeColorPreset) {
 
       <section v-if="semanticColorFields.length > 0" class="grid gap-2" aria-labelledby="theme-semantic-title">
         <h3 id="theme-semantic-title" class="m-0 px-1 text-cp font-heavy text-cp-text">
-          功能色与中性色
+          {{ t('appearance.globalTokens.semanticColorsTitle') }}
         </h3>
         <ThemeColorTokenField
           v-for="field in semanticColorFields"
@@ -220,14 +251,19 @@ function presetSwatches(preset: ThemeColorPreset) {
         />
       </section>
 
-      <details v-if="derivedTokens.length > 0" class="group rounded-cp-lg bg-cp-bg-container shadow-cp-tertiary">
+      <details
+        v-if="derivedTokens.length > 0"
+        :open="derivedOpen"
+        class="group rounded-cp-lg bg-cp-bg-container shadow-cp-tertiary"
+        @toggle="derivedOpen = ($event.target as HTMLDetailsElement).open"
+      >
         <summary
           class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-cp-sm font-bold text-cp-text"
         >
-          派生变量 Map / Alias Token
+          {{ t('appearance.globalTokens.derivedVariablesMapAliasToken') }}
           <ChevronDown class="size-3.5 transition-transform duration-150 group-open:rotate-180" />
         </summary>
-        <div class="grid gap-1 px-2 pb-2">
+        <div v-if="derivedOpen" class="grid gap-1 px-2 pb-2">
           <div
             v-for="[name, value] in derivedTokens"
             :key="name"
@@ -243,9 +279,9 @@ function presetSwatches(preset: ThemeColorPreset) {
       </details>
     </template>
 
-    <section v-else-if="category === 'size'" class="grid gap-2" aria-label="尺寸 Token">
+    <section v-else-if="category === 'size'" class="grid gap-2" :aria-label="t('appearance.globalTokens.sizeToken')">
       <ThemeNumberTokenField
-        label="基础字号"
+        :label="t('appearance.globalTokens.basicFontSize')"
         token="fontSize"
         :value="resolved.seedTokens.fontSize"
         :min="11"
@@ -255,7 +291,7 @@ function presetSwatches(preset: ThemeColorPreset) {
         @reset="emit('resetSeed', 'fontSize')"
       />
       <ThemeNumberTokenField
-        label="基础间距"
+        :label="t('appearance.globalTokens.basicSpacing')"
         token="sizeUnit"
         :value="resolved.seedTokens.sizeUnit"
         :min="3"
@@ -265,7 +301,7 @@ function presetSwatches(preset: ThemeColorPreset) {
         @reset="emit('resetSeed', 'sizeUnit')"
       />
       <ThemeNumberTokenField
-        label="尺寸步长"
+        :label="t('appearance.globalTokens.sizeStep')"
         token="sizeStep"
         :value="resolved.seedTokens.sizeStep"
         :min="2"
@@ -275,7 +311,7 @@ function presetSwatches(preset: ThemeColorPreset) {
         @reset="emit('resetSeed', 'sizeStep')"
       />
       <ThemeNumberTokenField
-        label="控件高度"
+        :label="t('appearance.preview.components.controlHeight')"
         token="controlHeight"
         :value="resolved.seedTokens.controlHeight"
         :min="28"
@@ -286,14 +322,14 @@ function presetSwatches(preset: ThemeColorPreset) {
       />
     </section>
 
-    <section v-else class="grid gap-2" aria-label="风格 Token">
+    <section v-else class="grid gap-2" :aria-label="t('appearance.globalTokens.styleToken')">
       <div
         class="rounded-cp-lg bg-cp-primary-container px-3 py-3 text-[10px] leading-normal font-emphasis text-cp-primary-on-container"
       >
-        固定无边设计，圆角塑形，阴影分层
+        {{ t('appearance.globalTokens.surfaceDescription') }}
       </div>
       <ThemeNumberTokenField
-        label="通用圆角"
+        :label="t('appearance.globalTokens.universalFillet')"
         token="borderRadius"
         :value="resolved.seedTokens.borderRadius"
         :min="0"
@@ -303,7 +339,7 @@ function presetSwatches(preset: ThemeColorPreset) {
         @reset="emit('resetSeed', 'borderRadius')"
       />
       <ThemeNumberTokenField
-        label="阴影强度"
+        :label="t('appearance.globalTokens.shadowIntensity')"
         token="shadowStrength"
         :value="resolved.seedTokens.shadowStrength"
         :min="0"

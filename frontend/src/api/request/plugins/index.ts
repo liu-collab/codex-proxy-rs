@@ -5,6 +5,7 @@ import type { RawResponseOptions } from './raw'
 export interface RequestContext {
   config: RequestConfig
   raw?: RawResponseOptions
+  stream?: boolean
   // 会话插件补充身份代际检查，重试与提示消费同一请求有效性
   isCurrent: () => boolean
 }

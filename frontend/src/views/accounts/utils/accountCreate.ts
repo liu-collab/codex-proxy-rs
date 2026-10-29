@@ -1,5 +1,6 @@
 import type { ApiKeyAccountForm } from './upstreamApiKey'
 import type { AccountModelAccess } from '@/api'
+import { t } from '@/i18n'
 import { accountModelAccessError } from './modelAccess'
 import { parseAccountSchedulingForm } from './schedulingForm'
 import { emptyApiKeyAccountForm } from './upstreamApiKey'
@@ -42,18 +43,22 @@ export function emptyAccountCreateForm(): AccountCreateForm {
 }
 
 export function accountCreateProvider(form: AccountCreateForm) {
-  return form.source?.kind === 'provider' ? form.source.id : undefined
+  return form.source?.kind === 'provider'
+    ? form.source.id
+    : undefined
 }
 
 export function accountCreateSourceKey(form: AccountCreateForm) {
-  return form.source?.kind === 'provider' ? `provider:${form.source.id}` : form.source?.kind ?? ''
+  return form.source?.kind === 'provider'
+    ? `provider:${form.source.id}`
+    : form.source?.kind ?? ''
 }
 
 export function accountProxyError(form: AccountCreateForm): string | undefined {
   if (form.proxyMode !== 'proxy')
     return undefined
   if (!form.proxyId.trim())
-    return '请选择已通过测试的代理'
+    return t('accounts.batchEdit.proxyRequired')
   return undefined
 }
 
@@ -65,10 +70,17 @@ export function accountImportSettings(form: AccountCreateForm) {
   if (modelError)
     throw new Error(modelError)
   return {
-    modelAccess: form.modelAccess ? { ...form.modelAccess, models: [...form.modelAccess.models] } : undefined,
+    modelAccess: form.modelAccess
+      ? {
+          ...form.modelAccess,
+          models: [...form.modelAccess.models],
+        }
+      : undefined,
     enabled: form.enabled,
     ...scheduling.values,
-    groupIds: [...new Set(form.groupIds)],
+    groupIds: [
+      ...new Set(form.groupIds),
+    ],
     notes: form.notes.trim() || undefined,
   }
 }
@@ -77,13 +89,26 @@ export function accountImportModes(provider: string | undefined) {
   if (provider === 'openai') {
     return [
       { label: 'OAuth', value: 'oauth' as const },
-      { label: 'API Key', value: 'api_key' as const },
+      {
+        label: t('common.fields.apiKey'),
+        value: 'api_key' as const,
+      },
       { label: 'AT', value: 'access_token' as const },
       { label: 'RT', value: 'refresh_token' as const },
-      { label: '账号文件', value: 'json' as const },
+      {
+        label: t('accounts.onboarding.accountFile'),
+        value: 'json' as const,
+      },
     ]
   }
-  if (provider === 'xai')
-    return [{ label: 'OAuth', value: 'oauth' as const }, { label: '账号文件', value: 'json' as const }]
+  if (provider === 'xai') {
+    return [
+      { label: 'OAuth', value: 'oauth' as const },
+      {
+        label: t('accounts.onboarding.accountFile'),
+        value: 'json' as const,
+      },
+    ]
+  }
   return []
 }

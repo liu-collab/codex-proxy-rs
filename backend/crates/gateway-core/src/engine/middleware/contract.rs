@@ -43,6 +43,8 @@ pub enum MiddlewareMount {
     Request,
     /// 受管 Provider attempt 内层；每次真实 retry 都重新建立
     Attempt,
+    /// Provider 完成序列化后、提交实际发送前的请求准备
+    Outbound,
 }
 
 /// 中间件正文块的宿主边界

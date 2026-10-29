@@ -79,7 +79,7 @@ fn astra_billing_should_preserve_components_across_tiers_and_context_boundary() 
 }
 
 #[test]
-fn new_gpt_6_models_should_use_published_prices_across_tiers_and_context_boundary() {
+fn gpt_6_models_should_use_published_prices_across_tiers_and_context_boundary() {
     // 每档依次核对每百万 Token 的输入、缓存读取、缓存写入和输出价格
     for (model, cases) in [
         (
@@ -91,6 +91,17 @@ fn new_gpt_6_models_should_use_published_prices_across_tiers_and_context_boundar
                 (Some("flex"), 272_001, ["2", "0.1", "2.5", "7.5"]),
                 (Some("fast"), 272_000, ["4", "0.2", "5", "20"]),
                 (Some("priority"), 272_001, ["8", "0.4", "10", "30"]),
+            ],
+        ),
+        (
+            "gpt-6.1-terra",
+            [
+                (None, 272_000, ["1", "0.05", "1.25", "5"]),
+                (None, 272_001, ["2", "0.1", "2.5", "7.5"]),
+                (Some("flex"), 272_000, ["0.5", "0.025", "0.625", "2.5"]),
+                (Some("flex"), 272_001, ["1", "0.05", "1.25", "3.75"]),
+                (Some("fast"), 272_000, ["2", "0.1", "2.5", "10"]),
+                (Some("priority"), 272_001, ["4", "0.2", "5", "15"]),
             ],
         ),
         (
@@ -448,6 +459,8 @@ fn billing_should_not_inherit_prices_for_unknown_models_or_tiers() {
         ("gpt-5.3-codex", 1, Some("flex")),
         ("gpt-6-astra", 1, Some("auto")),
         ("gpt-6-astra", 1, Some("future")),
+        ("gpt-6.1-terra", 1, Some("ultrafast")),
+        ("gpt-6.1-terra", 272_001, Some("ultrafast")),
         ("gpt-6-sol", 1, Some("ultrafast")),
         ("gpt-6-sol", 272_001, Some("ultrafast")),
         ("gpt-6-luna", 1, Some("ultrafast")),
@@ -496,6 +509,7 @@ async fn fetch_should_use_wham_usage_headers_only() {
 
     let usage = client(&server.uri())
         .fetch_usage(CodexRequestContext {
+            response_control: None,
             trace: None,
             authorization: "Bearer oauth-access",
             account_id: Some("acct_123"),
@@ -885,6 +899,7 @@ fn profile() -> CodexWireProfileState {
         terminal: "xterm".to_owned(),
         exact_user_agent: None,
         residency: None,
+        account_routing_override: None,
         verified_at: Utc
             .with_ymd_and_hms(2026, 7, 18, 0, 0, 0)
             .single()
@@ -894,6 +909,7 @@ fn profile() -> CodexWireProfileState {
 
 fn context() -> CodexRequestContext<'static> {
     CodexRequestContext {
+        response_control: None,
         trace: None,
         authorization: "Bearer oauth-access",
         account_id: Some("acct_123"),

@@ -1,12 +1,17 @@
 <script setup lang="ts">
 import type { PluginReleaseAsset } from '@/api'
+
 import { ZPopover, ZScrollbar, ZTag } from '@codex-proxy/ui'
 import { ChevronDown, FileArchive } from '@lucide/vue'
 import { useElementSize, useEventListener } from '@vueuse/core'
 import { computed, nextTick, shallowRef, useId, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { formatPluginFileSize } from '../utils/model'
 
 const props = defineProps<{ assets: PluginReleaseAsset[], disabled?: boolean }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const selected = defineModel<string>({ required: true })
 const open = shallowRef(false)
 const trigger = useTemplateRef<HTMLButtonElement>('trigger')
@@ -40,13 +45,21 @@ useEventListener(panel, 'keydown', handleKeydown)
 useEventListener(panel, 'keydown', (event) => {
   if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key))
     return
-  const options = [...(panel.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
+  const options = [
+    ...(panel.value?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? []),
+  ]
   if (!options.length)
     return
   event.preventDefault()
   event.stopPropagation()
   const current = options.indexOf(event.target as HTMLButtonElement)
-  const next = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + options.length) % options.length
+  const next = event.key === 'Home'
+    ? 0
+    : event.key === 'End'
+      ? options.length - 1
+      : (current + (event.key === 'ArrowDown'
+          ? 1
+          : -1) + options.length) % options.length
   options[next]?.focus()
 })
 watch(open, async (value) => {
@@ -70,7 +83,7 @@ watch(() => props.disabled, (value) => {
         type="button"
         :disabled="disabled"
         :title="selectedAsset?.name"
-        :aria-label="selectedAsset ? `插件包：${selectedAsset.name}` : '选择插件包'"
+        :aria-label="selectedAsset ? t('plugins.assets.pluginPackage', { name: selectedAsset.name }) : t('plugins.assets.selectPluginPackage')"
         aria-haspopup="listbox"
         :aria-expanded="open"
         :aria-controls="open ? panelId : undefined"
@@ -85,12 +98,12 @@ watch(() => props.disabled, (value) => {
       >
         <FileArchive v-if="selectedAsset" class="size-4 shrink-0 text-cp-text-tertiary" aria-hidden="true" />
         <span class="min-w-0 flex-1 truncate text-cp-sm" :class="{ 'text-cp-text-quaternary': !selectedAsset }">
-          {{ selectedAsset?.name ?? '选择插件包' }}
+          {{ selectedAsset?.name ?? t('plugins.assets.selectPluginPackage') }}
         </span>
         <ChevronDown class="size-4 shrink-0 text-cp-text-tertiary transition-transform motion-reduce:transition-none" :class="{ 'rotate-180': open }" aria-hidden="true" />
       </button>
     </template>
-    <div :id="panelId" ref="panel" role="listbox" aria-label="插件包" aria-required="true" :style="{ width: `${width}px` }" class="max-w-[calc(100vw-2rem)] p-1.5">
+    <div :id="panelId" ref="panel" role="listbox" :aria-label="t('plugins.assets.packageLabel')" aria-required="true" :style="{ width: `${width}px` }" class="max-w-[calc(100vw-2rem)] p-1.5">
       <ZScrollbar max-height="min(18rem, 45dvh)">
         <div class="grid gap-0.5 p-0.5">
           <button

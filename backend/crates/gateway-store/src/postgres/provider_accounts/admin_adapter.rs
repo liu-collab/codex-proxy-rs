@@ -29,7 +29,7 @@ fn account_capacity(
 #[derive(Clone)]
 pub struct PgAdminAccountStore {
     pub(super) pool: PgPool,
-    accounts: PgProviderAccountRepository,
+    pub(super) accounts: PgProviderAccountRepository,
     observability: PgObservabilityRepository,
     control_plane: PgControlPlaneRepository,
     cooldowns: Option<Arc<dyn ProviderCooldownPort>>,
@@ -43,9 +43,14 @@ impl PgAdminAccountStore {
         cooldowns: Option<Arc<dyn ProviderCooldownPort>>,
         query_budget: ObservabilityQueryBudget,
     ) -> Self {
+        let accounts = PgProviderAccountRepository::new(pool.clone());
+        let accounts = match &cooldowns {
+            Some(port) => accounts.with_account_error_protection(port.clone()),
+            None => accounts,
+        };
         Self {
             pool: pool.clone(),
-            accounts: PgProviderAccountRepository::new(pool.clone()),
+            accounts,
             observability: PgObservabilityRepository::new(
                 pool.clone(),
                 None,
@@ -324,6 +329,11 @@ impl AccountStore for PgAdminAccountStore {
                 let mut account = admin_account_record(summary)?;
                 account.groups = groups_by_account.remove(&account_id).unwrap_or_default();
                 Ok(AccountPageItem {
+                    protection_rules: runtime
+                        .protection_rules
+                        .get(&account.id)
+                        .cloned()
+                        .unwrap_or_default(),
                     capacity: account_capacity(
                         &account,
                         page.default_concurrency,
@@ -383,6 +393,11 @@ impl AccountStore for PgAdminAccountStore {
             )
         })?;
         Ok(Some(AccountPageItem {
+            protection_rules: runtime
+                .protection_rules
+                .get(&account_id)
+                .cloned()
+                .unwrap_or_default(),
             capacity: account_capacity(&account, default_concurrency, runtime.in_flight.as_ref()),
             account,
             projection,
@@ -638,67 +653,6 @@ impl AccountStore for PgAdminAccountStore {
             config_revision,
             account_id,
         })
-    }
-
-    async fn lower_concurrency_limit(
-        &self,
-        account_id: &CoreProviderAccountId,
-        limit: AccountConcurrencyLimit,
-        context: &MutationContext,
-    ) -> AdminStoreResult<Option<AccountUpdateResult>> {
-        let mut transaction = self.pool.begin().await.map_err(|source| {
-            admin_store_error(
-                ENTITY,
-                postgres_unavailable("begin concurrency reduction", source),
-            )
-        })?;
-        let result =
-            async {
-                // 与管理写入采用相同锁顺序；锁住默认值后再检查账号最新设置，避免把旧快照写回
-                let default_limit: i64 = sqlx::query_scalar(
-                "select max_concurrent_per_account from runtime_settings where id = 1 for update"
-            ).fetch_one(&mut *transaction).await
-                .map_err(|source| postgres_unavailable("lock default concurrency", source))?;
-                let changed = sqlx::query_scalar::<_, String>(
-                    "update provider_accounts set concurrency_limit = $2, updated_at = greatest(now(), updated_at)
-                 where id = $1 and enabled = true
-                   and (coalesce(concurrency_limit, $3) = 0 or coalesce(concurrency_limit, $3) > $2)
-                 returning id",
-                )
-                .bind(account_id.as_str())
-                .bind(i64::from(limit.get()))
-                .bind(default_limit)
-                .fetch_optional(&mut *transaction)
-                .await
-                .map_err(|source| postgres_unavailable("lower account concurrency", source))?;
-                if changed.is_none() {
-                    return Ok(None);
-                }
-                let revision = bump_config_revision_in_transaction(&mut transaction).await?;
-                append_admin_audit_event_in_transaction(
-                    &mut transaction,
-                    mutation_audit(context, MutationAuditOperation::ProviderAccountAdaptConcurrency, account_id.as_str(), vec!["concurrency_limit".to_owned()]),
-                    revision,
-                )
-                .await?;
-                Ok(Some(revision))
-            }
-            .await;
-        let revision = super::repository::finish_admin_transaction(
-            transaction,
-            result,
-            "lower account concurrency",
-        )
-        .await
-        .map_err(|error| admin_store_error(ENTITY, error))?;
-        revision
-            .map(|revision| {
-                Ok(AccountUpdateResult {
-                    config_revision: admin_revision(revision)?,
-                    account_id: account_id.clone(),
-                })
-            })
-            .transpose()
     }
 
     async fn recover_account(

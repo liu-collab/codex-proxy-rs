@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import type { TokenPrices } from '@/api'
+
 import { ZFormItem, ZInput } from '@codex-proxy/ui'
+import { useI18n } from 'vue-i18n'
 import { effectivePrice, priceFields, validPrice } from './model'
 
 const props = defineProps<{
@@ -9,7 +11,10 @@ const props = defineProps<{
   multiplierBps?: number
   disabled: boolean
 }>()
+
 defineEmits<{ change: [field: keyof TokenPrices, value: string] }>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 function preview(field: keyof TokenPrices) {
   const price = (props.custom ?? props.base)?.[field]
@@ -25,7 +30,7 @@ function preview(field: keyof TokenPrices) {
       <ZFormItem v-if="custom" :label="field.label">
         <ZInput
           :model-value="custom[field.key]"
-          :aria-label="`${field.label}单价`"
+          :aria-label="t('settings.pricing.unitPrice', { label: field.label })"
           class="font-mono"
           inputmode="decimal"
           placeholder="0.00"
@@ -43,10 +48,10 @@ function preview(field: keyof TokenPrices) {
       </div>
       <div v-if="(custom && base) || multiplierBps !== 10000" class="mt-2 grid gap-1 text-cp-xs">
         <span v-if="custom && base" class="text-cp-text-tertiary">
-          来源 <span class="break-all font-mono tabular-nums">{{ effectivePrice(base[field.key]) }}</span>
+          {{ t('settings.pricing.source') }} <span class="break-all font-mono tabular-nums">{{ effectivePrice(base[field.key]) }}</span>
         </span>
         <span v-if="multiplierBps !== 10000" class="text-cp-text-secondary">
-          生效 <span class="break-all font-mono tabular-nums text-cp-primary-text">{{ preview(field.key) }}</span>
+          {{ t('settings.pricing.takeEffect') }} <span class="break-all font-mono tabular-nums text-cp-primary-text">{{ preview(field.key) }}</span>
         </span>
       </div>
     </div>

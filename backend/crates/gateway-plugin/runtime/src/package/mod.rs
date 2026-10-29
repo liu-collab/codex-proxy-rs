@@ -8,7 +8,9 @@ mod validation;
 
 pub use cache::PreparedPackage;
 pub(crate) use compatibility::{
-    requirements as compatibility_requirements, warning as compatibility_warning,
+    host_fingerprint as compatibility_host_fingerprint, requirements as compatibility_requirements,
+    warning as compatibility_warning,
 };
 pub use inspection::PackageInspector;
+pub(crate) use inspection::inspection_error;
 pub use validation::{PackageError, PackageLimits, ValidatedPackage};

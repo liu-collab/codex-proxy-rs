@@ -1,13 +1,17 @@
 ---
 name: cpr-plugin-dev
-description: 开发、排查或打包 Codex Proxy RS 独立网关插件；仅改宿主 Runtime、安装器或管理端时使用 cpr-dev-guide，不适用于 Codex 插件或 Vue 插件
+description: 开发、修复、排查、审查或打包 Codex Proxy RS 独立网关插件，含处理器、清单与插件页面；仅改宿主能力时使用 cpr-dev-guide 的插件边界，不适用于 Codex 插件或 Vue 插件
 ---
 
 # 网关插件开发
 
-插件在独立项目中通过公开 SDK 实现业务，不向宿主业务模块添加专属流程
+## 先读职责边界
 
-同时使用 [cpr-dev-guide](../cpr-dev-guide/SKILL.md)的对应任务分支，已加载则复用，不递归重读
+插件在独立项目中通过公开 SDK 实现业务，插件业务错误在插件侧修复；宿主维护自身合同、资源与稳定性，不猜测插件意图、不补造业务数据，不在宿主、SDK 或 Runtime 中增加插件专属补偿
+
+开发、排查和审查先完整读取[插件职责边界](../cpr-dev-guide/references/plugin-boundaries.md)，再选择实现步骤；已有处理器修复和页面改动也执行，不以是否新增能力为条件。需要新增宿主能力时，先界定可独立使用的基础接口及其职责；必要的协议保护与资源回收仍由宿主负责
+
+同时执行 [cpr-dev-guide](../cpr-dev-guide/SKILL.md)的领域必读与收尾要求；已实际读取且仍适用的内容复用，不递归重读入口。仅构建、打包或分发已有插件时按对应操作读取，若需诊断或修改行为，再补齐开发分支
 
 ## 范围与合同
 
@@ -18,13 +22,13 @@ description: 开发、排查或打包 Codex Proxy RS 独立网关插件；仅改
 
 ## 按当前步骤读取
 
-只读取命中行与链接的指定章节，长文档先列标题再截取；不预读全部 SDK、示例、前端和打包资料
+完成上述适用边界后，按当前步骤读取下表；同时涉及多项时叠加。命中的实现或页面参考完整读取，长文档读取指定章节，示例、前端和打包资料在对应步骤加载
 
 | 当前工作 | 入口 |
 | --- | --- |
-| 选择能力或确认能力缺口 | [能力与方法](../../../backend/crates/gateway-plugin/sdk/docs/capabilities.md#能力与方法)、所需能力章节、[插件职责边界](../cpr-dev-guide/references/plugin-boundaries.md) |
-| 清单与 Rust 处理器 | [实现参考](references/implementation.md)、所用 SDK 类型；只有修改清单字段时读[清单](../../../backend/crates/gateway-plugin/sdk/docs/manifest.md)对应章节 |
-| 创建或修改页面 | [页面参考](references/frontend.md)，不需要页面的插件不创建前端 |
+| 选择、使用或审查能力 | [能力与方法](../../../backend/crates/gateway-plugin/sdk/docs/capabilities.md#能力与方法)及所用能力章节，不以已有调用能编译代替合同核对 |
+| 开发、排查或审查清单与 Rust 处理器 | [实现参考](references/implementation.md)、所用 SDK 类型；涉及清单字段时读[清单](../../../backend/crates/gateway-plugin/sdk/docs/manifest.md)对应章节 |
+| 创建、修改或审查页面 | [页面参考](references/frontend.md)，不需要页面的插件不创建前端 |
 | 准备工程或联调依赖 | [工程与依赖](references/development.md#工程与依赖)，需要示例时再读[复用示例](references/development.md#复用示例) |
 | 构建或打包 | [构建与打包](references/development.md#构建与打包) |
 | 实际验收 | [验证与交付](references/development.md#验证与交付)，按实现范围验证 |

@@ -22,7 +22,7 @@ async fn dump_process_lifecycle() {
         let script = directory.path().join("pg_dump");
         std::fs::write(
             &script,
-            "#!/bin/sh\nprintf '%s' $$ > \"$CPR_TEST_PG_DUMP_PROBE_DIR/pid\"\ncase \"$5\" in\n  wait) exec 1>&-; exec sleep 30 ;;\n  stream) printf archive; exec sleep 30 ;;\n  fail) printf partial; exit 1 ;;\n  *) printf archive ;;\nesac\n",
+            "#!/bin/sh\nprintf '%s' $$ > \"$CPR_TEST_PG_DUMP_PROBE_DIR/pid\"\ncase \"$5\" in\n  wait) exec >/dev/null; exec sleep 30 ;;\n  stream) printf archive; exec sleep 30 ;;\n  fail) printf partial; exit 1 ;;\n  *) printf archive ;;\nesac\n",
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -119,8 +119,13 @@ async fn dump_process_lifecycle() {
         .await;
         let pid = std::fs::read_to_string(directory.join("pid")).unwrap();
         if mode == "wait" {
-            // stdout 已关闭，但子进程仍存活：取消必须覆盖 wait 阶段
-            wait_until(|| std::fs::read_link(format!("/proc/{pid}/fd/1")).is_err()).await;
+            // stdout 已脱离管道，但子进程仍存活：取消必须覆盖 wait 阶段
+            // sleep 可能重开关闭的标准 fd，因此以显式重定向确认管道已关闭
+            wait_until(|| {
+                std::fs::read_link(format!("/proc/{pid}/fd/1"))
+                    .is_ok_and(|target| target == Path::new("/dev/null"))
+            })
+            .await;
         }
         if abort {
             task.abort();

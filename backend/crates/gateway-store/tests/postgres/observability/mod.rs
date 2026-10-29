@@ -153,8 +153,13 @@ async fn output_throughput_uses_official_response_duration_without_local_fallbac
 
         super::drain_analytics(&database.pool).await;
         let summary = repository
-            .usage_summary(range, UsageRecordFilter::default())
+            .usage_insights_observation(
+                range,
+                UsageRecordFilter::default(),
+                gateway_admin::model::observability::Granularity::Hour,
+            )
             .await
+            .map(|snapshot| snapshot.overview)
             .expect("throughput summary");
         assert_percentile(
             summary.requests.output_throughput_p10.map(|v| v as f64),
@@ -494,37 +499,6 @@ async fn usage_list_and_diagnostics_preserve_account_snapshots_by_id() {
 }
 
 #[tokio::test]
-async fn usage_search_should_match_literal_prefix_instead_of_substring() {
-    let Some(database) = TestDatabase::create("usage_literal_prefix_search").await else {
-        return;
-    };
-    let now = Utc::now();
-    seed_observability_facts(&database.pool, now)
-        .await
-        .expect("seed observability facts");
-    let range = ObservabilityRange::new(now - TimeDelta::hours(1), now + TimeDelta::hours(1))
-        .expect("observability range");
-
-    super::drain_analytics(&database.pool).await;
-    let page = observability_repository(&database.pool)
-        .list_usage_records(UsageRecordQuery {
-            status: Default::default(),
-            range,
-            filter: UsageRecordFilter {
-                search: Some("rimary".to_owned()),
-                ..UsageRecordFilter::default()
-            },
-            current_page: 1,
-            page_size: ObservabilityPageSize::new(10).expect("page size"),
-        })
-        .await
-        .expect("usage substring search");
-
-    assert_eq!(page.total, 0);
-    database.close().await;
-}
-
-#[tokio::test]
 async fn usage_search_should_ignore_request_ids_and_preserve_exact_filters() {
     let Some(database) = TestDatabase::create("usage_search_without_request_ids").await else {
         return;
@@ -571,8 +545,8 @@ async fn usage_search_should_ignore_request_ids_and_preserve_exact_filters() {
 }
 
 #[tokio::test]
-async fn usage_search_should_match_account_email_and_name_prefixes() {
-    let Some(database) = TestDatabase::create("usage_account_prefix").await else {
+async fn usage_search_should_match_account_email_and_name_substrings() {
+    let Some(database) = TestDatabase::create("usage_account_contains").await else {
         return;
     };
     let now = Utc::now();
@@ -582,10 +556,18 @@ async fn usage_search_should_match_account_email_and_name_prefixes() {
     let range = ObservabilityRange::new(now - TimeDelta::hours(1), now + TimeDelta::hours(1))
         .expect("observability range");
 
-    for search in ["account@example.invalid", "account@", "primary", "pri"] {
+    for search in [
+        "account@example.invalid",
+        "account@",
+        "primary",
+        "pri",
+        "count@example.invalid",
+        "example.invalid",
+        "rimary",
+    ] {
         assert_usage_search_ids(&database.pool, range, search, &["req_observe_success"]).await;
     }
-    for search in ["count@example.invalid", "rimary", "missing@example.invalid"] {
+    for search in ["missing@example.invalid", "EXAMPLE.INVALID", "PRIMARY"] {
         assert_usage_search_ids(&database.pool, range, search, &[]).await;
     }
 
@@ -674,9 +656,13 @@ async fn usage_search_should_treat_account_snapshot_wildcards_as_literals() {
         "account_team%tag@example.invalid",
         "account_",
         "account_team%",
+        "team%tag",
+        "_team%",
         r"primary\",
         r"primary\ops_",
         r"primary\ops_100%",
+        r"\ops_",
+        "100%",
     ] {
         assert_usage_search_ids(&database.pool, range, search, &["req_observe_success"]).await;
     }
@@ -756,6 +742,9 @@ async fn usage_and_error_search_match_key_names_instead_of_credentials() {
         for (search, expected) in [
             ("production", 1),
             ("PRODUCTION_%", 1),
+            ("DUCTION", 1),
+            ("_%专", 1),
+            ("专用", 1),
             ("ProductionX", 0),
             (key, 0),
             (&key[..10], 0),
@@ -858,8 +847,8 @@ async fn usage_and_error_search_match_key_names_instead_of_credentials() {
 }
 
 #[tokio::test]
-async fn ops_search_should_treat_sql_wildcards_as_literals() {
-    let Some(database) = TestDatabase::create("ops_literal_wildcard_search").await else {
+async fn ops_search_should_match_literal_substrings_from_both_sources() {
+    let Some(database) = TestDatabase::create("ops_literal_contains_search").await else {
         return;
     };
     let now = Utc::now();
@@ -870,20 +859,38 @@ async fn ops_search_should_treat_sql_wildcards_as_literals() {
         .expect("observability range");
 
     super::drain_analytics(&database.pool).await;
-    let page = observability_repository(&database.pool)
-        .list_ops_errors(OpsErrorQuery {
-            range,
-            filter: OpsErrorFilter {
-                search: Some("req%".to_owned()),
-                ..OpsErrorFilter::default()
-            },
-            current_page: 1,
-            page_size: ObservabilityPageSize::new(10).expect("page size"),
-        })
-        .await
-        .expect("ops literal wildcard search");
-
-    assert_eq!(page.total, 0);
+    let repository = observability_repository(&database.pool);
+    for (search, expected) in [
+        ("observe_failed", 2),
+        ("_limit", 2),
+        ("observe_retry", 1),
+        ("OBSERVE", 0),
+        ("req%", 0),
+        ("rate%limit", 0),
+        ("rate__limit", 0),
+        (r"\", 0),
+    ] {
+        for current_page in 1..=3 {
+            let page = repository
+                .list_ops_errors(OpsErrorQuery {
+                    range,
+                    filter: OpsErrorFilter {
+                        search: Some(search.to_owned()),
+                        ..OpsErrorFilter::default()
+                    },
+                    current_page,
+                    page_size: ObservabilityPageSize::new(1).expect("page size"),
+                })
+                .await
+                .expect("ops literal substring search");
+            assert_eq!(page.total, expected, "search: {search}");
+            assert_eq!(
+                page.items.len(),
+                usize::from(u64::from(current_page) <= expected),
+                "search: {search}, page: {current_page}"
+            );
+        }
+    }
     database.close().await;
 }
 
@@ -1161,8 +1168,13 @@ async fn recovered_continuation_failure_should_be_visible_in_ops_but_hidden_from
 
     super::drain_analytics(&database.pool).await;
     let overview = repository
-        .usage_summary(range, UsageRecordFilter::default())
+        .usage_insights_observation(
+            range,
+            UsageRecordFilter::default(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("usage summary without recovered intermediates");
     assert_eq!(overview.requests.request_count, 2);
     assert_eq!(overview.requests.failure_count, 0);
@@ -1485,28 +1497,12 @@ impl ProviderCooldownPort for StaticCooldowns {
         Box::pin(async { Ok(false) })
     }
 
-    fn record_capacity_failure<'a>(
-        &'a self,
-        _account_id: &'a ProviderAccountId,
-        _window: Duration,
-        _in_flight: u32,
-    ) -> BoxFuture<'a, Result<u32, ProviderStoreError>> {
-        Box::pin(async { Ok(0) })
-    }
-
     fn clear_after_success<'a>(
         &'a self,
         _account_id: &'a ProviderAccountId,
         _through_revision: gateway_core::account::CredentialRevision,
     ) -> BoxFuture<'a, Result<(), ProviderStoreError>> {
         Box::pin(async { Ok(()) })
-    }
-
-    fn capacity_peak_in_flight<'a>(
-        &'a self,
-        _account_id: &'a ProviderAccountId,
-    ) -> BoxFuture<'a, Result<Option<u32>, ProviderStoreError>> {
-        Box::pin(async { Ok(None) })
     }
 }
 
@@ -1758,6 +1754,9 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
             status: Default::default(),
             range,
             filter: admin_observability::UsageFilter {
+                model_contains: None,
+                client_api_key_name: None,
+                provider_account_name: None,
                 client_api_key_ref: Some("key_observe".to_owned()),
                 request_id: Some("req_observe_success".to_owned()),
                 provider_account_ref: Some("acct_observe".to_owned()),
@@ -1841,8 +1840,13 @@ async fn admin_observability_adapter_preserves_utc_queries_metrics_costs_and_det
 
     super::drain_analytics(&database.pool).await;
     let overview = store
-        .usage_summary(range, admin_observability::UsageFilter::default())
+        .usage_insights_observation(
+            range,
+            admin_observability::UsageFilter::default(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("admin usage overview");
     assert_eq!(overview.range, range);
     assert_eq!(overview.providers[0].provider_kind, "openai");
@@ -2324,8 +2328,13 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
 
     super::drain_analytics(&database.pool).await;
     let overview = repository
-        .usage_summary(range, UsageRecordFilter::default())
+        .usage_insights_observation(
+            range,
+            UsageRecordFilter::default(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("usage summary");
     assert_eq!(overview.attempts.attempt_count, 4);
     assert_eq!(overview.attempts.failure_count, 2);
@@ -2343,14 +2352,16 @@ async fn observability_queries_preserve_request_account_cost_and_diagnostic_fact
 
     super::drain_analytics(&database.pool).await;
     let succeeded = repository
-        .usage_summary(
+        .usage_insights_observation(
             range,
             UsageRecordFilter {
                 outcome: Some("succeeded".to_owned()),
                 ..UsageRecordFilter::default()
             },
+            gateway_admin::model::observability::Granularity::Hour,
         )
         .await
+        .map(|snapshot| snapshot.overview)
         .expect("filtered usage summary");
     assert_eq!(succeeded.requests.cache_eligible_request_count, 1);
     assert_eq!(succeeded.requests.cache_hit_request_count, 1);

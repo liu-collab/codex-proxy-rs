@@ -1,14 +1,29 @@
 <script setup lang="ts">
 import { ZSegmented } from '@codex-proxy/ui'
+
 import { LayoutGrid } from '@lucide/vue'
+
+import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { formatProviderLabel, PROVIDER_IDS, providerIcon } from '@/utils/providers'
 
 defineProps<{ disabled?: boolean }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const provider = defineModel<string>({ required: true })
-const options = [
-  { label: '全部平台', value: '', icon: LayoutGrid },
-  ...PROVIDER_IDS.map(value => ({ label: formatProviderLabel(value), value, icon: providerIcon(value) })),
-]
+const options = computed(() => ([
+  {
+    label: t('common.providers.all'),
+    value: '',
+    icon: LayoutGrid,
+  },
+  ...PROVIDER_IDS.map(value => ({
+    label: formatProviderLabel(value),
+    value,
+    icon: providerIcon(value),
+  })),
+]))
 </script>
 
 <template>
@@ -16,7 +31,7 @@ const options = [
     <div class="min-w-0 overflow-x-auto">
       <ZSegmented
         v-model="provider"
-        aria-label="按平台筛选"
+        :aria-label="t('common.providers.filter')"
         display="icon"
         :style="{ width: `${options.length * 40 + 4}px` }"
         :options="options"

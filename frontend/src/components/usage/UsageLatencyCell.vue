@@ -2,12 +2,16 @@
 import type { UsageListRecord } from '@/api'
 
 import { computed } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 import UsageDetailPopover from '@/components/usage/UsageDetailPopover.vue'
 import { usageLatencyDetails } from './shared/presenter'
 
 const props = defineProps<{
   record: Pick<UsageListRecord, 'latencyDetails' | 'firstTokenLatencyMs' | 'latencyMs'>
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 const latencyDetails = computed(() => usageLatencyDetails(props.record))
 
@@ -25,17 +29,17 @@ const latencyTones = {
     <div
       class="grid grid-cols-[auto_auto] items-center justify-end gap-x-2 gap-y-1.5 whitespace-nowrap font-mono text-cp-sm leading-none font-heavy tabular-nums"
     >
-      <span class="text-cp-xs text-cp-text-quaternary">首字</span>
+      <span class="text-cp-xs text-cp-text-quaternary">{{ t('usage.ttft') }}</span>
       <span :class="latencyDetails.firstOutputSeverity === null ? 'text-cp-text-quaternary' : latencyTones[latencyDetails.firstOutputSeverity]">
         {{ latencyDetails.firstOutputDisplay }}
       </span>
-      <span class="text-cp-xs text-cp-text-quaternary">总耗时</span>
+      <span class="text-cp-xs text-cp-text-quaternary">{{ t('usage.latency.total') }}</span>
       <span :class="latencyDetails.totalSeverity === null ? 'text-cp-text-quaternary' : latencyTones[latencyDetails.totalSeverity]">
         {{ latencyDetails.totalDisplay }}
       </span>
     </div>
 
-    <UsageDetailPopover trigger-label="查看延迟明细">
+    <UsageDetailPopover :trigger-label="t('usage.latency.viewLatencyDetails')">
       <section
         v-for="(section, index) in latencyDetails.sections"
         :key="section.title"
@@ -50,7 +54,7 @@ const latencyTones = {
               ? 'bg-cp-primary-container text-cp-primary-on-container'
               : 'bg-cp-fill-tertiary text-cp-text-tertiary'"
           >
-            {{ section.source === 'official' ? '官方' : '本地' }}
+            {{ section.source === 'official' ? t('usage.latency.official') : t('usage.latency.local') }}
           </span>
         </p>
         <div

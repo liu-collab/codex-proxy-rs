@@ -36,23 +36,6 @@ fn host_compatibility_only_advertises_known_contracts() {
     }
 }
 
-#[test]
-fn host_compatibility_requires_the_trusted_middleware_contract() {
-    let compatibility: PluginHostCompatibility =
-        serde_json::from_str(include_str!("../../plugin-host-compatibility.json"))
-            .expect("compatibility JSON");
-    assert!(!compatibility.supports_capability("middleware", 1));
-    assert!(!compatibility.supports_capability("middleware", 2));
-    assert!(!compatibility.supports_capability("middleware", 3));
-    assert!(!compatibility.supports_capability("middleware", 4));
-    assert!(compatibility.supports_capability("middleware", 5));
-    assert!(!compatibility.supports_capability("upstream_adapter", 1));
-    assert!(!compatibility.supports_capability("upstream_adapter", 2));
-    assert!(!compatibility.supports_capability("upstream_adapter", 3));
-    assert!(compatibility.supports_capability("upstream_adapter", 4));
-    assert!(!compatibility.supports_capability("openai", 1));
-}
-
 #[tokio::test]
 async fn package_inspector_returns_static_requirements_without_starting_the_plugin() {
     let archive = crate::support::package_with_contributions(
@@ -80,7 +63,7 @@ async fn package_inspector_returns_static_requirements_without_starting_the_plug
         requirements.protocol_version,
         gateway_plugin_sdk::PROTOCOL_VERSION
     );
-    assert_eq!(requirements.capabilities, vec![("middleware".into(), 5)]);
+    assert_eq!(requirements.capabilities, vec![("middleware".into(), 6)]);
 }
 
 #[tokio::test]
@@ -98,13 +81,20 @@ async fn retired_contracts_remain_loadable_with_compatibility_warnings() {
             vec!["openai".into()],
             vec!["openai".into()],
         );
+        let mut catalog = crate::support::contribution(
+            Capability::ModelCatalog,
+            vec![Stage::Registration],
+            vec![],
+            vec![],
+        );
         if legacy {
             middleware.1.version = 3;
             upstream.1.version = 1;
+            catalog.1.version = 1;
         }
         let archive = crate::support::package_with_contributions(
             b"not-an-executable",
-            Contributions::from([middleware, upstream]),
+            Contributions::from([middleware, upstream, catalog]),
         );
         let inspector =
             PackageInspector::new(PackageLimits::default(), semver::Version::new(1, 0, 0));
@@ -119,6 +109,7 @@ async fn retired_contracts_remain_loadable_with_compatibility_warnings() {
             let warning = warning.expect("retired contracts must remain visible");
             assert!(warning.contains("middleware v3"));
             assert!(warning.contains("upstream_adapter v1"));
+            assert!(warning.contains("model_catalog v1"));
         } else {
             assert!(warning.is_none());
         }
@@ -163,4 +154,47 @@ async fn compatibility_warning_rejects_invalid_packages_and_digest_mismatches() 
         .await
         .unwrap_err();
     assert_eq!(error.kind(), gateway_admin::model::AdminErrorKind::Invalid);
+}
+
+#[tokio::test]
+async fn runtime_and_update_preflight_compare_only_declared_contracts() {
+    let host: PluginHostCompatibility =
+        serde_json::from_str(include_str!("../../plugin-host-compatibility.json")).unwrap();
+    for capability_version in [6, 3] {
+        let mut contribution =
+            crate::support::contribution(Capability::Middleware, vec![Stage::Http], vec![], vec![]);
+        contribution.1.version = capability_version;
+        let archive = crate::support::package_with_contributions(
+            b"not-an-executable",
+            Contributions::from([contribution]),
+        );
+        let digest = hex::encode(Sha256::digest(&archive));
+        for version in ["1.0.0", "3.0.0"] {
+            let version = semver::Version::parse(version).unwrap();
+            let inspector = PackageInspector::new(PackageLimits::default(), version.clone());
+            let requirements = inspector
+                .compatibility(archive.clone(), digest.clone())
+                .await
+                .unwrap();
+            let reasons = host.incompatibilities(&requirements, &version);
+            assert_eq!(
+                inspector
+                    .compatibility_warning(archive.clone(), digest.clone())
+                    .await
+                    .unwrap(),
+                (!reasons.is_empty()).then(|| reasons.join("，"))
+            );
+            assert_eq!(
+                reasons.len(),
+                usize::from(capability_version != 6) + usize::from(version.major != 1)
+            );
+            let mut unsupported = requirements;
+            unsupported.manifest_schema_version = 999;
+            unsupported.protocol_version = 999;
+            assert_eq!(
+                host.incompatibilities(&unsupported, &version).len(),
+                reasons.len() + 2
+            );
+        }
+    }
 }

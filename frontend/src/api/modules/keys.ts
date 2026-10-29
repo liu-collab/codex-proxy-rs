@@ -121,11 +121,12 @@ export function updateApiKey(data: ApiKeyUpdateParam) {
   })
 }
 
-export function revealApiKey(data: ApiKeyIdParam) {
+export function revealApiKey(data: ApiKeyIdParam, options: RequestOptions = {}) {
   return request<ApiKeyRevealResponse>({
     url: '/api/admin/client-keys/reveal',
     method: 'GET',
     params: data,
+    ...options,
   })
 }
 

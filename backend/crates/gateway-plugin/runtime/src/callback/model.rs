@@ -1,4 +1,4 @@
-//! 嵌套模型执行；只驱动 Core 会话，不拥有路由、重试或计费规则
+//! 模型目录与执行适配；身份解析交给客户端端口，路由与计费沿用 Core
 
 use std::sync::{Arc, OnceLock, Weak};
 
@@ -9,11 +9,10 @@ use gateway_core::{
     engine::{
         CommitRequirement, ModelRequestId,
         execution::{
-            BoundModelExecutionContext, ClientTransport, ExecutionRequestMetadata, ExecutionSession,
+            AuthenticatedClient, ClientTransport, ExecutionRequestMetadata, ExecutionSession,
         },
         nested::{
-            BoundModelExecutionBinding, BoundModelExecutionRequest, NestedModelExecutionPort,
-            NestedModelExecutionRequest,
+            BoundModelExecutionRequest, NestedModelExecutionPort, NestedModelExecutionRequest,
         },
     },
     event::ProviderEvent,
@@ -22,13 +21,12 @@ use gateway_core::{
         GenerateRequest, ImageRequest, ImageRequestKind, Operation, ProtocolPayload,
         RawJsonPayload, StandaloneSearchRequest,
     },
-    policy::ClientApiKeyId,
     routing::PublicModelId,
 };
 use gateway_plugin_sdk::{
     CallContext, ErrorCode, PluginFault,
     call::host::{
-        ModelEventBatch, ModelExecuteRequest, ModelExecuteResult, ModelListRequest,
+        self as wire, ModelEventBatch, ModelExecuteRequest, ModelExecuteResult, ModelListRequest,
         ModelListResult, ModelOperation, ModelStreamCloseRequest, ModelStreamReadRequest,
         ModelStreamReadResult, ModelStreamResult,
     },
@@ -63,6 +61,7 @@ impl PluginModelPortSlot {
 
 pub(super) struct PluginModels {
     slot: Arc<PluginModelPortSlot>,
+    clients: Arc<super::client::PluginClients>,
     request_limits: Arc<super::request_limits::RequestLimits>,
     maximum_payload: usize,
 }
@@ -70,11 +69,13 @@ pub(super) struct PluginModels {
 impl PluginModels {
     pub(super) fn new(
         slot: Arc<PluginModelPortSlot>,
+        clients: Arc<super::client::PluginClients>,
         request_limits: Arc<super::request_limits::RequestLimits>,
         maximum_payload: usize,
     ) -> Self {
         Self {
             slot,
+            clients,
             request_limits,
             maximum_payload,
         }
@@ -89,7 +90,7 @@ impl PluginModels {
         payload: Vec<u8>,
     ) -> Result<RpcReply, PluginFault> {
         match method {
-            "host.models.list" => {
+            wire::MODELS_LIST => {
                 if !payload.is_empty() {
                     return Err(invalid());
                 }
@@ -102,19 +103,14 @@ impl PluginModels {
                     return Err(invalid());
                 }
                 let port = self.slot.upgrade()?;
-                let bound = port
-                    .bind(BoundModelExecutionBinding {
-                        settings: call.request_settings(),
-                        client_key_id: ClientApiKeyId::new(request.client_key_id)
-                            .map_err(|_| invalid())?,
-                        initiating_plugin_instance_id: context.instance_id.clone(),
-                        cancellation: call.cancellation.child_token(),
-                        extension_scope: call.scope.extension_scope.clone(),
-                    })
-                    .await
-                    .map_err(super::error::gateway)?;
+                let client = self.clients.identity(call, request.client_key_id).await?;
                 let models = port
-                    .models(bound, request.protocol, request.client_version)
+                    .models(
+                        client,
+                        call.cancellation.clone(),
+                        request.protocol,
+                        request.client_version,
+                    )
                     .await
                     .map_err(super::error::gateway)?;
                 encode_result(ModelListResult {
@@ -124,7 +120,7 @@ impl PluginModels {
                         .collect(),
                 })
             }
-            "host.model.execute" | "host.model.execute_stream" => {
+            wire::MODEL_EXECUTE | wire::MODEL_EXECUTE_STREAM => {
                 let mut request: ModelExecuteRequest =
                     serde_json::from_value(params).map_err(|_| invalid())?;
                 if payload.is_empty() {
@@ -139,11 +135,14 @@ impl PluginModels {
                     }
                 };
                 let port = self.slot.upgrade()?;
-                let stream = method == "host.model.execute_stream";
+                let stream = method == wire::MODEL_EXECUTE_STREAM;
                 let started = if let Some(client_key_id) = request.client_key_id.take() {
-                    let bound = self.binding(&port, context, call, client_key_id).await?;
-                    check_size(bound.request_body_limit())?;
-                    port.start_bound(self.bound_request(request, payload, stream, bound)?)
+                    let client = self.clients.identity(call, client_key_id).await?;
+                    check_size(client.snapshot().responses_max_decompressed_body_bytes())?;
+                    let request = self.request_parts(request, payload, stream)?;
+                    let request = Self::bound_request(context, call, request, client);
+                    call.observe_dispatch()?;
+                    port.start_bound(request)
                         .await
                         .map_err(super::error::gateway)?
                 } else {
@@ -151,7 +150,7 @@ impl PluginModels {
                     let request = self.request(context, request, payload, stream)?;
                     port.start(request).await.map_err(super::error::gateway)?
                 };
-                if method == "host.model.execute" {
+                if method == wire::MODEL_EXECUTE {
                     execute_buffered(started, self.maximum_payload).await
                 } else {
                     let stream = Arc::new(ModelStream::new(started.session, self.maximum_payload));
@@ -175,7 +174,7 @@ impl PluginModels {
                     })
                 }
             }
-            "host.model.stream_read" => {
+            wire::MODEL_STREAM_READ => {
                 if !payload.is_empty() {
                     return Err(invalid());
                 }
@@ -214,7 +213,7 @@ impl PluginModels {
                     payload: read.payload,
                 })
             }
-            "host.model.stream_close" => {
+            wire::MODEL_STREAM_CLOSE => {
                 if !payload.is_empty() {
                     return Err(invalid());
                 }
@@ -235,44 +234,6 @@ impl PluginModels {
             }
             _ => Err(denied()),
         }
-    }
-
-    async fn binding(
-        &self,
-        port: &Arc<dyn NestedModelExecutionPort>,
-        context: &CallContext,
-        call: &CallResources,
-        client_key_id: String,
-    ) -> Result<BoundModelExecutionContext, PluginFault> {
-        let key = ClientApiKeyId::new(client_key_id.clone()).map_err(|_| invalid())?;
-        let settings = call.request_settings();
-        let mut bindings = call.model_bindings.lock().await;
-        if let Some(bound) = bindings
-            .get(&client_key_id)
-            .filter(|bound| bound.request_settings() == settings.as_ref())
-        {
-            return Ok(bound.clone());
-        }
-        if !bindings.contains_key(&client_key_id) && bindings.len() >= MAX_MODEL_STREAMS_PER_CALL {
-            return Err(PluginFault::new(
-                ErrorCode::Capacity,
-                "model identity capacity is exhausted",
-            ));
-        }
-        let bound = port
-            .bind(BoundModelExecutionBinding {
-                settings,
-                client_key_id: key,
-                initiating_plugin_instance_id: context.instance_id.clone(),
-                cancellation: call.cancellation.child_token(),
-                extension_scope: call.scope.extension_scope.clone(),
-            })
-            .await
-            .map_err(super::error::gateway)?;
-        // 调用持有身份直到 RPC 结束，流式执行不会因单次 callback 返回而提前取消；
-        // 同一 Key 复用身份快照，每次执行由 Core 创建独立调用图
-        bindings.insert(client_key_id, bound.clone());
-        Ok(bound)
     }
 
     fn request(
@@ -310,21 +271,22 @@ impl PluginModels {
     }
 
     fn bound_request(
-        &self,
-        request: ModelExecuteRequest,
-        body: Vec<u8>,
-        stream: bool,
-        context: BoundModelExecutionContext,
-    ) -> Result<BoundModelExecutionRequest, PluginFault> {
-        let request = self.request_parts(request, body, stream)?;
-        Ok(BoundModelExecutionRequest {
-            context,
+        context: &CallContext,
+        call: &CallResources,
+        request: ModelRequestParts,
+        client: AuthenticatedClient,
+    ) -> BoundModelExecutionRequest {
+        BoundModelExecutionRequest {
+            client,
+            initiating_plugin_instance_id: context.instance_id.clone(),
+            cancellation: call.cancellation.clone(),
+            extension_scope: call.scope.extension_scope.clone(),
             public_model: request.public_model,
             operation: request.operation,
             metadata: request.metadata,
             provider: request.provider,
             account: request.account,
-        })
+        }
     }
 
     fn request_parts(

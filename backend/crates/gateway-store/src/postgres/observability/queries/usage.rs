@@ -11,6 +11,19 @@ pub(crate) fn push_usage_filter(
     filter: &UsageRecordFilter,
     alias: &str,
 ) {
+    for (column, value) in [
+        ("client_api_key_name_snapshot", &filter.client_api_key_name),
+        (
+            "provider_account_name_snapshot",
+            &filter.provider_account_name,
+        ),
+    ] {
+        if let Some(value) = value {
+            query.push(format!(" and {alias}.{column} like "));
+            query.push_bind(literal_contains_pattern(value));
+            query.push(" escape '\\'");
+        }
+    }
     if let Some(value) = &filter.client_api_key_ref {
         query.push(format!(" and {alias}.client_api_key_ref = "));
         query.push_bind(value.clone());
@@ -37,6 +50,14 @@ pub(crate) fn push_usage_filter(
         query.push(format!(" or {alias}.upstream_model_id = "));
         query.push_bind(value.clone());
         query.push(")");
+    }
+    if let Some(value) = &filter.model_contains {
+        let pattern = literal_contains_pattern(value);
+        query.push(format!(" and ({alias}.requested_model_id like "));
+        query.push_bind(pattern.clone());
+        query.push(format!(" escape '\\' or {alias}.upstream_model_id like "));
+        query.push_bind(pattern);
+        query.push(" escape '\\')");
     }
     if let Some(value) = &filter.outcome {
         query.push(format!(" and {alias}.outcome = "));
@@ -79,7 +100,7 @@ pub(crate) fn push_usage_filter(
         query.push_bind(value.clone());
     }
     if let Some(value) = &filter.search {
-        let pattern = literal_prefix_pattern(value);
+        let pattern = literal_contains_pattern(value);
         query.push(format!(" and ({alias}.requested_model_id like "));
         query.push_bind(pattern.clone());
         for column in [
@@ -102,16 +123,6 @@ pub(crate) fn push_usage_filter(
     }
 }
 
-pub(crate) fn literal_prefix_pattern(value: &str) -> String {
-    format!(
-        "{}%",
-        value
-            .replace('\\', "\\\\")
-            .replace('%', "\\%")
-            .replace('_', "\\_")
-    )
-}
-
 pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
     "select mr.id, mr.outcome, mr.provider_error_code as error_code, mr.error_message, mr.client_status_code, mr.client_api_key_name_snapshot as client_api_key_name, mr.endpoint, mr.client_transport, mr.requested_model_id,
             mr.provider_kind, mr.provider_account_ref,
@@ -121,7 +132,7 @@ pub(crate) const USAGE_LIST_RECORD_SELECT: &str =
             mr.provider_account_plan_type_snapshot as provider_account_plan_type,
             mr.provider_account_authentication_kind_snapshot
               as provider_account_authentication_kind,
-            mr.upstream_model_id, mr.upstream_transport, mr.upstream_response_model, mr.service_tier,
+            mr.upstream_model_id, mr.upstream_transport, mr.service_tier,
             mr.input_tokens, mr.output_tokens, mr.cached_input_tokens, mr.cache_write_input_tokens,
             mr.reasoning_output_tokens, mr.image_input_tokens, mr.image_output_tokens,
             mr.total_tokens, mr.billing_snapshot_json, mr.cost_source, mr.cost_amount::text, mr.cost_currency,
@@ -146,7 +157,7 @@ pub(crate) const USAGE_RECORD_DETAIL_SELECT: &str =
             mr.provider_account_authentication_kind_snapshot
               as provider_account_authentication_kind,
             mr.upstream_model_id, mr.upstream_transport, mr.http_version, mr.websocket_pool,
-            mr.service_tier, mr.upstream_response_model, mr.provider_observation_json, mr.diagnostic_trace_json,
+            mr.service_tier, mr.provider_observation_json, mr.diagnostic_trace_json,
             mr.attempt_count, mr.upstream_send_state, mr.downstream_committed_at,
             mr.outcome, mr.client_status_code, mr.upstream_status_code,
             mr.client_response_id, mr.upstream_request_id, mr.upstream_response_id,
@@ -176,11 +187,7 @@ pub(crate) async fn list_usage_records(
         let items = list_usage_record_items(&mut *snapshot.tx, &query, None).await?;
         let total = if items.len() < usize::from(query.page_size.get()) {
             items.len() as u64
-        } else if query.status == admin_observability::UsageRecordStatus::Success
-            && let Some(counts) = snapshot
-                .completed_request_counts(query.range, &query.filter)
-                .await?
-        {
+        } else if let Some(counts) = projected_usage_counts(&mut snapshot, &query).await? {
             counts.values().try_fold(0_u64, |sum, count| {
                 sum.checked_add(*count)
                     .ok_or_else(|| invalid("usage count overflows u64"))
@@ -190,21 +197,18 @@ pub(crate) async fn list_usage_records(
         };
         (total, items)
     } else {
-        let (total, page) = if query.status == admin_observability::UsageRecordStatus::Success
-            && let Some(counts) = snapshot
-                .completed_request_counts(query.range, &query.filter)
-                .await?
-        {
-            time_page_from_segments(
-                counts.into_iter().rev(),
-                query.range,
-                observability_page_offset(query.current_page, query.page_size)?,
-                query.page_size,
-                TimeDelta::minutes(15),
-            )?
-        } else {
-            usage_time_page(&mut snapshot.tx, &query).await?
-        };
+        let (total, page) =
+            if let Some(counts) = projected_usage_counts(&mut snapshot, &query).await? {
+                time_page_from_segments(
+                    counts.into_iter().rev(),
+                    query.range,
+                    observability_page_offset(query.current_page, query.page_size)?,
+                    query.page_size,
+                    TimeDelta::minutes(15),
+                )?
+            } else {
+                usage_time_page(&mut snapshot.tx, &query).await?
+            };
         let items = match page {
             Some(page) => list_usage_record_items_at(&mut *snapshot.tx, &query, page).await?,
             None => Vec::new(),
@@ -218,6 +222,48 @@ pub(crate) async fn list_usage_records(
         page_size: query.page_size.get(),
         total,
     })
+}
+
+async fn projected_usage_counts(
+    snapshot: &mut AnalyticsSnapshot<'_>,
+    query: &UsageRecordQuery,
+) -> StoreResult<Option<BTreeMap<DateTime<Utc>, u64>>> {
+    use admin_observability::UsageRecordStatus;
+    if query.status == UsageRecordStatus::Error {
+        return Ok(None);
+    }
+    let Some(mut counts) = snapshot
+        .completed_request_counts(query.range, &query.filter)
+        .await?
+    else {
+        return Ok(None);
+    };
+    if query.status == UsageRecordStatus::All {
+        // 成功计数已校正未投影差量；其他状态直接读同一快照源表，保留恢复记录和执行中请求
+        let mut statement = QueryBuilder::<Postgres>::new(
+            "select date_bin(interval '15 minutes',mr.started_at,timestamptz 'epoch') as bucket_start,
+                    count(*)::bigint as request_count
+             from model_request_observations mr where mr.started_at >= ",
+        );
+        statement.push_bind(query.range.start);
+        statement.push(" and mr.started_at < ");
+        statement.push_bind(query.range.end);
+        statement.push(" and mr.outcome in ('running','failed','cancelled','incomplete')");
+        push_non_success_count_filter(&mut statement, &query.filter);
+        statement.push(" group by bucket_start");
+        let rows = statement
+            .build()
+            .fetch_all(&mut *snapshot.tx)
+            .await
+            .map_err(|source| postgres_unavailable("count non-success usage records", source))?;
+        for row in rows {
+            let count = counts.entry(get(&row, "bucket_start")?).or_default();
+            *count = count
+                .checked_add(to_u64(get(&row, "request_count")?)?)
+                .ok_or_else(|| invalid("usage count overflows u64"))?;
+        }
+    }
+    Ok(Some(counts))
 }
 
 pub(crate) async fn list_usage_record_items<'e, E: sqlx::Executor<'e, Database = Postgres>>(
@@ -357,17 +403,7 @@ async fn usage_time_page(
     query: &UsageRecordQuery,
 ) -> StoreResult<(u64, Option<TimePage>)> {
     let offset = observability_page_offset(query.current_page, query.page_size)?;
-    let mut statement = QueryBuilder::<Postgres>::new(
-        "select date_bin(interval '1 minute', mr.started_at, timestamptz 'epoch') as bucket_start,
-                count(*)::bigint as request_count
-         from model_request_observations mr where mr.started_at >= ",
-    );
-    statement.push_bind(query.range.start);
-    statement.push(" and mr.started_at < ");
-    statement.push_bind(query.range.end);
-    push_usage_record_status(&mut statement, query.status);
-    push_usage_filter(&mut statement, &query.filter, "mr");
-    statement.push(" group by bucket_start order by bucket_start desc");
+    let mut statement = usage_counts_query(query.range, &query.filter, query.status, true);
     let rows = statement
         .build()
         .fetch_all(connection)
@@ -382,20 +418,127 @@ pub(crate) async fn count_usage_records<'e, E: sqlx::Executor<'e, Database = Pos
     filter: &UsageRecordFilter,
     status: admin_observability::UsageRecordStatus,
 ) -> StoreResult<u64> {
-    let mut statement = QueryBuilder::<Postgres>::new(
-        "select count(*)::bigint from model_request_observations mr where mr.started_at >= ",
-    );
-    statement.push_bind(range.start);
-    statement.push(" and mr.started_at < ");
-    statement.push_bind(range.end);
-    push_usage_record_status(&mut statement, status);
-    push_usage_filter(&mut statement, filter, "mr");
+    let mut statement = usage_counts_query(range, filter, status, false);
     let total = statement
         .build_query_scalar::<i64>()
         .fetch_one(executor)
         .await
         .map_err(|source| postgres_unavailable("count usage records", source))?;
     to_u64(total)
+}
+
+fn usage_counts_query(
+    range: ObservabilityRange,
+    filter: &UsageRecordFilter,
+    status: admin_observability::UsageRecordStatus,
+    by_minute: bool,
+) -> QueryBuilder<Postgres> {
+    use admin_observability::UsageRecordStatus;
+    let split = status == UsageRecordStatus::All;
+    let mut statement = QueryBuilder::<Postgres>::new(if split {
+        if by_minute {
+            "select bucket_start,sum(request_count)::bigint as request_count from ("
+        } else {
+            "select sum(request_count)::bigint as request_count from ("
+        }
+    } else {
+        ""
+    });
+    // 成功交付和非成功互斥，分别使用交付部分索引和 outcome 索引，保留恢复记录
+    for branch in 0..if split { 2 } else { 1 } {
+        if branch > 0 {
+            statement.push(" union all ");
+        }
+        statement.push("select ");
+        if by_minute {
+            statement.push(
+                "date_bin(interval '1 minute',mr.started_at,timestamptz 'epoch') as bucket_start,",
+            );
+        }
+        statement.push("count(*)::bigint as request_count from model_request_observations mr where mr.started_at >= ");
+        statement.push_bind(range.start);
+        statement.push(" and mr.started_at < ");
+        statement.push_bind(range.end);
+        if branch > 0 {
+            // 与 model_requests_outcome_ck 允许的全部非成功状态一致
+            statement.push(" and mr.outcome in ('running','failed','cancelled','incomplete')");
+        } else {
+            push_usage_record_status(
+                &mut statement,
+                if split {
+                    UsageRecordStatus::Success
+                } else {
+                    status
+                },
+            );
+        }
+        if branch > 0 || status == UsageRecordStatus::Error {
+            push_non_success_count_filter(&mut statement, filter);
+        } else {
+            push_usage_filter(&mut statement, filter, "mr");
+        }
+        if by_minute {
+            statement.push(" group by bucket_start");
+        }
+    }
+    if split {
+        statement.push(") counts");
+        if by_minute {
+            statement.push(" group by bucket_start");
+        }
+    }
+    if by_minute {
+        statement.push(" order by bucket_start desc");
+    }
+    statement
+}
+
+fn push_non_success_count_filter(
+    statement: &mut QueryBuilder<Postgres>,
+    filter: &UsageRecordFilter,
+) {
+    let model_filter = UsageRecordFilter {
+        provider_kind: filter.provider_kind.clone(),
+        model: filter.model.clone(),
+        outcome: filter.outcome.clone(),
+        ..Default::default()
+    };
+    let Some(model) = filter.model.as_ref().filter(|_| *filter == model_filter) else {
+        push_usage_filter(statement, filter, "mr");
+        return;
+    };
+    let outcome_only = UsageRecordFilter {
+        outcome: filter.outcome.clone(),
+        ..Default::default()
+    };
+    push_usage_filter(statement, &outcome_only, "mr");
+    // outcome 索引没有模型或供应方字段；用同一记录的三列等值探测现有索引，避免大批错误回宽表
+    // 其他筛选仍需读取源行，继续使用原谓词；两个 EXISTS 的 OR 不会重复计算双模型匹配
+    statement.push(" and (");
+    for (index, column) in ["requested_model_id", "upstream_model_id"]
+        .iter()
+        .enumerate()
+    {
+        if index > 0 {
+            statement.push(" or ");
+        }
+        statement.push(format!(
+            "exists(select 1 from model_requests modeled where modeled.{column}="
+        ));
+        statement.push_bind(model.clone());
+        statement.push(" and modeled.started_at=mr.started_at and modeled.id=mr.id");
+        if let Some(provider) = &filter.provider_kind {
+            // 放在模型候选内，避免外层同表 EXISTS 被合并为 mr.provider_kind 而重新回宽表
+            statement.push(
+                " and exists(select 1 from model_requests provided where provided.provider_kind=",
+            );
+            statement.push_bind(provider.clone());
+            statement
+                .push(" and provided.started_at=modeled.started_at and provided.id=modeled.id)");
+        }
+        statement.push(")");
+    }
+    statement.push(")");
 }
 
 pub(crate) async fn usage_record_detail(

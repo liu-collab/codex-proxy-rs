@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
+
 import { Menu } from '@lucide/vue'
 import {
   useDraggable,
@@ -18,6 +19,13 @@ import {
   useTemplateRef,
   watch,
 } from 'vue'
+import { useI18n } from 'vue-i18n'
+
+const emit = defineEmits<{
+  open: []
+}>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 interface StoredPosition {
   initialized: boolean
@@ -25,10 +33,6 @@ interface StoredPosition {
   x: number
   y: number
 }
-
-const emit = defineEmits<{
-  open: []
-}>()
 
 const edgeGap = 12
 const defaultButtonSize = 48
@@ -114,15 +118,14 @@ function handlePointerUp(event: PointerEvent) {
     event.clientX - pointerStart.value.x,
     event.clientY - pointerStart.value.y,
   )
-  ignoreNextClick.value = true
+  ignoreNextClick.value = moved > dragClickThreshold
   window.clearTimeout(ignoreClickTimer)
-  ignoreClickTimer = window.setTimeout(() => {
-    ignoreNextClick.value = false
-  }, 320)
-
-  if (moved <= dragClickThreshold) {
-    emit('open')
+  if (ignoreNextClick.value) {
+    ignoreClickTimer = window.setTimeout(() => {
+      ignoreNextClick.value = false
+    }, 320)
   }
+  // 触摸结束后还会派发 click，提前打开并卸载按钮会让该点击落到新遮罩上
 }
 
 function handleClick() {
@@ -145,7 +148,9 @@ function restorePosition() {
     return
   }
 
-  const sideX = storedPosition.value.side === 'right' ? bounds.value.maxX : bounds.value.minX
+  const sideX = storedPosition.value.side === 'right'
+    ? bounds.value.maxX
+    : bounds.value.minX
   applyPosition({
     initialized: true,
     side: storedPosition.value.side,
@@ -156,12 +161,16 @@ function restorePosition() {
 
 function snapPosition(rawX: number, rawY: number) {
   const { minX, maxX, minY, maxY } = bounds.value
-  const side = rawX <= (minX + maxX) / 2 ? 'left' : 'right'
+  const side = rawX <= (minX + maxX) / 2
+    ? 'left'
+    : 'right'
 
   return {
     initialized: true,
     side,
-    x: side === 'left' ? minX : maxX,
+    x: side === 'left'
+      ? minX
+      : maxX,
     y: clamp(rawY, minY, maxY),
   } satisfies StoredPosition
 }
@@ -181,12 +190,16 @@ function applyPosition(position: StoredPosition) {
 }
 
 function positiveNumber(value: number, fallback: number) {
-  return Number.isFinite(value) && value > 0 ? value : fallback
+  return Number.isFinite(value) && value > 0
+    ? value
+    : fallback
 }
 
 function parseCssPixel(value: string) {
   const parsed = Number.parseFloat(value)
-  return Number.isFinite(parsed) ? parsed : 0
+  return Number.isFinite(parsed)
+    ? parsed
+    : 0
 }
 
 onMounted(async () => {
@@ -226,7 +239,7 @@ onScopeDispose(() => {
           ? 'scale-95 cursor-grabbing shadow-[0_14px_28px_-20px_var(--cp-color-shadow)]'
           : 'cursor-grab'
       "
-      aria-label="打开侧边栏"
+      :aria-label="t('navigation.sidebar.open')"
       @pointerdown="handlePointerDown"
       @pointerup="handlePointerUp"
       @click="handleClick"

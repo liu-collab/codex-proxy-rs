@@ -8,7 +8,8 @@ use super::{
 use crate::{
     PackageLimits, RpcLimits, RpcSession,
     callback::{
-        PluginAccountPortSlot, PluginAffinityPortSlot, PluginClientKeyPortSlot, PluginModelPortSlot,
+        PluginAccountPortSlot, PluginAffinityPortSlot, PluginClientIdentityPortSlot,
+        PluginClientKeyPortSlot, PluginModelPortSlot,
     },
 };
 use gateway_admin::{
@@ -21,21 +22,19 @@ use gateway_admin::{
 };
 use gateway_core::{
     engine::{
-        authentication::FrontendAuthenticationExtensionIndex,
+        authentication::{ClientIdentityPort, FrontendAuthenticationExtensionIndex},
         extensions::ExecutionExtensionIndex,
         nested::{AffinityLookupPort, NestedModelExecutionPort},
         observation::RequestObserverExtensionIndex,
         policy::RequestPolicyExtensionIndex,
     },
+    lifecycle::CancellationToken,
     provider_ports::OAuthPendingFlowPort,
 };
 use std::{
     collections::BTreeMap,
     path::PathBuf,
-    sync::{
-        Arc, Mutex as SyncMutex, Weak,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex as SyncMutex, Weak},
     time::Duration,
 };
 use tokio::sync::{Mutex, Semaphore};
@@ -62,7 +61,7 @@ pub struct PluginRuntime {
     pub(super) prepared_instances: Mutex<BTreeMap<String, Weak<PreparedInstance>>>,
     pub(super) preparation_diagnostics: SyncMutex<BTreeMap<u64, PreparationDiagnostic>>,
     pub(super) restart_circuits: Arc<RestartCircuits>,
-    pub(super) shutting_down: Arc<AtomicBool>,
+    pub(super) shutting_down: CancellationToken,
     shutdown_lock: Mutex<()>,
     pub(super) processes: Arc<gateway_host::process::ProcessSupervisor>,
     pub(super) validators: Arc<Semaphore>,
@@ -71,6 +70,7 @@ pub struct PluginRuntime {
     pub(super) account_ports: Arc<PluginAccountPortSlot>,
     pub(super) client_key_ports: Arc<PluginClientKeyPortSlot>,
     pub(super) resource_ports: Arc<crate::callback::PluginResourcePorts>,
+    pub(super) client_identity_port: Arc<PluginClientIdentityPortSlot>,
     pub(super) model_ports: Arc<PluginModelPortSlot>,
     pub(super) affinity_ports: Arc<PluginAffinityPortSlot>,
     pub(super) observers: RequestObserverExtensionIndex,
@@ -105,7 +105,7 @@ impl PluginRuntime {
             prepared_instances: Mutex::new(BTreeMap::new()),
             preparation_diagnostics: SyncMutex::new(BTreeMap::new()),
             restart_circuits: RestartCircuits::new(restart_circuit),
-            shutting_down: Arc::new(AtomicBool::new(false)),
+            shutting_down: CancellationToken::new(),
             shutdown_lock: Mutex::new(()),
             processes,
             validators: Arc::new(Semaphore::new(MAXIMUM_PARALLEL_PREPARATIONS)),
@@ -115,6 +115,7 @@ impl PluginRuntime {
             account_ports: Arc::new(PluginAccountPortSlot::new()),
             client_key_ports: Arc::new(PluginClientKeyPortSlot::new()),
             resource_ports: Arc::new(crate::callback::PluginResourcePorts::new()),
+            client_identity_port: Arc::new(PluginClientIdentityPortSlot::new()),
             model_ports: Arc::new(PluginModelPortSlot::new()),
             affinity_ports: Arc::new(PluginAffinityPortSlot::new()),
             observers: RequestObserverExtensionIndex::default(),
@@ -170,6 +171,14 @@ impl PluginRuntime {
         self.client_key_ports.bind(access)
     }
 
+    /// 身份查询独立装配，复用 Core 的认证与冻结权限，不要求绑定模型执行端口
+    pub fn bind_client_identity_port(
+        &self,
+        clients: &Arc<dyn ClientIdentityPort>,
+    ) -> Result<(), AdminError> {
+        self.client_identity_port.bind(clients)
+    }
+
     /// Core 激活后一次性绑定嵌套执行与亲和查询端口；Runtime 仅保存 Weak，避免组合根强环
     pub fn bind_model_ports(
         &self,
@@ -182,7 +191,7 @@ impl PluginRuntime {
 
     /// 调用方必须先停止接收 HTTP 与 Worker；这里拒绝新候选并等待全部插件 I/O 退出
     pub async fn shutdown(&self) {
-        self.shutting_down.store(true, Ordering::Release);
+        self.shutting_down.cancel();
         let _shutdown = self.shutdown_lock.lock().await;
         let _prepare = self.prepare_lock.lock().await;
         let sets = {

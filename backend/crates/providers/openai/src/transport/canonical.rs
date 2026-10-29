@@ -14,10 +14,7 @@ use gateway_core::event::{
 };
 use gateway_core::metering::Usage;
 use gateway_core::upstream::UpstreamSendState;
-use gateway_protocol::openai::events::{
-    ResponseModelObservation, TokenUsage, billable_usage_is_complete, extract_usage,
-    observed_model_name,
-};
+use gateway_protocol::openai::events::{TokenUsage, billable_usage_is_complete, extract_usage};
 use gateway_protocol::openai::sse::{SseEvent, SseEventDecoder, SseFrame, sse_frame_is_done};
 use serde_json::Value;
 use thiserror::Error;
@@ -42,6 +39,7 @@ const CONTENTS_PER_OUTPUT: u32 = 1_024;
 /// 上游 wire 是客户端可见的事实来源；canonical facts 只用于观测、亲和和计费
 /// 因而未知或形状变化的 JSON event 只能放弃 canonical 投影，不能截断 wire 流
 pub struct CodexCanonicalDecoder {
+    trace: gateway_core::diagnostics::TraceContext,
     pricing: Option<gateway_core::metering::ModelPriceOverride>,
     decoder: SseEventDecoder,
     upstream_model: String,
@@ -58,8 +56,6 @@ pub struct CodexCanonicalDecoder {
     response_service_tier: Option<String>,
     upstream_response_ms: Option<u64>,
     upstream_timing_metrics: ResponseTimingMetrics,
-    response_model: ResponseModelObservation,
-    reported_model: Option<String>,
     web_search_pricing: Option<WebSearchPricing>,
     timing_signals: ResponseEventSignals,
     raw_sse_passthrough: bool,
@@ -154,6 +150,7 @@ impl CodexCanonicalDecoder {
     /// 使用路由后最终发往上游的请求模型计价，并在响应缺少模型时用于 canonical 兜底
     pub fn new(upstream_model: impl Into<String>) -> Self {
         Self {
+            trace: gateway_core::diagnostics::TraceContext::default(),
             decoder: SseEventDecoder::default(),
             upstream_model: upstream_model.into(),
             response_id: None,
@@ -169,13 +166,18 @@ impl CodexCanonicalDecoder {
             response_service_tier: None,
             upstream_response_ms: None,
             upstream_timing_metrics: ResponseTimingMetrics::default(),
-            response_model: ResponseModelObservation::default(),
-            reported_model: None,
             web_search_pricing: None,
             pricing: None,
             timing_signals: ResponseEventSignals::default(),
             raw_sse_passthrough: false,
         }
+    }
+
+    /// 只旁路保存已解析的终态用量，不改变 wire 或计费事件
+    #[must_use]
+    pub fn with_trace(mut self, trace: gateway_core::diagnostics::TraceContext) -> Self {
+        self.trace = trace;
+        self
     }
 
     /// 让 HTTP SSE 上游帧以原始字节随 wire event 向下游传递
@@ -279,28 +281,6 @@ impl CodexCanonicalDecoder {
         self.upstream_timing_metrics
     }
 
-    /// 真实 HTTP 响应头提供初始报告；流内请求级报告可覆盖它
-    #[must_use]
-    pub fn with_reported_model(mut self, model: Option<&str>) -> Self {
-        self.reported_model = model.and_then(observed_model_name).map(str::to_owned);
-        self
-    }
-
-    /// 接收 transport 已解析的内部 metadata 报告，内部帧无需交付客户端
-    pub(crate) fn observe_reported_model(&mut self, model: &str) {
-        if let Some(model) = observed_model_name(model) {
-            self.reported_model = Some(model.to_owned());
-        }
-    }
-
-    /// 官方服务端报告优先；缺少报告时仅使用正文明确声明，不使用请求兜底值
-    #[must_use]
-    pub fn response_model(&self) -> Option<&str> {
-        self.reported_model
-            .as_deref()
-            .or_else(|| self.response_model.model())
-    }
-
     fn decode(&mut self, events: Vec<SseEvent>) -> CodexCanonicalOutcome {
         let mut output = Vec::new();
         for event in events {
@@ -358,6 +338,12 @@ impl CodexCanonicalDecoder {
         let value = match serde_json::from_str::<Value>(&event.data) {
             Ok(value) => value,
             Err(_) => {
+                super::diagnostics::evidence::record_parse_gap(
+                    &self.trace,
+                    "invalid_json",
+                    Some(event.data.as_bytes()),
+                    event.event.as_deref(),
+                );
                 let wire = match raw_sse_frame {
                     Some(RawResponseFrame::Sse(raw)) => {
                         ProtocolWireEvent::raw_sse("openai", raw).ok()
@@ -377,6 +363,12 @@ impl CodexCanonicalDecoder {
             .event
             .as_deref()
             .or_else(|| value.get("type").and_then(Value::as_str));
+        if let Some(
+            kind @ ("response.completed" | "response.incomplete" | "response.failed" | "error"),
+        ) = event_type
+        {
+            super::diagnostics::evidence::record_response_usage(&self.trace, kind, &value);
+        }
         if event_type == Some("codex.rate_limits") {
             // HTTP 传输已将此控制帧投影为本地额度事实
             // 此帧只贡献首响应观测，不能成为客户端输出
@@ -398,10 +390,6 @@ impl CodexCanonicalDecoder {
             }
         }
         self.observe_response_service_tier(&value);
-        self.response_model.observe(event_type, &value);
-        if let Some(model) = super::response_meta::reported_model_from_event(&value) {
-            self.reported_model = Some(model.to_owned());
-        }
         let signals = response_event_signals(event_type, &value);
         self.merge_timing_signals(signals);
         if matches!(event_type, Some("response.failed" | "error")) {
@@ -429,8 +417,17 @@ impl CodexCanonicalDecoder {
             return Err(CodexCanonicalError::Upstream(Box::new(failure)));
         }
         let mut canonical = Vec::new();
-        if let Some(event_type) = event_type {
-            let _ = self.decode_event(event_type, &value, &mut canonical);
+        if let Some(event_type) = event_type
+            && self
+                .decode_event(event_type, &value, &mut canonical)
+                .is_err()
+        {
+            super::diagnostics::evidence::record_parse_gap(
+                &self.trace,
+                "canonical_decode_failed",
+                None,
+                Some(event_type),
+            );
         }
         let Some(wire) = Self::wire_for_event(event, value, raw_sse_frame) else {
             return Ok(());
@@ -871,8 +868,7 @@ impl CodexCanonicalDecoder {
         output: &mut Vec<GatewayEvent>,
     ) -> Result<(), ProviderError> {
         self.require_started()?;
-        let output_index = event_index(value, "output_index")?;
-        let part_index = optional_event_index(value, "content_index")?.unwrap_or_default();
+        let index = event_content_index(value)?;
         let part = value
             .get("part")
             .or_else(|| value.get("summary_part"))
@@ -882,7 +878,8 @@ impl CodexCanonicalDecoder {
             Some("summary_text" | "reasoning_text") => ContentKind::Reasoning,
             _ => return Ok(()),
         };
-        self.add_content(content_index(output_index, part_index)?, kind, output)
+        // reasoning 项已声明首段，后续 part 复用同一内容；类型冲突仍由共享登记逻辑拒绝
+        self.ensure_content(index, kind, output)
     }
 
     fn text_delta(

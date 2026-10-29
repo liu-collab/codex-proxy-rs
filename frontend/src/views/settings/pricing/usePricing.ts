@@ -1,13 +1,20 @@
 import type { PricingCatalog, PricingChange, PricingSyncPreview } from '@/api'
-import { ZNotification } from '@codex-proxy/ui'
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { getPricing, previewPricingSync, syncPricing, updatePricing } from '@/api'
 import { useAsyncAction } from '@/composables/useAsyncAction'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import { pricingProviders, pricingRows } from './model'
 
 export function usePricing() {
-  const catalog = shallowRef<PricingCatalog>({ defaults: {}, overrides: {}, synced: {}, syncedAt: null, syncedAtDisplay: null })
+  const catalog = shallowRef<PricingCatalog>({
+    defaults: {},
+    overrides: {},
+    synced: {},
+    syncedAt: null,
+    syncedAtDisplay: null,
+  })
   const provider = ref('openai')
   const search = ref('')
   const source = ref('all')
@@ -43,12 +50,20 @@ export function usePricing() {
         provider.value = providers.value[0] ?? ''
       error.value = ''
       page.value = Math.min(page.value, Math.max(1, Math.ceil(filtered.value.length / pageSize.value)))
-    }, { onError: (cause) => { error.value = errorMessage(cause, '无法加载价目') } })
+    }, {
+      onError: (cause) => { error.value = errorMessage(cause, t('settings.pricing.unableToLoadPriceList')) },
+    })
   }
   async function save(models: string[], change: PricingChange): Promise<boolean> {
     return await writeAction.run(async () => {
       await updatePricing({ provider: provider.value, models, change })
-      ZNotification.success({ message: change.action === 'delete' ? '模型价目已删除' : change.action === 'reset' ? '已清除人工覆盖' : '模型定价已保存' })
+      ZNotification.success({
+        message: change.action === 'delete'
+          ? t('settings.pricing.deleted')
+          : change.action === 'reset'
+            ? t('settings.pricing.manualOverrideCleared')
+            : t('settings.pricing.modelPricingSaved'),
+      })
       selected.value = []
       await load()
       return true
@@ -68,17 +83,55 @@ export function usePricing() {
     await writeAction.run(async () => {
       await syncPricing({ preview: approved, models })
       syncOpen.value = false
-      ZNotification.success({ message: '来源价目已同步，人工覆盖保持不变' })
+      ZNotification.success({
+        message: t('settings.pricing.synced'),
+      })
       await load()
     })
   }
   function toggle(model: string, checked: boolean) {
-    selected.value = checked ? [...new Set([...selected.value, model])] : selected.value.filter(id => id !== model)
+    selected.value = checked
+      ? [
+          ...new Set([...selected.value, model]),
+        ]
+      : selected.value.filter(id => id !== model)
   }
   function togglePage(checked: boolean) {
     const ids = visible.value.map(row => row.model)
-    selected.value = checked ? [...new Set([...selected.value, ...ids])] : selected.value.filter(id => !ids.includes(id))
+    selected.value = checked
+      ? [
+          ...new Set([
+            ...selected.value,
+            ...ids,
+          ]),
+        ]
+      : selected.value.filter(id => !ids.includes(id))
   }
   onMounted(load)
-  return { catalog, providers, provider, search, source, page, pageSize, selected, error, rows, filtered, visible, pagination, loading: loadAction.loading, saving: writeAction.loading, syncing: previewAction.loading, preview, syncOpen, syncCatalog, load, save, startSync, confirmSync, toggle, togglePage }
+  return {
+    catalog,
+    providers,
+    provider,
+    search,
+    source,
+    page,
+    pageSize,
+    selected,
+    error,
+    rows,
+    filtered,
+    visible,
+    pagination,
+    loading: loadAction.loading,
+    saving: writeAction.loading,
+    syncing: previewAction.loading,
+    preview,
+    syncOpen,
+    syncCatalog,
+    save,
+    startSync,
+    confirmSync,
+    toggle,
+    togglePage,
+  }
 }

@@ -1,6 +1,7 @@
 import type { RequestConfig } from '../index'
 import type { RequestContext, RequestNext } from './index'
-import { ZNotification } from '@codex-proxy/ui'
+import { t } from '@/i18n'
+import { notification as ZNotification } from '@/utils/notification'
 import { ApiError, isSessionRequired } from './error'
 
 // 会话失效是后端业务事实，登录凭据错误和 403 不清除已有会话
@@ -65,23 +66,32 @@ export async function sessionPlugin(context: RequestContext, send: RequestNext) 
   const isCurrent = context.isCurrent
   context.isCurrent = () => isCurrent() && generation === sessionGeneration
   if (!config.skipSessionRecovery && sessionRecovery && !await sessionRecovery)
-    return expireSession(new ApiError('登录已失效，请重新登录', 401, SESSION_REQUIRED), config, generation)
+    return expireSession(new ApiError(t('common.errors.sessionExpired'), 401, SESSION_REQUIRED), config, generation)
   if (config.signal?.aborted || generation !== sessionGeneration)
-    throw new ApiError('请求已取消', 0, undefined, undefined, 'cancelled')
+    throw new ApiError(t('common.errors.canceled'), 0, undefined, undefined, 'cancelled')
+  const sendCurrent: RequestNext = async () => {
+    const response = await send()
+    if (context.isCurrent())
+      return response
+    // 身份已切换时丢弃迟到结果，流式传输由请求层终止
+    throw new ApiError(t('common.errors.canceled'), 0, undefined, undefined, 'cancelled')
+  }
   const recovered = successfulRecoveries
   try {
-    return await send()
+    return await sendCurrent()
   }
   catch (error) {
     if (!isSessionRequired(error) || config.signal?.aborted || generation !== sessionGeneration)
       throw error
     if (!config.skipSessionRecovery && sessionRecoveryHandler
-      && await (sessionRecovery ?? (successfulRecoveries !== recovered ? true : recoverSession()))) {
+      && await (sessionRecovery ?? (successfulRecoveries !== recovered
+        ? true
+        : recoverSession()))) {
       // 迟到的 40101 也须等待当前续期；Cookie 更新完成后原请求最多重放一次
       if (config.signal?.aborted || generation !== sessionGeneration)
         throw error
       try {
-        return await send()
+        return await sendCurrent()
       }
       catch (retryError) {
         if (!isSessionRequired(retryError))

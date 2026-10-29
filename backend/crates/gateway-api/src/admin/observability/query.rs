@@ -25,27 +25,28 @@ impl DashboardQuery {
     }
 }
 
-/// 逻辑请求列表、汇总和洞察查询参数
+/// 请求明细的字段筛选、时间范围与分页参数
 #[derive(Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UsageQuery {
+    pub client_api_key_name: Option<String>,
+    pub account_name: Option<String>,
     pub status: Option<String>,
     pub current_page: Option<u32>,
     pub page_size: Option<u16>,
-    pub kind: Option<String>,
-    pub outcome: Option<String>,
-    pub client_api_key_id: Option<String>,
     pub provider: Option<String>,
-    pub request_id: Option<String>,
-    pub account_id: Option<String>,
-    pub route: Option<String>,
     pub model: Option<String>,
-    pub status_code: Option<i64>,
-    pub transport: Option<String>,
-    pub attempt_index: Option<i64>,
-    pub response_id: Option<String>,
-    pub upstream_request_id: Option<String>,
-    pub search: Option<String>,
+    pub period: Option<String>,
+    pub as_of: Option<i64>,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+}
+
+/// 用量汇总与洞察只按时间和 Provider 查询
+#[derive(Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UsageAnalyticsQuery {
+    pub provider: Option<String>,
     pub period: Option<String>,
     pub as_of: Option<i64>,
     pub start_time: Option<String>,
@@ -258,16 +259,6 @@ pub(crate) fn domain_diagnostic_dimension(
     }
 }
 
-pub(crate) fn request_outcome(
-    value: Option<String>,
-) -> Result<Option<domain::RequestOutcome>, WireValidationError> {
-    non_empty(value)
-        .map(|value| {
-            domain::RequestOutcome::new(value).map_err(|_| WireValidationError::new("outcome"))
-        })
-        .transpose()
-}
-
 pub(crate) fn usage_range(
     start: Option<&str>,
     end: Option<&str>,
@@ -288,39 +279,14 @@ pub(crate) fn dashboard_today_range(
     crate::time::query_range(start, end, period, as_of, timezone, "today")
 }
 
-pub(crate) fn usage_filter(query: &UsageQuery) -> Result<domain::UsageFilter, WireValidationError> {
-    let outcome = query.outcome.clone().or_else(|| {
-        non_empty(query.kind.clone()).filter(|value| {
-            matches!(
-                value.as_str(),
-                "running" | "succeeded" | "failed" | "cancelled" | "incomplete"
-            )
-        })
-    });
-    Ok(domain::UsageFilter {
-        client_api_key_ref: non_empty(query.client_api_key_id.clone()),
-        request_id: non_empty(query.request_id.clone()),
-        provider_account_ref: non_empty(query.account_id.clone()),
-        operation: non_empty(query.route.clone()),
+pub(crate) fn usage_filter(query: &UsageQuery) -> domain::UsageFilter {
+    domain::UsageFilter {
+        client_api_key_name: non_empty(query.client_api_key_name.clone()),
+        provider_account_name: non_empty(query.account_name.clone()),
         provider_kind: non_empty(query.provider.clone()),
-        model: non_empty(query.model.clone()),
-        outcome: request_outcome(outcome)?,
-        status_code: parse_status(query.status_code)?,
-        transport: non_empty(query.transport.clone()),
-        attempt_index: parse_attempt_index(query.attempt_index)?,
-        response_id: non_empty(query.response_id.clone()),
-        upstream_request_id: non_empty(query.upstream_request_id.clone()),
-        search: non_empty(query.search.clone()),
-    })
-}
-
-pub(crate) fn analytics_filter(
-    query: &UsageQuery,
-) -> Result<domain::UsageFilter, WireValidationError> {
-    if query.search.is_some() {
-        return Err(WireValidationError::new("search"));
+        model_contains: non_empty(query.model.clone()),
+        ..Default::default()
     }
-    usage_filter(query)
 }
 
 pub(crate) fn usage_command(
@@ -344,7 +310,7 @@ pub(crate) fn usage_command(
             query.as_of,
             timezone,
         )?,
-        filter: usage_filter(query)?,
+        filter: usage_filter(query),
         current_page,
         page_size: page_size_value,
     })

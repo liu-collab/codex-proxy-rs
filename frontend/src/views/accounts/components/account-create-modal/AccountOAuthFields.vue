@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { AccountAuthorizationView } from '../../composables/useAccountAuthorization'
+
 import { ZButton, ZForm, ZFormItem, ZIconButton, ZScrollbar, ZTextarea } from '@codex-proxy/ui'
 import { Copy, KeyRound } from '@lucide/vue'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useCopyText } from '@/composables/useCopyText'
 
 const props = defineProps<{
@@ -16,14 +18,18 @@ const props = defineProps<{
   authorization: AccountAuthorizationView
   canStart: boolean
 }>()
+
 const emit = defineEmits<{ regenerate: [] }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const callback = defineModel<string>({ required: true })
 const copyWithToast = useCopyText()
 const statusText = computed(() => {
   if (props.authorization.status === 'expired')
-    return '授权已过期，可重新开始或检查已完成的授权结果'
+    return t('accounts.onboarding.authorizationExpired')
   if (props.authorization.status === 'paused')
-    return '查询已暂停，可检查授权结果后继续'
+    return t('accounts.onboarding.pollingPaused')
   return ''
 })
 </script>
@@ -54,20 +60,20 @@ const statusText = computed(() => {
         :disabled="disabled || (!authorization.flow && !canStart)"
         @click="emit('regenerate')"
       >
-        {{ authUrl ? '重新生成授权链接' : '生成授权链接' }}
+        {{ authUrl ? t('accounts.onboarding.regenerateAuthorizationLink') : t('accounts.onboarding.generateAuthorizationLink') }}
       </ZButton>
     </div>
 
     <ZForm v-if="authUrl">
-      <ZFormItem label="授权链接">
+      <ZFormItem :label="t('accounts.onboarding.authorizationLink')">
         <template #extra>
           <ZIconButton
             variant="solid"
             size="small"
-            title="复制链接"
-            aria-label="复制链接"
+            :title="t('accounts.onboarding.copyLink')"
+            :aria-label="t('accounts.onboarding.copyLink')"
             :disabled="disabled"
-            @click="copyWithToast(authUrl, { successText: '授权链接已复制' })"
+            @click="copyWithToast(authUrl, { successText: t('accounts.onboarding.authorizationLinkCopied') })"
           >
             <Copy class="size-3.5" />
           </ZIconButton>

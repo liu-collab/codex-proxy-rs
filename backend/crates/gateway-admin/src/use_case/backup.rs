@@ -7,11 +7,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use gateway_core::runtime::SnapshotControl;
 use secrecy::ExposeSecret as _;
-use uuid::Uuid;
 
 use crate::model::{
     AdminError, AdminErrorKind, MutationContext,
-    auth::{AdminAuditEvent, AuditActorKind},
+    audit::{MutationAuditIntent, MutationAuditOperation},
     backup::{
         BackupError, BackupRecord, BackupRecordListQuery, BackupRecordPage, BackupSettings,
         BackupStatus, BackupStorageConfig, BackupTriggerKind, ConnectionTestResult,
@@ -180,8 +179,8 @@ impl BackupService for DefaultBackupService {
         }
         self.append_audit(
             context,
-            "backup.s3_connection_tested",
-            "backup_settings",
+            MutationAuditOperation::BackupConnectionTest,
+            "1",
             vec![],
         )
         .await?;
@@ -219,11 +218,9 @@ impl BackupService for DefaultBackupService {
         .map_err(map_backup_error)?;
         let record = self
             .repository
-            .insert_backup_record(seed)
+            .insert_backup_record(seed, context)
             .await
             .map_err(|error| map_store_error(error, "backup record"))?;
-        self.append_audit(context, "backup.created", "backup", vec![record.id.clone()])
-            .await?;
         Ok(record)
     }
 
@@ -264,9 +261,9 @@ impl BackupService for DefaultBackupService {
             .map_err(map_backup_error)?;
         self.append_audit(
             context,
-            "backup.download_url_created",
-            "backup",
-            vec![backup_id.to_owned()],
+            MutationAuditOperation::BackupDownloadUrl,
+            backup_id,
+            vec![],
         )
         .await?;
         Ok(DownloadUrlResult {
@@ -290,17 +287,10 @@ impl BackupService for DefaultBackupService {
         let now = Utc::now();
         let deleting = self
             .repository
-            .transition_to_deleting(backup_id, now)
+            .transition_to_deleting(backup_id, now, Some(context))
             .await
             .map_err(|error| map_store_error(error, "backup record"))?
             .ok_or_else(|| AdminError::conflict("备份记录已进入删除流程"))?;
-        self.append_audit(
-            context,
-            "backup.delete_requested",
-            "backup",
-            vec![backup_id.to_owned()],
-        )
-        .await?;
         Ok(deleting)
     }
 }
@@ -317,41 +307,15 @@ impl DefaultBackupService {
     async fn append_audit(
         &self,
         context: &MutationContext,
-        action: &str,
+        operation: MutationAuditOperation,
         entity_ref: &str,
         changed_fields: Vec<String>,
     ) -> Result<(), AdminError> {
-        let actor_kind = match context.actor {
-            crate::model::MutationActor::AdminSession { .. } => AuditActorKind::AdminSession,
-            crate::model::MutationActor::AdminApiKey => AuditActorKind::AdminApiKey,
-            crate::model::MutationActor::System => AuditActorKind::System,
-        };
-        let actor_ref = match &context.actor {
-            crate::model::MutationActor::AdminSession { admin_user_id } => {
-                crate::model::auth::admin_session_actor_ref(admin_user_id)
-            }
-            crate::model::MutationActor::AdminApiKey => "admin_api_key".to_owned(),
-            crate::model::MutationActor::System => "system".to_owned(),
-        };
-        let actor_admin_user_id = match &context.actor {
-            crate::model::MutationActor::AdminSession { admin_user_id } => {
-                Some(admin_user_id.clone())
-            }
-            _ => None,
-        };
-        let event = AdminAuditEvent {
-            id: format!("audit_{}", Uuid::now_v7().simple()),
-            actor_kind,
-            actor_admin_user_id,
-            actor_ref,
-            request_id: Some(context.request_id.clone()),
-            action: action.to_owned(),
-            entity_kind: "backup".to_owned(),
-            entity_ref: entity_ref.to_owned(),
-            config_revision: None,
-            changed_fields,
-            occurred_at: Utc::now(),
-        };
+        let event = MutationAuditIntent {
+            operation,
+            entity_ref,
+        }
+        .event(context, changed_fields);
         self.auth
             .append_audit_event(event)
             .await

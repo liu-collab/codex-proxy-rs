@@ -39,12 +39,15 @@ pub(crate) fn observability_page_offset(
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UsageRecordFilter {
+    pub client_api_key_name: Option<String>,
+    pub provider_account_name: Option<String>,
     pub client_api_key_ref: Option<String>,
     pub request_id: Option<String>,
     pub provider_account_ref: Option<String>,
     pub operation: Option<String>,
     pub provider_kind: Option<String>,
     pub model: Option<String>,
+    pub model_contains: Option<String>,
     pub outcome: Option<String>,
     pub status_code: Option<u16>,
     pub transport: Option<String>,
@@ -57,6 +60,14 @@ pub struct UsageRecordFilter {
 impl UsageRecordFilter {
     pub fn validate(&self) -> StoreResult<()> {
         for (value, field) in [
+            (
+                self.client_api_key_name.as_deref(),
+                "client API key name filter",
+            ),
+            (
+                self.provider_account_name.as_deref(),
+                "provider account name filter",
+            ),
             (self.client_api_key_ref.as_deref(), "client API key filter"),
             (self.request_id.as_deref(), "request ID filter"),
             (
@@ -66,6 +77,7 @@ impl UsageRecordFilter {
             (self.operation.as_deref(), "operation filter"),
             (self.provider_kind.as_deref(), "provider filter"),
             (self.model.as_deref(), "model filter"),
+            (self.model_contains.as_deref(), "model contains filter"),
             (self.outcome.as_deref(), "outcome filter"),
             (self.transport.as_deref(), "transport filter"),
             (
@@ -215,6 +227,7 @@ pub struct ProviderAccountUsageObservation {
     pub authentication_kind: String,
     pub name: String,
     pub email: Option<String>,
+    pub notes: Option<String>,
     pub plan_type: Option<String>,
     pub request_count: u64,
     pub success_count: u64,
@@ -343,6 +356,14 @@ pub struct UsageOverview {
     pub requests: RequestMetrics,
     pub attempts: AttemptMetrics,
     pub providers: Vec<ProviderObservation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsageSummaryObservation {
+    pub analytics: admin_observability::AnalyticsMetadata,
+    pub range: ObservabilityRange,
+    pub requests: admin_observability::RequestSummaryMetrics,
+    pub attempts: AttemptMetrics,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -2,6 +2,8 @@
 import { ZIconButton } from '@codex-proxy/ui'
 
 import { Copy } from '@lucide/vue'
+
+import { useI18n } from 'vue-i18n'
 import { useCopyText } from '@/composables/useCopyText'
 
 defineOptions({ name: 'ClientInstallCommandList' })
@@ -13,10 +15,14 @@ defineProps<{
   }>
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const copyText = useCopyText()
 
 function copyCommand(command: string) {
-  void copyText(command, { successText: '命令已复制' })
+  void copyText(command, {
+    successText: t('settings.clientVersion.commandCopied'),
+  })
 }
 </script>
 
@@ -33,7 +39,7 @@ function copyCommand(command: string) {
         </p>
         <code class="mt-1.5 block overflow-x-auto whitespace-nowrap font-mono text-cp-sm leading-normal font-semibold text-cp-text">{{ item.command }}</code>
       </div>
-      <ZIconButton size="small" aria-label="复制命令" @click="copyCommand(item.command)">
+      <ZIconButton size="small" :aria-label="t('settings.clientVersion.copyCommand')" @click="copyCommand(item.command)">
         <Copy class="size-3.5" />
       </ZIconButton>
     </article>

@@ -105,8 +105,10 @@ fn codex_identity_field(
 /// 从 OpenAI Responses 请求中提取的稳定 Codex 请求语义
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CodexResponsesRequestSemantics {
-    /// 客户端原始选择的推理强度
+    /// 按最新配置更新与请求基线解析的推理强度
     pub reasoning_effort: Option<String>,
+    /// 对话内持续生效的推理强度更新，供原生续接继承
+    pub reasoning_effort_override: Option<String>,
     /// Codex turn metadata 中的请求类型
     pub request_kind: Option<String>,
     /// Codex turn metadata 中的子代理类型
@@ -126,24 +128,31 @@ pub fn codex_responses_request_semantics(
     codex_responses_request_semantics_with_turn_metadata(
         body,
         non_empty_string(context.get("turn_metadata")),
+        None,
     )
 }
 
-/// 调用方已解析权威 turn metadata 时，从 Responses body 中提取 Codex 语义
+/// 结合权威 turn metadata 与原生续接配置，从 Responses body 中提取 Codex 语义
 #[must_use]
 pub fn codex_responses_request_semantics_with_turn_metadata(
     body: &Map<String, Value>,
     turn_metadata: Option<&str>,
+    previous_reasoning_effort_override: Option<&str>,
 ) -> CodexResponsesRequestSemantics {
-    let reasoning_effort = body
-        .get("reasoning")
-        .and_then(Value::as_object)
-        .and_then(|reasoning| reasoning.get("effort"))
-        .and_then(|effort| {
-            non_empty_string(Some(effort))
+    // 配置更新不改变顶层基线，只有 previous_response_id 续接才继承上一响应的更新
+    let reasoning_effort_override = input_items(body)
+        .iter()
+        .rev()
+        .find(|item| item.get("type").and_then(Value::as_str) == Some("configuration_update"))
+        .map(|item| reasoning_effort(item.get("reasoning")))
+        .unwrap_or_else(|| {
+            previous_reasoning_effort_override
+                .filter(|_| non_empty_string(body.get("previous_response_id")).is_some())
                 .map(ToOwned::to_owned)
-                .or_else(|| effort.as_u64().map(|value| value.to_string()))
         });
+    let reasoning_effort = reasoning_effort_override
+        .clone()
+        .or_else(|| reasoning_effort(body.get("reasoning")));
     let parsed_turn_metadata = turn_metadata
         .or_else(|| request_turn_metadata(body))
         .and_then(|value| serde_json::from_str::<Value>(value).ok());
@@ -168,11 +177,19 @@ pub fn codex_responses_request_semantics_with_turn_metadata(
 
     CodexResponsesRequestSemantics {
         reasoning_effort,
+        reasoning_effort_override,
         request_kind,
         subagent_kind,
         reasoning_preset,
         compact,
     }
+}
+
+fn reasoning_effort(reasoning: Option<&Value>) -> Option<String> {
+    let effort = reasoning?.get("effort")?;
+    non_empty_string(Some(effort))
+        .map(ToOwned::to_owned)
+        .or_else(|| effort.as_u64().map(|value| value.to_string()))
 }
 
 fn request_turn_metadata(body: &Map<String, Value>) -> Option<&str> {

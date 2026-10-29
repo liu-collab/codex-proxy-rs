@@ -1,12 +1,14 @@
 # 受管上游适配器
 
-`upstream_adapter` v4 是现有生成请求洋葱链的终端，只挂到内置 `openai` / `xai`，不替换独立图像或压缩端点。
+[返回 SDK](../README.md) · [清单声明](manifest.md#扩展项简写) · [能力与回调](capabilities.md)
+
+`upstream_adapter` v5 是现有生成请求洋葱链的终端，只挂到内置 `openai` / `xai`，不替换独立图像或压缩端点。
 插件定义 Base URL、业务路径、请求编码和响应解析；宿主继续持有身份、ACL、选号、租约、凭据、代理、重试和账本。
 普通请求或响应加工使用 [middleware](capabilities.md#洋葱中间件)
 
 ## 声明与绑定
 
-清单声明 `upstream_adapter`、版本 `4`，以及匹配的 `inputFormats` / `outputFormats`；固定阶段 `upstream` 由作者清单规范化入口生成。
+清单声明 `upstream_adapter`、版本 `5`，以及匹配的 `inputFormats` / `outputFormats`；固定阶段 `upstream` 由作者清单规范化入口生成。
 使用 `PluginBuilder::on` 注册
 `methods::UPSTREAM_ADAPTER_REGISTER` 与 `methods::UPSTREAM_ADAPTER_EXECUTE`
 
@@ -22,10 +24,20 @@
 | `transport` | `http_json`、`http_sse` 或 `websocket` |
 | `protocol` | 请求和客户端 wire 使用的协议 |
 | `models` | 公开请求模型的精确匹配，空集合沿用绑定范围 |
+| `account_ids` | 上游账号 ID 范围，必填；空数组匹配所有账号 |
 
 实例绑定沿用 Key、账号组、Provider、模型范围，只允许一次 `upstream` 绑定和 `reject` 故障策略。
 多个声明命中时按发布顺序选择首个适配器，插件负责声明的业务含义。适配器未命中时仍使用原生上游，
 已命中但不可用时拒绝请求。安装、配置、启停和升级使用已有插件管理
+
+账号范围只收窄绑定，不能扩大 Key、分组或模型权限。宿主先排除适配器不可用或认证类型不兼容的账号，
+再沿用原调度、亲和和租约；取得账号后从同一发布代次解析适配器。不同账号可以为同一公开模型选择不同适配器，
+未匹配账号保持原生执行，重叠声明仍按发布顺序取首个匹配。
+前置账号范围已匹配的可用适配器不受后置兜底声明故障影响。
+xAI 原生编码不支持的请求仍可选择匹配的适配器账号；原生账号会在取得租约前被排除
+
+账号范围由插件注册结果提供，不改变管理端 binding 中 `accountGroupIds` 的请求作用域语义。
+停用或卸载实例会移除其绑定；维护时须先停用依赖该适配器的账号并排空请求，账号范围不提供永久依赖约束。
 
 能力、清单、进程 RPC 和宿主兼容声明分别校验各自版本，见[清单](manifest.md)。
 Provider、业务协议和传输名称不能写入宿主兼容清单的 capability / RPC 版本位置
@@ -81,6 +93,14 @@ let (message, ()) = tokio::try_join!(
 执行返回 `TypedReply<Empty>` 的有界 `ResponseStream`。每个 chunk 使用 `UpstreamAdapterEvent::encode()`，
 包含标准事实与可选原始 wire；事件需符合开始、内容、工具、用量和唯一结束的顺序。
 原始 JSON / SSE / WebSocket 字节与标准事实分开传递，错误使用 `UpstreamFailure`；宿主网络观测决定发送状态，插件不能将其降为未发送
+`status`、`code`、可选 `error_type` 和 `message` 保留实际上游错误字段，缺失类型保持空值；流内失败不能使用成功握手状态或从业务码推导状态
+
+宿主只对一次受管 `inference` HTTP 调用明确返回的 429 提供有限重放证明：插件必须报告
+`rate_limited` 和 `status: 429`，且此前及失败事件中均无业务事实、wire 或续接材料。
+调用结束时先撤销回调、回收资源并封存未完成发送，再将错误交给 Core；发送状态仍为 `sent`。
+多次或并发请求、辅助请求、其他宿主能力调用（日志除外）、受管回调失败以及取消都不能取得该证明。
+观测事件和该次 HTTP 的读流、关流不单独阻断；HTTP200 流内报错、WebSocket 拒绝及其他状态码不适用。
+Core 仍复核续接归属、外部副作用、交付与重试预算；这不保证一定换号，也不证明完整信任插件绕过宿主执行的操作可重放
 
 初始 RPC 回复受插件处理预算约束，默认上限为 120 秒；持续接收与解析应放在返回的流中。
 初始流式回复后，流的寿命遵循模型请求期限与取消，受管 HTTP 正文每次读取单独计时。

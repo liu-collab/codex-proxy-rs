@@ -11,7 +11,8 @@ use tokio::{
 };
 
 use crate::{
-    CallContext, ErrorCode, Frame, FrameError, Handshake, Message, PROTOCOL_VERSION, PluginFault,
+    CallBudgets, CallContext, ErrorCode, Frame, FrameError, Handshake, Message, PROTOCOL_VERSION,
+    PluginFault, ResolvedCallBudgets,
 };
 
 use super::super::frame::{EncodedFrame, read_frame, write_frame};
@@ -22,6 +23,7 @@ use super::{
     lifecycle::{CancellationSource, LifecycleHooks},
     output::{Output, writer_loop},
     registry::CallbackRegistry,
+    scheduling::CallSchedule,
     stream::validate_stream_chunk,
 };
 
@@ -31,6 +33,7 @@ pub struct PluginSession<R, W> {
     writer: W,
     handshake: Handshake,
     config: SessionConfig,
+    call_budgets: CallBudgets,
 }
 
 impl<R, W> PluginSession<R, W>
@@ -70,12 +73,25 @@ where
             writer,
             handshake,
             config,
+            call_budgets: CallBudgets::new(),
         })
     }
 
     #[must_use]
     pub const fn handshake(&self) -> &Handshake {
         &self.handshake
+    }
+
+    /// 在 Ready 前声明所需预算，可根据握手中的实例配置计算
+    /// 未声明的阶段采用协议默认值，同一会话的预算在 run 时冻结
+    ///
+    /// # Errors
+    ///
+    /// 预算为零或平台计时器无法表示时失败，原声明保持不变
+    pub fn set_call_budgets(&mut self, budgets: CallBudgets) -> Result<(), SessionError> {
+        crate::budget::validate_values(&budgets)?;
+        self.call_budgets = budgets;
+        Ok(())
     }
 
     /// 发送 Ready 并持续处理调用、回调、流控、取消与关闭
@@ -87,16 +103,18 @@ where
     where
         H: PluginHandler,
     {
+        let call_budgets = ResolvedCallBudgets::resolve(&self.call_budgets)?;
         let data_capacity = self
             .config
             .maximum_calls
             .checked_add(self.config.maximum_callbacks)
-            .and_then(|capacity| capacity.checked_add(self.config.maximum_calls))
             .ok_or(SessionError::Configuration)?;
         let control_reserve = self
             .config
             .maximum_calls
-            .checked_add(8)
+            .checked_mul(2)
+            .and_then(|capacity| capacity.checked_add(self.config.maximum_callbacks))
+            .and_then(|capacity| capacity.checked_add(8))
             .ok_or(SessionError::Configuration)?;
         let queue_capacity = data_capacity
             .checked_add(control_reserve)
@@ -105,18 +123,17 @@ where
         let output = Output {
             sender: outbound,
             data_slots: Arc::new(Semaphore::new(data_capacity)),
+            failed: tokio::sync::watch::channel(false).0,
         };
-        let callbacks = Arc::new(CallbackRegistry::new(
-            self.config.maximum_callbacks,
-            self.config.maximum_calls,
-        ));
+        let callbacks = Arc::new(CallbackRegistry::new(self.config.maximum_callbacks));
         let handler: Arc<dyn PluginHandler> = Arc::new(handler);
         let lifecycle = LifecycleHooks::new(Arc::clone(&handler), control_reserve)?;
         write_frame(
             &mut self.writer,
             &Frame::control(Message::Ready {
-                protocol_version: PROTOCOL_VERSION,
+                protocol_version: self.handshake.protocol_version,
                 incarnation: self.handshake.incarnation.clone(),
+                call_budgets: self.call_budgets,
             }),
         )
         .await?;
@@ -124,6 +141,7 @@ where
         let (completed, completions) = mpsc::channel(self.config.maximum_calls);
         let mut driver = SessionDriver {
             config: self.config,
+            call_budgets,
             instance_id: self.handshake.instance_id,
             generation: self.handshake.generation,
             incarnation: self.handshake.incarnation,
@@ -149,6 +167,7 @@ struct ActiveCall {
     credits: Arc<CreditWindow>,
     cancellation: CancellationSource,
     task: JoinHandle<()>,
+    schedule: Arc<CallSchedule>,
 }
 
 #[derive(Clone, Copy)]
@@ -200,6 +219,7 @@ impl Drop for CompletionGuard {
 
 struct SessionDriver {
     config: SessionConfig,
+    call_budgets: ResolvedCallBudgets,
     instance_id: String,
     generation: u64,
     incarnation: String,
@@ -224,6 +244,7 @@ impl SessionDriver {
             let frame = loop {
                 tokio::select! {
                     biased;
+                    () = self.output.failed() => return Err(SessionError::Capacity),
                     writer = &mut self.writer => {
                         return writer.map_err(|_| SessionError::Closed)?;
                     }
@@ -277,6 +298,16 @@ impl SessionDriver {
                 }
                 Ok(false)
             }
+            Message::Resumed { id, epoch } if frame.payload.is_empty() => {
+                if id == 0 || id.is_multiple_of(2) || id > self.last_call || epoch == 0 {
+                    return Err(SessionError::Protocol);
+                }
+                // 取消和完成可能先于同一授权抵达，已退休调用不能被重新打开
+                if let Some(active) = self.active.get(&id) {
+                    active.schedule.resumed(epoch)?;
+                }
+                Ok(false)
+            }
             Message::Cancel { id } if frame.payload.is_empty() => {
                 self.cancel_call(id)?;
                 Ok(false)
@@ -323,7 +354,7 @@ impl SessionDriver {
             || context.generation != self.generation
             || context.incarnation != self.incarnation
             || context.timeout_ms == 0
-            || Duration::from_millis(context.timeout_ms) > self.config.maximum_call_timeout
+            || Duration::from_millis(context.timeout_ms) > self.call_budgets.budget(context.stage)
             || method.is_empty()
             || method.len() > 128
         {
@@ -348,6 +379,7 @@ impl SessionDriver {
         let deadline = CallDeadline::new(deadline);
         let credits = Arc::new(CreditWindow::default());
         let (cancellation, cancellation_signal) = CancellationSource::new();
+        let schedule = Arc::new(CallSchedule::new(id, self.output.clone(), deadline.clone()));
         let host = HostClient {
             parent_id: id,
             deadline: deadline.clone(),
@@ -356,6 +388,7 @@ impl SessionDriver {
             output: self.output.clone(),
             maximum_stream_chunk_bytes: self.config.maximum_stream_chunk_bytes,
             credits: credits.clone(),
+            schedule: schedule.clone(),
         };
         let call = PluginCall {
             method,
@@ -373,6 +406,8 @@ impl SessionDriver {
         let maximum_chunks = self.config.maximum_buffered_stream_chunks;
         let task_context = context.clone();
         let lifecycle = self.lifecycle.clone();
+        let task_schedule = schedule.clone();
+        let callbacks = Arc::clone(&self.callbacks);
         let task = tokio::spawn(async move {
             let guard = CompletionGuard::new(id, completed);
             let result = run_call(
@@ -385,6 +420,8 @@ impl SessionDriver {
                 deadline,
                 maximum_stream_chunk_bytes,
                 maximum_chunks,
+                task_schedule,
+                callbacks,
             )
             .await;
             guard.finish(if result.is_ok() {
@@ -400,6 +437,7 @@ impl SessionDriver {
                 credits,
                 cancellation,
                 task,
+                schedule,
             },
         );
         Ok(())
@@ -459,9 +497,12 @@ async fn run_call(
     deadline: CallDeadline,
     maximum_stream_chunk_bytes: usize,
     maximum_chunks: usize,
+    schedule: Arc<CallSchedule>,
+    callbacks: Arc<CallbackRegistry>,
 ) -> Result<(), SessionError> {
     let id = context.call_id;
     let cancellation = call.cancellation.clone();
+    let response = schedule.drive(handler.call(call), || callbacks.pauses_budget(id));
     let response = tokio::select! {
         biased;
         () = cancellation.cancelled() => return Ok(()),
@@ -473,7 +514,7 @@ async fn run_call(
             ))?;
             return Ok(());
         }
-        response = handler.call(call) => response,
+        response = response => response?,
     };
     let mut reply = match response {
         Ok(reply) => reply,

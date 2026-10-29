@@ -215,6 +215,7 @@ async fn backend_http_should_preserve_business_headers_without_downstream_transp
         .create_response(
             &request,
             CodexRequestContext {
+                response_control: None,
                 trace: None,
                 authorization: "Bearer lease-token",
                 account_id: Some("lease-account"),
@@ -256,7 +257,6 @@ async fn backend_http_should_preserve_business_headers_without_downstream_transp
         ("accept", b"text/event-stream".as_slice()),
         ("content-type", b"application/json".as_slice()),
         ("x-still-valid", b"after-invalid".as_slice()),
-        ("session-id", b"synthetic-alias".as_slice()),
         ("authorization", b"Bearer lease-token".as_slice()),
         ("chatgpt-account-id", b"lease-account".as_slice()),
         ("chatgpt-organization-id", b"unclassified-org".as_slice()),
@@ -266,6 +266,9 @@ async fn backend_http_should_preserve_business_headers_without_downstream_transp
     ] {
         assert_eq!(raw_header_values(&raw, name), vec![value.to_vec()]);
     }
+    assert!(raw_header_values(&raw, "traceparent").is_empty());
+    let session = raw_header_values(&raw, "session-id");
+    assert!(uuid::Uuid::parse_str(std::str::from_utf8(&session[0]).unwrap()).is_ok());
     // 指纹头由运行时画像生成，不透传客户端值
     assert_eq!(
         raw_header_values(&raw, "user-agent"),
@@ -293,7 +296,6 @@ async fn backend_http_should_preserve_business_headers_without_downstream_transp
         );
     }
     for name in [
-        "traceparent",
         "x-business-origin",
         "x-cf-business-field",
         "sec-ch-business",
@@ -359,6 +361,7 @@ async fn backend_websocket_should_preserve_business_headers_without_downstream_t
         .create_response(
             &request,
             CodexRequestContext {
+                response_control: None,
                 trace: None,
                 authorization: "Bearer lease-token",
                 account_id: Some("lease-account"),
@@ -430,7 +433,6 @@ async fn backend_websocket_should_preserve_business_headers_without_downstream_t
         vec![b"lease-account".to_vec()]
     );
     for name in [
-        "traceparent",
         "x-business-origin",
         "x-cf-business-field",
         "sec-ch-business",
@@ -446,6 +448,8 @@ async fn backend_websocket_should_preserve_business_headers_without_downstream_t
     ] {
         assert_eq!(values(name), vec![value.to_vec()], "missing {name}");
     }
-    assert_eq!(values("session-id"), vec![b"synthetic-alias".to_vec()]);
+    assert!(values("traceparent").is_empty());
+    let session = values("session-id");
+    assert!(uuid::Uuid::parse_str(std::str::from_utf8(&session[0]).unwrap()).is_ok());
     assert_eq!(values("x-codex-turn-state"), vec![b"turn-ascii".to_vec()]);
 }

@@ -241,13 +241,27 @@ impl BackupRepository for PgBackupRepository {
         Ok(result.rows_affected() == 1)
     }
 
-    async fn insert_backup_record(&self, seed: BackupRecordSeed) -> AdminStoreResult<BackupRecord> {
+    async fn insert_backup_record(
+        &self,
+        seed: BackupRecordSeed,
+        context: &MutationContext,
+    ) -> AdminStoreResult<BackupRecord> {
         let mut transaction = self.pool.begin().await.map_err(|source| {
             store_unavailable("begin backup record insert").with_source(source)
         })?;
-        let result = async {
+        let result: AdminStoreResult<_> = async {
             let _ = lock_settings_in_transaction(&mut transaction).await?;
-            insert_queued_in_transaction(&mut transaction, &seed).await
+            let record = insert_queued_in_transaction(&mut transaction, &seed).await?;
+            let audit = crate::mutation_audit(
+                context,
+                MutationAuditOperation::BackupCreate,
+                &record.id,
+                vec!["status".to_owned()],
+            );
+            append_audit_in_transaction(&mut transaction, audit, None)
+                .await
+                .map_err(map_admin_error)?;
+            Ok(record)
         }
         .await;
         match result {
@@ -550,22 +564,56 @@ impl BackupRepository for PgBackupRepository {
         &self,
         id: &str,
         now: DateTime<Utc>,
+        context: Option<&MutationContext>,
     ) -> AdminStoreResult<Option<BackupRecord>> {
-        sqlx::query(
-            "update backup_records
-                set status = 'deleting', updated_at = $1
-              where id = $2 and status in ('completed', 'failed')
-              returning id, trigger_kind, status, scheduled_at, object_key, size_bytes, sha256,
-                        attempt_count, error_code, error_message, started_at, completed_at, expires_at,
-                        created_at, updated_at",
-        )
-        .bind(now)
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|source| store_unavailable("transition backup to deleting").with_source(source))?
-        .map(|row| backup_record_from_row(&row))
-        .transpose()
+        let mut transaction = self.pool.begin().await.map_err(|source| {
+            store_unavailable("begin backup deletion request").with_source(source)
+        })?;
+        let result: AdminStoreResult<_> = async {
+            let record = sqlx::query(
+                "update backup_records
+                    set status = 'deleting', updated_at = $1
+                  where id = $2 and status in ('completed', 'failed')
+                  returning id, trigger_kind, status, scheduled_at, object_key, size_bytes, sha256,
+                            attempt_count, error_code, error_message, started_at, completed_at, expires_at,
+                            created_at, updated_at",
+            )
+            .bind(now)
+            .bind(id)
+            .fetch_optional(&mut *transaction)
+            .await
+            .map_err(|source| store_unavailable("transition backup to deleting").with_source(source))?
+            .map(|row| backup_record_from_row(&row))
+            .transpose()?;
+            if record.is_some() && let Some(context) = context {
+                let audit = crate::mutation_audit(
+                    context,
+                    MutationAuditOperation::BackupDelete,
+                    id,
+                    vec!["status".to_owned()],
+                );
+                append_audit_in_transaction(&mut transaction, audit, None)
+                    .await
+                    .map_err(map_admin_error)?;
+            }
+            Ok(record)
+        }
+        .await;
+        match result {
+            Ok(record) => {
+                transaction.commit().await.map_err(|source| {
+                    store_unavailable("commit backup deletion request").with_source(source)
+                })?;
+                Ok(record)
+            }
+            Err(error) => {
+                let error = match transaction.rollback().await {
+                    Ok(()) => error,
+                    Err(cleanup) => error.with_cleanup(cleanup),
+                };
+                Err(error)
+            }
+        }
     }
 
     async fn delete_record(&self, id: &str) -> AdminStoreResult<()> {

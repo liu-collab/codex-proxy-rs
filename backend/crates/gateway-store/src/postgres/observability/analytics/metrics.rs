@@ -320,6 +320,25 @@ impl MetricState {
             p99_ms: percentile(0.99)?,
         })
     }
+    pub fn request_summary_metrics(&self) -> admin_observability::RequestSummaryMetrics {
+        admin_observability::RequestSummaryMetrics {
+            request_count: self.count("request_count"),
+            success_count: self.count("success_count"),
+            failure_count: self.count("failure_count"),
+            cancelled_count: self.count("cancelled_count"),
+            incomplete_count: self.count("incomplete_count"),
+            caller_error_count: self.count("caller_error_count"),
+            input_tokens: self.count("input_tokens"),
+            output_tokens: self.count("output_tokens"),
+            cached_input_tokens: self.count("cached_input_tokens"),
+            cache_write_input_tokens: self.count("cache_write_input_tokens"),
+            reasoning_output_tokens: self.count("reasoning_output_tokens"),
+            total_tokens: self.count("total_tokens"),
+            latency_sum_ms: self.count("latency_ms_sum"),
+            latency_count: self.histogram("latency_ms").count,
+        }
+    }
+
     pub fn request_metrics(&self) -> StoreResult<RequestMetrics> {
         let latency = self.histogram("latency_ms");
         let first = self.histogram("first_token_ms");

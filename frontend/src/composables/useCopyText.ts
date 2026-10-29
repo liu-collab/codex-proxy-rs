@@ -1,6 +1,7 @@
-import { ZNotification } from '@codex-proxy/ui'
-
 import { useClipboard } from '@vueuse/core'
+import { t } from '@/i18n'
+
+import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 
 interface CopyTextOptions {
@@ -27,7 +28,11 @@ export function useCopyText() {
       ZNotification.success({ message: options.successText })
     }
     catch (error: unknown) {
-      ZNotification.error({ message: options.errorFromException ? errorMessage(error, '复制失败') : '复制失败' })
+      ZNotification.error({
+        message: options.errorFromException
+          ? errorMessage(error, t('common.errors.copy'))
+          : t('common.errors.copy'),
+      })
     }
   }
 }

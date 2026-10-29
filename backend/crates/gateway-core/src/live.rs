@@ -11,6 +11,8 @@ use bytes::Bytes;
 use futures::future::BoxFuture;
 
 use crate::account::scope::FrozenAccountScope;
+use crate::event::ProviderResponseHeader;
+use crate::operation::ProviderHttpHeader;
 use crate::policy::ClientApiKeyId;
 
 /// sideband 中继在客户端与上游 WebSocket 之间搬运的帧。
@@ -41,7 +43,7 @@ pub enum LiveSidebandStyle {
     RealtimeQuery,
 }
 
-/// sideband 拨号请求；协议头已由协议 adapter 按允许清单过滤。
+/// sideband 拨号请求；协议 adapter 已剥离入站身份与传输头
 #[derive(Debug)]
 pub struct LiveSidebandRequest<'a> {
     pub call_id: &'a str,
@@ -49,7 +51,7 @@ pub struct LiveSidebandRequest<'a> {
     /// 本次认证冻结的账号范围与模型政策，重连也必须重新校验
     pub account_scope: &'a FrozenAccountScope,
     pub style: LiveSidebandStyle,
-    pub protocol_headers: Vec<(String, String)>,
+    pub protocol_headers: Vec<ProviderHttpHeader>,
     /// 客户端 offer 的 `Sec-WebSocket-Protocol`，原样透传给上游。
     pub subprotocols: Vec<String>,
 }
@@ -61,14 +63,14 @@ pub struct LiveHangupRequest<'a> {
     pub client_api_key_id: &'a ClientApiKeyId,
     pub content_type: Option<String>,
     pub body: Bytes,
-    pub protocol_headers: Vec<(String, String)>,
+    pub protocol_headers: Vec<ProviderHttpHeader>,
 }
 
 /// 一次性账号级上游调用的透传结果。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LiveCallOutcome {
     pub status: u16,
-    pub headers: Vec<(String, String)>,
+    pub headers: Vec<ProviderResponseHeader>,
     pub body: Bytes,
 }
 

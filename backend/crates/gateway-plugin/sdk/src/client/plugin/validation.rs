@@ -25,7 +25,7 @@ pub(super) fn validate(
                 required(methods::UPSTREAM_ADAPTER_EXECUTE.name)?;
             }
             C::ModelRouter => required(methods::ROUTE_MODEL.name)?,
-            C::ModelCatalog => required(methods::MODEL_CATALOG_REGISTER.name)?,
+            C::ModelCatalog => required(methods::MODEL_CATALOG_REGISTER_V2.name)?,
             C::RetryPolicy => required(methods::RETRY_DECISION.name)?,
             C::Scheduler => required(methods::SCHEDULE_ACCOUNT.name)?,
             C::Observer => required(methods::OBSERVE.name)?,

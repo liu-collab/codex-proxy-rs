@@ -2,6 +2,8 @@
 import type { AccountGroupRef, AccountModelAccess } from '@/api'
 
 import { ZButton, ZDialog } from '@codex-proxy/ui'
+
+import { useI18n } from 'vue-i18n'
 import AccountSettingsFields from './AccountSettingsFields.vue'
 
 defineProps<{
@@ -16,6 +18,8 @@ const emit = defineEmits<{
   save: []
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const open = defineModel<boolean>({ required: true })
 const enabled = defineModel<boolean>('enabled', { required: true })
 const concurrencyLimit = defineModel<string>('concurrencyLimit', { required: true })
@@ -29,8 +33,8 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
 <template>
   <ZDialog
     v-model="open"
-    title="批量编辑账号"
-    :description="`编辑 ${selectedCount} 个账号`"
+    :title="t('accounts.batchEdit.title')"
+    :description="t('accounts.batchEdit.selectionTitle', { count: selectedCount })"
     width="48rem"
     :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving"
   >
@@ -53,7 +57,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
 
     <template #footer>
       <ZButton :disabled="saving" @click="open = false">
-        取消
+        {{ t('common.actions.cancel') }}
       </ZButton>
       <ZButton
         type="primary"
@@ -61,7 +65,7 @@ const selectedGroupIds = defineModel<string[]>('selectedGroupIds', { required: t
         :disabled="selectedCount === 0 || groupsLoading"
         @click="emit('save')"
       >
-        保存更改
+        {{ t('common.actions.save') }}
       </ZButton>
     </template>
   </ZDialog>

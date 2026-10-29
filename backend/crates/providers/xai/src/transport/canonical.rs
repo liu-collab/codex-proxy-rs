@@ -15,9 +15,7 @@ use gateway_core::metering::{
     CurrencyCode, Decimal, Money, ProviderReportedCost, Usage,
 };
 use gateway_core::upstream::UpstreamSendState;
-use gateway_protocol::openai::events::{
-    ResponseModelObservation, TokenUsage, billable_usage_is_complete, extract_usage,
-};
+use gateway_protocol::openai::events::{TokenUsage, billable_usage_is_complete, extract_usage};
 use gateway_protocol::openai::sse::{SseEvent, SseEventDecoder};
 use serde_json::Value;
 
@@ -295,7 +293,6 @@ pub struct GrokCanonicalDecoder {
     tool_arguments_seen: BTreeSet<u32>,
     usage_emitted: bool,
     response_service_tier: Option<String>,
-    response_model: ResponseModelObservation,
     requires_provider_cost: bool,
 }
 
@@ -372,7 +369,6 @@ impl GrokCanonicalDecoder {
             tool_arguments_seen: BTreeSet::new(),
             usage_emitted: false,
             response_service_tier: None,
-            response_model: ResponseModelObservation::default(),
             requires_provider_cost: false,
         }
     }
@@ -414,12 +410,6 @@ impl GrokCanonicalDecoder {
     #[must_use]
     pub fn response_service_tier(&self) -> Option<&str> {
         self.response_service_tier.as_deref()
-    }
-
-    /// 返回原始上游响应声明的模型，缺失时不使用请求模型补齐
-    #[must_use]
-    pub fn response_model(&self) -> Option<&str> {
-        self.response_model.model()
     }
 
     pub fn push(&mut self, chunk: &[u8]) -> Result<Vec<ProviderEvent>, ProviderError> {
@@ -522,9 +512,6 @@ impl GrokCanonicalDecoder {
                 event.retry,
             )
             .map_err(|_| protocol_error_marker())?;
-            if !event_type.is_empty() {
-                self.response_model.observe(Some(&event_type), &value);
-            }
             // 工具转换可能隐藏注入的调用，计费事实必须从转换前的上游事件读取
             if let Some(response) = value.get("response") {
                 if let Some(tier) = response.get("service_tier").and_then(Value::as_str) {
@@ -1228,9 +1215,28 @@ fn upstream_event_error(value: &Value) -> ProviderError {
             _ => ProviderErrorKind::Unavailable,
         }
     };
-    let mut error = ProviderError::new(kind, UpstreamSendState::Sent).with_raw_upstream_error(
-        gateway_core::error::RawUpstreamError::new(value.to_string()),
-    );
+    let mut error = ProviderError::new(kind, UpstreamSendState::Sent)
+        .with_raw_upstream_error(gateway_core::error::RawUpstreamError::new(
+            value.to_string(),
+        ))
+        .with_upstream_failure_fields(gateway_core::upstream::UpstreamFailureFields {
+            status: value
+                .get("status")
+                .or_else(|| value.get("status_code"))
+                .or_else(|| value.pointer("/error/status"))
+                .or_else(|| value.pointer("/response/error/status"))
+                .and_then(Value::as_u64)
+                .and_then(|value| u16::try_from(value).ok())
+                .filter(|value| (400..=599).contains(value)),
+            code: code.map(str::to_owned),
+            // 顶层 type 是 SSE 事件名，只有错误对象内的 type 才属于上游错误事实
+            error_type: value
+                .pointer("/error/type")
+                .or_else(|| value.pointer("/response/error/type"))
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+            message: message.map(str::to_owned),
+        });
     if let Some(code) = code {
         error = error.with_upstream_code(OpaqueUpstreamValue::new(code.to_owned()));
     }

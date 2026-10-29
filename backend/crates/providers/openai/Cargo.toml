@@ -25,13 +25,13 @@ getrandom = "0.4.3"
 hex = "0.4.3"
 # TLS 依赖以官方 Core 锁文件为基线，安全补丁经握手特征核验后精确固定
 # 包含用于约束传递依赖的直接声明
-# hyper 受 workspace 的 SOCKS IPv6 修复补丁约束，保留补丁要求的兼容版本。
+# hyper-util 固定到包含 SOCKS IPv6 修复的正式版
 # 升级前须重复采样 ClientHello，核对算法、扩展集合及排序约束、key_share 与 ALPN。
 aws-lc-rs = "=1.18.1"
 h2 = "=0.4.20"
 hyper = { version = "=1.11.1", default-features = false }
 hyper-rustls = "=0.27.7"
-hyper-util = { version = "0.1.20", features = ["client-legacy", "http1", "tokio"] }
+hyper-util = { version = "=0.1.21", features = ["client-legacy", "http1", "tokio"] }
 # 与官方 Codex Desktop 一致：HTTP 默认走 native-tls，rustls 保留给自定义 CA 回退；
 # vendored OpenSSL 固定 Linux 发布版的 TLS 画像，且不启用压缩特性。
 native-tls = "=0.2.14"
@@ -46,12 +46,12 @@ rustls-native-certs = "=0.8.3"
 rustls-pki-types = "=1.14.0"
 secrecy = "0.10.3"
 serde = { version = "1.0.228", features = ["derive"] }
-serde_json = { version = "1.0.150", features = ["arbitrary_precision", "preserve_order"] }
+serde_json = { version = "1.0.150", features = ["arbitrary_precision", "preserve_order", "raw_value"] }
 sha2 = "0.11.0"
 subtle = "2.6.1"
 tar = { version = "0.4.46", default-features = false }
 thiserror = "2.0.18"
-tokio = { version = "=1.52.3", default-features = false, features = ["fs", "macros", "rt", "sync", "time"] }
+tokio = { version = "=1.53.3", default-features = false, features = ["fs", "macros", "rt", "sync", "time"] }
 tokio-rustls = { version = "=0.26.4", default-features = false }
 tokio-util = { version = "0.7.18", features = ["rt"] }
 tower-service = "0.3.3"
@@ -65,8 +65,8 @@ uuid = { version = "1.23.3", features = ["v4", "v7"] }
 # 静态链接 XZ 解码器，不要求部署环境安装 liblzma。
 xz2 = { version = "0.1.7", features = ["static"] }
 # 官方 Codex app-server 对 /v1/responses 请求体默认做 zstd 压缩（level 3），
-# 并携带 Content-Encoding: zstd；保持同版本同级别以对齐上游指纹。
-zstd = "=0.13.3"
+# 并携带 Content-Encoding: zstd；保留底层 Zstd 1.5.7 与压缩级别，仅更新 Rust 安全封装
+zstd = "=0.14.3"
 zip = { version = "9.0.4", default-features = false, features = ["deflate-flate2"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -76,7 +76,7 @@ openssl-sys = { version = "=0.9.111", features = ["vendored"] }
 [dev-dependencies]
 allocation-counter = "0.8.1"
 tempfile = "3.27.0"
-tokio = { version = "1.52.3", default-features = false, features = ["rt-multi-thread", "test-util"] }
+tokio = { version = "1.53.3", default-features = false, features = ["rt-multi-thread", "test-util"] }
 tracing-subscriber = { version = "0.3.23", features = ["json"] }
 wiremock = "0.6.5"
 

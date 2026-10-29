@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import type { CreatePluginSourceCredentialRequest, PluginSourceAuthentication, PluginSourceCredential } from '@/api'
+
 import { ZFormItem, ZInput, ZSelect } from '@codex-proxy/ui'
 import { computed, reactive, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { normalizePluginRepository } from '../utils/model'
 import PluginHelpPopover from './PluginHelpPopover.vue'
 import SourceCredentialPicker from './SourceCredentialPicker.vue'
@@ -12,23 +14,58 @@ const props = defineProps<{
   credentials: PluginSourceCredential[]
   disabled: boolean
 }>()
+
 defineEmits<{
   deleteCredential: [credential: PluginSourceCredential]
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const selected = defineModel<string[]>({ required: true })
 const pending = defineModel<boolean>('pending', { required: true })
 const draft = defineModel<CreatePluginSourceCredentialRequest | null>('draft', { required: true })
 const mode = shallowRef(selected.value.length ? 'saved' : 'public')
-const form = reactive({ kind: 'bearer', token: '', username: '', password: '', headerName: '', headerValue: '' })
-const authOptions = [
-  { label: '访问令牌', value: 'bearer' },
-  { label: '用户名与密码', value: 'basic' },
-  { label: '自定义请求头', value: 'header' },
-]
+const form = reactive({
+  kind: 'bearer',
+  token: '',
+  username: '',
+  password: '',
+  headerName: '',
+  headerValue: '',
+})
+const authOptions = computed(() => ([
+  {
+    label: t('plugins.downloadAuth.accessToken'),
+    value: 'bearer',
+  },
+  {
+    label: t('plugins.downloadAuth.usernameAndPassword'),
+    value: 'basic',
+  },
+  {
+    label: t('plugins.downloadAuth.customRequestHeader'),
+    value: 'header',
+  },
+]))
 const modeOptions = computed(() => [
-  { label: '无需认证', value: 'public' },
-  { label: props.kind === 'github' ? '填写 GitHub 令牌' : '填写认证信息', value: 'new' },
-  ...(props.credentials.length ? [{ label: '使用已保存凭据', value: 'saved' }] : []),
+  {
+    label: t('plugins.downloadAuth.noCertificationRequired'),
+    value: 'public',
+  },
+  {
+    label: props.kind === 'github'
+      ? t('plugins.downloadAuth.fillInGithubToken')
+      : t('plugins.downloadAuth.credentialsPlaceholder'),
+    value: 'new',
+  },
+  ...(props.credentials.length
+    ? [
+        {
+          label: t('plugins.downloadAuth.useSavedCredentials'),
+          value: 'saved',
+        },
+      ]
+    : []),
 ])
 const scope = computed(() => {
   if (props.kind === 'github') {
@@ -42,24 +79,59 @@ const scope = computed(() => {
     const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
     if (!(url.protocol === 'https:' || (url.protocol === 'http:' && loopback)) || url.username || url.password || url.hash || /[%\\]/.test(url.pathname))
       return null
-    return { origin: url.origin, pathPrefix: url.pathname, name: `下载 · ${url.hostname}` }
+    return {
+      origin: url.origin,
+      pathPrefix: url.pathname,
+      name: t('plugins.downloadAuth.download', { hostname: url.hostname }),
+    }
   }
   catch {
     return null
   }
 })
 const authentication = computed<PluginSourceAuthentication | null>(() => {
-  if (props.kind === 'github')
-    return form.token.trim() ? { kind: 'github', token: form.token.trim() } : null
-  if (form.kind === 'basic')
-    return form.username.trim() && form.password ? { kind: 'basic', username: form.username.trim(), password: form.password } : null
-  if (form.kind === 'header')
-    return form.headerName.trim() && form.headerValue ? { kind: 'header', name: form.headerName.trim(), value: form.headerValue } : null
-  return form.token.trim() ? { kind: 'bearer', token: form.token.trim() } : null
+  if (props.kind === 'github') {
+    return form.token.trim()
+      ? {
+          kind: 'github',
+          token: form.token.trim(),
+        }
+      : null
+  }
+  if (form.kind === 'basic') {
+    return form.username.trim() && form.password
+      ? {
+          kind: 'basic',
+          username: form.username.trim(),
+          password: form.password,
+        }
+      : null
+  }
+  if (form.kind === 'header') {
+    return form.headerName.trim() && form.headerValue
+      ? {
+          kind: 'header',
+          name: form.headerName.trim(),
+          value: form.headerValue,
+        }
+      : null
+  }
+  return form.token.trim()
+    ? {
+        kind: 'bearer',
+        token: form.token.trim(),
+      }
+    : null
 })
 
 function clearSecrets() {
-  Object.assign(form, { token: '', username: '', password: '', headerName: '', headerValue: '' })
+  Object.assign(form, {
+    token: '',
+    username: '',
+    password: '',
+    headerName: '',
+    headerValue: '',
+  })
 }
 
 function changeMode(value: string | undefined) {
@@ -94,7 +166,9 @@ watch([mode, scope, authentication], () => {
     ? {
         ...scope.value,
         name: scope.value.name.slice(0, 128),
-        purposes: props.kind === 'github' ? ['metadata', 'artifact'] : ['artifact'],
+        purposes: props.kind === 'github'
+          ? ['metadata', 'artifact']
+          : ['artifact'],
         authentication: authentication.value,
       }
     : null
@@ -103,40 +177,40 @@ watch([mode, scope, authentication], () => {
 
 <template>
   <div class="grid gap-4">
-    <ZFormItem label="下载认证">
+    <ZFormItem :label="t('plugins.downloadAuth.downloadCertification')">
       <template #label-extra>
-        <PluginHelpPopover label="下载认证说明">
+        <PluginHelpPopover :label="t('plugins.downloadAuth.helpTitle')">
           <p class="m-0">
-            {{ kind === 'github' ? '公开仓库无需认证，私有仓库需要有读取权限的 GitHub 令牌' : '仅在下载地址要求认证时填写' }}
+            {{ kind === 'github' ? t('plugins.downloadAuth.githubHelp') : t('plugins.downloadAuth.urlHelp') }}
           </p>
           <p class="m-0">
-            认证信息在查询或解析时保存，仅用于当前来源，不会提供给插件
+            {{ t('plugins.downloadAuth.storageHelp') }}
           </p>
         </PluginHelpPopover>
       </template>
-      <ZSelect :model-value="mode" :options="modeOptions" :disabled="disabled" class="w-full" aria-label="下载认证" @update:model-value="changeMode" />
+      <ZSelect :model-value="mode" :options="modeOptions" :disabled="disabled" class="w-full" :aria-label="t('plugins.downloadAuth.downloadCertification')" @update:model-value="changeMode" />
     </ZFormItem>
     <template v-if="mode === 'new'">
-      <ZFormItem v-if="kind === 'url'" label="认证方式">
-        <ZSelect v-model="form.kind" :options="authOptions" :disabled="disabled" class="w-full" aria-label="认证方式" @update:model-value="clearSecrets" />
+      <ZFormItem v-if="kind === 'url'" :label="t('plugins.downloadAuth.authenticationMethod')">
+        <ZSelect v-model="form.kind" :options="authOptions" :disabled="disabled" class="w-full" :aria-label="t('plugins.downloadAuth.authenticationMethod')" @update:model-value="clearSecrets" />
       </ZFormItem>
-      <ZFormItem v-if="kind === 'github' || form.kind === 'bearer'" :label="kind === 'github' ? 'GitHub 令牌' : '访问令牌'" required>
-        <ZInput v-model="form.token" type="password" autocomplete="new-password" :disabled="disabled" aria-label="下载令牌" placeholder="输入令牌" />
+      <ZFormItem v-if="kind === 'github' || form.kind === 'bearer'" :label="kind === 'github' ? t('plugins.downloadAuth.githubToken') : t('plugins.downloadAuth.accessToken')" required>
+        <ZInput v-model="form.token" type="password" autocomplete="new-password" :disabled="disabled" :aria-label="t('plugins.downloadAuth.downloadToken')" :placeholder="t('plugins.downloadAuth.enterToken')" />
       </ZFormItem>
       <div v-else-if="form.kind === 'basic'" class="grid gap-4 sm:grid-cols-2">
-        <ZFormItem label="用户名" required>
-          <ZInput v-model="form.username" autocomplete="off" :disabled="disabled" aria-label="下载用户名" />
+        <ZFormItem :label="t('plugins.downloadAuth.username')" required>
+          <ZInput v-model="form.username" autocomplete="off" :disabled="disabled" :aria-label="t('plugins.downloadAuth.downloadUsername')" />
         </ZFormItem>
-        <ZFormItem label="密码" required>
-          <ZInput v-model="form.password" type="password" autocomplete="new-password" :disabled="disabled" aria-label="下载密码" />
+        <ZFormItem :label="t('plugins.downloadAuth.password')" required>
+          <ZInput v-model="form.password" type="password" autocomplete="new-password" :disabled="disabled" :aria-label="t('plugins.downloadAuth.downloadPassword')" />
         </ZFormItem>
       </div>
       <div v-else class="grid gap-4 sm:grid-cols-2">
-        <ZFormItem label="请求头名称" required>
-          <ZInput v-model="form.headerName" :disabled="disabled" aria-label="请求头名称" placeholder="X-Download-Token" />
+        <ZFormItem :label="t('plugins.downloadAuth.requestHeaderName')" required>
+          <ZInput v-model="form.headerName" :disabled="disabled" :aria-label="t('plugins.downloadAuth.requestHeaderName')" placeholder="X-Download-Token" />
         </ZFormItem>
-        <ZFormItem label="请求头值" required>
-          <ZInput v-model="form.headerValue" type="password" autocomplete="new-password" :disabled="disabled" aria-label="请求头值" />
+        <ZFormItem :label="t('plugins.downloadAuth.requestHeaderValue')" required>
+          <ZInput v-model="form.headerValue" type="password" autocomplete="new-password" :disabled="disabled" :aria-label="t('plugins.downloadAuth.requestHeaderValue')" />
         </ZFormItem>
       </div>
     </template>

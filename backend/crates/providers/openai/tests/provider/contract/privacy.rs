@@ -129,12 +129,12 @@ async fn privacy_json_endpoints_preserve_untouched_bytes_and_rewrite_matched_bod
             "Bearer configured-synthetic-token"
         );
         if change_body {
-            assert_eq!(
-                serde_json::from_slice::<Value>(&sent.body).unwrap(),
-                json!({"id":"search","future":2})
-            );
+            let mut value: Value = serde_json::from_slice(&sent.body).unwrap();
+            assert_scoped_id(value["id"].as_str().unwrap(), "search");
+            value.as_object_mut().unwrap().remove("id");
+            assert_eq!(value, json!({"future":2}));
         } else {
-            assert_eq!(sent.body, raw);
+            assert_scoped_search_body(&sent.body, &raw);
         }
     }
 }

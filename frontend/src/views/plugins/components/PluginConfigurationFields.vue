@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { JsonSchema } from '../utils/model'
-import { ZEmpty, ZFormItem, ZInput, ZTag } from '@codex-proxy/ui'
 
+import { ZEmpty, ZFormItem, ZInput, ZSegmented, ZTag } from '@codex-proxy/ui'
 import { computed, nextTick, shallowRef, useTemplateRef, watch } from 'vue'
+
+import { useI18n } from 'vue-i18n'
 
 import SchemaForm from '@/components/schema-form/index.vue'
 import { parseJsonObject } from '@/utils/data'
@@ -13,11 +15,9 @@ const props = withDefaults(defineProps<{
   schema: Record<string, unknown>
   secretFields: string[]
   existingSecretFields?: string[]
-  secretMode?: 'preserve' | 'replace' | 'clear'
   disabled?: boolean
 }>(), {
   existingSecretFields: () => [],
-  secretMode: 'replace',
   disabled: false,
 })
 
@@ -25,8 +25,11 @@ const emit = defineEmits<{
   validityChange: [valid: boolean]
 }>()
 
+const { t } = useI18n({ useScope: 'global' })
+
 const configuration = defineModel<Record<string, unknown>>('configuration', { required: true })
 const secrets = defineModel<Record<string, string>>('secrets', { required: true })
+const secretMode = defineModel<'preserve' | 'replace' | 'clear'>('secretMode', { required: true })
 const configurationText = shallowRef('{}')
 const schemaForm = useTemplateRef<{ focusField: (key?: string) => Promise<boolean> }>('schemaForm')
 const secretFieldsRoot = useTemplateRef<HTMLElement>('secretFieldsRoot')
@@ -52,30 +55,51 @@ const secretSchemas = computed(() => {
     required: required.includes(name),
   }))
 })
+const secretModes = computed(() => ([
+  {
+    label: t('plugins.configuration.keepExistingValues'),
+    value: 'preserve',
+  },
+  {
+    label: t('plugins.configuration.replaceAllValues'),
+    value: 'replace',
+  },
+  {
+    label: t('plugins.configuration.clearAllValues'),
+    value: 'clear',
+  },
+]))
+const existingSecretLabels = computed(() => props.existingSecretFields.map(name => ({
+  name,
+  label: (props.schema as JsonSchema).properties?.[name]?.title || name,
+})))
 const requiredConfigurationFields = computed(() => (configurationSchema.value as JsonSchema).required ?? [])
 const missingConfigurationFields = computed(() => requiredConfigurationFields.value.filter(name =>
   !Object.hasOwn(configuration.value, name),
 ))
 const configurationFieldErrors = computed(() => Object.fromEntries(
-  missingConfigurationFields.value.map(name => [name, '请填写必填配置']),
+  missingConfigurationFields.value.map(name => [
+    name,
+    t('plugins.configuration.fillInRequiredConfiguration'),
+  ]),
 ))
 const requiredSecretFields = computed(() => secretSchemas.value.filter(field => field.required))
 const missingSecretFields = computed(() => requiredSecretFields.value.filter((field) => {
-  if (props.secretMode === 'clear')
+  if (secretMode.value === 'clear')
     return true
-  if (props.secretMode === 'preserve')
+  if (secretMode.value === 'preserve')
     return !props.existingSecretFields.includes(field.name)
   return !valuePresent(secrets.value[field.name])
 }))
 const secretModeError = computed(() => {
-  if (props.secretMode === 'preserve' && props.existingSecretFields.some(name => !props.secretFields.includes(name)))
-    return '目标版本不支持部分已保存的敏感配置，请选择替换或清除'
-  if (!missingSecretFields.value.length || props.secretMode === 'replace')
+  if (secretMode.value === 'preserve' && props.existingSecretFields.some(name => !props.secretFields.includes(name)))
+    return t('plugins.configuration.incompatibleSecrets')
+  if (!missingSecretFields.value.length || secretMode.value === 'replace')
     return ''
   const labels = missingSecretFields.value.map(field => field.schema.title || field.name).join('、')
-  return props.secretMode === 'clear'
-    ? `必填敏感配置不能清除：${labels}`
-    : `没有可保留的必填敏感配置：${labels}`
+  return secretMode.value === 'clear'
+    ? t('plugins.configuration.requiredSecretsCannotClear', { labels })
+    : t('plugins.configuration.requiredSecretsMissing', { labels })
 })
 const hasConfiguration = computed(() => {
   const properties = (configurationSchema.value as JsonSchema).properties
@@ -83,7 +107,8 @@ const hasConfiguration = computed(() => {
     || (configurationSchema.value as JsonSchema).additionalProperties !== false
     || Object.keys(configuration.value).length > 0
 })
-const hasFields = computed(() => hasConfiguration.value || props.secretFields.length > 0)
+const hasSecrets = computed(() => props.secretFields.length > 0 || props.existingSecretFields.length > 0)
+const hasFields = computed(() => hasConfiguration.value || hasSecrets.value)
 
 function setSecret(name: string, value: unknown) {
   const next = { ...secrets.value }
@@ -106,7 +131,9 @@ const valid = computed(() => !configurationError.value
   && !missingSecretFields.value.length)
 const validationMessage = computed(() => secretModeError.value
   || configurationError.value
-  || (missingSecretFields.value.length ? '请填写必填敏感配置' : '请检查基本设置'))
+  || (missingSecretFields.value.length
+    ? t('plugins.configuration.secretsRequired')
+    : t('plugins.configuration.checkBasicSettings')))
 
 watch(valid, value => emit('validityChange', value), { immediate: true })
 
@@ -138,12 +165,14 @@ async function focusInvalid() {
   }
   if (!missingSecretFields.value.length)
     return null
-  if (props.secretMode !== 'replace')
+  if (secretMode.value !== 'replace')
     return 'secretMode' as const
 
   await nextTick()
   const missingName = missingSecretFields.value[0]?.name
-  const container = [...(secretFieldsRoot.value?.querySelectorAll<HTMLElement>('[data-secret-field]') ?? [])]
+  const container = [
+    ...(secretFieldsRoot.value?.querySelectorAll<HTMLElement>('[data-secret-field]') ?? []),
+  ]
     .find(element => element.dataset.secretField === missingName)
   container?.querySelector<HTMLElement>('input:not([type="hidden"]), textarea, button, [tabindex]:not([tabindex="-1"])')?.focus()
   return 'secret' as const
@@ -155,7 +184,7 @@ defineExpose({ focusInvalid, validationMessage })
 <template>
   <ZEmpty
     v-if="!hasFields"
-    title="无需填写插件参数"
+    :title="t('plugins.configuration.noParameters')"
     size="small"
     surface="inset"
     class="min-h-40 content-center"
@@ -171,29 +200,44 @@ defineExpose({ focusInvalid, validationMessage })
       :field-errors="configurationFieldErrors"
     />
 
-    <template v-if="secretFields.length > 0">
+    <section v-if="hasSecrets" class="grid gap-3 rounded-cp bg-cp-fill-alter p-4" :aria-label="t('plugins.configuration.sensitiveConfiguration')">
       <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <strong class="text-cp leading-none text-cp-text">敏感配置</strong>
-        <PluginHelpPopover label="敏感配置说明">
-          敏感配置单独保存，不回显已有值，选择保留时不会更改，选择替换时以本次填写的全部值覆盖
-        </PluginHelpPopover>
+        <strong class="text-cp leading-none text-cp-text">{{ t('plugins.configuration.sensitiveConfiguration') }}</strong>
         <ZTag v-if="existingSecretFields.length > 0" type="success" size="small">
-          已保存 {{ existingSecretFields.length }} 项
+          {{ t('plugins.configuration.settingsSaved', { count: existingSecretFields.length }) }}
         </ZTag>
       </div>
-      <p v-if="secretMode === 'clear'" class="m-0 text-cp-xs text-cp-warning-text">
-        保存时清除全部敏感配置
+      <p class="m-0 text-cp-xs leading-relaxed text-cp-text-secondary">
+        {{ t('plugins.configuration.secretsHelp') }}
       </p>
-      <div ref="secretFieldsRoot" class="contents">
+      <ZSegmented
+        v-if="existingSecretFields.length"
+        v-model="secretMode"
+        :options="secretModes"
+        :aria-label="t('plugins.configuration.secretsModeLabel')"
+        :disabled="disabled"
+        class="w-fit max-w-full"
+      />
+      <p v-if="secretModeError" role="alert" class="m-0 text-cp-xs leading-relaxed text-cp-warning-text">
+        {{ secretModeError }}
+      </p>
+      <ul v-if="secretMode === 'preserve'" class="m-0 flex list-none flex-wrap gap-2 p-0">
+        <li v-for="field in existingSecretLabels" :key="field.name" class="min-w-0 wrap-anywhere">
+          <ZTag type="primary">
+            {{ field.label }}
+          </ZTag>
+        </li>
+      </ul>
+      <div v-if="secretMode === 'replace'" ref="secretFieldsRoot" class="grid items-end gap-4 sm:grid-cols-2">
         <ZFormItem
-          v-for="field in secretMode === 'replace' ? secretSchemas : []"
+          v-for="field in secretSchemas"
           :key="field.name"
           :label="field.schema.title || field.name"
           :required="field.required"
           :data-secret-field="field.name"
         >
           <template v-if="field.schema.description" #label-extra>
-            <PluginHelpPopover :label="`${field.schema.title || field.name}说明`">
+            <PluginHelpPopover :label="t('plugins.configuration.about', { name: field.schema.title || field.name })">
               {{ field.schema.description }}
             </PluginHelpPopover>
           </template>
@@ -204,11 +248,11 @@ defineExpose({ focusInvalid, validationMessage })
             :disabled="disabled"
             :aria-label="field.schema.title || field.name"
             :aria-invalid="field.required && !valuePresent(secrets[field.name])"
-            placeholder="输入新值"
+            :placeholder="existingSecretFields.includes(field.name) ? t('plugins.configuration.emptySecretPlaceholder') : t('plugins.configuration.enterNewValue')"
             @update:model-value="setSecret(field.name, $event)"
           />
         </ZFormItem>
       </div>
-    </template>
+    </section>
   </div>
 </template>

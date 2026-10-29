@@ -617,7 +617,6 @@ pub(super) struct FakeAccountStore {
     automations: Mutex<
         BTreeMap<String, gateway_admin::model::reset_credit_automation::ResetCreditAutomation>,
     >,
-    pub(super) lowered_limits: Mutex<Vec<(String, u32)>>,
 }
 
 impl FakeAccountStore {
@@ -638,7 +637,6 @@ impl FakeAccountStore {
             quota_window_queries: Mutex::new(Vec::new()),
             quota_forecast_history: Mutex::new(QuotaForecastHistory::default()),
             update_commands: Mutex::new(Vec::new()),
-            lowered_limits: Mutex::new(Vec::new()),
             automations: Mutex::default(),
         })
     }
@@ -720,6 +718,7 @@ impl FakeAccountStore {
             last_error_message: account.last_error_message.clone(),
         };
         AccountPageItem {
+            protection_rules: Vec::new(),
             capacity: gateway_admin::model::accounts::AccountCapacity {
                 used_slots: None,
                 total_slots: account
@@ -1036,35 +1035,6 @@ impl AccountStore for FakeAccountStore {
         })
     }
 
-    async fn lower_concurrency_limit(
-        &self,
-        account_id: &ProviderAccountId,
-        limit: gateway_core::account::AccountConcurrencyLimit,
-        _: &MutationContext,
-    ) -> AdminStoreResult<Option<AccountUpdateResult>> {
-        let mut accounts = self.accounts.lock().expect("accounts");
-        let Some(account) = accounts
-            .iter_mut()
-            .find(|account| account.id == account_id.as_str())
-        else {
-            return Ok(None);
-        };
-        if !account.enabled
-            || account.concurrency_limit.map_or(5, |value| value.get()) <= limit.get()
-        {
-            return Ok(None);
-        }
-        account.concurrency_limit = Some(limit);
-        self.lowered_limits
-            .lock()
-            .expect("lowered limits")
-            .push((account.id.clone(), limit.get()));
-        Ok(Some(AccountUpdateResult {
-            config_revision: revision(2),
-            account_id: account_id.clone(),
-        }))
-    }
-
     async fn recover_account(
         &self,
         account_id: &ProviderAccountId,
@@ -1189,13 +1159,7 @@ impl SettingsStore for StaticSettingsStore {
                 usage_retention_days: 30,
                 ops_event_retention_days: 30,
                 audit_retention_days: 30,
-                account_auto_freeze_enabled: true,
-                account_auto_freeze_threshold: 12,
-                account_auto_freeze_window_seconds: 600,
-                account_auto_freeze_duration_seconds: 7_200,
-                account_auto_freeze_probe_enabled: true,
-                account_auto_freeze_probe_model: None,
-                account_auto_freeze_adaptive_concurrency: true,
+                account_error_protection: gateway_core::account::AccountErrorProtection::default(),
                 account_warmup_enabled: false,
                 account_warmup_schedule_time: "08:00".to_owned(),
                 account_warmup_model: None,
@@ -2098,11 +2062,23 @@ async fn accounts_list_should_degrade_quota_failure_to_empty_window_without_drop
         provider_data: None,
     });
     let failing = FakeProviderAdmin::new("xai", events.clone());
+    let mut xai_quota = failing.quota.lock().expect("provider quota").clone();
+    xai_quota.observed_at = Some(Utc::now());
+    failing.set_quota(xai_quota);
     failing.fail_next_quota(ProviderAdminErrorKind::Invalid);
     let store = FakeAccountStore::new("openai", events.clone());
     let mut xai_account = account_record("xai");
     xai_account.id = "acct_bad_xai".to_owned();
-    store.set_accounts(vec![account_record("openai"), xai_account]);
+    let mut healthy_xai = xai_account.clone();
+    healthy_xai.id = "acct_healthy_xai".to_owned();
+    let mut second_openai = account_record("openai");
+    second_openai.id = "acct_second_openai".to_owned();
+    store.set_accounts(vec![
+        account_record("openai"),
+        xai_account,
+        second_openai,
+        healthy_xai,
+    ]);
     let services = super::AdminHarness::new()
         .accounts(store.clone())
         .settings(Arc::new(StaticSettingsStore::default()))
@@ -2126,7 +2102,18 @@ async fn accounts_list_should_degrade_quota_failure_to_empty_window_without_drop
         .await
         .expect("one failing quota must not fail the directory page");
 
-    assert_eq!(page.items.len(), 2);
+    assert_eq!(
+        page.items
+            .iter()
+            .map(|item| item.account.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "acct_test",
+            "acct_bad_xai",
+            "acct_second_openai",
+            "acct_healthy_xai"
+        ]
+    );
     let by_id = page
         .items
         .iter()
@@ -2139,7 +2126,9 @@ async fn accounts_list_should_degrade_quota_failure_to_empty_window_without_drop
     assert!(degraded.quota.windows.is_empty());
     assert!(degraded.quota.observed_at.is_none());
     assert!(degraded.quota.provider_data.is_none());
-    assert_eq!(page.summary.total, 2);
+    assert!(by_id["acct_healthy_xai"].quota.observed_at.is_some());
+    assert_eq!(by_id["acct_second_openai"].quota.windows.len(), 1);
+    assert_eq!(page.summary.total, 4);
 }
 
 #[tokio::test]
@@ -3655,6 +3644,7 @@ impl AccountRuntimeStore for CapacityRuntime {
             return Err(store_unavailable());
         }
         Ok(AccountRuntimeSnapshot {
+            protection_rules: std::collections::BTreeMap::new(),
             in_flight: self.counts.clone(),
             ..Default::default()
         })
@@ -3663,10 +3653,6 @@ impl AccountRuntimeStore for CapacityRuntime {
     async fn active_freezes(
         &self,
     ) -> AdminStoreResult<BTreeMap<String, gateway_admin::model::accounts::AccountFreeze>> {
-        Ok(BTreeMap::new())
-    }
-
-    async fn capacity_peaks(&self, _: &[String]) -> AdminStoreResult<BTreeMap<String, u32>> {
         Ok(BTreeMap::new())
     }
 

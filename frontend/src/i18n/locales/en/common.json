@@ -1,0 +1,141 @@
+{
+  "common": {
+    "errors": {
+      "canceled": "Request canceled",
+      "timeout": "Request timed out, try again later",
+      "network": "Connection failed, check your network and try again",
+      "invalidParameters": "Invalid request parameters",
+      "signInRequired": "Sign-in required",
+      "forbidden": "You do not have permission to perform this action",
+      "notFound": "Endpoint not found",
+      "conflict": "Resource conflict, refresh and try again",
+      "payloadTooLarge": "Request payload is too large",
+      "unsupportedFormat": "Unsupported request format",
+      "invalidContent": "Invalid request content",
+      "rateLimited": "Too many requests, try again later",
+      "internal": "Internal server error",
+      "upstreamFailure": "Upstream service request failed",
+      "unavailable": "Service temporarily unavailable, try again later",
+      "upstreamTimeout": "Upstream response timed out",
+      "http": "Request failed (HTTP {status})",
+      "request": "Request failed",
+      "responseTooLarge": "Response content exceeds size limit",
+      "unsupportedResponse": "The service returned an unsupported response",
+      "sessionExpired": "Your session has expired, sign in again",
+      "operation": "Operation failed",
+      "copy": "Failed to copy",
+      "malformedJson": "The request body is not valid JSON",
+      "invalidTimeRange": "Invalid time range",
+      "invalidCredentials": "Invalid sign-in credentials",
+      "invalidAdminApiKey": "Invalid admin API key",
+      "tooManyLoginAttempts": "Too many sign-in attempts, try again later",
+      "upstreamResultUnknown": "The upstream result is unknown, refresh the status before deciding whether to retry"
+    },
+    "status": {
+      "disabled": "Disabled",
+      "disabledName": "{name} (disabled)",
+      "success": "Success",
+      "error": "Error",
+      "pending": "Pending",
+      "failed": "Failed",
+      "healthy": "Healthy",
+      "all": "All",
+      "available": "Available",
+      "unavailable": "Unavailable",
+      "enabled": "Enabled",
+      "loading": "Loading",
+      "running": "Running",
+      "completed": "Completed",
+      "rateLimited": "Rate limited"
+    },
+    "actions": {
+      "copy": "Copy",
+      "close": "Close",
+      "cancel": "Cancel",
+      "previous": "Previous",
+      "reset": "Reset",
+      "back": "Back",
+      "delete": "Delete",
+      "create": "Create",
+      "enable": "Enable",
+      "next": "Next",
+      "confirm": "Confirm",
+      "refresh": "Refresh",
+      "save": "Save"
+    },
+    "providers": {
+      "all": "All platforms",
+      "filter": "Filter by platform",
+      "unknown": "Unknown platform",
+      "customAuth": "Custom authentication · {normalized}",
+      "unknownAuth": "Unknown authentication type"
+    },
+    "location": {
+      "resolving": "Resolving exit location",
+      "detect": "Resolve exit location and fill in the form",
+      "countryCode": "Country code",
+      "countryCodePlaceholder": "Enter a two-letter country code",
+      "region": "Region",
+      "regionPlaceholder": "Enter a region",
+      "city": "City",
+      "cityPlaceholder": "Enter a city",
+      "timeZone": "IANA time zone",
+      "timeZonePlaceholder": "Enter an IANA time zone",
+      "required": "Enter a two-letter country code, region, city, and IANA time zone"
+    },
+    "values": {
+      "yes": "Yes",
+      "no": "No",
+      "unspecified": "Not specified",
+      "all": "All",
+      "unknown": "Unknown",
+      "unlimited": "Unlimited",
+      "default": "Default",
+      "on": "On",
+      "none": "None",
+      "off": "Off"
+    },
+    "form": {
+      "inputPlaceholder": "Enter a value",
+      "useForm": "Use form",
+      "fieldHelp": "About {label}",
+      "editJson": "Edit JSON"
+    },
+    "fields": {
+      "actions": "Actions",
+      "notes": "Notes",
+      "status": "Status",
+      "color": "Color",
+      "updatedAt": "Updated",
+      "name": "Name",
+      "createdAt": "Created",
+      "baseUrl": "Base URL",
+      "apiKey": "API key",
+      "build": "Build"
+    },
+    "language": "Language",
+    "validation": {
+      "invalidJson": "Enter a valid JSON object",
+      "jsonObject": "Input must be a JSON object",
+      "sizeLimit": "Input must not exceed {value} KiB"
+    },
+    "feedback": {
+      "deleted": "Deleted",
+      "copied": "Copied"
+    },
+    "time": {
+      "justNow": "Just now",
+      "minutesAgo": "{count} min ago",
+      "hoursAgo": "{count} h ago",
+      "daysAgo": "{count} d ago"
+    },
+    "units": {
+      "tokens": "Tokens"
+    },
+    "sizes": {
+      "small": "Small",
+      "medium": "Medium",
+      "large": "Large"
+    }
+  }
+}

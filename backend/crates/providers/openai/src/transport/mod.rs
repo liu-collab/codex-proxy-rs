@@ -1,4 +1,4 @@
-//! Codex HTTP/SSE/WebSocket 上游 transport
+﻿//! Codex HTTP/SSE/WebSocket 上游 transport
 
 mod automatic_context;
 pub mod canonical;
@@ -8,14 +8,15 @@ mod client_json;
 mod client_live;
 mod client_sse;
 pub(crate) mod connection;
+mod correlation;
 pub mod diagnostics;
 mod downstream;
 pub mod endpoints;
 pub mod headers;
-pub mod identity_pseudonym;
 pub mod input_guard;
 pub mod json_literal;
 pub mod local_compaction;
+mod outbound;
 pub mod profile;
 pub mod profile_avatar;
 pub mod profile_statistics;

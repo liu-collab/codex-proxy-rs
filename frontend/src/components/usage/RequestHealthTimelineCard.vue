@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import type { DashboardHealthTimeline, DashboardHealthTimelinePoint } from '@/api'
-import { ZButton, ZCard, ZPopover } from '@codex-proxy/ui'
 
+import { ZButton, ZCard, ZPopover } from '@codex-proxy/ui'
 import { usePreferredReducedMotion, useResizeObserver } from '@vueuse/core'
+
 import { gsap } from 'gsap'
 import { computed, onBeforeUnmount, shallowRef, useTemplateRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import HealthTimelinePointPopover from '@/components/usage/HealthTimelinePointPopover.vue'
 import { formatHealthCount, healthEligibleRequestCount, healthLegend, healthObservedRequestCount, healthStatusMeta } from '@/components/usage/shared/health'
 
 const props = defineProps<{
   timeline: DashboardHealthTimeline
 }>()
+
+const { t } = useI18n({ useScope: 'global' })
 
 const healthPopoverArrowSurfaceClasses = {
   top: 'bg-cp-popover-header-bg',
@@ -114,7 +118,9 @@ function animatePointWave(centerIndex: number) {
   const cellsByDistance: HTMLElement[][] = [[], [], []]
 
   for (let distance = 0; distance <= 2; distance += 1) {
-    const candidateIndexes = distance === 0 ? [centerIndex] : [centerIndex - distance, centerIndex + distance]
+    const candidateIndexes = distance === 0
+      ? [centerIndex]
+      : [centerIndex - distance, centerIndex + distance]
 
     for (const index of candidateIndexes) {
       const button = buttons[index]
@@ -136,7 +142,10 @@ function animatePointWave(centerIndex: number) {
 
   if (preferredMotion.value === 'reduce') {
     const cells = cellsByDistance.flat()
-    gsap.set([...cells, ...cellsToRelease], { clearProps: 'transform,willChange' })
+    gsap.set([
+      ...cells,
+      ...cellsToRelease,
+    ], { clearProps: 'transform,willChange' })
     wavedCellIndexes = nextCellIndexes
     return
   }
@@ -193,7 +202,12 @@ function releasePointWave() {
 
 function pointAccessibilityLabel(point: DashboardHealthTimelinePoint) {
   const eligibleRequests = healthEligibleRequestCount(point)
-  return `${point.time}，${healthStatusMeta[point.status].label}，有效请求 ${formatHealthCount(eligibleRequests)}，可用性 ${point.reliabilityDisplay}`
+  return t('usage.health.validRequestsAvailability', {
+    time: point.time,
+    label: healthStatusMeta.value[point.status].label,
+    count: formatHealthCount(eligibleRequests),
+    reliabilityDisplay: point.reliabilityDisplay,
+  })
 }
 
 watch(popoverOpen, (open) => {
@@ -222,7 +236,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <ZCard as="article" :title="timeline.title" :description="timeline.description" class="w-full">
+  <ZCard as="article" :title="t('dashboard.health.title')" :description="t('dashboard.health.description')" class="w-full">
     <template #actions>
       <div class="flex w-full flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <div

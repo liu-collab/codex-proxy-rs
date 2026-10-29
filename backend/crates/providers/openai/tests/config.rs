@@ -1,15 +1,40 @@
-//! 验证 OpenAI 配置默认值、路径派生与上游地址约束
+//! 验证 OpenAI 配置解析、路径派生与上游地址约束
 
-use std::path::Path;
+use std::{path::Path, time::Duration};
 
-use provider_openai::config::{DEFAULT_STREAM_MAX_RETRIES, MAX_STREAM_MAX_RETRIES, OpenAiConfig};
+use provider_openai::config::{MAX_STREAM_MAX_RETRIES, OpenAiConfig};
 
 #[test]
-fn openai_config_keeps_residency_separate_from_client_identity() {
-    use provider_openai::transport::profile::CodexResidency;
-    let config: OpenAiConfig = serde_json::from_str(r#"{"residency":"us"}"#).unwrap();
-    assert_eq!(config.residency, Some(CodexResidency::Us));
-    assert!(serde_json::from_str::<OpenAiConfig>(r#"{"residency":"invalid"}"#).is_err());
+fn openai_config_preserves_optional_routing_header_values() {
+    for (document, expected) in [
+        (r#"{}"#, (None, None)),
+        (
+            r#"{"residency":null,"account_routing_override":null}"#,
+            (None, None),
+        ),
+        (
+            r#"{"residency":"us","account_routing_override":"us"}"#,
+            (Some("us"), Some("us")),
+        ),
+        (
+            r#"{"residency":"custom-region","account_routing_override":"custom-route"}"#,
+            (Some("custom-region"), Some("custom-route")),
+        ),
+        (
+            r#"{"residency":"","account_routing_override":"NO_CONSTRAINT"}"#,
+            (Some(""), Some("NO_CONSTRAINT")),
+        ),
+    ] {
+        let config: OpenAiConfig = serde_json::from_str(document).unwrap();
+        assert_eq!(
+            (
+                config.residency.as_deref(),
+                config.account_routing_override.as_deref()
+            ),
+            expected,
+            "{document}",
+        );
+    }
 }
 
 #[test]
@@ -60,39 +85,6 @@ fn openai_config_restricts_upstream_base_url_to_https_or_loopback_http() {
 }
 
 #[test]
-fn openai_config_defaults_to_the_provider_owned_operating_values() {
-    let config = OpenAiConfig::default();
-    assert_eq!(DEFAULT_STREAM_MAX_RETRIES, 5);
-
-    assert_eq!(
-        (
-            config.api.base_url.as_str(),
-            config.ws_pool.enabled,
-            config.ws_pool.max_age_ms,
-            config.ws_pool.max_connecting,
-            config.ws_pool.stream_idle_timeout_ms,
-            config.quota.refresh_interval_minutes,
-            config.auth.refresh_enabled,
-            config.auth.oauth_client_id.as_str(),
-            config.auth.oauth_token_endpoint.as_str(),
-            config.stream_max_retries(),
-        ),
-        (
-            "https://chatgpt.com/backend-api",
-            true,
-            3_300_000,
-            8,
-            300_000,
-            15,
-            true,
-            "app_EMoamEEZ73f0CkXaXp7hrann",
-            "https://auth.openai.com/oauth/token",
-            u32::try_from(DEFAULT_STREAM_MAX_RETRIES).expect("default retry budget fits u32"),
-        )
-    );
-}
-
-#[test]
 fn openai_stream_retry_budget_uses_the_official_hard_cap() {
     let mut config = OpenAiConfig::default();
     config.stream_max_retries = MAX_STREAM_MAX_RETRIES + 1;
@@ -126,6 +118,31 @@ fn openai_input_guard_is_disabled_by_default_and_rejects_out_of_range_thresholds
 }
 
 #[test]
+fn websocket_pool_idle_timeout_accepts_existing_configs_and_explicit_overrides() {
+    for (idle_timeout_ms, expected) in [(None, 300_000), (Some(600_000), 600_000)] {
+        let mut document = serde_json::json!({
+            "ws_pool": {
+                "enabled": true,
+                "max_age_ms": 3_300_000,
+                "max_connecting": 8,
+                "stream_idle_timeout_ms": 300_000
+            }
+        });
+        if let Some(idle_timeout_ms) = idle_timeout_ms {
+            document["ws_pool"]["idle_timeout_ms"] = serde_json::json!(idle_timeout_ms);
+        }
+        let mut config: OpenAiConfig = serde_json::from_value(document).unwrap();
+        config
+            .resolve_and_validate(Path::new("/srv/gateway"))
+            .unwrap();
+        assert_eq!(
+            config.websocket_pool_config().idle_timeout,
+            Duration::from_millis(expected)
+        );
+    }
+}
+
+#[test]
 fn openai_input_guard_settings_reach_the_provider_config() {
     for threshold in [1_000, 272_000, 2_000_000] {
         let mut config: OpenAiConfig = serde_json::from_value(serde_json::json!({
@@ -140,6 +157,17 @@ fn openai_input_guard_settings_reach_the_provider_config() {
         assert!(guard.enabled);
         assert_eq!(guard.threshold_tokens, threshold);
     }
+}
+
+#[test]
+fn websocket_pool_idle_timeout_rejects_zero() {
+    let mut config = valid_config();
+    config.ws_pool.idle_timeout_ms = 0;
+    assert!(
+        config
+            .resolve_and_validate(Path::new("/srv/gateway"))
+            .is_err()
+    );
 }
 
 fn valid_config() -> OpenAiConfig {

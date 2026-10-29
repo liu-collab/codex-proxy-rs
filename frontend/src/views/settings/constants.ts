@@ -1,23 +1,26 @@
-export const rotationOptions = [
+import { computed } from 'vue'
+import { t } from '@/i18n'
+
+export const rotationOptions = computed(() => ([
   {
-    label: '智能调度（推荐）',
+    label: t('settings.rotation.smartLabel'),
     value: 'smart',
-    description: '综合负载、剩余额度、健康和延迟评分，支持自定义评分偏好',
+    description: t('settings.rotation.smartDescription'),
   },
 
   {
-    label: '额度重置优先',
+    label: t('settings.rotation.quotaResetLabel'),
     value: 'quota_reset_priority',
-    description: '优先选择额度窗口更快重置的账号，适合在重置前消耗剩余额度',
+    description: t('settings.rotation.quotaResetDescription'),
   },
   {
-    label: '轮询调度',
+    label: t('settings.rotation.roundRobinLabel'),
     value: 'round_robin',
-    description: '在可用候选账号间按顺序轮转，分配结果最可预测',
+    description: t('settings.rotation.roundRobinDescription'),
   },
   {
-    label: '粘性调度',
+    label: t('settings.rotation.stickyLabel'),
     value: 'sticky',
-    description: '优先复用最近使用的账号，直到不可用后再切换',
+    description: t('settings.rotation.stickyDescription'),
   },
-] as const
+] as const))

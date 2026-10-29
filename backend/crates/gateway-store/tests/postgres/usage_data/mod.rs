@@ -530,8 +530,13 @@ async fn unassigned_correction_changes_totals_without_inventing_dimension_member
     let repo = observability_repository(&db.pool);
     let range = ObservabilityRange::new(start(), start() + TimeDelta::days(1)).unwrap();
     let summary = repo
-        .usage_summary(range, NativeFilter::default())
+        .usage_insights_observation(
+            range,
+            NativeFilter::default(),
+            gateway_admin::model::observability::Granularity::Hour,
+        )
         .await
+        .map(|snapshot| snapshot.overview)
         .unwrap();
     assert_eq!(
         (

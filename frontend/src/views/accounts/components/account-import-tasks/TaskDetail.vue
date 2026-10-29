@@ -1,18 +1,30 @@
 <script setup lang="ts">
 import type { AccountImportTaskDetail } from '@/api'
+
 import { ZButton, ZEmpty, ZScrollbar, ZSegmented } from '@codex-proxy/ui'
 import { ArrowUpRight, Check, CircleAlert, Square, X } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { itemDescription, itemStates, outcomeOrder, processed, taskLabel } from './presenter'
 
 const props = defineProps<{ task: AccountImportTaskDetail, stopping: boolean }>()
+
 const emit = defineEmits<{ stop: [], viewAccounts: [] }>()
+
+const { t } = useI18n({ useScope: 'global' })
+
 const filter = shallowRef('all')
-const filterOptions = [
-  { label: '全部', value: 'all' },
-  { label: '需处理', value: 'attention' },
-]
+const filterOptions = computed(() => ([
+  {
+    label: t('common.values.all'),
+    value: 'all',
+  },
+  {
+    label: t('accounts.importTasks.needProcessing'),
+    value: 'attention',
+  },
+]))
 const hasAttention = computed(() => props.task.counts.failed + props.task.counts.unknown > 0)
 const visibleItems = computed(() => filter.value === 'attention'
   ? props.task.items.filter(item => item.status === 'failed' || item.status === 'unknown')
@@ -30,42 +42,46 @@ watch(hasAttention, (value) => {
 </script>
 
 <template>
-  <section class="min-w-0 space-y-5" aria-label="导入任务详情">
+  <section class="min-w-0 space-y-5" :aria-label="t('accounts.importTasks.importTaskDetails')">
     <div class="flex flex-wrap items-start justify-between gap-3">
       <div>
         <h3 class="text-base font-bold text-cp-text">
           {{ taskLabel(task) }}
         </h3>
         <p class="mt-1 text-xs text-cp-text-secondary">
-          {{ task.createdAtDisplay }} 创建
+          {{ t('accounts.importTasks.created', { createdAtDisplay: task.createdAtDisplay }) }}
         </p>
       </div>
-      <ZButton
-        v-if="!task.finishedAt"
-        size="small"
-        :loading="stopping"
-        :disabled="task.stopRequested || task.counts.pending === 0"
-        @click="emit('stop')"
-      >
-        <template #icon>
-          <Square class="size-3 text-cp-error" />
-        </template>
-        {{ task.stopRequested || task.counts.pending === 0 ? '等待当前条目结束' : '停止未开始条目' }}
-      </ZButton>
+      <div v-if="!task.finishedAt" class="grid max-w-full justify-items-end gap-1.5">
+        <ZButton
+          size="small"
+          :loading="stopping"
+          :disabled="task.stopRequested || task.counts.pending === 0"
+          @click="emit('stop')"
+        >
+          <template #icon>
+            <Square class="size-3 text-cp-error" />
+          </template>
+          {{ task.stopRequested || task.counts.pending === 0 ? t('accounts.importTasks.waitForCurrentEntryToEnd') : t('accounts.importTasks.stopUnstartedEntries') }}
+        </ZButton>
+        <p v-if="task.counts.pending > 0 || task.stopRequested" class="m-0 max-w-64 text-right text-cp-xs text-cp-text-secondary">
+          {{ t('accounts.importTasks.stopHelp') }}
+        </p>
+      </div>
       <ZButton v-else size="small" type="primary" variant="plain" @click="emit('viewAccounts')">
-        查看账号 <ArrowUpRight class="size-3.5" />
+        {{ t('accounts.importTasks.viewAccount') }} <ArrowUpRight class="size-3.5" />
       </ZButton>
     </div>
 
     <div>
       <div class="mb-2 flex items-baseline justify-between gap-3 text-xs">
-        <span class="text-cp-text-secondary">条目进度 <strong class="font-mono font-medium text-cp-text">{{ processed(task) }} / {{ task.total }}</strong></span>
-        <span class="font-semibold text-cp-text">已入库 {{ task.counts.importedAccounts }} 个账号</span>
+        <span class="text-cp-text-secondary">{{ t('accounts.importTasks.entryProgress') }} <strong class="font-mono font-medium text-cp-text">{{ processed(task) }} / {{ task.total }}</strong></span>
+        <span class="font-semibold text-cp-text">{{ t('accounts.importTasks.accountsImported', { importedAccounts: task.counts.importedAccounts }) }}</span>
       </div>
       <div
         class="flex h-2 overflow-hidden rounded-full bg-cp-fill-alter"
         role="progressbar"
-        aria-label="条目处理进度"
+        :aria-label="t('accounts.importTasks.itemProcessingProgress')"
         :aria-valuenow="processed(task)"
         :aria-valuemax="task.total"
         :aria-valuemin="0"
@@ -84,20 +100,20 @@ watch(hasAttention, (value) => {
       <div v-if="hasAttention" class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-3">
         <p v-if="task.counts.unknown" class="flex min-w-0 items-start gap-2 text-xs leading-relaxed text-cp-warning-text">
           <CircleAlert class="mt-0.5 size-3.5 shrink-0" />
-          待核对条目可能已入库，请先查看账号，再决定是否重新导入
+          {{ t('accounts.importTasks.itemsToBeCheckedMayHaveBeen') }}
         </p>
         <ZSegmented
           v-model="filter"
           class="ml-auto shrink-0"
-          aria-label="筛选导入明细"
+          :aria-label="t('accounts.importTasks.filterImportDetails')"
           :options="filterOptions"
           size="small"
         />
       </div>
       <div>
         <ZScrollbar :key="`${task.taskId}-${filter}`" max-height="min(18rem, 32dvh)">
-          <ZEmpty v-if="!visibleItems.length" size="small" title="暂无需要处理的条目" surface="none" />
-          <ol v-else class="m-0 list-none space-y-1 p-0" aria-label="导入条目结果">
+          <ZEmpty v-if="!visibleItems.length" size="small" :title="t('accounts.importTasks.thereAreNoItemsToBeProcessed')" surface="none" />
+          <ol v-else class="m-0 list-none space-y-1 p-0" :aria-label="t('accounts.importTasks.importEntryResults')">
             <li
               v-for="item in visibleItems"
               :key="item.index"

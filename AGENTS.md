@@ -5,14 +5,16 @@
 | 任务意图与常见说法 | 必用技能 |
 | --- | --- |
 | 开发、修复、排障、代码审查、改文档；包括“改弹窗／样式／文案”“修接口／调度／数据库”等省略请求 | [cpr-dev-guide](.agents/skills/cpr-dev-guide/SKILL.md)，按实际操作和文件匹配规范，跨前后端同时执行 |
-| 提交／提个 PR、准备或更新 PR、看下 PR、回复 PR 讨论、处理 PR 审查意见 | [cpr-github-pr](.agents/skills/cpr-github-pr/SKILL.md)；需要修改时同时执行 cpr-dev-guide |
+| 提交／提个 PR、准备或更新 PR、看下 PR、回复 PR 讨论、处理 PR 审查意见 | [cpr-github-pr](.agents/skills/cpr-github-pr/SKILL.md)；实现自审、审查或修改同时执行 cpr-dev-guide |
 | 提 Issue、反馈到仓库、把问题或建议整理成 Issue、补充或回复 Issue | [cpr-github-issue](.agents/skills/cpr-github-issue/SKILL.md) |
-| 写网关插件、修改插件能力、排查插件接入、打包插件 | [cpr-plugin-dev](.agents/skills/cpr-plugin-dev/SKILL.md)，同时执行 cpr-dev-guide |
+| 写、修或审查独立网关插件，排查插件接入、打包插件 | [cpr-plugin-dev](.agents/skills/cpr-plugin-dev/SKILL.md)，同时执行 cpr-dev-guide；仅改宿主能力时由 cpr-dev-guide 加载插件边界 |
 | 发版、准备版本、发布 beta／实验版、整理发布说明、打发行 tag | [cpr-release](.agents/skills/cpr-release/SKILL.md) |
 
 结合上下文识别“提交吧”“看看这个问题”等省略说法：普通 Git 提交不自动变成 PR，代码排查不自动变成 Issue；审查与发版准备不代表获准远程写入
 
-只加载当前任务命中的技能、模式和文档章节，复用已有上下文，进入新阶段再补读；链接是按需入口，不是全文或全部参考文件的必读清单
+先完整读取命中技能的 `SKILL.md`，再读取其领域必读规范，之后按当前步骤补充实现、命令和示例。技能名称、描述或入口摘要不能代替正文与必读引用；引用中明确要求“先读”“必须读取”或“执行”的规范也要落实，其他资料按需读取
+
+按用户意图、行为影响和实际文件共同匹配，跨领域叠加；确定方案或给出审查结论前完成对应领域必读，不能因改动小、路径未落在该模块或自认为熟悉而跳过。只复用当前上下文中已实际读取且仍适用的内容；输出截断、上下文压缩后缺失的必要内容须补读，范围或阶段变化时重新匹配
 
 执行所选流程中的问题核实、自审、验证与交付要求，协作流程和审查标准见 [CONTRIBUTING.md](CONTRIBUTING.md)
 
@@ -26,6 +28,7 @@ Issue 和 PR 回复统一按 [GitHub 回复口吻](CONTRIBUTING.md#github-回复
 
 In repositories indexed by CodeGraph (a `.codegraph/` directory exists at the repo root), reach for it BEFORE grep/find or reading files when you need to understand or locate code:
 
+- **Index freshness**: Run `codegraph sync` from the repository root before the first code query in a task. After pulling updates, switching branches, or changing code, run it again before the next query so symbols and call paths match the working tree. If synchronization fails, report the failure and verify against current source rather than treating the index as current.
 - **MCP tools** (when available): `codegraph_explore` answers most code questions in one call — the relevant symbols' verbatim source plus the call paths between them. `codegraph_node` returns one symbol's source + callers, or reads a whole file with line numbers. If the tools are listed but deferred, load them by name via tool search.
 - **Shell** (always works): `codegraph explore "<symbol names or question>"` and `codegraph node <symbol-or-file>` print the same output.
 

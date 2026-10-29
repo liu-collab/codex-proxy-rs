@@ -41,7 +41,7 @@ impl AnalyticsValue for DashboardObservation {
         &mut self.analytics
     }
 }
-impl AnalyticsValue for UsageOverview {
+impl AnalyticsValue for UsageSummaryObservation {
     fn metadata(&mut self) -> &mut AnalyticsMetadata {
         &mut self.analytics
     }
@@ -177,7 +177,7 @@ type UsageKey = (TimeRange, UsageFilter);
 pub(crate) struct CachedObservabilityStore {
     inner: Arc<dyn ObservabilityStore>,
     dashboard: Cache<DashboardQuery, DashboardObservation>,
-    summaries: Cache<UsageKey, UsageOverview>,
+    summaries: Cache<UsageKey, UsageSummaryObservation>,
     insights: Cache<(UsageKey, Granularity), UsageInsightsObservation>,
     diagnostics: Cache<(UsageKey, DiagnosticDimension, u16), DiagnosticsObservation>,
 }
@@ -254,7 +254,7 @@ impl ObservabilityStore for CachedObservabilityStore {
         &self,
         range: TimeRange,
         filter: UsageFilter,
-    ) -> AdminStoreResult<UsageOverview> {
+    ) -> AdminStoreResult<UsageSummaryObservation> {
         self.summaries
             .get((range, filter.clone()), self.inner.as_ref(), TTL, || {
                 self.inner.usage_summary(range, filter)

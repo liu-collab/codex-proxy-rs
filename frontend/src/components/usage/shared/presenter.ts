@@ -1,4 +1,5 @@
 import type { UsageListRecord, UsageRecordDetail, UsageTokenDetails } from '@/api'
+import { t } from '@/i18n'
 import { formatCompactNumber, formatDuration, formatInteger } from '@/utils/format'
 
 // 列表与详情使用独立读模型，展示函数只依赖两者的公共字段。
@@ -9,7 +10,7 @@ export type UsagePerformanceRecord = Pick<UsageCommonRecord, 'latencyDetails' | 
   tokenDetails: Pick<UsageListRecord['tokenDetails'], 'outputTokens'> | null
 }
 
-export type UsageModelRecord = Pick<UsageCommonRecord, 'model'> & Partial<Pick<UsageCommonRecord, 'requestedModel' | 'upstreamModel' | 'upstreamResponseModel'>>
+export type UsageModelRecord = Pick<UsageCommonRecord, 'model'> & Partial<Pick<UsageCommonRecord, 'requestedModel' | 'upstreamModel'>>
 export type UsageReasoningRecord = Pick<UsageCommonRecord, 'reasoningEffort'> & Partial<Pick<UsageCommonRecord, 'reasoningPreset' | 'subagentKind'>>
 
 interface UsageTimingItem {
@@ -37,7 +38,9 @@ export function usageTokenDetails(details: UsageTokenDetails): UsageTokenDetails
   return {
     ...details,
     inputTokens,
-    inputTokensDisplay: inputTokens === null ? details.inputTokensDisplay : formatInteger(inputTokens),
+    inputTokensDisplay: inputTokens === null
+      ? details.inputTokensDisplay
+      : formatInteger(inputTokens),
   }
 }
 
@@ -92,27 +95,7 @@ export function usageModelDisplay(record: UsageModelRecord) {
         ? storedModel
         : ''
 
-  const responseModel = record.upstreamResponseModel || ''
-  const returned = responseModel && responseModel !== primary ? responseModel : ''
-  const routes = []
-  if (secondary && secondary !== returned) {
-    routes.push({
-      model: secondary,
-      kind: 'mapped' as const,
-      description: `网关映射后发送给上游的模型：${secondary}`,
-    })
-  }
-  if (returned) {
-    routes.push({
-      model: returned,
-      kind: 'returned' as const,
-      description: returned === secondary
-        ? `上游返回模型：${returned}（与网关映射后发送的模型一致）`
-        : `上游返回模型：${returned}`,
-    })
-  }
-
-  return { primary, secondary, routes }
+  return { primary, secondary }
 }
 
 export function usagePerformanceDetails(record: UsagePerformanceRecord) {
@@ -125,7 +108,9 @@ export function usagePerformanceDetails(record: UsagePerformanceRecord) {
     : null
 
   return {
-    throughputDisplay: throughput === null ? '—' : `${formatCompactNumber(throughput)} tok/s`,
+    throughputDisplay: throughput === null
+      ? '—'
+      : `${formatCompactNumber(throughput)} tok/s`,
     firstTokenDisplay: formatDuration(durationValue(record.firstTokenLatencyMs)),
   }
 }
@@ -140,81 +125,133 @@ export function usageLatencyDetails(record: UsageLatencyRecord) {
   const requestItems: UsageTimingItem[] = []
 
   if (firstTokenMs !== null && totalMs !== null && firstTokenMs <= totalMs) {
-    requestItems.push({ label: '首个输出等待', value: formatDuration(firstTokenMs) })
+    requestItems.push({
+      label: t('usage.status.firstOutputWaiting'),
+      value: formatDuration(firstTokenMs),
+    })
 
     if (firstTextMs !== null && firstTextMs >= firstTokenMs && firstTextMs <= totalMs) {
       const beforeTextMs = firstTextMs - firstTokenMs
       if (beforeTextMs > 0) {
         requestItems.push({
-          label: firstReasoningMs === firstTokenMs ? '推理到正文' : '首个输出到正文',
+          label: firstReasoningMs === firstTokenMs
+            ? t('usage.status.reasoningToText')
+            : t('usage.status.firstOneIsOutputToText'),
           value: formatDuration(beforeTextMs),
         })
       }
-      requestItems.push({ label: '正文到完成', value: formatDuration(totalMs - firstTextMs) })
+      requestItems.push({
+        label: t('usage.status.textToCompletion'),
+        value: formatDuration(totalMs - firstTextMs),
+      })
     }
     else {
       requestItems.push({
-        label: '首个输出后完成',
+        label: t('usage.status.completedAfterFirstOutput'),
         value: formatDuration(totalMs - firstTokenMs),
       })
     }
   }
 
-  requestItems.push({ label: '总耗时', value: formatDuration(totalMs), emphasized: true })
+  requestItems.push({
+    label: t('usage.latency.totalLatency'),
+    value: formatDuration(totalMs),
+    emphasized: true,
+  })
 
   const transportItems: UsageTimingItem[] = [
-    { label: '准入判定', value: durationValue(latencyDetails?.admissionDecisionMs) },
-    { label: '账号选择等待', value: durationValue(latencyDetails?.accountSelectionWaitMs) },
     {
-      label: '传输决策等待',
+      label: t('usage.status.admissionDecision'),
+      value: durationValue(latencyDetails?.admissionDecisionMs),
+    },
+    {
+      label: t('usage.status.accountSelectionWaiting'),
+      value: durationValue(latencyDetails?.accountSelectionWaitMs),
+    },
+    {
+      label: t('usage.status.transferDecisionWaiting'),
       value: durationValue(latencyDetails?.transportDecisionWaitMs),
     },
-    { label: 'WebSocket 连接', value: durationValue(latencyDetails?.wsConnectMs) },
-    { label: '上游响应头', value: durationValue(latencyDetails?.upstreamHeadersMs) },
-    { label: '首个上游事件', value: durationValue(latencyDetails?.firstEventMs) },
+    {
+      label: t('usage.status.websocketConnection'),
+      value: durationValue(latencyDetails?.wsConnectMs),
+    },
+    {
+      label: t('usage.status.upstreamResponseHeader'),
+      value: durationValue(latencyDetails?.upstreamHeadersMs),
+    },
+    {
+      label: t('usage.status.firstUpstreamEvent'),
+      value: durationValue(latencyDetails?.firstEventMs),
+    },
   ]
     .filter(item => item.value !== null)
-    .map(item => ({ ...item, value: formatDuration(item.value) }))
+    .map(item => ({
+      ...item,
+      value: formatDuration(item.value),
+    }))
 
   if (
     latencyDetails?.capacityUsedSlots != null
     && latencyDetails.capacityTotalSlots != null
   ) {
     transportItems.push({
-      label: '账号槽位快照',
+      label: t('usage.status.accountSlotSnapshot'),
       value: `${latencyDetails.capacityUsedSlots} / ${latencyDetails.capacityTotalSlots}`,
     })
   }
 
   const upstreamDisplay = formatDuration(upstreamMs)
   const upstreamItems: UsageTimingItem[] = []
-  if (upstreamMs !== null)
-    upstreamItems.push({ label: '响应耗时', value: upstreamDisplay })
+  if (upstreamMs !== null) {
+    upstreamItems.push({
+      label: t('accounts.connectionTest.duration'),
+      value: upstreamDisplay,
+    })
+  }
   const processingMs = durationValue(latencyDetails?.openaiProcessingMs)
-  if (processingMs !== null)
-    upstreamItems.push({ label: '处理耗时', value: formatDuration(processingMs) })
+  if (processingMs !== null) {
+    upstreamItems.push({
+      label: t('usage.status.processingTime'),
+      value: formatDuration(processingMs),
+    })
+  }
 
   const performanceItems = [
-    { label: 'API 开销', value: durationValue(latencyDetails?.upstreamApiOverheadMs) },
-    { label: '引擎耗时', value: durationValue(latencyDetails?.upstreamEngineMs) },
+    {
+      label: t('usage.status.apiOverhead'),
+      value: durationValue(latencyDetails?.upstreamApiOverheadMs),
+    },
+    {
+      label: t('usage.status.engineTime'),
+      value: durationValue(latencyDetails?.upstreamEngineMs),
+    },
   ]
   for (const item of performanceItems) {
-    if (item.value !== null)
-      upstreamItems.push({ label: item.label, value: formatUpstreamDuration(item.value) })
+    if (item.value !== null) {
+      upstreamItems.push({
+        label: item.label,
+        value: formatUpstreamDuration(item.value),
+      })
+    }
   }
 
   const sections: UsageTimingSection[] = []
   if (upstreamItems.length) {
     sections.push({
-      title: '上游性能',
+      title: t('usage.status.upstreamPerformance'),
       source: 'official',
       items: upstreamItems,
     })
   }
-  sections.push({ title: '请求观测', source: 'local', items: requestItems })
+  sections.push({
+    title: t('usage.status.requestObservation'),
+    source: 'local',
+    items: requestItems,
+  })
   if (transportItems.length) {
     sections.push({
-      title: '传输观测',
+      title: t('usage.status.transport'),
       source: 'local',
       items: transportItems,
     })
@@ -248,7 +285,9 @@ export function usageBillingText(record: Pick<UsageCommonRecord, 'billing'>) {
 }
 
 function durationValue(value: unknown) {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? value
+    : null
 }
 
 function formatUpstreamDuration(value: number) {
@@ -261,5 +300,7 @@ function formatUpstreamDuration(value: number) {
 
 function upstreamResponseMs(details: UsageCommonRecord['latencyDetails']) {
   const value = durationValue(details?.upstreamResponseMs)
-  return value !== null && value > 0 ? value : null
+  return value !== null && value > 0
+    ? value
+    : null
 }

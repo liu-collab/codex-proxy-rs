@@ -249,7 +249,6 @@ pub struct RequestObservation {
     provider: Option<ProviderKind>,
     account_id: Option<ProviderAccountId>,
     upstream_model: Option<crate::routing::UpstreamModelId>,
-    response_model: Option<String>,
     service_tier: Option<String>,
     outcome: RequestObservationOutcome,
     send_state: UpstreamSendState,
@@ -287,7 +286,6 @@ impl RequestObservation {
             provider: None,
             account_id: None,
             upstream_model: None,
-            response_model: None,
             service_tier: None,
             outcome,
             send_state,
@@ -339,11 +337,6 @@ impl RequestObservation {
     #[must_use]
     pub fn upstream_model(&self) -> Option<&crate::routing::UpstreamModelId> {
         self.upstream_model.as_ref()
-    }
-
-    #[must_use]
-    pub fn response_model(&self) -> Option<&str> {
-        self.response_model.as_deref()
     }
 
     #[must_use]
@@ -626,7 +619,6 @@ impl RequestObservationDispatch {
             outcome: RequestObservationOutcome::Rejected,
             account_id: None,
             upstream_model: None,
-            response_model: None,
             service_tier: None,
             send_state: UpstreamSendState::NotSent,
             attempt_count: 0,
@@ -699,7 +691,6 @@ impl RequestObservationDispatch {
             provider,
             account_id: attempt.map(|attempt| attempt.provider_account_id().clone()),
             upstream_model: attempt.and_then(|attempt| attempt.upstream_model().cloned()),
-            response_model: finalization.upstream_response_model.clone(),
             service_tier: finalization.service_tier.clone(),
             outcome,
             send_state: finalization.send_state,

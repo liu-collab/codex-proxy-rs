@@ -1,23 +1,66 @@
 import type { ApiKey } from '@/api'
-
 import { defineTableColumns } from '@codex-proxy/ui'
+import { computed } from 'vue'
 
-export const apiKeyColumns = defineTableColumns<ApiKey>([
+import { t } from '@/i18n'
+
+export const apiKeyColumns = computed(() => (defineTableColumns<ApiKey>([
   { key: 'selection', kind: 'selection' },
-  { key: 'identity', label: '名称', kind: 'identity', size: '2xl', sortable: 'name' },
-  { key: 'prefix', label: '密钥前缀', kind: 'mono', size: '2xl' },
-  { key: 'enabled', label: '状态', kind: 'status', sortable: true },
-  { key: 'scope', label: '分组', kind: 'status', size: 'lg' },
-  { key: 'budget', label: '额度使用', kind: 'text', size: 'xl' },
-  { key: 'limits', label: '请求限制', kind: 'text', size: 'md' },
-  { key: 'createdAtDisplay', label: '创建时间', kind: 'datetime', sortable: 'createdAt' },
+  {
+    key: 'identity',
+    label: t('common.fields.name'),
+    kind: 'identity',
+    size: 'xl',
+    sortable: 'name',
+  },
+  {
+    key: 'prefix',
+    label: t('keys.fields.keyPrefix'),
+    kind: 'mono',
+    size: 'xl',
+  },
+  {
+    key: 'enabled',
+    label: t('common.fields.status'),
+    kind: 'status',
+    sortable: true,
+  },
+  {
+    key: 'scope',
+    label: t('groups.group'),
+    kind: 'status',
+    size: 'lg',
+  },
+  {
+    key: 'budget',
+    label: t('keys.fields.quotaUsage'),
+    kind: 'text',
+    size: 'xl',
+  },
+  {
+    key: 'limits',
+    label: t('keys.fields.requestLimits'),
+    kind: 'text',
+    size: 'xl',
+  },
+  {
+    key: 'createdAtDisplay',
+    label: t('common.fields.createdAt'),
+    kind: 'datetime',
+    sortable: 'createdAt',
+  },
   {
     key: 'lastUsedAt',
-    label: '最后使用',
+    label: t('keys.fields.lastUsed'),
     kind: 'datetime',
-    size: 'lg',
+    size: 'md',
     sortable: true,
     emptyText: '',
   },
-  { key: 'actions', label: '操作', kind: 'actions', size: 'lg' },
-])
+  {
+    key: 'actions',
+    label: t('common.fields.actions'),
+    kind: 'actions',
+    size: 'lg',
+  },
+])))

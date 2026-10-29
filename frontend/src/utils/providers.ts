@@ -1,9 +1,10 @@
 import type { Component } from 'vue'
 import { Key, LinkAlt, Openai, Xai } from '@boxicons/vue'
 import { Fingerprint, Plug } from '@lucide/vue'
+import { t } from '@/i18n'
 
 const PROVIDER_DISPLAY_NAMES = {
-  openai: 'OpenAI',
+  openai: 'Codex',
   xai: 'xAI',
 } as const
 
@@ -18,7 +19,9 @@ export function isSupportedProvider(value: unknown): value is SupportedProvider 
 export function formatProviderLabel(value?: string | null, fallback = '—') {
   const normalized = value?.trim()
   const provider = normalized?.toLowerCase()
-  return isSupportedProvider(provider) ? PROVIDER_DISPLAY_NAMES[provider] : (normalized || fallback)
+  return isSupportedProvider(provider)
+    ? PROVIDER_DISPLAY_NAMES[provider]
+    : (normalized || fallback)
 }
 
 export function providerIcon(value: string): Component {
@@ -33,8 +36,10 @@ export function formatAuthenticationLabel(value?: string | null) {
   const normalized = value?.trim()
   switch (normalized?.toLowerCase()) {
     case 'oauth': return 'OAuth'
-    case 'api_key': return 'API Key'
-    default: return normalized ? `自定义认证 · ${normalized}` : '未知认证类型'
+    case 'api_key': return t('common.fields.apiKey')
+    default: return normalized
+      ? t('common.providers.customAuth', { normalized })
+      : t('common.providers.unknownAuth')
   }
 }
 

@@ -186,6 +186,8 @@ impl PluginsService {
             .configuration_ready(probe, &metadata)
             .await?;
 
+        let status = self.package_status(&metadata.sha256).await?;
+        let compatible = status.warning.is_none() && status.load_error.is_none();
         // 其它管理员写入或同插件的并发安装可能推进全局 revision；稳定 creation ID
         // 配合每轮重新读取，既不会复制默认实例，也不会覆盖先完成的另一个版本
         for _ in 0..3 {
@@ -207,12 +209,13 @@ impl PluginsService {
             }
 
             let input = ConfigurePluginInstance {
+                compatibility_confirmation: None,
                 replace_instances: Vec::new(),
                 creation_id: Some(creation_id.clone()),
                 expected_revision: None,
                 name: metadata.display_name.clone(),
                 artifact_sha256: metadata.sha256.clone(),
-                enabled: !configuration_required,
+                enabled: !configuration_required && compatible,
                 configuration: configuration.clone(),
                 secrets: None,
                 bindings: bindings.clone(),

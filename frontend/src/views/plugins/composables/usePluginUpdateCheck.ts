@@ -4,6 +4,7 @@ import type { PluginArtifact, PluginInstance, PluginRelease, PluginSourceCredent
 import { isEqual } from 'es-toolkit'
 import { onScopeDispose, shallowRef, watch } from 'vue'
 import { checkPluginUpdate, getPluginUpdateSources, queryPluginRelease, verifyRemotePlugin } from '@/api'
+import { t } from '@/i18n'
 import { notifyPluginError } from '../utils/actions'
 import { currentPluginInstance } from '../utils/catalog'
 import { selectPluginReleaseAsset } from '../utils/updates'
@@ -43,7 +44,7 @@ export function usePluginUpdateCheck(credentials: Ref<PluginSourceCredential[]>)
       const options = { signal: current.signal, silent: true }
       const binding = (await getPluginUpdateSources(options)).find(value => value.pluginId === target.id)
       if (!binding || (binding.source.kind !== 'github' && binding.source.kind !== 'url'))
-        throw new Error('此来源不支持检查更新，请安装新版本')
+        throw new Error(t('plugins.updates.unsupportedSource'))
       const source = binding.source
       const history = [...target.artifacts].sort((left, right) => right.installedAt.localeCompare(left.installedAt))
       const previous = history.find((artifact: PluginArtifact) => source.kind === 'github'
@@ -56,7 +57,11 @@ export function usePluginUpdateCheck(credentials: Ref<PluginSourceCredential[]>)
       if (source.kind === 'github') {
         // 手动来源仍可按需查询稳定发布，不为一次查询修改持久化策略。
         const release = binding.policy.kind === 'manual'
-          ? await queryPluginRelease({ query: { repository: source.repository, tag: null, allowPrerelease: false }, credentialIds, outboundProxyId: binding.outboundProxyId }, options)
+          ? await queryPluginRelease({
+              query: { repository: source.repository, tag: null, allowPrerelease: false },
+              credentialIds,
+              outboundProxyId: binding.outboundProxyId,
+            }, options)
           : (await checkPluginUpdate({ pluginId: target.id, credentialIds }, options)).release
         candidate = { binding, credentialIds, release }
         const asset = selectPluginReleaseAsset(release, target.artifact)
@@ -65,27 +70,44 @@ export function usePluginUpdateCheck(credentials: Ref<PluginSourceCredential[]>)
             expectedPluginId: target.id,
             credentialIds,
             outboundProxyId: binding.outboundProxyId,
-            location: { kind: 'github', repository: release.repository, tag: release.tag, asset: asset.name, allow_prerelease: release.prerelease, sha256: asset.sha256 },
+            location: {
+              kind: 'github',
+              repository: release.repository,
+              tag: release.tag,
+              asset: asset.name,
+              allow_prerelease: release.prerelease,
+              sha256: asset.sha256,
+            },
           }
           candidate.artifact = await verifyRemotePlugin(candidate.request, options)
         }
       }
       else {
-        const request: VerifyRemotePluginRequest = { expectedPluginId: target.id, credentialIds, outboundProxyId: binding.outboundProxyId, location: { kind: 'url', url: source.url, sha256: null } }
+        const request: VerifyRemotePluginRequest = {
+          expectedPluginId: target.id,
+          credentialIds,
+          outboundProxyId: binding.outboundProxyId,
+          location: { kind: 'url', url: source.url, sha256: null },
+        }
         const artifact = await verifyRemotePlugin(request, options)
-        candidate = { binding, credentialIds, artifact, request }
+        candidate = {
+          binding,
+          credentialIds,
+          artifact,
+          request,
+        }
       }
       candidate.instance = currentPluginInstance(target)
       const latest = (await getPluginUpdateSources(options)).find(value => value.pluginId === target.id)
       if (!isEqual(binding, latest))
-        throw new Error('安装来源已变更，请重新检查')
+        throw new Error(t('plugins.updates.sourceChanged'))
       if (controller === current)
         result.value = candidate
     }
     catch (error) {
       if (controller === current) {
         open.value = false
-        notifyPluginError('检查更新失败', error)
+        notifyPluginError(t('plugins.updates.checkForUpdatesFailed'), error)
       }
     }
     finally {
@@ -101,5 +123,11 @@ export function usePluginUpdateCheck(credentials: Ref<PluginSourceCredential[]>)
       cancel(false)
   }, { flush: 'sync' })
   onScopeDispose(cancel)
-  return { open, checking, plugin, result, check }
+  return {
+    open,
+    checking,
+    plugin,
+    result,
+    check,
+  }
 }

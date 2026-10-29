@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { ZCard, ZForm, ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
-import { Clock, Sparkles } from '@lucide/vue'
+import { ZCard, ZForm, ZFormItem, ZIconButton, ZInput, ZPopover, ZSwitch } from '@codex-proxy/ui'
+
+import { CircleAlert, Clock, Sparkles } from '@lucide/vue'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n({ useScope: 'global' })
 
 const enabled = defineModel<boolean>('enabled', { required: true })
 const scheduleTime = defineModel<string>('scheduleTime', { required: true })
@@ -9,24 +13,38 @@ const model = defineModel<string>('model', { required: true })
 
 <template>
   <ZCard
-    title="账号预激活"
-    description="在指定时间向空闲的 Codex OAuth 账号发送一次请求，尝试启动额度窗口"
+    :description="t('settings.warmup.description')"
   >
-    <ZForm class="max-w-6xl sm:grid-cols-2">
+    <template #title>
+      <span class="inline-flex items-center gap-1">
+        {{ t('settings.warmup.title') }}
+        <ZPopover trigger="hover-click" placement="top-start">
+          <template #reference="{ open }">
+            <ZIconButton :aria-label="t('settings.warmup.helpTitle')" :title="undefined" :aria-expanded="open" class="size-6! hover:bg-transparent! active:bg-transparent!">
+              <CircleAlert class="size-3.5" aria-hidden="true" />
+            </ZIconButton>
+          </template>
+          <p class="max-w-72 px-3 py-2 text-cp-sm font-regular leading-relaxed text-cp-text-secondary">
+            {{ t('settings.warmup.help') }}
+          </p>
+        </ZPopover>
+      </span>
+    </template>
+    <ZForm class="max-w-6xl sm:grid-cols-2 sm:items-end">
       <ZSwitch
         v-model="enabled"
         class="col-span-full justify-self-start"
-        label="启用每日预激活"
+        :label="t('settings.warmup.enableDailyWarmup')"
       />
 
       <ZFormItem
-        label="执行时间"
-        description="HH:MM；多个时间用英文逗号分隔"
+        :label="t('settings.warmup.executionTime')"
+        :description="t('settings.warmup.timesPlaceholder')"
       >
         <ZInput
           v-model="scheduleTime"
           :disabled="!enabled"
-          aria-label="每日激活时间"
+          :aria-label="t('settings.warmup.scheduleLabel')"
           placeholder="08:00"
         >
           <template #prefix>
@@ -36,15 +54,15 @@ const model = defineModel<string>('model', { required: true })
       </ZFormItem>
 
       <ZFormItem
-        label="预激活模型"
-        description="启用时必填，请填写账号可用的模型"
+        :label="t('settings.warmup.modelLabel')"
+        :description="t('settings.warmup.modelHelp')"
         :required="enabled"
       >
         <ZInput
           v-model="model"
           :disabled="!enabled"
-          aria-label="预激活模型"
-          placeholder="请输入模型名称"
+          :aria-label="t('settings.warmup.modelLabel')"
+          :placeholder="t('settings.warmup.modelPlaceholder')"
         >
           <template #prefix>
             <Sparkles class="size-4" />

@@ -652,6 +652,30 @@ impl RuntimeSnapshot {
             .map_or(&[], |set| set.model_aliases())
     }
 
+    fn contributed_models(&self) -> &[super::ContributedModel] {
+        self.extensions.as_ref().map_or(&[], |set| set.models())
+    }
+
+    pub(crate) fn contributed_profiles_for_scope(
+        &self,
+        provider: &ProviderKind,
+        scope: &FrozenAccountScope,
+    ) -> Vec<super::PublicModelProfile> {
+        self.contributed_models()
+            .iter()
+            .filter(|model| {
+                &model.provider == provider
+                    && model.accounts.iter().any(|account| {
+                        scope.account_provider(account) == Some(provider)
+                            && scope.allows_model(account, &self.mapped_model(model.id.as_str()))
+                    })
+            })
+            .map(|model| {
+                super::PublicModelProfile::new(model.id.clone(), model.presentation.clone())
+            })
+            .collect()
+    }
+
     fn model_alias(&self, model: &str) -> Option<&super::ContributedModelAlias> {
         self.model_aliases()
             .iter()
@@ -844,6 +868,12 @@ impl RuntimeSnapshot {
                 .filter(|alias| &alias.provider == provider)
                 .map(|alias| alias.id.clone()),
         );
+        models.extend(
+            self.contributed_models()
+                .iter()
+                .filter(|model| &model.provider == provider)
+                .map(|model| model.id.clone()),
+        );
         models.into_iter().collect()
     }
 
@@ -922,10 +952,7 @@ impl RuntimeSnapshot {
     ) -> Vec<super::PublicModelProfile> {
         let mut profiles = BTreeMap::new();
         for provider in scope.provider_kinds() {
-            for profile in self.public_model_profiles_for_provider(provider) {
-                if !self.catalog_model_allowed_for_scope(provider, profile.model(), scope) {
-                    continue;
-                }
+            for profile in self.profiles_for_provider_scope(provider, scope) {
                 profiles
                     .entry(profile.model().clone())
                     .or_insert_with(|| profile.presentation().clone());
@@ -934,6 +961,20 @@ impl RuntimeSnapshot {
         profiles
             .into_iter()
             .map(|(model, presentation)| super::PublicModelProfile::new(model, presentation))
+            .collect()
+    }
+
+    pub(crate) fn profiles_for_provider_scope(
+        &self,
+        provider: &ProviderKind,
+        scope: &FrozenAccountScope,
+    ) -> Vec<super::PublicModelProfile> {
+        self.public_model_profiles_for_provider(provider)
+            .into_iter()
+            .filter(|profile| {
+                self.native_catalog_model_allowed_for_scope(provider, profile.model(), scope)
+            })
+            .chain(self.contributed_profiles_for_scope(provider, scope))
             .collect()
     }
 
@@ -961,7 +1002,15 @@ impl RuntimeSnapshot {
         self.provider_models
             .get(provider)
             .is_some_and(|models| models.contains_key(&upstream_model))
+            || self
+                .contributed_models()
+                .iter()
+                .any(|model| &model.provider == provider && &model.id == public_model)
             || (!self.exhaustive_provider_catalogs.contains(provider)
+                && !self
+                    .contributed_models()
+                    .iter()
+                    .any(|model| &model.id == public_model)
                 && !self.is_known_upstream_model(&upstream_model))
     }
 
@@ -969,6 +1018,10 @@ impl RuntimeSnapshot {
         self.provider_models
             .values()
             .any(|models| models.contains_key(upstream_model))
+            || self
+                .contributed_models()
+                .iter()
+                .any(|model| model.id.as_str() == upstream_model.as_str())
     }
 
     #[must_use]
@@ -989,6 +1042,24 @@ impl RuntimeSnapshot {
         public_model: &PublicModelId,
         scope: &FrozenAccountScope,
     ) -> bool {
+        self.native_catalog_model_allowed_for_scope(provider, public_model, scope)
+            || self.contributed_models().iter().any(|model| {
+                &model.provider == provider
+                    && &model.id == public_model
+                    && model.accounts.iter().any(|account| {
+                        scope.account_provider(account) == Some(provider)
+                            && scope
+                                .allows_model(account, &self.mapped_model(public_model.as_str()))
+                    })
+            })
+    }
+
+    fn native_catalog_model_allowed_for_scope(
+        &self,
+        provider: &ProviderKind,
+        public_model: &PublicModelId,
+        scope: &FrozenAccountScope,
+    ) -> bool {
         let upstream_model = self.mapped_model(public_model.as_str());
         match self
             .model_catalog_accounts
@@ -999,7 +1070,17 @@ impl RuntimeSnapshot {
                 scope.account_provider(account) == Some(provider)
                     && scope.allows_model(account, &upstream_model)
             }),
-            None => scope.allows_provider_model(provider, &upstream_model),
+            None => {
+                // 只有插件声明的模型不能借非完整原生目录扩大到其他账号
+                let native = self.provider_models.get(provider).is_some_and(|models| {
+                    models.keys().any(|model| model.as_str() == upstream_model)
+                });
+                let contributed = self
+                    .contributed_models()
+                    .iter()
+                    .any(|model| &model.provider == provider && &model.id == public_model);
+                (native || !contributed) && scope.allows_provider_model(provider, &upstream_model)
+            }
         }
     }
 
@@ -1121,7 +1202,11 @@ impl RuntimeSnapshot {
         }
         .map_err(|_| RoutingError::InvalidIdentifier)?;
         // 归属先于账号范围、能力与路由约束判定，原 Provider 被排除不能变成跨平台透传
-        let known_model = self.is_known_upstream_model(&upstream_model);
+        let known_model = self.is_known_upstream_model(&upstream_model)
+            || self
+                .contributed_models()
+                .iter()
+                .any(|model| &model.id == public_model);
 
         let providers = context.required_provider.as_ref().map_or_else(
             || account_scope.provider_kinds().clone(),
@@ -1155,17 +1240,64 @@ impl RuntimeSnapshot {
                 .provider_models
                 .get(provider)
                 .and_then(|models| models.get(&upstream_model));
-            let emulated_features = match capabilities {
-                Some(capabilities) => {
-                    let Some(emulated) = capabilities.match_requirements(&requirements) else {
+            let contributions: Vec<_> = self
+                .contributed_models()
+                .iter()
+                .filter(|model| &model.provider == provider && &model.id == public_model)
+                .collect();
+            let mut candidate_scope = Arc::clone(&account_scope);
+            let emulated_features = if contributions.is_empty() {
+                match capabilities {
+                    Some(capabilities) => {
+                        let Some(emulated) = capabilities.match_requirements(&requirements) else {
+                            continue;
+                        };
+                        emulated
+                    }
+                    None if known_model || self.exhaustive_provider_catalogs.contains(provider) => {
                         continue;
-                    };
-                    emulated
+                    }
+                    None => BTreeSet::new(),
                 }
-                None if known_model || self.exhaustive_provider_catalogs.contains(provider) => {
+            } else {
+                let native = capabilities.and_then(|value| value.match_requirements(&requirements));
+                let capable_accounts: BTreeSet<_> = contributions
+                    .iter()
+                    .filter(|model| {
+                        model
+                            .capabilities
+                            .match_requirements(&requirements)
+                            .is_some()
+                    })
+                    .flat_map(|model| model.accounts.iter())
+                    .filter(|account| {
+                        account_scope.account_provider(account) == Some(provider)
+                            && account_scope.allows_model(account, upstream_model.as_str())
+                    })
+                    .cloned()
+                    .collect();
+                if native.is_some() {
+                    // 这些账号实际由适配器执行，不能借用同名原生模型的能力
+                    let mut restricted = account_scope.as_ref().clone();
+                    for account in contributions.iter().flat_map(|model| &model.accounts) {
+                        if !capable_accounts.contains(account) {
+                            restricted = restricted.excluding_account(account.clone());
+                        }
+                    }
+                    candidate_scope = Arc::new(restricted);
+                } else {
+                    // restricted_to 的空集合表示不收窄，因此必须先拒绝空候选
+                    if capable_accounts.is_empty() {
+                        continue;
+                    }
+                    candidate_scope = Arc::new(
+                        account_scope.restricted_to(&Default::default(), &capable_accounts),
+                    );
+                }
+                if !candidate_scope.allows_provider_model(provider, upstream_model.as_str()) {
                     continue;
                 }
-                None => BTreeSet::new(),
+                native.unwrap_or_default()
             };
             candidates.push(ProviderCandidate {
                 provider: provider.clone(),
@@ -1173,10 +1305,15 @@ impl RuntimeSnapshot {
                     .provider_model_presentations
                     .get(provider)
                     .and_then(|models| models.get(&upstream_model))
-                    .cloned(),
+                    .cloned()
+                    .or_else(|| {
+                        contributions
+                            .first()
+                            .map(|model| model.presentation.clone())
+                    }),
                 upstream_model: Some(upstream_model.clone()),
                 emulated_features,
-                account_scope: Arc::clone(&account_scope),
+                account_scope: candidate_scope,
             });
         }
 
@@ -1212,6 +1349,11 @@ impl RuntimeSnapshot {
             pricing: Arc::clone(&self.settings.values.pricing),
             request_location: self.settings.request_location.clone(),
             privacy: self.settings.privacy.clone(),
+            account_error_protection: Arc::clone(&self.settings.account_error_protection),
+            account_error_protection_revision: self
+                .settings
+                .values
+                .account_error_protection_revision,
             account_selection_policy: self.settings.account_selection_policy,
             operation: operation.kind(),
             max_attempts: NonZeroU32::new(super::MAX_REQUEST_ATTEMPTS)
@@ -1294,6 +1436,11 @@ impl RuntimeSnapshot {
             pricing: Arc::clone(&self.settings.values.pricing),
             request_location: self.settings.request_location.clone(),
             privacy: self.settings.privacy.clone(),
+            account_error_protection: Arc::clone(&self.settings.account_error_protection),
+            account_error_protection_revision: self
+                .settings
+                .values
+                .account_error_protection_revision,
             account_selection_policy: self.settings.account_selection_policy,
             operation: operation.kind(),
             max_attempts: NonZeroU32::new(super::MAX_REQUEST_ATTEMPTS)

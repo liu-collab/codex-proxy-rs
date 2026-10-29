@@ -24,7 +24,6 @@ const minCodexCliVersion = defineModel<string>('minCodexCliVersion', { required:
 const {
   open,
   loading: downloadsLoading,
-  error,
   downloads,
   load,
   showGuide,
@@ -45,8 +44,6 @@ const {
     v-model="open"
     :downloads="downloads"
     :loading="downloadsLoading"
-    :error="error"
-    @retry="load(false)"
     @refresh="load(true)"
   />
 </template>
