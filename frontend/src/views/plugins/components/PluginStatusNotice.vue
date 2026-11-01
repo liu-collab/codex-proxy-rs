@@ -39,17 +39,17 @@ const title = computed(() => {
     :label="`${instance.name}：${title}`"
     :tone="tone"
   >
-    <p class="m-0 font-emphasis text-cp-text">
+    <p class="m-0 font-emphasis text-z-text">
       {{ title }}
     </p>
-    <p v-if="failure" class="m-0" :class="tone === 'error' ? 'text-cp-error-text' : 'text-cp-warning'">
+    <p v-if="failure" class="m-0" :class="tone === 'error' ? 'text-z-error-text' : 'text-z-warning'">
       {{ failure }}
     </p>
     <p v-if="instance.runtime.failure && !incompatible" class="m-0 font-mono">
       {{ instance.runtime.failure.code }}
     </p>
     <template v-if="instance.compatibilityWarning && !incompatible">
-      <p class="m-0 text-cp-warning">
+      <p class="m-0 text-z-warning">
         {{ instance.compatibilityWarning }}
       </p>
       <p class="m-0">
@@ -57,10 +57,10 @@ const title = computed(() => {
       </p>
     </template>
     <div v-for="entry in instance.apiDeprecations" :key="`${entry.capability}:${entry.version}`" class="grid gap-1">
-      <p class="m-0 font-mono text-cp-text">
+      <p class="m-0 font-mono text-z-text">
         {{ entry.capability }} v{{ entry.version }} → v{{ entry.replacementVersion }}
       </p>
-      <p class="m-0 text-cp-warning">
+      <p class="m-0 text-z-warning">
         {{ entry.remainingReleases > 0 ? t('plugins.status.compatibilityWindow', { remainingReleases: entry.remainingReleases }) : t('plugins.status.compatibilityEnding') }}
       </p>
       <p class="m-0">

@@ -9,7 +9,7 @@ use super::{
     AccountStateChange, CredentialCasOutcome, CredentialCasUpdate, CredentialRevision,
     LoadedCredential, NewProviderAccount, ProviderAccount, ProviderAccountId,
     ProviderAccountUpdate, ProviderRefreshQuery, QuotaAccessChange, QuotaObservation,
-    QuotaObservationTouch, QuotaWriteOutcome,
+    QuotaObservationTouch, QuotaObservationVersion, QuotaWriteOutcome,
 };
 
 /// `provider_accounts` 的数据库中立端口
@@ -59,6 +59,23 @@ pub trait ProviderAccountStore: Send + Sync {
         &self,
         accounts: &[ProviderAccountId],
     ) -> Result<Vec<QuotaObservation>, StoreError>;
+
+    /// 仅查询快照版本，列表缓存校验不物化额度正文
+    async fn get_quota_versions(
+        &self,
+        accounts: &[ProviderAccountId],
+    ) -> Result<Vec<QuotaObservationVersion>, StoreError> {
+        Ok(self
+            .get_quotas(accounts)
+            .await?
+            .into_iter()
+            .map(|quota| QuotaObservationVersion {
+                account_id: quota.account_id,
+                credential_revision: quota.expected_revision,
+                observed_at: quota.observed_at,
+            })
+            .collect())
+    }
 
     async fn compare_and_swap_quota(
         &self,

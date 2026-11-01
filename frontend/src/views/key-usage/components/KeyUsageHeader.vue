@@ -42,12 +42,12 @@ async function logout() {
   <ZPageHeader :title="t('usage.header.title')">
     <template #description>
       <span class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
-        <span class="min-w-0 truncate text-cp font-semibold text-cp-text" :title="name">
+        <span class="min-w-0 truncate text-z font-semibold text-z-text" :title="name">
           {{ name || t('usage.header.currentKey') }}
         </span>
-        <span v-if="prefix" class="inline-flex shrink-0 items-center gap-1.5 rounded-cp-sm bg-cp-fill-tertiary px-2 py-0.5 text-cp-text-secondary" :aria-label="t('usage.header.keyPrefix')">
+        <span v-if="prefix" class="inline-flex shrink-0 items-center gap-1.5 rounded-z-sm bg-z-fill-tertiary px-2 py-0.5 text-z-text-secondary" :aria-label="t('usage.header.keyPrefix')">
           <KeyRound class="size-3" aria-hidden="true" />
-          <code class="font-mono text-cp-xs leading-4 font-normal">{{ prefix }}…</code>
+          <code class="font-mono text-z-xs leading-4 font-normal">{{ prefix }}…</code>
         </span>
       </span>
     </template>
@@ -80,11 +80,11 @@ async function logout() {
 
 <style scoped>
 .key-usage-actions {
-  --cp-icon-button-secondary-bg: var(--cp-button-secondary-bg);
-  --cp-icon-button-secondary-hover-bg: var(--cp-button-secondary-hover-bg);
-  --cp-icon-button-secondary-active-bg: var(--cp-button-secondary-active-bg);
-  --cp-input-bg: var(--cp-button-secondary-bg);
-  --cp-input-hover-bg: var(--cp-button-secondary-hover-bg);
-  --cp-input-active-bg: var(--cp-button-secondary-active-bg);
+  --z-icon-button-secondary-bg: var(--z-button-secondary-bg);
+  --z-icon-button-secondary-hover-bg: var(--z-button-secondary-hover-bg);
+  --z-icon-button-secondary-active-bg: var(--z-button-secondary-active-bg);
+  --z-input-bg: var(--z-button-secondary-bg);
+  --z-input-hover-bg: var(--z-button-secondary-hover-bg);
+  --z-input-active-bg: var(--z-button-secondary-active-bg);
 }
 </style>

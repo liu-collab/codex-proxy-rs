@@ -200,14 +200,14 @@ defineExpose({ focusInvalid, validationMessage })
       :field-errors="configurationFieldErrors"
     />
 
-    <section v-if="hasSecrets" class="grid gap-3 rounded-cp bg-cp-fill-alter p-4" :aria-label="t('plugins.configuration.sensitiveConfiguration')">
+    <section v-if="hasSecrets" class="grid gap-3 rounded-z bg-z-fill-alter p-4" :aria-label="t('plugins.configuration.sensitiveConfiguration')">
       <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <strong class="text-cp leading-none text-cp-text">{{ t('plugins.configuration.sensitiveConfiguration') }}</strong>
+        <strong class="text-z leading-none text-z-text">{{ t('plugins.configuration.sensitiveConfiguration') }}</strong>
         <ZTag v-if="existingSecretFields.length > 0" type="success" size="small">
           {{ t('plugins.configuration.settingsSaved', { count: existingSecretFields.length }) }}
         </ZTag>
       </div>
-      <p class="m-0 text-cp-xs leading-relaxed text-cp-text-secondary">
+      <p class="m-0 text-z-xs leading-relaxed text-z-text-secondary">
         {{ t('plugins.configuration.secretsHelp') }}
       </p>
       <ZSegmented
@@ -218,7 +218,7 @@ defineExpose({ focusInvalid, validationMessage })
         :disabled="disabled"
         class="w-fit max-w-full"
       />
-      <p v-if="secretModeError" role="alert" class="m-0 text-cp-xs leading-relaxed text-cp-warning-text">
+      <p v-if="secretModeError" role="alert" class="m-0 text-z-xs leading-relaxed text-z-warning-text">
         {{ secretModeError }}
       </p>
       <ul v-if="secretMode === 'preserve'" class="m-0 flex list-none flex-wrap gap-2 p-0">

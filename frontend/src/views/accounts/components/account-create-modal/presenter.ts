@@ -3,7 +3,6 @@ import type { AccountCreateForm } from '../../utils/accountCreate'
 import { t } from '@/i18n'
 import { formatProviderLabel } from '@/utils/providers'
 import { accountCreateProvider, accountImportModes } from '../../utils/accountCreate'
-import { apiKeyAccountError } from '../../utils/upstreamApiKey'
 
 export function resolveAccountCreatePresentation(input: {
   form: AccountCreateForm
@@ -35,9 +34,7 @@ export function resolveAccountCreatePresentation(input: {
   let canSubmit = available && !input.busy
   if (form.mode === 'oauth')
     canSubmit &&= Boolean(authorization.flow && input.callback.trim())
-  else if (form.mode === 'api_key')
-    canSubmit &&= !apiKeyAccountError(form.apiKey)
-  else
+  else if (form.mode !== 'api_key')
     canSubmit &&= Boolean(form.importTexts[form.mode].trim())
 
   return {

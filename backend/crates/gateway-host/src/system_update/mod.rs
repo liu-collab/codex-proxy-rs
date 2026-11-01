@@ -2,6 +2,7 @@
 
 mod archive;
 mod config;
+mod diagnostics;
 mod download;
 mod error;
 mod events;

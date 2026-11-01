@@ -46,30 +46,30 @@ const dates = computed(() => [
 </script>
 
 <template>
-  <section class="min-w-0 rounded-cp-lg bg-cp-fill-alter p-4 sm:p-5" :aria-label="t('accounts.profile.subscription.label')">
+  <section class="min-w-0 rounded-z-lg bg-z-fill-alter p-4 sm:p-5" :aria-label="t('accounts.profile.subscription.label')">
     <dl class="m-0 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-[1.3fr_1.3fr_1fr_1fr]">
       <div v-for="date in dates" :key="date.label" class="min-w-0">
-        <dt class="text-cp-xs text-cp-text-secondary">
+        <dt class="text-z-xs text-z-text-secondary">
           {{ date.label }}
         </dt>
-        <dd class="m-0 mt-1.5 font-mono text-cp-sm leading-relaxed tabular-nums text-cp-text">
+        <dd class="m-0 mt-1.5 font-mono text-z-sm leading-relaxed tabular-nums text-z-text">
           <time v-if="date.value" :datetime="date.value">{{ date.display ?? t('common.values.unknown') }}</time>
           <span v-else>{{ t('common.values.unknown') }}</span>
         </dd>
       </div>
       <div class="min-w-0">
-        <dt class="text-cp-xs text-cp-text-secondary">
+        <dt class="text-z-xs text-z-text-secondary">
           {{ t('accounts.profile.subscription.renewalMethod') }}
         </dt>
-        <dd class="m-0 mt-1.5 text-cp-sm leading-relaxed" :class="subscription.willRenew === true ? 'text-cp-success' : 'text-cp-text'">
+        <dd class="m-0 mt-1.5 text-z-sm leading-relaxed" :class="subscription.willRenew === true ? 'text-z-success' : 'text-z-text'">
           {{ renewal }}
         </dd>
       </div>
       <div class="min-w-0">
-        <dt class="text-cp-xs text-cp-text-secondary">
+        <dt class="text-z-xs text-z-text-secondary">
           {{ t('accounts.usage.billing') }}
         </dt>
-        <dd class="m-0 mt-1.5 text-cp-sm leading-relaxed wrap-break-word text-cp-text">
+        <dd class="m-0 mt-1.5 text-z-sm leading-relaxed wrap-break-word text-z-text">
           {{ billing }}
         </dd>
       </div>

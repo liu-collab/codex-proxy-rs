@@ -39,19 +39,19 @@ function preview(field: keyof TokenPrices) {
         />
       </ZFormItem>
       <div v-else>
-        <div class="mb-2 text-cp leading-none font-medium text-cp-text-secondary">
+        <div class="mb-2 text-z leading-none font-medium text-z-text-secondary">
           {{ field.label }}
         </div>
-        <div class="flex h-cp-control items-center font-mono text-lg tabular-nums text-cp-text">
+        <div class="flex h-z-control items-center font-mono text-lg tabular-nums text-z-text">
           {{ effectivePrice(base?.[field.key]) }}
         </div>
       </div>
-      <div v-if="(custom && base) || multiplierBps !== 10000" class="mt-2 grid gap-1 text-cp-xs">
-        <span v-if="custom && base" class="text-cp-text-tertiary">
+      <div v-if="(custom && base) || multiplierBps !== 10000" class="mt-2 grid gap-1 text-z-xs">
+        <span v-if="custom && base" class="text-z-text-tertiary">
           {{ t('settings.pricing.source') }} <span class="break-all font-mono tabular-nums">{{ effectivePrice(base[field.key]) }}</span>
         </span>
-        <span v-if="multiplierBps !== 10000" class="text-cp-text-secondary">
-          {{ t('settings.pricing.takeEffect') }} <span class="break-all font-mono tabular-nums text-cp-primary-text">{{ preview(field.key) }}</span>
+        <span v-if="multiplierBps !== 10000" class="text-z-text-secondary">
+          {{ t('settings.pricing.takeEffect') }} <span class="break-all font-mono tabular-nums text-z-primary-text">{{ preview(field.key) }}</span>
         </span>
       </div>
     </div>

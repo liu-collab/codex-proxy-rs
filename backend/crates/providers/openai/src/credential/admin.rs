@@ -602,9 +602,6 @@ impl CodexCredentialAdmin {
             .map_err(|_| CodexCredentialAdminError::InvalidInput)?;
         let provider = ProviderKind::new(PROVIDER_NAME)
             .map_err(|_| CodexCredentialAdminError::InvalidInput)?;
-        if input.name.trim().is_empty() {
-            return Err(CodexCredentialAdminError::InvalidInput);
-        }
         let revision =
             CredentialRevision::new(1).map_err(|_| CodexCredentialAdminError::InvalidCredential)?;
         let CodexOAuthMetadata {

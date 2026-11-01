@@ -566,6 +566,7 @@ impl GrokCredentialRepository {
         let outcome = self
             .store
             .compare_and_swap_quota(QuotaObservation {
+                expected_connection: None,
                 plan_type: None,
                 account_id,
                 expected_revision,
@@ -842,7 +843,7 @@ fn validate_scope(scope: &str) -> Result<(), GrokCredentialRepositoryError> {
 }
 
 fn validate_name(value: &str) -> Result<(), GrokCredentialRepositoryError> {
-    if value.trim().is_empty()
+    if (!value.is_empty() && value.trim().is_empty())
         || value.len() > MAX_NAME_BYTES
         || value.chars().any(char::is_control)
     {

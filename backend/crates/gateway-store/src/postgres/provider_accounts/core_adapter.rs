@@ -183,6 +183,8 @@ impl ProviderAccountStore for PgProviderAccountRepository {
              set name = case when $14 then name else $3 end,
                  email = case when $14 then email else $4 end,
                  plan_type = case when $14 then plan_type else $5 end,
+                 provider_quota_json = case when $14 then provider_quota_json else null end,
+                 quota_observed_at = case when $14 then quota_observed_at else null end,
                  provider_credentials_json = $6,
                  credential_revision = credential_revision + 1,
                  has_refresh_token = $7, access_token_expires_at = $8,
@@ -316,6 +318,7 @@ impl ProviderAccountStore for PgProviderAccountRepository {
                 )
                 .ok_or_else(|| CoreStoreError::new(CoreStoreErrorKind::InvalidData))?;
                 Ok(QuotaObservation {
+                    expected_connection: None,
                     plan_type: row.try_get("plan_type").map_err(|source| {
                         CoreStoreError::caused_by(CoreStoreErrorKind::InvalidData, source)
                     })?,
@@ -335,28 +338,14 @@ impl ProviderAccountStore for PgProviderAccountRepository {
         &self,
         observation: QuotaObservation,
     ) -> Result<QuotaWriteOutcome, CoreStoreError> {
-        let quota = JsonObject::try_from_value(
-            "provider_quota_json",
-            serde_json::Value::Object(observation.quota.into_inner()),
-            QUOTA_MAX_BYTES,
-        )
-        .map_err(core_store_error)?;
-        let updated = self
-            .compare_and_swap_provider_quota(
-                observation.account_id.as_str(),
-                Revision::new(observation.expected_revision.get()).map_err(core_store_error)?,
-                quota,
-                DateTime::<Utc>::from(observation.observed_at),
-                observation.state,
-                observation.plan_type.as_deref(),
-            )
-            .await
-            .map_err(core_store_error)?;
-        Ok(if updated {
-            QuotaWriteOutcome::Updated
-        } else {
-            QuotaWriteOutcome::Conflict
-        })
+        super::quota::write(self, observation).await
+    }
+
+    async fn get_quota_versions(
+        &self,
+        accounts: &[CoreProviderAccountId],
+    ) -> Result<Vec<gateway_core::account::QuotaObservationVersion>, CoreStoreError> {
+        super::quota::versions(self, accounts).await
     }
 
     async fn apply_quota_access(

@@ -3,6 +3,27 @@
 use super::*;
 
 #[tokio::test]
+async fn invalid_update_state_should_keep_raw_details_out_of_public_error() {
+    use std::error::Error as _;
+
+    let fixture = Fixture::new();
+    fs::write(
+        fixture.state(),
+        r#"{"operation":{"status":"private-state-sentinel"}}"#,
+    )
+    .expect("invalid state");
+    let service = fixture.service_for_url("http://127.0.0.1:1/repos");
+    let error = service.update_status().await.expect_err("invalid state");
+
+    assert_eq!(error.kind(), SystemOperationErrorKind::Internal);
+    assert_eq!(error.message(), "系统更新状态文件损坏");
+    assert!(!format!("{error} {error:?}").contains("private-state-sentinel"));
+    let source = error.source().expect("state decoding error");
+    assert!(source.is::<serde_json::Error>());
+    assert!(source.to_string().contains("private-state-sentinel"));
+}
+
+#[tokio::test]
 async fn update_status_should_reconcile_manual_deployment_without_reusing_legacy_success() {
     let fixture = Fixture::new();
     fs::write(fixture.state(), r#"{"previousVersion":"3.14.0","currentVersion":"3.14.1","operation":{"operationId":"legacy","kind":"update","status":"succeeded","targetVersion":"3.14.1"}}"#).expect("legacy state");

@@ -6,9 +6,9 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
 import { t } from '@/i18n'
 import { notification as ZNotification } from '@/utils/notification'
-import { accountModelAccessError } from '../utils/modelAccess'
-import { concurrencyLimitInput, parseAccountSchedulingForm } from '../utils/schedulingForm'
-import { apiKeyAccountError, emptyApiKeyAccountForm, isOpenAiApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
+import { accountNameUpdate } from '../utils/accountName'
+import { accountSchedulingValues, concurrencyLimitInput } from '../utils/schedulingForm'
+import { emptyApiKeyAccountForm, isOpenAiApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
 
 export function useAccountEditor(options: {
   reloadAccounts: () => Promise<unknown>
@@ -17,6 +17,7 @@ export function useAccountEditor(options: {
   const showEditModal = shallowRef(false)
   // 保存后列表可能因筛选移除该账号，编辑窗口的退场仍需保留原账号内容。
   const editingAccount = shallowRef<Account | null>(null)
+  const name = shallowRef('')
   const notes = shallowRef('')
   const schedulingEnabled = shallowRef(true)
   const concurrencyLimit = shallowRef('')
@@ -70,6 +71,7 @@ export function useAccountEditor(options: {
   function open(account: Account) {
     clearCredentials()
     editingAccount.value = account
+    name.value = account.name
     notes.value = account.notes ?? ''
     proxyMode.value = 'preserve'
     proxyId.value = ''
@@ -87,43 +89,22 @@ export function useAccountEditor(options: {
   }
 
   async function save() {
-    const accountId = editingAccount.value?.id
-    if (!accountId || saving.value)
+    const account = editingAccount.value
+    if (!account || saving.value)
       return
-    const isApiKey = isOpenAiApiKeyAccount(editingAccount.value)
-    const isOAuth = isOpenAiOAuthAccount(editingAccount.value)
+    const isApiKey = isOpenAiApiKeyAccount(account)
+    const isOAuth = isOpenAiOAuthAccount(account)
     const configuration = isApiKey && configurationReady.value
       ? parseApiKeyConfiguration(apiKey.value)
       : undefined
     if (isApiKey && !configuration)
       return
-    if (isApiKey) {
-      const error = apiKeyAccountError(apiKey.value, true)
-      if (error) {
-        ZNotification.warning({ message: error })
-        return
-      }
-    }
-    const modelError = accountModelAccessError(modelAccess.value)
-    if (modelError) {
-      ZNotification.warning({ message: modelError })
-      return
-    }
-    const scheduling = parseAccountSchedulingForm(concurrencyLimit.value, weight.value)
-    if (proxyMode.value === 'proxy' && !proxyId.value.trim()) {
-      ZNotification.warning({
-        message: t('accounts.batchEdit.proxyRequired'),
-      })
-      return
-    }
-    if (!scheduling.valid) {
-      ZNotification.warning({ message: scheduling.message })
-      return
-    }
+    const scheduling = accountSchedulingValues(concurrencyLimit.value, weight.value)
 
     await saveAction.run(async () => {
       const settings = {
-        accountId,
+        accountId: account.id,
+        name: accountNameUpdate(name.value, account.name),
         notes: notes.value,
         outboundProxyId: proxyMode.value === 'preserve'
           ? undefined
@@ -131,8 +112,8 @@ export function useAccountEditor(options: {
             ? ''
             : proxyId.value.trim(),
         enabled: schedulingEnabled.value,
-        concurrencyLimit: scheduling.values.concurrencyLimit,
-        weight: scheduling.values.weight,
+        concurrencyLimit: scheduling.concurrencyLimit,
+        weight: scheduling.weight,
         modelAccess: modelAccess.value,
         groupIds: [
           ...new Set(selectedGroupIds.value),
@@ -188,6 +169,7 @@ export function useAccountEditor(options: {
     configurationReady,
     showEditModal,
     editingAccount,
+    name,
     notes,
     schedulingEnabled,
     concurrencyLimit,

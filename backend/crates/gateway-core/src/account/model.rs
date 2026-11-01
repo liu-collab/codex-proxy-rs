@@ -1392,9 +1392,19 @@ pub enum CredentialCasOutcome {
     Conflict,
 }
 
+/// 当前额度快照的轻量版本，不包含协议正文
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuotaObservationVersion {
+    pub account_id: ProviderAccountId,
+    pub credential_revision: CredentialRevision,
+    pub observed_at: SystemTime,
+}
+
 /// Provider quota 的一次完整观察结果
 #[derive(Clone, PartialEq)]
 pub struct QuotaObservation {
+    /// 网络查询可额外校验请求出口与启用状态，避免连接变化后的迟到写入
+    pub expected_connection: Option<super::UpstreamConnection>,
     pub account_id: ProviderAccountId,
     pub expected_revision: CredentialRevision,
     pub quota: OpaqueProviderData,

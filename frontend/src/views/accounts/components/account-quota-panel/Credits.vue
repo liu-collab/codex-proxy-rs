@@ -37,15 +37,15 @@ const hasBalance = computed(() => !props.credits?.unlimited && balanceDisplay.va
 
 <template>
   <div class="flex min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1 px-4 pb-4" :aria-label="t('accounts.quota.quotaPoints')">
-    <span class="text-cp-sm font-heavy text-cp-text">{{ t('accounts.quota.quotaPoints') }}</span>
+    <span class="text-z-sm font-heavy text-z-text">{{ t('accounts.quota.quotaPoints') }}</span>
     <span class="flex min-w-0 items-baseline gap-1.5">
       <strong
-        class="min-w-0 text-right text-cp-sm font-heavy wrap-anywhere"
-        :class="hasBalance ? 'font-mono tabular-nums text-cp-text' : 'text-cp-text-secondary'"
+        class="min-w-0 text-right text-z-sm font-heavy wrap-anywhere"
+        :class="hasBalance ? 'font-mono tabular-nums text-z-text' : 'text-z-text-secondary'"
       >
         {{ value }}
       </strong>
-      <span v-if="hasBalance" class="shrink-0 text-cp-xs text-cp-text-tertiary">{{ t('accounts.quota.point') }}</span>
+      <span v-if="hasBalance" class="shrink-0 text-z-xs text-z-text-tertiary">{{ t('accounts.quota.point') }}</span>
     </span>
   </div>
 </template>

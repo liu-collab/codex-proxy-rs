@@ -514,12 +514,13 @@ async fn concurrency_queue_settings_round_trip_into_the_runtime_snapshot() {
     let before = repository.load_runtime_settings().await.unwrap();
     assert_eq!(
         (
+            before.values.max_concurrent_per_account,
             before.values.max_waiting_per_key,
             before.values.max_waiting_per_account,
             before.values.concurrency_wait_timeout_seconds,
             before.values.openai_guardian_reserved_concurrency,
         ),
-        (0, 0, 30, 0)
+        (3, 10, 10, 30, 5)
     );
     let mut update = settings_with_margin(1234);
     update.values.max_concurrent_per_account = 7;

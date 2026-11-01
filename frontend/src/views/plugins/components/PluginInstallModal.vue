@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { FormRules } from '@codex-proxy/ui'
 import type { PluginUpdateSelection } from '../composables/usePluginUpdateCheck'
 
 import type { PluginInstallMode, PluginInstallSelection } from '../utils/model'
@@ -19,7 +20,7 @@ import { CheckCircle2, Download, FileArchive, Link, PackageOpen } from '@lucide/
 import { useEventListener, useSessionStorage } from '@vueuse/core'
 
 import { isEqual } from 'es-toolkit'
-import { computed, nextTick, reactive, shallowRef, watch } from 'vue'
+import { computed, nextTick, reactive, shallowRef, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { notification as ZNotification } from '@/utils/notification'
 import { formatPluginFileSize, normalizePluginRepository, pluginInstallSelectionKey } from '../utils/model'
@@ -81,7 +82,7 @@ interface InstallDraft {
   url: typeof urlForm
   github: Omit<typeof githubForm, 'asset'>
 }
-const drafts = useSessionStorage<Record<string, InstallDraft>>('cp-plugin-install-drafts', {}, { flush: 'sync' })
+const drafts = useSessionStorage<Record<string, InstallDraft>>('z-plugin-install-drafts', {}, { flush: 'sync' })
 let activeDraftKey: string | null = null
 const queriedGithubKey = shallowRef('')
 const pendingAuthentication = shallowRef(false)
@@ -108,16 +109,35 @@ function changeMode(value: string) {
   emit('changeMode', value)
 }
 const releaseAssets = computed(() => (props.release?.assets ?? []).filter(asset => /\.(?:tar\.gz|tgz)$/i.test(asset.name)))
-const digestPattern = /^[a-f0-9]{64}$/
-const digestError = computed(() => {
-  const digest = connectionForm.value.sha256.trim().toLowerCase()
-  return digest && !digestPattern.test(digest)
-    ? t('plugins.installation.enterDigitHexadecimalDigest')
-    : ''
-})
+const formRef = useTemplateRef<InstanceType<typeof ZForm>>('formElement')
+const rules = computed<FormRules>(() => ({
+  repository: {
+    required: true,
+    pattern: /^[-\w.]+\/[-\w.]+$/,
+    transform: normalizePluginRepository,
+    trigger: ['blur', 'change'],
+    message: t('plugins.installation.githubRepositoryRequired'),
+  },
+  tag: {
+    required: githubForm.allowPrerelease,
+    whitespace: true,
+    trigger: ['blur', 'change'],
+    message: t('plugins.installation.prereleaseTagRequired'),
+  },
+  url: {
+    required: true,
+    whitespace: true,
+    trigger: ['blur', 'change'],
+    message: t('plugins.installation.urlHelp'),
+  },
+  sha256: {
+    pattern: /^[a-f0-9]{64}$/,
+    transform: value => value.trim().toLowerCase(),
+    trigger: ['blur', 'change'],
+    message: t('plugins.installation.enterDigitHexadecimalDigest'),
+  },
+}))
 const remoteRequest = computed<VerifyRemotePluginRequest | null>(() => {
-  if (digestError.value)
-    return null
   if (props.mode === 'url') {
     const url = urlForm.url.trim()
     const sha256 = urlForm.sha256.trim().toLowerCase()
@@ -220,7 +240,11 @@ async function prepareAuthentication() {
 }
 
 async function verifySelected() {
-  if (busy.value || !selection.value || authenticationIncomplete.value)
+  if (busy.value || authenticationIncomplete.value)
+    return
+  if (props.mode !== 'upload' && !await formRef.value?.validate().catch(() => false))
+    return
+  if (!selection.value)
     return
   submitting.value = true
   try {
@@ -383,20 +407,10 @@ function githubRepository() {
 async function queryRelease() {
   if (busy.value || authenticationIncomplete.value)
     return
+  if (!await formRef.value?.validateField(['repository', 'tag']).catch(() => false))
+    return
   const repository = githubRepository()
   const tag = githubForm.tag.trim()
-  if (!/^[-\w.]+\/[-\w.]+$/.test(repository)) {
-    ZNotification.warning({
-      message: t('plugins.installation.githubRepositoryRequired'),
-    })
-    return
-  }
-  if (githubForm.allowPrerelease && !tag) {
-    ZNotification.warning({
-      message: t('plugins.installation.prereleaseTagRequired'),
-    })
-    return
-  }
   submitting.value = true
   try {
     if (!await prepareSource() || !await prepareAuthentication())
@@ -440,6 +454,7 @@ function clearCredentials() {
   credentialDraft.value = null
 }
 watch(() => props.mode, () => {
+  formRef.value?.clearValidate()
   pendingAuthentication.value = false
   credentialDraft.value = null
 })
@@ -492,131 +507,133 @@ watch(
       class="mb-5 w-full"
       @update:model-value="changeMode"
     />
-    <ZForm v-if="!verified && mode === 'upload'">
-      <ZFormItem :label="t('plugins.assets.packageLabel')" required>
-        <!-- 原生文件输入放在样式化上传区内，保留键盘与读屏语义。 -->
-        <!-- eslint-disable-next-line vue-a11y/label-has-for -->
-        <label
-          class="flex cursor-pointer items-center gap-3 rounded-cp bg-cp-fill-alter p-4 outline-none transition-colors hover:bg-cp-fill-tertiary focus-within:ring-2 focus-within:ring-cp-control-outline"
-        >
-          <FileArchive class="size-5 shrink-0 text-cp-text-secondary" aria-hidden="true" />
-          <span class="grid min-w-0 flex-1 gap-1">
-            <span class="truncate text-cp-sm font-emphasis text-cp-text">{{ uploadFile?.name ?? t('plugins.assets.selectPluginPackage') }}</span>
-            <span class="text-cp-xs text-cp-text-secondary">{{ uploadFile ? formatPluginFileSize(uploadFile.size) : t('plugins.installation.tarGzTgzMaxMib') }}</span>
-          </span>
-          <span class="shrink-0 text-cp-xs text-cp-primary-text">{{ uploadFile ? t('plugins.installation.replace') : t('plugins.installation.browseFiles') }}</span>
-          <input
-            type="file"
-            accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
-            class="sr-only"
-            :disabled="busy"
-            :aria-label="t('plugins.assets.selectPluginPackage')"
-            @change="chooseFile"
+    <ZForm v-if="!verified" ref="formElement" :model="connectionForm" :rules="rules" scroll-to-error focus-on-error novalidate @submit="mode === 'github' && !release ? queryRelease() : verifySelected()">
+      <div v-if="mode === 'upload'">
+        <ZFormItem :label="t('plugins.assets.packageLabel')" required>
+          <!-- 原生文件输入放在样式化上传区内，保留键盘与读屏语义。 -->
+          <!-- eslint-disable-next-line vue-a11y/label-has-for -->
+          <label
+            class="flex cursor-pointer items-center gap-3 rounded-z bg-z-fill-alter p-4 outline-none transition-colors hover:bg-z-fill-tertiary focus-within:ring-2 focus-within:ring-z-control-outline"
           >
-        </label>
-      </ZFormItem>
-    </ZForm>
+            <FileArchive class="size-5 shrink-0 text-z-text-secondary" aria-hidden="true" />
+            <span class="grid min-w-0 flex-1 gap-1">
+              <span class="truncate text-z-sm font-emphasis text-z-text">{{ uploadFile?.name ?? t('plugins.assets.selectPluginPackage') }}</span>
+              <span class="text-z-xs text-z-text-secondary">{{ uploadFile ? formatPluginFileSize(uploadFile.size) : t('plugins.installation.tarGzTgzMaxMib') }}</span>
+            </span>
+            <span class="shrink-0 text-z-xs text-z-primary-text">{{ uploadFile ? t('plugins.installation.replace') : t('plugins.installation.browseFiles') }}</span>
+            <input
+              type="file"
+              accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
+              class="sr-only"
+              :disabled="busy"
+              :aria-label="t('plugins.assets.selectPluginPackage')"
+              @change="chooseFile"
+            >
+          </label>
+        </ZFormItem>
+      </div>
 
-    <ZForm v-else-if="!verified && mode === 'url'" class="grid gap-4">
-      <ZFormItem :label="t('plugins.installation.downloadUrl')" required>
-        <template #label-extra>
-          <PluginHelpPopover :label="t('plugins.installation.downloadAddressDescription')">
-            {{ t('plugins.installation.urlHelp') }}
-          </PluginHelpPopover>
-        </template>
-        <ZInput v-model="urlForm.url" :disabled="busy" :aria-label="t('plugins.installation.downloadUrl')" placeholder="https://downloads.example.org/plugin.tar.gz" />
-      </ZFormItem>
-    </ZForm>
-
-    <ZForm v-else-if="!verified" class="grid gap-4">
-      <ZFormItem :label="t('plugins.installation.githubRepository')" required>
-        <ZInput v-model="githubForm.repository" :disabled="busy" :aria-label="t('plugins.installation.githubRepository')" :placeholder="t('plugins.installation.repositoryLinkOrOwnerRepo')">
-          <template #prefix>
-            <Github class="size-4" />
-          </template>
-        </ZInput>
-      </ZFormItem>
-      <ZFormItem :label="t('plugins.installation.tagLabel')">
-        <template #label-extra>
-          <PluginHelpPopover :label="t('plugins.installation.tagHelpTitle')">
-            {{ t('plugins.installation.tagHelp') }}
-          </PluginHelpPopover>
-        </template>
-        <ZInput v-model="githubForm.tag" :disabled="busy" :aria-label="t('plugins.installation.tagLabel')" :placeholder="t('plugins.installation.tagPlaceholder')" />
-      </ZFormItem>
-      <ZCheckbox v-model="githubForm.allowPrerelease" :label="t('plugins.installation.allowPrereleaseLabel')" :disabled="busy" />
-    </ZForm>
-
-    <div v-if="!verified && mode !== 'upload'" class="mt-4 grid gap-4">
-      <PluginDownloadAuthentication
-        :key="mode"
-        v-model="connectionForm.credentialIds"
-        v-model:pending="pendingAuthentication"
-        v-model:draft="credentialDraft"
-        :kind="mode"
-        :location="mode === 'github' ? githubForm.repository : urlForm.url"
-        :credentials="credentials"
-        :disabled="busy"
-        @delete-credential="$emit('deleteCredential', $event)"
-      />
-      <div class="grid items-end gap-4 sm:grid-cols-2">
-        <ZFormItem :label="t('plugins.installation.verificationSummary')">
+      <div v-else-if="mode === 'url'" class="grid gap-4.5">
+        <ZFormItem prop="url" :show-message="false" :label="t('plugins.installation.downloadUrl')" required>
           <template #label-extra>
-            <PluginHelpPopover :label="t('plugins.installation.digestHelpTitle')">
-              {{ t('plugins.installation.digestHelp') }}
+            <PluginHelpPopover :label="t('plugins.installation.downloadAddressDescription')">
+              {{ t('plugins.installation.urlHelp') }}
             </PluginHelpPopover>
           </template>
-          <ZInput v-model="connectionForm.sha256" :disabled="busy" :aria-invalid="Boolean(digestError)" maxlength="64" :aria-label="t('plugins.installation.shaChecksum')" :placeholder="t('plugins.installation.optionalSha')" class="font-mono [&_input::placeholder]:font-normal" />
+          <ZInput v-model="urlForm.url" :disabled="busy" :aria-label="t('plugins.installation.downloadUrl')" placeholder="https://downloads.example.org/plugin.tar.gz" />
         </ZFormItem>
-        <PluginSourceProxyField v-model="connectionForm.outboundProxyId" :disabled="busy" />
       </div>
-    </div>
 
-    <section v-if="!verified && mode === 'github' && release" class="mt-4 grid gap-3">
-      <div class="flex min-w-0 flex-wrap items-center gap-2">
-        <span class="text-cp-sm text-cp-text-secondary">{{ t('plugins.installation.versionFound') }}</span>
-        <strong class="min-w-0 wrap-break-word text-cp-sm font-emphasis text-cp-text">{{ release.tag }}</strong>
-        <ZTag v-if="release.prerelease" type="warning">
-          {{ t('plugins.installation.preRelease') }}
-        </ZTag>
+      <div v-else class="grid gap-4.5">
+        <ZFormItem prop="repository" :show-message="Boolean(githubForm.repository.trim())" :label="t('plugins.installation.githubRepository')" required>
+          <ZInput v-model="githubForm.repository" :disabled="busy" :aria-label="t('plugins.installation.githubRepository')" :placeholder="t('plugins.installation.repositoryLinkOrOwnerRepo')">
+            <template #prefix>
+              <Github class="size-4" />
+            </template>
+          </ZInput>
+        </ZFormItem>
+        <ZFormItem prop="tag" :show-message="false" :label="t('plugins.installation.tagLabel')">
+          <template #label-extra>
+            <PluginHelpPopover :label="t('plugins.installation.tagHelpTitle')">
+              {{ t('plugins.installation.tagHelp') }}
+            </PluginHelpPopover>
+          </template>
+          <ZInput v-model="githubForm.tag" :disabled="busy" :aria-label="t('plugins.installation.tagLabel')" :placeholder="t('plugins.installation.tagPlaceholder')" />
+        </ZFormItem>
+        <ZCheckbox v-model="githubForm.allowPrerelease" :label="t('plugins.installation.allowPrereleaseLabel')" :disabled="busy" />
       </div>
-      <ZFormItem v-if="releaseAssets.length > 1" :label="t('plugins.assets.packageLabel')" required>
-        <PluginAssetPicker v-model="githubForm.asset" :assets="releaseAssets" :disabled="busy" />
-      </ZFormItem>
-      <p v-else class="m-0 break-all text-cp-sm text-cp-text-secondary">
-        {{ githubForm.asset || t('plugins.installation.thereIsNoTarGzOrTgz') }}
-      </p>
-    </section>
 
-    <section v-if="verified" :aria-label="t('plugins.installation.pendingTitle')" class="rounded-cp bg-cp-fill-alter p-4">
+      <div v-if="mode !== 'upload'" class="grid gap-4.5">
+        <PluginDownloadAuthentication
+          :key="mode"
+          v-model="connectionForm.credentialIds"
+          v-model:pending="pendingAuthentication"
+          v-model:draft="credentialDraft"
+          :kind="mode"
+          :location="mode === 'github' ? githubForm.repository : urlForm.url"
+          :credentials="credentials"
+          :disabled="busy"
+          @delete-credential="$emit('deleteCredential', $event)"
+        />
+        <div class="grid items-end gap-4.5 sm:grid-cols-2">
+          <ZFormItem prop="sha256" :label="t('plugins.installation.verificationSummary')">
+            <template #label-extra>
+              <PluginHelpPopover :label="t('plugins.installation.digestHelpTitle')">
+                {{ t('plugins.installation.digestHelp') }}
+              </PluginHelpPopover>
+            </template>
+            <ZInput v-model="connectionForm.sha256" :disabled="busy" maxlength="64" :aria-label="t('plugins.installation.shaChecksum')" :placeholder="t('plugins.installation.optionalSha')" class="font-mono [&_input::placeholder]:font-normal" />
+          </ZFormItem>
+          <PluginSourceProxyField v-model="connectionForm.outboundProxyId" :disabled="busy" />
+        </div>
+      </div>
+
+      <section v-if="mode === 'github' && release" class="grid gap-3">
+        <div class="flex min-w-0 flex-wrap items-center gap-2">
+          <span class="text-z-sm text-z-text-secondary">{{ t('plugins.installation.versionFound') }}</span>
+          <strong class="min-w-0 wrap-break-word text-z-sm font-emphasis text-z-text">{{ release.tag }}</strong>
+          <ZTag v-if="release.prerelease" type="warning">
+            {{ t('plugins.installation.preRelease') }}
+          </ZTag>
+        </div>
+        <ZFormItem v-if="releaseAssets.length > 1" :label="t('plugins.assets.packageLabel')" required>
+          <PluginAssetPicker v-model="githubForm.asset" :assets="releaseAssets" :disabled="busy" />
+        </ZFormItem>
+        <p v-else class="m-0 break-all text-z-sm text-z-text-secondary">
+          {{ githubForm.asset || t('plugins.installation.thereIsNoTarGzOrTgz') }}
+        </p>
+      </section>
+    </ZForm>
+
+    <section v-if="verified" :aria-label="t('plugins.installation.pendingTitle')" class="rounded-z bg-z-fill-alter p-4">
       <div class="flex items-start gap-3">
-        <div class="flex size-10 shrink-0 items-center justify-center rounded-cp bg-cp-bg-container text-cp-text-secondary">
+        <div class="flex size-10 shrink-0 items-center justify-center rounded-z bg-z-bg-container text-z-text-secondary">
           <PackageOpen class="size-5" aria-hidden="true" />
         </div>
         <div class="min-w-0 flex-1">
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <h3 class="m-0 min-w-0 wrap-break-word text-cp-sm font-emphasis text-cp-text">
+            <h3 class="m-0 min-w-0 wrap-break-word text-z-sm font-emphasis text-z-text">
               {{ verified.metadata.displayName }}
             </h3>
             <ZTag>{{ verified.metadata.version }}</ZTag>
-            <span role="status" class="ml-auto inline-flex shrink-0 items-center gap-1 text-cp-xs text-cp-success-text">
+            <span role="status" class="ml-auto inline-flex shrink-0 items-center gap-1 text-z-xs text-z-success-text">
               <CheckCircle2 class="size-3.5" aria-hidden="true" />
               {{ t('plugins.installation.parsingCompleted') }}
             </span>
           </div>
-          <p class="mt-1 mb-0 break-all font-mono text-cp-xs text-cp-text-secondary" :title="`SHA-256 ${verified.metadata.sha256}`">
+          <p class="mt-1 mb-0 break-all font-mono text-z-xs text-z-text-secondary" :title="`SHA-256 ${verified.metadata.sha256}`">
             {{ verified.metadata.pluginId }}
           </p>
         </div>
       </div>
-      <dl class="mt-3 mb-0 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 text-cp-xs leading-relaxed">
-        <dt class="text-cp-text-secondary">
+      <dl class="mt-3 mb-0 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-4 gap-y-2 text-z-xs leading-relaxed">
+        <dt class="text-z-text-secondary">
           {{ t('plugins.installation.publisher') }}
         </dt>
         <dd class="m-0 min-w-0 wrap-break-word">
           {{ verified.metadata.publisher }}
         </dd>
-        <dt class="text-cp-text-secondary">
+        <dt class="text-z-text-secondary">
           {{ t('plugins.installation.applicablePlatforms') }}
         </dt>
         <dd class="m-0 flex min-w-0 flex-wrap gap-1.5">
@@ -625,10 +642,10 @@ watch(
           </ZTag>
         </dd>
       </dl>
-      <p class="mt-4 mb-0 text-cp-xs leading-relaxed text-cp-text-secondary">
+      <p class="mt-4 mb-0 text-z-xs leading-relaxed text-z-text-secondary">
         {{ t('plugins.installation.trustNotice') }}
       </p>
-      <div v-if="previousArtifact" class="mt-2 flex items-center gap-1.5 text-cp-xs text-cp-text-secondary">
+      <div v-if="previousArtifact" class="mt-2 flex items-center gap-1.5 text-z-xs text-z-text-secondary">
         <span>{{ t('plugins.installation.activateAfterInstall') }}</span>
         <PluginHelpPopover :label="t('plugins.installation.installNewVersionInstructions')">
           {{ t('plugins.installation.configurationHelp') }}
@@ -646,14 +663,14 @@ watch(
       <ZButton :disabled="busy" @click="open = false">
         {{ t('common.actions.cancel') }}
       </ZButton>
-      <ZButton v-if="mode === 'github' && !release" type="primary" :loading="submitting || querying" :disabled="busy || authenticationIncomplete || !githubForm.repository.trim()" @click="queryRelease">
+      <ZButton v-if="mode === 'github' && !release" type="primary" :loading="submitting || querying" :disabled="busy || authenticationIncomplete" @click="queryRelease">
         {{ querying ? t('plugins.installation.queryingVersion') : sourceChanged ? t('plugins.installation.saveSourceAndContinue') : t('common.actions.next') }}
       </ZButton>
       <ZButton
         v-else-if="!verified"
         type="primary"
         :loading="submitting || verifying"
-        :disabled="!selection || busy || authenticationIncomplete"
+        :disabled="busy || authenticationIncomplete || (mode !== 'url' && !selection)"
         @click="verifySelected"
       >
         {{ verifying ? t('plugins.installation.parsingPluginPackage') : sourceChanged ? t('plugins.installation.saveSourceAndContinue') : t('common.actions.next') }}

@@ -25,7 +25,6 @@
       "reset": "重置：",
       "remainingQuota": "{label}剩余额度",
       "accountLimit": "账号额度",
-      "quota": "{provider} 额度",
       "lastRefreshed": "最近刷新: {refreshedAtDisplay}",
       "viewPersonalInformation": "查看个人信息",
       "forecastWeeklyMonthlyQuota": "预测周/月额度",
@@ -38,7 +37,6 @@
       "windowConsumption": "窗口消耗",
       "resetTime": "重置时间",
       "localTokens": "本地累计总 Token",
-      "unavailableHelp": "上游额度未提供，绿色条不表示剩余额度",
       "totalTokensFor": "{windowLabelDisplay}总 Token",
       "usageRateHelp": "最近使用额度的当前已用比例",
       "usageRate": "使用率",
@@ -118,7 +116,6 @@
       "noModelsAvailable": "没有可测试模型"
     },
     "credentials": {
-      "wsFirst": "WS 优先",
       "accountName": "账号名称",
       "enterUpstreamName": "输入上游名称",
       "baseUrlHelp": "填写 API 前缀，接口路径会自动追加",
@@ -126,7 +123,7 @@
       "apiKeyPlaceholder": "留空保留当前密钥",
       "enterUpstreamKey": "输入上游密钥",
       "transportLabel": "传输方式",
-      "webSocketHelp": "WS 优先需要上游支持 Responses WebSocket",
+      "webSocketHelp": "WS 需要上游支持 Responses WebSocket",
       "nameRequired": "请输入账号名称",
       "validation": {
         "urlLength": "上游 API 地址不能超过 2048 个字符",
@@ -161,9 +158,10 @@
       "elapsed": "占用时长"
     },
     "editor": {
+      "namePlaceholder": "留空默认使用账号邮箱",
+      "nameInvalid": "账号名称最多 512 字节，不能包含换行或控制字符",
       "title": "编辑账号",
       "transportLabel": "上游传输方式",
-      "upstreamConnection": "上游连接",
       "loadError": "上游设置读取失败",
       "notesHelp": "最多 500 字，留空可清除备注",
       "oauthUnavailable": "该账号没有 OAuth 上游设置",
@@ -188,9 +186,12 @@
       "reserve": "保留",
       "allowlist": "白名单",
       "blocklist": "黑名单",
-      "modelLimitations": "模型限制",
+      "modelCatalog": "模型目录",
       "refreshModel": "刷新模型",
       "modelRestrictionMode": "模型限制模式",
+      "catalogHelpTitle": "模型目录说明",
+      "catalogObservedAtHelp": "时间表示最近一次成功获取上游目录的时间",
+      "catalogDescription": "目录仅提供模型 ID，端点能力请通过实际请求确认，连接测试仅验证测试所用端点",
       "searchOrAddModels": "搜索或添加模型",
       "searchOrEnterIdAndPressEnter": "搜索或输入 ID，回车添加",
       "selectModel": "选择模型",
@@ -230,6 +231,7 @@
     },
     "scheduling": {
       "scheduling": "调度",
+      "preserve": "保留",
       "switchAccountSchedule": "切换账号调度",
       "concurrencyLimit": "并发限制",
       "accountConcurrencyLimit": "账号并发限制",
@@ -290,6 +292,7 @@
       "totalCharges": "总计费：",
       "noModelUsageYet": "暂无模型用量",
       "windows": {
+        "daily": "日用量",
         "general": "累计用量",
         "weekly": "周用量",
         "monthly": "月用量",
@@ -311,6 +314,7 @@
       "selectAccountPlatform": "选择账号平台",
       "accountPlatform": "账号平台",
       "maximumWordsOptional": "最多 500 字，可不填",
+      "namePlaceholder": "留空保留原名称，仅单账号导入生效",
       "copyAccount": "复制账号",
       "accountCopied": "账号已复制",
       "howToAddAccount": "账号添加方式",
@@ -351,7 +355,6 @@
       "importTasksCreated": "已创建 {submitted} 个导入任务",
       "importTaskCreated": "导入任务已创建",
       "partialSubmission": "部分导入任务已创建，保持输入不变重试可继续提交",
-      "accountName": "{provider} 账号",
       "failedToStartAuthorization": "启动授权失败"
     },
     "importTasks": {
@@ -609,6 +612,24 @@
       "pasteAtLeastOne": "请至少粘贴一个 {label}",
       "missingProvider": "批量导入文件不包含 {provider} 账号文档",
       "importFilesMustBeJsonObjects": "导入文件必须是 JSON 对象"
+    },
+    "upstream": {
+      "account": "账号 {number}",
+      "poolChart": "共享池账号额度",
+      "poolKeyboard": "左右键选择账号，加减键缩放，Home 键查看全池",
+      "startsOnNextUse": "下次使用时开启",
+      "link": "CPR 互联",
+      "observedAt": "{time}更新",
+      "stale": "数据已过期",
+      "unauthorized": "上游未授权",
+      "unsupported": "上游暂不支持互联",
+      "rateLimited": "上游查询受限",
+      "invalidResponse": "上游数据异常",
+      "unavailable": "上游暂不可用",
+      "pool": "共享池",
+      "ready": "可用",
+      "nodeQuota": "节点额度",
+      "quota": "上游额度"
     }
   }
 }

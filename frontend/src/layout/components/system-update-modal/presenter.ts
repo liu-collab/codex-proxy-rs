@@ -38,13 +38,13 @@ export function resolveSystemUpdatePresentation(input: SystemUpdatePresentationI
 export function resolveSystemUpdateLogClasses(level: string) {
   switch (level) {
     case 'success':
-      return { marker: 'text-cp-success', text: 'text-cp-success' }
+      return { marker: 'text-z-success', text: 'text-z-success' }
     case 'warning':
-      return { marker: 'text-cp-warning', text: 'text-cp-warning' }
+      return { marker: 'text-z-warning', text: 'text-z-warning' }
     case 'error':
-      return { marker: 'text-cp-error', text: 'text-cp-error' }
+      return { marker: 'text-z-error', text: 'text-z-error' }
     default:
-      return { marker: 'text-cp-info', text: 'text-cp-text' }
+      return { marker: 'text-z-info', text: 'text-z-text' }
   }
 }
 
@@ -57,16 +57,16 @@ function resolveStatus(input: SystemUpdatePresentationInput) {
           ? t('systemUpdate.status.updating')
           : t('systemUpdate.status.checking'),
       icon: RefreshCw,
-      badge: 'bg-cp-info-container text-cp-info-on-container',
-      iconClass: 'text-cp-info',
+      badge: 'bg-z-info-container text-z-info-on-container',
+      iconClass: 'text-z-info',
     }
   }
   if (input.updateError || input.updateInfo?.warning) {
     return {
       label: t('common.status.error'),
       icon: XCircle,
-      badge: 'bg-cp-error-container text-cp-error-on-container',
-      iconClass: 'text-cp-error',
+      badge: 'bg-z-error-container text-z-error-on-container',
+      iconClass: 'text-z-error',
     }
   }
   if (input.needRestart || input.hasUpdate || input.updateInfo) {
@@ -77,15 +77,15 @@ function resolveStatus(input: SystemUpdatePresentationInput) {
           ? t('systemUpdate.status.available')
           : t('systemUpdate.status.upToDate'),
       icon: input.hasUpdate ? ArrowUpCircle : CheckCircle2,
-      badge: 'bg-cp-success-container text-cp-success-on-container',
-      iconClass: 'text-cp-success',
+      badge: 'bg-z-success-container text-z-success-on-container',
+      iconClass: 'text-z-success',
     }
   }
   return {
     label: t('systemUpdate.status.notChecked'),
     icon: CheckCircle2,
-    badge: 'bg-cp-fill-tertiary text-cp-text-secondary',
-    iconClass: 'text-cp-text-quaternary',
+    badge: 'bg-z-fill-tertiary text-z-text-secondary',
+    iconClass: 'text-z-text-quaternary',
   }
 }
 

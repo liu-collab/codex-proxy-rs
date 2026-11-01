@@ -101,7 +101,7 @@ function confirm() {
 <template>
   <ZDialog v-model="open" :title="t('settings.rotation.smartSchedulingSettings')" :description="t('settings.scheduling.description')" width="36rem">
     <form :id="formId" class="grid gap-5" novalidate @submit.prevent="confirm">
-      <p v-if="!active" class="m-0 text-cp text-cp-text-secondary">
+      <p v-if="!active" class="m-0 text-z text-z-text-secondary">
         {{ t('settings.scheduling.enabledHelp') }}
       </p>
       <div>
@@ -112,18 +112,18 @@ function confirm() {
                 {{ field.label }}
                 <ZPopover trigger="hover-click" placement="top-start">
                   <template #reference="{ open: helpOpen }">
-                    <ZIconButton :aria-label="t('settings.scheduling.about', { label: field.label })" :title="undefined" :aria-expanded="helpOpen" class="size-6! hover:bg-transparent! active:bg-transparent!">
+                    <ZIconButton variant="link" :aria-label="t('settings.scheduling.about', { label: field.label })" :title="undefined" :aria-expanded="helpOpen" class="size-6!">
                       <CircleHelp class="size-3.5" />
                     </ZIconButton>
                   </template>
-                  <p class="m-0 max-w-64 px-3 py-2 text-cp-sm leading-relaxed">{{ field.help }}</p>
+                  <p class="m-0 max-w-64 px-3 py-2 text-z-sm leading-relaxed">{{ field.help }}</p>
                 </ZPopover>
               </span>
             </template>
             <ZInput v-model="draft[field.key]" type="number" min="0" max="10" step="0.1" :placeholder="t('settings.scheduling.zeroWeightHelp')" :aria-label="field.label" />
           </ZFormItem>
         </div>
-        <p v-if="submitted && emptyWeights" role="alert" class="mt-2 mb-0 text-cp-sm text-cp-danger">
+        <p v-if="submitted && emptyWeights" role="alert" class="mt-2 mb-0 text-z-sm text-z-danger">
           {{ t('settings.scheduling.weightsRequired') }}
         </p>
       </div>

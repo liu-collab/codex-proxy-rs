@@ -67,7 +67,7 @@ const trendKind = defineModel<DashboardTrendKind>('trendKind', { required: true 
       </template>
       <template #actions>
         <ZIconButton
-          class="text-cp-primary-text"
+          class="text-z-primary-text"
           size="default"
           :aria-label="t('dashboard.refresh.action')"
           :loading="loading || refreshing"

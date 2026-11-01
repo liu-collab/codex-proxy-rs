@@ -104,9 +104,9 @@ watch(() => props.initialSection, value => section.value = value)
             </ZButton>
           </template>
         </ZEmpty>
-        <article v-for="instance in current ? [current] : []" :key="instance.id" class="grid min-h-36 content-between gap-3 rounded-cp bg-cp-fill-alter p-4">
+        <article v-for="instance in current ? [current] : []" :key="instance.id" class="grid min-h-36 content-between gap-3 rounded-z bg-z-fill-alter p-4">
           <div class="flex flex-wrap items-center gap-2">
-            <strong class="min-w-0 flex-1 wrap-break-word text-cp-sm">{{ t('plugins.catalog.currentVersion') }}</strong>
+            <strong class="min-w-0 flex-1 wrap-break-word text-z-sm">{{ t('plugins.catalog.currentVersion') }}</strong>
             <ZTag>{{ artifactForInstance(instance, plugin.artifacts)?.metadata.version ?? t('plugins.details.versionNotAvailable') }}</ZTag>
             <PluginStatusNotice :instance="instance" />
             <ZTag v-if="!['failed', 'incompatible'].includes(configurationStatus(instance))" :type="pluginStatusType(configurationStatus(instance))">
@@ -126,7 +126,7 @@ watch(() => props.initialSection, value => section.value = value)
           <PluginRuntimeLoad v-if="instance.runtime.load" :load="instance.runtime.load" :revision="instance.runtime.actualRevision" />
           <div class="flex flex-wrap items-center gap-2">
             <div v-if="configurationStatus(instance) === 'enabled'" class="mr-auto flex min-w-0 flex-wrap items-center gap-2">
-              <RouterLink v-for="page in viewByInstance.get(instance.id)?.pages ?? []" :key="page.id" :to="pluginPageLocation(viewByInstance.get(instance.id)!, page)" class="inline-flex h-cp-control-sm min-w-0 items-center gap-1.5 rounded-cp bg-cp-primary-container px-2.5 text-cp-sm leading-none text-cp-primary-on-container no-underline outline-none transition-colors hover:bg-cp-primary-container-hover focus-visible:ring-2 focus-visible:ring-cp-control-outline motion-reduce:transition-none" @click="open = false">
+              <RouterLink v-for="page in viewByInstance.get(instance.id)?.pages ?? []" :key="page.id" :to="pluginPageLocation(viewByInstance.get(instance.id)!, page)" class="inline-flex h-z-control-sm min-w-0 items-center gap-1.5 rounded-z bg-z-primary-container px-2.5 text-z-sm leading-none text-z-primary-on-container no-underline outline-none transition-colors hover:bg-z-primary-container-hover focus-visible:ring-2 focus-visible:ring-z-control-outline motion-reduce:transition-none" @click="open = false">
                 <span class="truncate">{{ page.title }}</span>
                 <ArrowUpRight class="size-3.5 shrink-0" />
               </RouterLink>

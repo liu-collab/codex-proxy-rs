@@ -7,7 +7,7 @@
 /// 名单中的字段可能是合法 HTTP 字段，
 /// 过滤表示网关不继承下游环境，不代表官方服务端必然拒绝该字段
 /// 按已知来源命名空间覆盖扩展；其他未知业务头不因源码中未出现而被过滤
-pub(super) fn is_non_codex_request_header(name: &str) -> bool {
+pub(crate) fn is_non_codex_request_header(name: &str) -> bool {
     // Cloudflare 链路信息及 Access 认证不跨到上游；cf-* 不只包含诊断字段
     name.starts_with("cf-")
         // 反代记录的是客户端到网关这一段地址、协议和路由

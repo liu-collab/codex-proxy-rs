@@ -2,10 +2,10 @@ type PresetVisualTone = 'blue' | 'cyan' | 'green' | 'orange'
 
 const presetVisualTones: readonly PresetVisualTone[] = ['blue', 'green', 'orange', 'cyan']
 const presetVisualToneClasses = {
-  blue: 'bg-cp-blue-container-strong text-cp-blue-on-container',
-  cyan: 'bg-cp-cyan-container-strong text-cp-cyan-on-container',
-  green: 'bg-cp-green-container-strong text-cp-green-on-container',
-  orange: 'bg-cp-orange-container-strong text-cp-orange-on-container',
+  blue: 'bg-z-blue-container-strong text-z-blue-on-container',
+  cyan: 'bg-z-cyan-container-strong text-z-cyan-on-container',
+  green: 'bg-z-green-container-strong text-z-green-on-container',
+  orange: 'bg-z-orange-container-strong text-z-orange-on-container',
 } as const satisfies Record<PresetVisualTone, string>
 
 export function stableVisualIndex(value: unknown, length: number): number {

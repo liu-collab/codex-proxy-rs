@@ -11,7 +11,7 @@ const clientIp = computed(() => usageClientIp(props.record))
 
 <template>
   <span
-    class="inline-flex h-6 max-w-full items-center rounded-full bg-cp-blue-container px-2.5 font-mono text-cp-sm leading-none font-bold text-cp-blue-on-container"
+    class="inline-flex h-6 max-w-full items-center rounded-full bg-z-blue-container px-2.5 font-mono text-z-sm leading-none font-bold text-z-blue-on-container"
     :title="clientIp"
   >
     <span class="min-w-0 truncate">

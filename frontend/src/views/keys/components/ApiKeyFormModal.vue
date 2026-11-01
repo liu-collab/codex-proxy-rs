@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import type { ApiKeyFormValue } from '../composables/useApiKeyEditor'
 
-import type { AccountGroupRef } from '@/api'
-import { ZButton, ZDialog, ZForm, ZFormItem, ZInput } from '@codex-proxy/ui'
+import type { AccountGroupRef, ApiKeyPeerSharing } from '@/api'
+import { ZButton, ZCheckbox, ZDialog, ZForm, ZFormItem, ZInput, ZSwitch } from '@codex-proxy/ui'
 import { DollarSign, KeyRound } from '@lucide/vue'
 
 import { computed, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AccountGroupCheckboxGrid from '@/components/AccountGroupCheckboxGrid.vue'
 import ProviderRequestProfilesEditor from '@/components/client-profile/ProviderRequestProfilesEditor.vue'
+import HelpPopover from '@/components/HelpPopover.vue'
 import { useApiKeyFormRules } from '../composables/useApiKeyFormRules'
 
 const props = defineProps<{
@@ -31,7 +32,7 @@ const title = computed(() => props.editing
   ? t('keys.actions.editKey')
   : t('keys.filters.createApiKey'))
 const formRef = useTemplateRef<InstanceType<typeof ZForm>>('formElement')
-const rules = useApiKeyFormRules()
+const rules = useApiKeyFormRules(() => form.value)
 
 watch(open, () => formRef.value?.clearValidate())
 
@@ -43,6 +44,13 @@ async function requestSave() {
 
 function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFormValue[Key]) {
   form.value = { ...form.value, [key]: value }
+}
+
+function updatePeerSharing(key: keyof ApiKeyPeerSharing, value: boolean) {
+  const sharing = { ...form.value.peerSharing, [key]: value }
+  if (!sharing.sharePool)
+    sharing.sharePlans = false
+  updateForm('peerSharing', sharing)
 }
 </script>
 
@@ -57,11 +65,11 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
     @closed="emit('afterLeave')"
   >
     <template #icon>
-      <KeyRound class="text-cp-text" :size="20" aria-hidden="true" />
+      <KeyRound class="text-z-text" :size="20" aria-hidden="true" />
     </template>
 
     <ZForm ref="formElement" :model="form" :rules="rules" scroll-to-error focus-on-error novalidate class="grid gap-6" @submit="requestSave">
-      <ZFormItem prop="name" :label="t('common.fields.name')">
+      <ZFormItem prop="name" :label="t('common.fields.name')" :show-message="false">
         <ZInput
           :model-value="form.name" :aria-label="t('common.fields.name')"
           :placeholder="t('keys.editor.namePlaceholder')"
@@ -97,13 +105,32 @@ function updateForm<Key extends keyof ApiKeyFormValue>(key: Key, value: ApiKeyFo
         </ZFormItem>
       </div>
 
-      <ZFormItem :label="t('groups.group')">
+      <ZFormItem prop="groupIds" :label="t('groups.group')" :required="form.peerSharing.enabled">
         <AccountGroupCheckboxGrid
           :model-value="form.groupIds" :groups="groups"
           :loading="groupLoading"
           :disabled="saving"
           @update:model-value="updateForm('groupIds', $event)"
         />
+      </ZFormItem>
+
+      <ZFormItem :label="t('keys.editor.peerSharing')">
+        <template #label-extra>
+          <HelpPopover :label="t('keys.editor.peerSharing')" :content="t('keys.editor.peerSharingHelp')" />
+        </template>
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-3">
+          <ZSwitch
+            :model-value="form.peerSharing.enabled"
+            :aria-label="t('keys.editor.peerSharing')"
+            :disabled="saving"
+            @update:model-value="updatePeerSharing('enabled', $event)"
+          />
+          <template v-if="form.peerSharing.enabled">
+            <ZCheckbox :model-value="form.peerSharing.sharePool" :label="t('keys.editor.sharePool')" :disabled="saving" @update:model-value="updatePeerSharing('sharePool', $event)" />
+            <ZCheckbox :model-value="form.peerSharing.shareQuota" :label="t('keys.editor.shareQuota')" :disabled="saving" @update:model-value="updatePeerSharing('shareQuota', $event)" />
+            <ZCheckbox :model-value="form.peerSharing.sharePlans" :label="t('keys.editor.sharePlans')" :disabled="saving || !form.peerSharing.sharePool" @update:model-value="updatePeerSharing('sharePlans', $event)" />
+          </template>
+        </div>
       </ZFormItem>
 
       <ZFormItem :label="t('keys.editor.upstreamIdentity')">

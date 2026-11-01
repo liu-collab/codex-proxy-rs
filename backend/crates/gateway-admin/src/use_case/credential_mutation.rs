@@ -19,29 +19,54 @@ use gateway_core::{account::ProviderAccountId, routing::ProviderKind, runtime::S
 use super::{map_store_error, publish_committed};
 
 pub(super) async fn publish_credentials_and_observe_quota(
+    peer: Option<&std::sync::Arc<dyn crate::ports::peer::PeerUpstreamService>>,
     provider: &std::sync::Arc<dyn crate::ports::provider::ProviderAdmin>,
+    accounts: &std::sync::Arc<dyn AccountStore>,
     snapshot: &dyn SnapshotControl,
     revision: crate::model::Revision,
     account_ids: &[ProviderAccountId],
     request_id: &str,
 ) -> Result<(), AdminError> {
-    provider.account_facts_changed(account_ids).await;
+    notify_account_facts_changed(peer.map(AsRef::as_ref), provider.as_ref(), account_ids).await;
     publish_committed(snapshot, revision).await?;
 
     // 凭据已经提交；额度只是可重建的观察，不能拖住管理请求或回滚提交结果
     let provider = provider.clone();
+    let peer = peer.cloned();
+    let accounts = accounts.clone();
     let account_ids = account_ids.to_vec();
     let request_id = request_id.to_owned();
     tokio::spawn(async move {
         for account_id in account_ids {
-            if let Err(error) = provider
-                .quota(ProviderQuotaRequest {
-                    account_id: account_id.clone(),
-                    refresh: true,
-                    rolling_usage: None,
-                })
+            let request = ProviderQuotaRequest {
+                account_id: account_id.clone(),
+                refresh: true,
+                rolling_usage: None,
+            };
+            let result = if let Some(peer) = peer.as_deref() {
+                let account = match accounts.load_account_record(&account_id).await {
+                    Ok(Some(account)) => account,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        tracing::warn!(request_id, account_id = %account_id, error = %error, "initial quota account lookup failed");
+                        continue;
+                    }
+                };
+                if !account.enabled || &account.provider_kind != provider.provider_kind() {
+                    continue;
+                }
+                // 首查与手动刷新共用认证能力分派，互联协议由 Admin 解释
+                super::peer_link::upstream::read_quota(
+                    Some(peer),
+                    provider.as_ref(),
+                    &account,
+                    request,
+                )
                 .await
-            {
+            } else {
+                provider.quota(request).await
+            };
+            if let Err(error) = result {
                 tracing::warn!(
                     request_id,
                     provider = %provider.provider_kind().as_str(),
@@ -65,7 +90,7 @@ pub(super) async fn required_credential(
         .credential_details(provider_kind, account_id)
         .await
         .map_err(|error| map_store_error(error, resource))?
-        .ok_or_else(|| AdminError::not_found("Provider 凭据不存在"))
+        .ok_or_else(|| AdminError::not_found("服务商凭据不存在"))
 }
 
 pub(super) async fn required_plugin_credential(
@@ -77,7 +102,7 @@ pub(super) async fn required_plugin_credential(
         .credential_details_by_id(account_id)
         .await
         .map_err(|error| map_store_error(error, resource))?
-        .ok_or_else(|| AdminError::not_found("Provider 凭据不存在"))
+        .ok_or_else(|| AdminError::not_found("服务商凭据不存在"))
 }
 
 pub(super) async fn import_proxy_binding(
@@ -156,7 +181,7 @@ pub(super) fn validate_prepared_import(
             .iter()
             .any(|credential| credential.provider_kind != *provider_kind)
     {
-        return Err(AdminError::conflict("Provider 准备结果与请求范围不一致"));
+        return Err(AdminError::conflict("服务商返回的凭据与请求范围不符"));
     }
     Ok(())
 }
@@ -176,7 +201,7 @@ pub(super) fn validate_prepared_rotation_facts(
     if facts.account_id.as_str() != account.id.as_str()
         || facts.provider_kind != account.provider_kind
     {
-        return Err(AdminError::conflict("Provider 准备结果与当前凭据不一致"));
+        return Err(AdminError::conflict("凭据处理结果与当前凭据不符"));
     }
     Ok(())
 }
@@ -343,6 +368,7 @@ pub(super) async fn commit_credential_refresh(
 }
 
 pub(super) async fn delete_credentials(
+    peer: Option<&dyn crate::ports::peer::PeerUpstreamService>,
     accounts: &dyn AccountStore,
     provider: &dyn ProviderAdmin,
     command: CredentialDeletion,
@@ -365,11 +391,37 @@ pub(super) async fn delete_credentials(
         .await
         .map_err(|error| map_store_error(error, resource))?;
     for account_id in &account_ids {
-        provider.account_unavailable(account_id).await;
+        notify_account_unavailable(peer, provider, account_id).await;
     }
-    provider.account_facts_changed(&account_ids).await;
+    notify_account_facts_changed(peer, provider, &account_ids).await;
     Ok(CredentialDeletionResult {
         config_revision: revision,
         account_ids,
     })
+}
+
+pub(super) async fn notify_account_facts_changed(
+    peer: Option<&dyn crate::ports::peer::PeerUpstreamService>,
+    provider: &dyn ProviderAdmin,
+    ids: &[ProviderAccountId],
+) {
+    provider.account_facts_changed(ids).await;
+    if let Some(peer) = peer {
+        for id in ids {
+            if let Err(error) = peer.account_changed(id).await {
+                tracing::warn!(account_id = %id, error = %error, "upstream information cache invalidation failed");
+            }
+        }
+    }
+}
+
+pub(super) async fn notify_account_unavailable(
+    peer: Option<&dyn crate::ports::peer::PeerUpstreamService>,
+    provider: &dyn ProviderAdmin,
+    id: &ProviderAccountId,
+) {
+    if let Some(peer) = peer {
+        peer.forget(id);
+    }
+    provider.account_unavailable(id).await;
 }

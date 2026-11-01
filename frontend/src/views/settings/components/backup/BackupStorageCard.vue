@@ -40,11 +40,11 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
 <template>
   <ZCard :title="t('settings.backup.storage.s3StorageConfiguration')">
     <template #description>
-      <I18nT keypath="settings.backup.storage.description" tag="span" scope="global" class="text-cp-text-secondary">
+      <I18nT keypath="settings.backup.storage.description" tag="span" scope="global" class="text-z-text-secondary">
         <template #service>
           <button
             type="button"
-            class="cursor-pointer border-0 bg-transparent p-0 text-cp-link underline underline-offset-2 hover:text-cp-link-hover"
+            class="cursor-pointer border-0 bg-transparent p-0 text-z-link underline underline-offset-2 hover:text-z-link-hover"
             @click="emit('openR2Guide')"
           >
             Cloudflare R2
@@ -62,8 +62,8 @@ function updateStorage<Key extends keyof StorageForm>(key: Key, value: StorageFo
           @click="emit('test')"
         >
           <template #icon>
-            <CircleCheck v-if="verified" class="size-4 text-cp-success-text" />
-            <CircleAlert v-else class="size-4 text-cp-warning-text" />
+            <CircleCheck v-if="verified" class="size-4 text-z-success-text" />
+            <CircleAlert v-else class="size-4 text-z-warning-text" />
           </template>
           {{ testing ? t('settings.backup.storage.testing') : t('settings.backup.storage.test') }}
         </ZButton>

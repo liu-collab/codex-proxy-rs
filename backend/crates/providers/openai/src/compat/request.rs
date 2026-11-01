@@ -4,7 +4,7 @@ use serde_json::{Map, Value, json};
 
 /// 非官方客户端及跨客户端历史回填的兼容入口；调用方必须已选定 Codex/OAuth 上游
 /// 只处理已验证被拒绝的字段，不根据客户端品牌推断整份历史是否合法
-pub(crate) fn normalize_non_codex_request_body(body: &mut Map<String, Value>) {
+pub(super) fn normalize_non_codex_request_body(body: &mut Map<String, Value>) {
     let Some(input) = body.get_mut("input").and_then(Value::as_array_mut) else {
         return;
     };
@@ -17,14 +17,16 @@ pub(crate) fn normalize_non_codex_request_body(body: &mut Map<String, Value>) {
         }
         // SDK 输出项的 status 不属于 Codex reasoning 输入合同；其他项的 status 可能合法
         item.shift_remove("status");
-        // Codex 只接受空 content 数组，因此**非空数组一律移除**，不区分是否存在加密载荷：
-        // 纯明文的跨模型历史同样会被上游拒绝，留着只会让整条请求失败（不再使用
-        // "仅当 encrypted_content 非空才删"的旧规则）。非数组形状不属于 reasoning 内容
-        // 合同，保持原样
+        // Codex 只接受空 content 数组；仅在加密历史仍可回填时去掉冗余明文，
+        // 没有加密内容的历史不自动丢弃，保留给上游明确拒绝
         if item
-            .get("content")
-            .and_then(Value::as_array)
-            .is_some_and(|content| !content.is_empty())
+            .get("encrypted_content")
+            .and_then(Value::as_str)
+            .is_some_and(|content| !content.trim().is_empty())
+            && item
+                .get("content")
+                .and_then(Value::as_array)
+                .is_some_and(|content| !content.is_empty())
         {
             item.shift_remove("content");
         }
@@ -74,7 +76,7 @@ fn is_uuid36(value: &str) -> bool {
 ///
 /// 兼容基准是 Codex Core/Desktop 的模型请求，不是公开 OpenAI Responses API
 /// 未知字段继续透传，不能因官方请求结构中没有某个字段就将其列入过滤规则
-pub(in crate::transport) fn normalize_codex_request_body(body: &mut Map<String, Value>) {
+pub(crate) fn normalize_codex_request_body(body: &mut Map<String, Value>) {
     // 官方 Core/Desktop 显式发送 store=false；仅为缺字段的下游请求补齐，保留显式值
     body.entry("store").or_insert(Value::Bool(false));
 
@@ -129,7 +131,7 @@ pub(in crate::transport) fn normalize_codex_request_body(body: &mut Map<String, 
 /// `client_metadata` 内的同名键属于业务 metadata，保持原样。
 /// 这是"未知字段继续透传"原则的定向例外：这两个字段已知且只用于标识调用方，
 /// 不参与模型行为。
-pub(in crate::transport) fn strip_client_identity_fields(body: &mut Map<String, Value>) {
+pub(crate) fn strip_client_identity_fields(body: &mut Map<String, Value>) {
     body.remove("user");
     body.remove("safety_identifier");
 }

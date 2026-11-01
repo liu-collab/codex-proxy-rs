@@ -84,12 +84,12 @@ function handleExplanationKeydown(event: KeyboardEvent) {
     type="info"
   >
     <template #icon>
-      <ChartNoAxesCombined class="size-5 text-cp-primary-text" :stroke-width="1.75" />
+      <ChartNoAxesCombined class="size-5 text-z-primary-text" :stroke-width="1.75" />
     </template>
 
     <div class="grid grid-cols-1 gap-4">
       <div class="flex flex-wrap items-center justify-between gap-4">
-        <AccountIdentityCell :account="account" show-plan title-mode="email" meta-position="secondary" meta-size="xs" class="max-w-full">
+        <AccountIdentityCell :account="account" show-plan meta-position="secondary" meta-size="xs" class="max-w-full">
           <template #meta>
             <ProviderIconGroup :provider="account.provider" size="xs" />
           </template>
@@ -100,7 +100,7 @@ function handleExplanationKeydown(event: KeyboardEvent) {
       <div aria-live="polite" :aria-busy="loading || refreshing">
         <ForecastSkeleton v-if="loading || refreshing" />
         <template v-else-if="forecast">
-          <div v-if="unavailableReason" class="grid rounded-cp-card bg-cp-fill-tertiary/70 [html[data-theme=light]_&]:bg-cp-fill-quaternary/70">
+          <div v-if="unavailableReason" class="grid rounded-z-card bg-z-fill-tertiary/70 [html[data-theme=light]_&]:bg-z-fill-quaternary/70">
             <ZEmpty :title="t('accounts.quotaForecast.unpredictableAtMoment')" :description="unavailableReason" :icon="ChartNoAxesCombined" surface="none" class="min-h-72 content-center" />
           </div>
           <ForecastCapacity v-else :forecast="forecast" />
@@ -110,12 +110,14 @@ function handleExplanationKeydown(event: KeyboardEvent) {
 
     <template #footer>
       <div class="mr-auto flex min-w-0 items-center gap-1">
-        <span v-if="forecast?.source?.observedAt" class="hidden text-cp-xs text-cp-text-tertiary sm:block">
+        <span v-if="forecast?.source?.observedAt" class="hidden text-z-xs text-z-text-tertiary sm:block">
           {{ t('accounts.quotaForecast.updated', { observedAtDisplay: forecast.source.observedAtDisplay }) }}
         </span>
         <ZPopover v-model="explanationOpen" trigger="hover-click" placement="top-start" :hover-delay="240">
           <template #reference>
             <ZIconButton
+              variant="link"
+              :title="undefined"
               :aria-label="t('accounts.quotaForecast.forecastDescription')"
               size="small"
               :aria-expanded="explanationOpen"
@@ -125,8 +127,8 @@ function handleExplanationKeydown(event: KeyboardEvent) {
               <CircleAlert class="size-3.5" aria-hidden="true" />
             </ZIconButton>
           </template>
-          <section :id="explanationId" role="tooltip" class="grid w-96 max-w-[calc(100vw-2rem)] gap-3 p-4 text-cp-xs leading-relaxed text-cp-text-secondary">
-            <h4 class="m-0 font-heavy text-cp-text">
+          <section :id="explanationId" role="tooltip" class="grid w-96 max-w-[calc(100vw-2rem)] gap-3 p-4 text-z-xs leading-relaxed text-z-text-secondary">
+            <h4 class="m-0 font-heavy text-z-text">
               {{ t('accounts.quotaForecast.forReferenceOnly') }}
             </h4>
             <p class="m-0">

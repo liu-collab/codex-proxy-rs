@@ -37,26 +37,26 @@ impl CancellationReason {
     #[must_use]
     pub const fn message(self) -> &'static str {
         match self {
-            Self::Requested => "request was cancelled",
+            Self::Requested => "Request was cancelled.",
             Self::Lease {
                 kind: RequestLeaseKind::ClientAdmission,
                 failure,
             } => match failure {
-                LeaseFailure::Lost => "request was cancelled: client admission lease was lost",
+                LeaseFailure::Lost => "Request was cancelled: client admission lease was lost.",
                 LeaseFailure::RenewalTimedOut => {
-                    "request was cancelled: client admission lease renewal timed out"
+                    "Request was cancelled: client admission lease renewal timed out."
                 }
-                LeaseFailure::Expired => "request was cancelled: client admission lease expired",
+                LeaseFailure::Expired => "Request was cancelled: client admission lease expired.",
             },
             Self::Lease {
                 kind: RequestLeaseKind::Credential,
                 failure,
             } => match failure {
-                LeaseFailure::Lost => "request was cancelled: credential lease was lost",
+                LeaseFailure::Lost => "Request was cancelled: credential lease was lost.",
                 LeaseFailure::RenewalTimedOut => {
-                    "request was cancelled: credential lease renewal timed out"
+                    "Request was cancelled: credential lease renewal timed out."
                 }
-                LeaseFailure::Expired => "request was cancelled: credential lease expired",
+                LeaseFailure::Expired => "Request was cancelled: credential lease expired.",
             },
         }
     }

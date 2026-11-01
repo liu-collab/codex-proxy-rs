@@ -317,19 +317,19 @@ impl fmt::Debug for GrokResponsesRequest {
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
 pub enum GrokRequestEncodeError {
     /// 数据面只接受 OpenAI adapter 保留的原始 Responses object
-    #[error("Grok Build request is missing its OpenAI protocol payload")]
+    #[error("The OpenAI request payload is missing.")]
     InvalidProtocolPayload,
     /// Grok Build 不支持 Codex 的非生成预热语义
-    #[error("Grok Build does not support non-generating prewarm requests (generate=false)")]
+    #[error("Grok Build does not support prewarm requests (generate=false).")]
     UnsupportedPrewarm,
     /// JSON 序列化意外失败
     #[error("Grok Build request serialization failed")]
     Serialization,
     /// Responses 兼容字段无法安全归一化
-    #[error("Grok Build request normalization failed")]
+    #[error("The request could not be converted to the Grok Build format.")]
     InvalidRequestNormalization,
     /// 请求中的具体字段无法安全转换为 Grok Build 接受的形态
-    #[error("Grok Build request field `{field}` could not be normalized safely")]
+    #[error("The request field `{field}` could not be converted to the Grok Build format.")]
     InvalidRequestField { field: &'static str },
 }
 

@@ -2453,7 +2453,7 @@ async fn atomic_uncommitted_upstream_failure_batch_should_be_forwarded_once() {
     assert_eq!(body.matches("event: response.failed").count(), 1);
     assert!(body.contains(std::str::from_utf8(&raw_created).expect("created frame")));
     assert!(body.contains(std::str::from_utf8(&raw_failure).expect("failure frame")));
-    assert!(!body.contains("upstream capacity is temporarily unavailable"));
+    assert!(!body.contains("Upstream capacity is temporarily unavailable."));
     assert!(body.ends_with("data: [DONE]\n\n"));
     assert_eq!(trace.snapshot(), vec!["next_event", "commit", "next_error"]);
 }
@@ -3047,7 +3047,7 @@ async fn official_core_clients_should_be_version_checked_before_starting_respons
                 assert!(String::from_utf8_lossy(&body).contains("event: response.completed\n"));
                 assert!(trace.snapshot().contains(&"commit"));
             } else {
-                assert_eq!(status, StatusCode::UPGRADE_REQUIRED, "{product}/{version}");
+                assert_eq!(status, StatusCode::BAD_REQUEST, "{product}/{version}");
                 let value: Value = serde_json::from_slice(&body).unwrap();
                 assert_eq!(value["error"]["code"], "client_version_too_old");
                 assert_eq!(value["error"]["current_version"], version);
@@ -3118,7 +3118,7 @@ async fn chatgpt_remote_responses_should_only_skip_missing_desktop_versions() {
             let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
             if let Some(code) = expected_code {
                 let value: Value = serde_json::from_slice(&body).unwrap();
-                assert_eq!(status, StatusCode::UPGRADE_REQUIRED, "{name} {version:?}");
+                assert_eq!(status, StatusCode::BAD_REQUEST, "{name} {version:?}");
                 assert_eq!(value["error"]["code"], code);
                 assert!(execution.session.lock().unwrap().is_some());
             } else {

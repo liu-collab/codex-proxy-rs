@@ -56,9 +56,9 @@ const variantDefinitions: Record<
 > = {
   metric: {
     rootClass: 'grid min-w-0 grid-rows-[14px_14px] gap-1',
-    headerClass: 'flex items-center justify-between gap-2 text-cp-xs leading-[14px] font-bold',
-    labelClass: 'truncate text-cp-text-quaternary',
-    valueClass: 'text-cp-xs leading-none font-bold',
+    headerClass: 'flex items-center justify-between gap-2 text-z-xs leading-[14px] font-bold',
+    labelClass: 'truncate text-z-text-quaternary',
+    valueClass: 'text-z-xs leading-none font-bold',
     trackOffsetClass: 'self-center',
     trackShapeClass: 'h-1.5 w-full overflow-hidden rounded-full',
     minimumBarWidth: '6px',
@@ -68,21 +68,21 @@ const variantDefinitions: Record<
   },
   compact: {
     rootClass: 'flex min-w-0 flex-col',
-    headerClass: 'mb-1 flex items-baseline justify-between gap-2 text-cp-xs leading-[14px] font-bold',
-    labelClass: 'truncate text-cp-text-quaternary',
+    headerClass: 'mb-1 flex items-baseline justify-between gap-2 text-z-xs leading-[14px] font-bold',
+    labelClass: 'truncate text-z-text-quaternary',
     valueClass: 'text-[10px] leading-[14px] font-heavy',
     trackOffsetClass: 'mt-auto',
-    trackShapeClass: 'h-[3px] w-full overflow-hidden rounded-full',
+    trackShapeClass: 'h-1 w-full overflow-hidden rounded-full',
     minimumBarWidth: '3px',
     compactValues: true,
     labelTooltip: true,
     showResetTime: false,
   },
   detail: {
-    rootClass: 'rounded-lg bg-cp-fill-quaternary p-2',
-    headerClass: 'flex items-center justify-between gap-3 text-cp-sm font-bold',
-    labelClass: 'text-cp-text-secondary',
-    valueClass: 'text-cp-sm font-heavy',
+    rootClass: 'rounded-lg bg-z-fill-quaternary p-2',
+    headerClass: 'flex items-center justify-between gap-3 text-z-sm font-bold',
+    labelClass: 'text-z-text-secondary',
+    valueClass: 'text-z-sm font-heavy',
     trackOffsetClass: 'mt-2',
     trackShapeClass: 'h-2 overflow-hidden rounded-full',
     minimumBarWidth: '8px',
@@ -97,20 +97,20 @@ const quotaToneClasses: Record<
   { bar: string, text: string }
 > = {
   unknown: {
-    bar: 'bg-cp-border',
-    text: 'text-cp-text-quaternary',
+    bar: 'bg-z-border',
+    text: 'text-z-text-quaternary',
   },
   danger: {
-    bar: 'bg-cp-error',
-    text: 'text-cp-error-text',
+    bar: 'bg-z-error',
+    text: 'text-z-error-text',
   },
   warning: {
-    bar: 'bg-cp-warning',
-    text: 'text-cp-warning-text',
+    bar: 'bg-z-warning',
+    text: 'text-z-warning-text',
   },
   success: {
-    bar: 'bg-cp-success',
-    text: 'text-cp-success-text',
+    bar: 'bg-z-success',
+    text: 'text-z-success-text',
   },
 }
 
@@ -146,7 +146,7 @@ export function resolveAccountUsageWindowPresentation(
       value: definition.valueClass,
       trackOffset: definition.trackOffsetClass,
       trackShape: definition.trackShapeClass,
-      track: `${definition.trackShapeClass} bg-cp-border-secondary`,
+      track: `${definition.trackShapeClass} bg-z-border-secondary`,
     },
     quota: {
       valueVisible: typeof input.window?.usedPercent === 'number'
@@ -221,7 +221,7 @@ function usageWindowMode(
   window: AccountQuotaWindow | undefined,
   localUsage: AccountLocalUsage | null,
 ): AccountUsageWindowMode {
-  if (typeof window?.usedPercent === 'number')
+  if (typeof window?.usedPercent === 'number' || window?.amount)
     return 'quota'
   if (localUsage)
     return 'local'
@@ -239,9 +239,39 @@ function localTokenDisplay(localUsage: AccountLocalUsage | null) {
   return formatInteger(total)
 }
 
-export function quotaWindowLocalUsageDisplay(window: AccountQuotaWindow) {
+export function quotaWindowDetails(window: AccountQuotaWindow) {
   const localUsage = accountLocalUsage(window.localUsage)
-  return localTokenDisplay(localUsage) || null
+  const tokenDisplay = localTokenDisplay(localUsage) || null
+  const amountDisplay = window.amount?.usedDisplay ?? null
+  const hasConsumption = Boolean(tokenDisplay || amountDisplay)
+    || (!window.amount && localUsage?.totalTokens == null)
+  return {
+    stale: window.stale,
+    observationDisplay: [
+      window.stale
+        ? t('accounts.upstream.stale')
+        : null,
+      window.observedAtDisplay && window.observedAtDisplay !== '—'
+        ? t('accounts.upstream.observedAt', { time: window.observedAtDisplay })
+        : null,
+    ].filter(Boolean).join(' · '),
+    localUsageDisplay: tokenDisplay,
+    amountUsedDisplay: amountDisplay,
+    quotaValueDisplay: window.amount && window.usedPercent === null
+      ? window.amount.totalDisplay
+      : window.usedPercentDisplay,
+    consumptionDisplay: hasConsumption
+      ? [
+          amountDisplay,
+          tokenDisplay || (!window.amount && localUsage?.totalTokens == null
+            ? '—'
+            : null),
+        ].filter(Boolean).join(' · ')
+      : null,
+    resetAtDisplay: window.amount && window.resetAtDisplay === '—'
+      ? t('accounts.upstream.startsOnNextUse')
+      : window.resetAtDisplay,
+  }
 }
 
 const quotaWindowPeriods = [
@@ -352,7 +382,7 @@ function rollingWindowDurationDisplay(windowSeconds: number | null | undefined) 
 
 export function quotaWindowPresentation(window: AccountQuotaWindow, minimumWidth: string) {
   const percent = clamp(window.usedPercent ?? 0, 0, 100)
-  const tone = quotaWindowTone(window.usedPercent)
+  const tone = quotaWindowTone(window.stale ? null : window.usedPercent)
   return {
     barStyle: {
       width: `${percent}%`,
@@ -365,7 +395,7 @@ export function quotaWindowPresentation(window: AccountQuotaWindow, minimumWidth
   }
 }
 
-function quotaWindowTone(usedPercent: number | null): QuotaWindowTone {
+export function quotaWindowTone(usedPercent: number | null): QuotaWindowTone {
   if (usedPercent === null)
     return 'unknown'
   // 每个窗口按自身的已用比例分档，剩余不足 30% / 10% 时分别预警

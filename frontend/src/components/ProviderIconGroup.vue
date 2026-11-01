@@ -53,22 +53,22 @@ const authenticationLabel = computed(() => formatAuthenticationLabel(props.authe
 <template>
   <span class="inline-flex items-center whitespace-nowrap" :class="groupGapClass">
     <span
-      class="inline-flex shrink-0 items-center justify-center bg-cp-fill-secondary/80 text-cp-text"
+      class="inline-flex shrink-0 items-center justify-center bg-z-fill-secondary/80 text-z-text"
       :class="iconContainerClass"
       :title="providerLabel"
     >
       <component :is="providerIconComponent" v-if="providerIconComponent" :class="iconClass" />
-      <span v-else class="text-[10px] font-heavy text-cp-text-quaternary">?</span>
+      <span v-else class="text-[10px] font-heavy text-z-text-quaternary">?</span>
     </span>
 
     <span
       v-if="showAuthenticationKind"
-      class="inline-flex shrink-0 items-center justify-center bg-cp-fill-secondary/80 text-cp-text"
+      class="inline-flex shrink-0 items-center justify-center bg-z-fill-secondary/80 text-z-text"
       :class="iconContainerClass"
       :title="authenticationLabel"
     >
       <component :is="authenticationIconComponent" v-if="authenticationIconComponent" :class="iconClass" />
-      <span v-else class="text-[10px] font-heavy text-cp-text-quaternary">?</span>
+      <span v-else class="text-[10px] font-heavy text-z-text-quaternary">?</span>
     </span>
 
     <span class="sr-only">

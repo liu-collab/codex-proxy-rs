@@ -79,10 +79,10 @@ function importToClient() {
         />
       </div>
 
-      <section class="overflow-hidden rounded-cp-card bg-cp-fill-quaternary shadow-cp-tertiary">
+      <section class="overflow-hidden rounded-z-card bg-z-fill-quaternary shadow-z-tertiary">
         <div class="flex items-center justify-between gap-3 px-4 py-2.5">
           <span
-            class="min-w-0 truncate font-mono text-cp-sm font-emphasis text-cp-text-secondary"
+            class="min-w-0 truncate font-mono text-z-sm font-emphasis text-z-text-secondary"
           >
             {{ configPath }}
           </span>
@@ -96,9 +96,9 @@ function importToClient() {
           </ZIconButton>
         </div>
         <ZScrollbar max-height="calc(100dvh - 21rem)">
-          <div class="mx-3 mb-3 rounded-cp bg-cp-bg-container px-3.5 py-3 shadow-cp-tertiary">
+          <div class="mx-3 mb-3 rounded-z bg-z-bg-container px-3.5 py-3 shadow-z-tertiary">
             <pre
-              class="m-0 whitespace-pre-wrap wrap-break-word font-mono text-cp-sm leading-[1.65] font-emphasis text-cp-text"
+              class="m-0 whitespace-pre-wrap wrap-break-word font-mono text-z-sm leading-[1.65] font-emphasis text-z-text"
               v-text="codexConfig"
             />
           </div>

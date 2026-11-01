@@ -12,7 +12,7 @@ pub(super) fn check_image_generation(
     if !allowed && operation.image_generation_requested() {
         return Err(GatewayError::new(
             GatewayErrorKind::PolicyDenied,
-            "Image generation is not allowed by the API key's account groups",
+            "Image generation is not allowed by the API key's account groups.",
         )
         .with_client_code("image_generation_disabled"));
     }

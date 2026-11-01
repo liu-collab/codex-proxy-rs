@@ -280,7 +280,7 @@ fn gateway_error_should_keep_client_visible_upstream_fields_out_of_safe_diagnost
 
     assert_eq!(
         gateway.safe_message(),
-        "upstream capacity is temporarily unavailable"
+        "Upstream capacity is temporarily unavailable."
     );
     assert_eq!(gateway.client_message(), message);
     assert_eq!(gateway.client_error_code(), Some("quota_exhausted"));
@@ -304,7 +304,7 @@ fn continuation_recovery_should_keep_its_internal_classification_and_client_cont
     assert_eq!(error.kind().as_str(), "continuation_recovery_required");
     assert_eq!(
         gateway.safe_message(),
-        "conversation continuation must be rebuilt"
+        "Previous response unavailable. Resend the full conversation history."
     );
     assert_eq!(
         gateway.client_error_code(),
@@ -329,7 +329,7 @@ fn message_too_big_should_map_to_a_request_scoped_client_contract() {
     assert_eq!(gateway.kind().as_str(), "message_too_big");
     assert_eq!(
         gateway.safe_message(),
-        "upstream rejected the request because the message is too large"
+        "Request too large. Reduce the input size."
     );
     assert_eq!(gateway.client_error_code(), Some("message_too_big"));
     assert_eq!(gateway.client_error_type(), Some("invalid_request_error"));

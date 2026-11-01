@@ -72,7 +72,7 @@ pub fn account_quota_forecasts(
             },
             extrapolated: false,
             source: None,
-            unavailable_reason: Some("没有可统计的周/月额度窗口，请先刷新账号额度。"),
+            unavailable_reason: Some("缺少周/月额度窗口，请刷新账号额度"),
             low_sample: false,
             incomplete_cost: false,
             incomplete_tokens: false,
@@ -138,30 +138,27 @@ impl AccountQuotaForecast {
         self.incomplete_tokens = usage.is_some_and(|usage| usage.missing_token_count > 0);
         let method = sample.map_or(QuotaForecastMethod::Cumulative, |sample| sample.method);
         let Some(start) = start.filter(|start| *start <= now && now < reset_at) else {
-            self.unavailable_reason = Some("额度窗口已过期或边界无效，请刷新账号额度后重试。");
+            self.unavailable_reason = Some("额度窗口已过期或无效，请刷新账号额度");
             return;
         };
         if !observed_at.is_some_and(|observed| start <= observed && observed <= now) {
-            self.unavailable_reason = Some("缺少本周期的额度快照，请先刷新账号额度。");
+            self.unavailable_reason = Some("缺少本周期的额度快照，请刷新账号额度");
             return;
         }
         if sample.is_some_and(|sample| sample.discontinuous) {
-            self.unavailable_reason =
-                Some("额度观测出现回落或累计记录不连续，正在重新积累配对样本。");
+            self.unavailable_reason = Some("额度回落或记录不连续，正在重新积累配对样本");
             return;
         }
         if account_added_at > start && method == QuotaForecastMethod::Cumulative {
-            self.unavailable_reason = Some(
-                "本周期开始时的记录不完整，正在积累至少 5 个百分点的配对观测，无需等待下次重置。",
-            );
+            self.unavailable_reason = Some("周期初记录不完整，正在积累至少 5 个百分点的配对观测");
             return;
         }
         let Some(percent) = percent else {
-            self.unavailable_reason = Some("已用比例未知，请刷新额度后查看预测。");
+            self.unavailable_reason = Some("已用比例未知，请刷新账号额度");
             return;
         };
         let Some(usage) = usage.filter(|usage| usage.request_count > 0) else {
-            self.unavailable_reason = Some("本周期没有网关用量记录，暂时无法预测额度。");
+            self.unavailable_reason = Some("本周期没有网关用量记录，无法预测额度");
             return;
         };
         let Some(sample) = sample.filter(|sample| {
@@ -172,8 +169,7 @@ impl AccountQuotaForecast {
                 && sample.sampled_percent >= MIN_USED_PERCENT
                 && sample.sampled_percent <= percent
         }) else {
-            self.unavailable_reason =
-                Some("有效额度进度不足 5 个百分点或采样边界无效，请继续积累用量。");
+            self.unavailable_reason = Some("有效额度进度不足 5 个百分点或采样边界无效");
             return;
         };
         self.low_sample = sample.sampled_percent < LOW_SAMPLE_PERCENT
@@ -196,7 +192,7 @@ impl AccountQuotaForecast {
             .and_then(|(used, remaining)| estimate(used + remaining, factor));
         self.unavailable_reason = if self.estimated_tokens.is_none() && self.estimated_usd.is_none()
         {
-            Some("本周期暂无可用于估算的 Token 或费用数据，请积累用量后重试。")
+            Some("本周期缺少可用于估算的 Token 或费用数据")
         } else {
             None
         };

@@ -86,7 +86,7 @@ pub(super) async fn invoke(
         () = context.cancellation().cancelled() => return Err(MiddlewareError::Fault),
         () = context.deadline().wait() => return Err(gateway_core::error::GatewayError::new(
             gateway_core::error::GatewayErrorKind::Timeout,
-            "request deadline elapsed",
+            "Request deadline elapsed.",
         ).into()),
         reply = ports.session.call(
             HANDLE_METHOD,

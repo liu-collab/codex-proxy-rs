@@ -112,7 +112,7 @@ onScopeDispose(() => controller?.abort())
     <template #empty="{ search }">
       <ZEmpty v-if="loading" :title="t('plugins.resources.loading')" size="small" surface="none" role="status">
         <template #icon>
-          <LoaderCircle :size="18" class="animate-spin text-cp-text-quaternary motion-reduce:animate-none" />
+          <LoaderCircle :size="18" class="animate-spin text-z-text-quaternary motion-reduce:animate-none" />
         </template>
       </ZEmpty>
       <ZEmpty

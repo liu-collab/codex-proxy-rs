@@ -29,7 +29,7 @@ const search = defineModel<string>('search', { required: true })
     <div class="min-w-0 flex-1 md:w-96 md:flex-none">
       <ZInput v-model="search" :placeholder="t('keys.filters.searchPlaceholder')" :aria-label="t('keys.filters.searchLabel')" class="w-full">
         <template #prefix>
-          <Search class="size-4.5 text-cp-text-tertiary" />
+          <Search class="size-4.5 text-z-text-tertiary" />
         </template>
       </ZInput>
     </div>

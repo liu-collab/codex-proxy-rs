@@ -65,19 +65,19 @@ watch(() => props.accountId, () => {
 </script>
 
 <template>
-  <section class="grid gap-2 rounded-cp bg-cp-fill-quaternary px-4 py-3" :aria-label="t('accounts.quotaReset.automaticallyUseResetCard')">
+  <section class="grid gap-2 rounded-z bg-z-fill-quaternary px-4 py-3" :aria-label="t('accounts.quotaReset.automaticallyUseResetCard')">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex items-center gap-1">
-        <h3 class="m-0 text-cp-sm font-heavy text-cp-text">
+        <h3 class="m-0 text-z-sm font-heavy text-z-text">
           {{ t('accounts.quotaReset.automaticallyUsed') }}
         </h3>
         <ZPopover trigger="click" placement="bottom-start" role="dialog">
           <template #reference="{ open, id }">
-            <ZIconButton size="small" class="size-6! p-0!" :aria-label="t('accounts.quotaReset.automaticUsageRules')" :aria-expanded="open" :aria-controls="id">
+            <ZIconButton variant="link" :title="undefined" size="small" class="size-6! p-0!" :aria-label="t('accounts.quotaReset.automaticUsageRules')" :aria-expanded="open" :aria-controls="id">
               <CircleHelp class="size-3.5" />
             </ZIconButton>
           </template>
-          <div class="grid max-w-64 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
+          <div class="grid max-w-64 gap-2 p-3 text-z-xs leading-relaxed text-z-text-secondary">
             <p>{{ t('accounts.quotaReset.automation.scheduleHelp') }}</p>
             <p>{{ t('accounts.quotaReset.automation.verifyHelp') }}</p>
           </div>
@@ -99,10 +99,10 @@ watch(() => props.accountId, () => {
         />
       </div>
     </div>
-    <p v-if="status?.enabled && status.nextConsumeAtDisplay" class="text-cp-xs text-cp-text-secondary">
+    <p v-if="status?.enabled && status.nextConsumeAtDisplay" class="text-z-xs text-z-text-secondary">
       {{ t('accounts.quotaReset.nextUse', { nextConsumeAtDisplay: status.nextConsumeAtDisplay }) }}
     </p>
-    <p v-if="resultText" class="text-cp-xs text-cp-warning" role="status">
+    <p v-if="resultText" class="text-z-xs text-z-warning" role="status">
       {{ resultText }}
     </p>
   </section>
@@ -110,6 +110,6 @@ watch(() => props.accountId, () => {
 
 <style scoped>
 .reset-credit-switch :deep(input:not(:checked) + span) {
-  background-color: var(--cp-switch-unchecked-bg);
+  background-color: var(--z-switch-unchecked-bg);
 }
 </style>

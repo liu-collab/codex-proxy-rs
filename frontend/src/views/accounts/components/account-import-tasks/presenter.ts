@@ -5,33 +5,33 @@ import { t } from '@/i18n'
 export const itemStates = computed<Record<ImportItemStatus, { label: string, color: string, fill: string }>>(() => ({
   pending: {
     label: t('common.status.pending'),
-    color: 'bg-cp-fill-alter text-cp-text-secondary',
-    fill: 'bg-cp-fill-secondary',
+    color: 'bg-z-fill-alter text-z-text-secondary',
+    fill: 'bg-z-fill-secondary',
   },
   running: {
     label: t('accounts.importTasks.processing'),
-    color: 'bg-cp-primary-container text-cp-primary-on-container',
-    fill: 'bg-cp-primary',
+    color: 'bg-z-primary-container text-z-primary-on-container',
+    fill: 'bg-z-primary',
   },
   succeeded: {
     label: t('accounts.importTasks.alreadyInStock'),
-    color: 'bg-cp-success-container text-cp-success-on-container',
-    fill: 'bg-cp-success',
+    color: 'bg-z-success-container text-z-success-on-container',
+    fill: 'bg-z-success',
   },
   failed: {
     label: t('common.status.failed'),
-    color: 'bg-cp-error-container text-cp-error-on-container',
-    fill: 'bg-cp-error',
+    color: 'bg-z-error-container text-z-error-on-container',
+    fill: 'bg-z-error',
   },
   unknown: {
     label: t('accounts.importTasks.toBeVerified'),
-    color: 'bg-cp-warning-container text-cp-warning-on-container',
-    fill: 'bg-cp-warning',
+    color: 'bg-z-warning-container text-z-warning-on-container',
+    fill: 'bg-z-warning',
   },
   skipped: {
     label: t('accounts.importTasks.notExecuted'),
-    color: 'bg-cp-fill-tertiary text-cp-text-secondary',
-    fill: 'bg-cp-text-quaternary',
+    color: 'bg-z-fill-tertiary text-z-text-secondary',
+    fill: 'bg-z-text-quaternary',
   },
 }))
 

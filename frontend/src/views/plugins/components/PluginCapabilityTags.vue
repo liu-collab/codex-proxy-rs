@@ -80,7 +80,7 @@ watch(() => hidden.value.length, (count) => {
       <template #reference>
         <button
           type="button"
-          class="cursor-pointer rounded-cp border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline"
+          class="cursor-pointer rounded-z border-0 bg-transparent p-0 outline-none focus-visible:ring-2 focus-visible:ring-z-control-outline"
           :aria-label="t('plugins.capabilities.moreCapabilities', { count: hidden.length })"
           :aria-expanded="open"
           :aria-describedby="open ? contentId : undefined"
@@ -96,6 +96,6 @@ watch(() => hidden.value.length, (count) => {
         </ZTag>
       </div>
     </ZPopover>
-    <span v-if="!entries.length" class="text-cp-text-quaternary">{{ t('common.values.none') }}</span>
+    <span v-if="!entries.length" class="text-z-text-quaternary">{{ t('common.values.none') }}</span>
   </div>
 </template>

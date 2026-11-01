@@ -132,27 +132,27 @@ const columns = computed(() => (defineTableColumns<(typeof rows.value)[number]>(
         <li v-for="plugin in rows" :key="plugin.id">
           <ZCard padding="compact">
             <div class="flex min-w-0 items-start gap-3">
-              <PluginIcon :artifact="plugin.artifact" class="size-10 shrink-0 rounded-cp" />
+              <PluginIcon :artifact="plugin.artifact" class="size-10 shrink-0 rounded-z" />
               <div class="grid min-w-0 flex-1 gap-1">
                 <div class="flex min-w-0 items-center gap-2">
-                  <strong class="truncate text-cp-sm">{{ plugin.artifact.metadata.displayName }}</strong>
+                  <strong class="truncate text-z-sm">{{ plugin.artifact.metadata.displayName }}</strong>
                   <ZTag size="small" class="shrink-0" :title="plugin.versionTitle" :aria-label="plugin.versionTitle">
                     <span class="block max-w-28 truncate">{{ plugin.versionLabel }}</span>
                   </ZTag>
                 </div>
-                <span class="truncate text-cp-xs text-cp-text-secondary">{{ plugin.artifact.metadata.publisher }}</span>
+                <span class="truncate text-z-xs text-z-text-secondary">{{ plugin.artifact.metadata.publisher }}</span>
               </div>
               <PluginStatusNotice v-if="currentPluginInstance(plugin)" :instance="currentPluginInstance(plugin)!" :failure-reason="plugin.failureReason" />
               <ZTag v-if="!['failed', 'incompatible'].includes(pluginStatus(plugin))" :type="pluginStatusType(pluginStatus(plugin))" size="small">
                 {{ PLUGIN_STATUS_LABELS[pluginStatus(plugin)] }}
               </ZTag>
             </div>
-            <p class="my-4 line-clamp-2 min-h-10 text-cp-sm leading-relaxed text-cp-text-secondary">
+            <p class="my-4 line-clamp-2 min-h-10 text-z-sm leading-relaxed text-z-text-secondary">
               {{ plugin.artifact.metadata.description || t('plugins.catalog.noDescription') }}
             </p>
             <PluginCapabilityTags :metadata="plugin.artifact.metadata" />
             <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
-              <span class="text-cp-xs text-cp-text-secondary">{{ t('plugins.catalog.versions', { count: plugin.artifacts.length }) }}</span>
+              <span class="text-z-xs text-z-text-secondary">{{ t('plugins.catalog.versions', { count: plugin.artifacts.length }) }}</span>
               <ZIconButton class="ml-auto" :aria-label="t('plugins.catalog.manage', { displayName: plugin.artifact.metadata.displayName })" variant="solid" size="small" @click="$emit('manage', plugin)">
                 <Settings2 class="size-4" />
               </ZIconButton>
@@ -164,7 +164,7 @@ const columns = computed(() => (defineTableColumns<(typeof rows.value)[number]>(
     <ZTable v-else class="min-h-0 flex-1" :columns="columns" :data="rows" :row-key="row => row.id" :aria-busy="loading">
       <template #plugin="{ row }">
         <div class="flex min-w-0 items-center gap-3">
-          <PluginIcon :artifact="row.artifact" class="size-9 rounded-cp" />
+          <PluginIcon :artifact="row.artifact" class="size-9 rounded-z" />
           <div class="grid min-w-0 gap-1">
             <div class="flex min-w-0 items-center gap-2">
               <strong class="truncate">{{ row.artifact.metadata.displayName }}</strong>
@@ -172,7 +172,7 @@ const columns = computed(() => (defineTableColumns<(typeof rows.value)[number]>(
                 <span class="block max-w-28 truncate">{{ row.versionLabel }}</span>
               </ZTag>
             </div>
-            <span class="truncate text-cp-xs text-cp-text-secondary">{{ row.artifact.metadata.publisher }}</span>
+            <span class="truncate text-z-xs text-z-text-secondary">{{ row.artifact.metadata.publisher }}</span>
           </div>
         </div>
       </template>

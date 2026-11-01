@@ -21,16 +21,16 @@ const { showConfig, configKey, configuring, apiBaseUrl, openConfig, copyConfig }
 </script>
 
 <template>
-  <main class="h-dvh overflow-hidden bg-cp-bg-layout text-cp-text">
+  <main class="h-dvh overflow-hidden bg-z-bg-layout text-z-text">
     <ZScrollbar>
       <div class="flex min-h-full w-full flex-col gap-5 p-4 min-[961px]:p-6">
         <div class="flex flex-col gap-2">
           <KeyUsageHeader v-model:period="period" v-model:refresh-interval="refreshInterval" :name="overview?.key.name" :prefix="overview?.key.prefix" :refreshing="refreshing || overviewLoading" :configuring="configuring" @refresh="refresh" @configure="openConfig" />
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <span v-if="overview" class="text-cp-sm text-cp-text-tertiary">{{ t('usage.page.updated', { asOfDisplay: overview.asOfDisplay }) }}</span>
+            <span v-if="overview" class="text-z-sm text-z-text-tertiary">{{ t('usage.page.updated', { asOfDisplay: overview.asOfDisplay }) }}</span>
             <ZInput id="key-usage-model" v-model="model" class="ml-auto w-full min-w-0 sm:w-md sm:flex-none" :placeholder="t('usage.filters.modelPlaceholder')" :aria-label="t('usage.filters.modelPlaceholder')" :maxlength="128">
               <template #prefix>
-                <Search class="size-4.5 text-cp-text-tertiary" />
+                <Search class="size-4.5 text-z-text-tertiary" />
               </template>
             </ZInput>
           </div>

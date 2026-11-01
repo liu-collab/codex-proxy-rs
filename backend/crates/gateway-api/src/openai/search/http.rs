@@ -65,7 +65,7 @@ fn search_operation(body: Bytes, headers: &HeaderMap) -> Result<Operation, Gatew
         .map_err(|_| {
             GatewayError::new(
                 GatewayErrorKind::Internal,
-                "OpenAI protocol identifier is invalid",
+                "OpenAI protocol identifier is invalid.",
             )
         })?
         .with_context(context);

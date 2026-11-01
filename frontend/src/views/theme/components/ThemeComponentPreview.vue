@@ -78,13 +78,13 @@ const viewOptions = computed(() => ([
   },
 ]))
 const themeSwatches = [
-  { label: 'Container', className: 'bg-cp-bg-container' },
-  { label: 'Fill Alter', className: 'bg-cp-fill-alter' },
-  { label: 'Elevated', className: 'bg-cp-bg-elevated' },
-  { label: 'Accent', className: 'bg-cp-primary' },
-  { label: 'Success', className: 'bg-cp-success' },
-  { label: 'Warning', className: 'bg-cp-warning' },
-  { label: 'Error', className: 'bg-cp-error' },
+  { label: 'Container', className: 'bg-z-bg-container' },
+  { label: 'Fill Alter', className: 'bg-z-fill-alter' },
+  { label: 'Elevated', className: 'bg-z-bg-elevated' },
+  { label: 'Accent', className: 'bg-z-primary' },
+  { label: 'Success', className: 'bg-z-success' },
+  { label: 'Warning', className: 'bg-z-warning' },
+  { label: 'Error', className: 'bg-z-error' },
 ]
 const progressItems = computed(() => ([
   {
@@ -212,32 +212,32 @@ const statusLabels = computed(() => ({
 
 function statusClass(status: PreviewTableRow['status']) {
   if (status === 'active')
-    return 'bg-cp-success-container text-cp-success-on-container'
+    return 'bg-z-success-container text-z-success-on-container'
   if (status === 'rate_limited')
-    return 'bg-cp-warning-container text-cp-warning-on-container'
+    return 'bg-z-warning-container text-z-warning-on-container'
   if (status === 'error')
-    return 'bg-cp-error-container text-cp-error-on-container'
-  return 'bg-cp-fill-tertiary text-cp-text-secondary'
+    return 'bg-z-error-container text-z-error-on-container'
+  return 'bg-z-fill-tertiary text-z-text-secondary'
 }
 </script>
 
 <template>
-  <div class="grid h-full min-w-0 grid-rows-[80px_352px_290px_520px_374px] gap-5 overflow-hidden rounded-cp-card bg-(--cp-card-bg) p-6 shadow-cp-card">
+  <div class="grid h-full min-w-0 grid-rows-[80px_352px_290px_520px_374px] gap-5 overflow-hidden rounded-z-card bg-(--z-card-bg) p-6 shadow-z-card">
     <header class="flex items-center justify-between gap-8 px-1">
       <div class="min-w-0">
-        <p class="m-0 font-mono text-cp-xs font-heavy tracking-[0.16em] text-cp-primary-text uppercase">
+        <p class="m-0 font-mono text-z-xs font-heavy tracking-[0.16em] text-z-primary-text uppercase">
           {{ t('appearance.preview.components.eyebrow') }}
         </p>
-        <h1 class="mt-2 mb-0 text-[30px] leading-none font-extrabold text-cp-text">
+        <h1 class="mt-2 mb-0 text-[30px] leading-none font-extrabold text-z-text">
           {{ t('appearance.preview.components.componentOverview') }}
         </h1>
-        <p class="mt-2 mb-0 text-cp font-emphasis text-cp-text-secondary">
+        <p class="mt-2 mb-0 text-z font-emphasis text-z-text-secondary">
           {{ t('appearance.preview.components.description') }}
         </p>
       </div>
 
       <div class="flex shrink-0 items-center gap-6">
-        <span class="rounded-full bg-cp-primary-container px-3 py-1.5 font-mono text-[10px] font-heavy tracking-wide text-cp-primary-on-container uppercase">
+        <span class="rounded-full bg-z-primary-container px-3 py-1.5 font-mono text-[10px] font-heavy tracking-wide text-z-primary-on-container uppercase">
           {{ t('appearance.preview.components.count', { count: 21 }) }}
         </span>
         <div class="flex items-center gap-5" :aria-label="t('appearance.preview.components.currentThemeSemanticColor')">
@@ -246,19 +246,19 @@ function statusClass(status: PreviewTableRow['status']) {
             :key="item.label"
             class="grid justify-items-center gap-1.5"
           >
-            <span class="size-6 rounded-cp shadow-cp-tertiary" :class="item.className" />
-            <span class="font-mono text-[10px] font-heavy text-cp-text-quaternary">{{ item.label }}</span>
+            <span class="size-6 rounded-z shadow-z-tertiary" :class="item.className" />
+            <span class="font-mono text-[10px] font-heavy text-z-text-quaternary">{{ item.label }}</span>
           </div>
         </div>
       </div>
     </header>
 
     <section class="grid min-w-0 grid-cols-12 gap-6" :aria-label="t('appearance.preview.components.basicControlComponents')">
-      <ZCard padding="compact" class="col-span-7 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.buttonsAndActions')" description="ZButton · ZIconButton · ZMotionIcon">
+      <ZCard padding="compact" class="col-span-7 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.buttonsAndActions')" description="ZButton · ZIconButton · ZMotionIcon">
         <template #body>
           <div class="grid flex-1 content-start gap-6">
             <div>
-              <p class="mt-0 mb-3 font-mono text-cp-xs font-heavy text-cp-text-quaternary">
+              <p class="mt-0 mb-3 font-mono text-z-xs font-heavy text-z-text-quaternary">
                 {{ t('appearance.preview.components.buttonLabel') }}
               </p>
               <div class="flex flex-wrap items-center gap-3">
@@ -286,9 +286,9 @@ function statusClass(status: PreviewTableRow['status']) {
               </div>
             </div>
 
-            <div class="grid grid-cols-[1fr_auto] items-end gap-5 rounded-cp-lg bg-cp-fill-quaternary p-4">
+            <div class="grid grid-cols-[1fr_auto] items-end gap-5 rounded-z-lg bg-z-fill-quaternary p-4">
               <div>
-                <p class="mt-0 mb-3 text-cp-sm font-heavy text-cp-text-secondary">
+                <p class="mt-0 mb-3 text-z-sm font-heavy text-z-text-secondary">
                   {{ t('appearance.preview.components.sizeAndDisabledStatus') }}
                 </p>
                 <div class="flex flex-wrap items-center gap-3">
@@ -327,7 +327,7 @@ function statusClass(status: PreviewTableRow['status']) {
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-5 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.formsAndInput')" description="ZInput · ZSelect · ZInputNumber · ZSlider · ZTextarea · ZColorPicker">
+      <ZCard padding="compact" class="col-span-5 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.formsAndInput')" description="ZInput · ZSelect · ZInputNumber · ZSlider · ZTextarea · ZColorPicker">
         <template #body>
           <ZForm class="grid-cols-2 gap-3!">
             <ZInput :model-value="search ?? t('appearance.preview.components.relayAccount')" :aria-label="t('appearance.preview.components.searchAccount')" :placeholder="t('appearance.preview.components.searchAccount')" @update:model-value="search = $event">
@@ -379,7 +379,7 @@ function statusClass(status: PreviewTableRow['status']) {
     </section>
 
     <section class="grid min-w-0 grid-cols-12 gap-6" :aria-label="t('appearance.preview.components.choiceAndFeedbackComponents')">
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.selectAndSwitch')" description="ZSegmented · ZSwitch · ZCheckbox · ZRadio">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.selectAndSwitch')" description="ZSegmented · ZSwitch · ZCheckbox · ZRadio">
         <template #body>
           <div class="grid gap-5">
             <ZSegmented v-model="view" :aria-label="t('appearance.preview.components.accountView')" :options="viewOptions" class="w-full" />
@@ -398,26 +398,26 @@ function statusClass(status: PreviewTableRow['status']) {
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.feedbackSemantics')" :description="t('appearance.preview.components.feedbackTypes')">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.feedbackSemantics')" :description="t('appearance.preview.components.feedbackTypes')">
         <template #body>
           <div class="grid gap-2.5">
-            <div class="flex items-center gap-3 rounded-cp bg-cp-success-container px-3.5 py-3 text-cp-success-on-container">
-              <Check class="size-4 shrink-0" /><strong class="text-cp-sm">{{ t('appearance.preview.components.themeSettingsSaved') }}</strong>
+            <div class="flex items-center gap-3 rounded-z bg-z-success-container px-3.5 py-3 text-z-success-on-container">
+              <Check class="size-4 shrink-0" /><strong class="text-z-sm">{{ t('appearance.preview.components.themeSettingsSaved') }}</strong>
             </div>
-            <div class="flex items-center gap-3 rounded-cp bg-cp-warning-container px-3.5 py-3 text-cp-warning-on-container">
-              <TriangleAlert class="size-4 shrink-0" /><strong class="text-cp-sm">{{ t('appearance.preview.components.quotaOfAccountsIsCloseToUpper') }}</strong>
+            <div class="flex items-center gap-3 rounded-z bg-z-warning-container px-3.5 py-3 text-z-warning-on-container">
+              <TriangleAlert class="size-4 shrink-0" /><strong class="text-z-sm">{{ t('appearance.preview.components.quotaOfAccountsIsCloseToUpper') }}</strong>
             </div>
-            <div class="flex items-center gap-3 rounded-cp bg-cp-error-container px-3.5 py-3 text-cp-error-on-container">
-              <CircleAlert class="size-4 shrink-0" /><strong class="text-cp-sm">{{ t('appearance.preview.components.connectionTestFailed') }}</strong>
+            <div class="flex items-center gap-3 rounded-z bg-z-error-container px-3.5 py-3 text-z-error-on-container">
+              <CircleAlert class="size-4 shrink-0" /><strong class="text-z-sm">{{ t('appearance.preview.components.connectionTestFailed') }}</strong>
             </div>
-            <div class="flex items-center gap-3 rounded-cp bg-cp-info-container px-3.5 py-3 text-cp-info-on-container">
-              <Info class="size-4 shrink-0" /><strong class="text-cp-sm">{{ t('appearance.preview.components.schedulingNotice') }}</strong>
+            <div class="flex items-center gap-3 rounded-z bg-z-info-container px-3.5 py-3 text-z-info-on-container">
+              <Info class="size-4 shrink-0" /><strong class="text-z-sm">{{ t('appearance.preview.components.schedulingNotice') }}</strong>
             </div>
           </div>
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.statusAndProgress')" :description="t('appearance.preview.components.tagComponents')">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.statusAndProgress')" :description="t('appearance.preview.components.tagComponents')">
         <template #body>
           <div class="grid gap-4">
             <div class="flex flex-wrap gap-2">
@@ -438,11 +438,11 @@ function statusClass(status: PreviewTableRow['status']) {
               </ZButton>
             </div>
             <div v-for="item in progressItems" :key="item.label" class="grid gap-2">
-              <div class="flex justify-between text-cp-sm font-heavy text-cp-text-secondary">
-                <span>{{ item.label }}</span><span class="font-mono text-cp-text">{{ item.value }}</span>
+              <div class="flex justify-between text-z-sm font-heavy text-z-text-secondary">
+                <span>{{ item.label }}</span><span class="font-mono text-z-text">{{ item.value }}</span>
               </div>
-              <div class="h-2 overflow-hidden rounded-full bg-cp-progress-remaining">
-                <div class="h-full rounded-full bg-cp-primary" :style="{ width: item.width }" />
+              <div class="h-2 overflow-hidden rounded-full bg-z-progress-remaining">
+                <div class="h-full rounded-full bg-z-primary" :style="{ width: item.width }" />
               </div>
             </div>
           </div>
@@ -450,7 +450,7 @@ function statusClass(status: PreviewTableRow['status']) {
       </ZCard>
     </section>
 
-    <ZCard padding="compact" class="h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.dataTable')" :description="t('appearance.preview.components.tableComponents')">
+    <ZCard padding="compact" class="h-full min-w-0 bg-z-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.dataTable')" :description="t('appearance.preview.components.tableComponents')">
       <template #actions>
         <ZInput :aria-label="t('appearance.preview.components.filterForm')" size="small" :placeholder="t('appearance.preview.components.filterAccounts')" class="w-64">
           <template #prefix>
@@ -463,12 +463,12 @@ function statusClass(status: PreviewTableRow['status']) {
           <ZTable :columns="tableColumns" :data="tableRows">
             <template #account="{ row }">
               <div class="grid gap-1">
-                <strong class="font-mono text-cp-sm text-cp-text">{{ row.account }}</strong>
-                <span class="text-[10px] font-emphasis text-cp-text-quaternary">credential_{{ row.id }}</span>
+                <strong class="font-mono text-z-sm text-z-text">{{ row.account }}</strong>
+                <span class="text-[10px] font-emphasis text-z-text-quaternary">credential_{{ row.id }}</span>
               </div>
             </template>
             <template #status="{ row }">
-              <span class="inline-flex rounded-full px-2.5 py-1 text-cp-xs font-heavy" :class="statusClass(row.status)">
+              <span class="inline-flex rounded-full px-2.5 py-1 text-z-xs font-heavy" :class="statusClass(row.status)">
                 {{ statusLabels[row.status] }}
               </span>
             </template>
@@ -479,7 +479,7 @@ function statusClass(status: PreviewTableRow['status']) {
     </ZCard>
 
     <section class="grid min-w-0 grid-cols-12 gap-6 overflow-hidden" :aria-label="t('appearance.preview.components.boundaryStateComponent')">
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.emptyState')" description="ZEmpty · ZButton">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.emptyState')" description="ZEmpty · ZButton">
         <template #body>
           <ZEmpty :title="t('appearance.preview.components.noMatchingAccountYet')" :description="t('appearance.preview.components.emptyHelp')" class="flex-1">
             <template #action>
@@ -491,9 +491,9 @@ function statusClass(status: PreviewTableRow['status']) {
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.loadingAndSkeleton')" :description="t('appearance.preview.components.loadingComponents')">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.loadingAndSkeleton')" :description="t('appearance.preview.components.loadingComponents')">
         <template #body>
-          <div class="grid flex-1 content-between gap-5 rounded-cp-lg bg-cp-fill-quaternary p-4">
+          <div class="grid flex-1 content-between gap-5 rounded-z-lg bg-z-fill-quaternary p-4">
             <div class="grid gap-4">
               <div class="flex items-center gap-3">
                 <ZSkeleton class="size-10 shrink-0" />
@@ -508,7 +508,7 @@ function statusClass(status: PreviewTableRow['status']) {
               </div>
             </div>
             <div class="flex items-center justify-between">
-              <span class="text-cp-sm font-emphasis text-cp-text-secondary">{{ t('appearance.preview.components.synchronizingAccountStatus') }}</span>
+              <span class="text-z-sm font-emphasis text-z-text-secondary">{{ t('appearance.preview.components.synchronizingAccountStatus') }}</span>
               <ZButton size="small" loading>
                 {{ t('appearance.preview.components.synchronizing') }}
               </ZButton>
@@ -517,13 +517,13 @@ function statusClass(status: PreviewTableRow['status']) {
         </template>
       </ZCard>
 
-      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-cp-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.overlaysAndMenus')" :description="t('appearance.preview.components.overlayComponents')">
+      <ZCard padding="compact" class="col-span-4 h-full min-w-0 bg-z-fill-quaternary! shadow-none!" :title="t('appearance.preview.components.overlaysAndMenus')" :description="t('appearance.preview.components.overlayComponents')">
         <template #body>
-          <div class="grid min-w-0 flex-1 grid-rows-[auto_1fr_auto] overflow-hidden rounded-cp-lg bg-cp-bg-container p-4">
-            <div class="flex items-center justify-between rounded-cp bg-cp-bg-container px-4 py-3 shadow-cp-tertiary">
+          <div class="grid min-w-0 flex-1 grid-rows-[auto_1fr_auto] overflow-hidden rounded-z-lg bg-z-bg-container p-4">
+            <div class="flex items-center justify-between rounded-z bg-z-bg-container px-4 py-3 shadow-z-tertiary">
               <div>
-                <strong class="block text-cp-sm text-cp-text">relay@example.com</strong>
-                <span class="mt-1 block text-[10px] text-cp-text-quaternary">{{ formatProviderLabel('openai') }} · OAuth</span>
+                <strong class="block text-z-sm text-z-text">relay@example.com</strong>
+                <span class="mt-1 block text-[10px] text-z-text-quaternary">{{ formatProviderLabel('openai') }} · OAuth</span>
               </div>
               <ZPopover>
                 <template #reference>
@@ -541,7 +541,7 @@ function statusClass(status: PreviewTableRow['status']) {
               </ZPopover>
             </div>
 
-            <div class="mt-3 ml-auto w-64 max-w-full self-start rounded-cp-lg bg-cp-bg-elevated p-2 shadow-cp">
+            <div class="mt-3 ml-auto w-64 max-w-full self-start rounded-z-lg bg-z-bg-elevated p-2 shadow-z">
               <ZMenuItem>
                 <template #icon>
                   <KeyRound class="size-3.5" />
@@ -562,9 +562,9 @@ function statusClass(status: PreviewTableRow['status']) {
               </ZMenuItem>
             </div>
 
-            <div class="flex min-w-0 items-center gap-3 rounded-cp bg-cp-bg-spotlight px-4 py-3 text-cp-text-light-solid shadow-cp-popup">
+            <div class="flex min-w-0 items-center gap-3 rounded-z bg-z-bg-spotlight px-4 py-3 text-z-text-light-solid shadow-z-popup">
               <Info class="size-4 shrink-0" />
-              <span class="min-w-0 text-cp-xs font-heavy">{{ t('appearance.preview.components.overlayHelp') }}</span>
+              <span class="min-w-0 text-z-xs font-heavy">{{ t('appearance.preview.components.overlayHelp') }}</span>
             </div>
           </div>
         </template>

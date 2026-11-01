@@ -69,7 +69,7 @@ mod personal_info {
     fn personal_info_response_preserves_unknown_subscription_and_profile_error() {
         let response = AccountPersonalInfoData::from((
             AccountPersonalInfo {
-                profile: Err(AdminError::unavailable("Provider 服务暂不可用")),
+                profile: Err(AdminError::unavailable("服务商暂不可用")),
                 subscription: None,
             },
             gateway_api::TimePresenter::new(Default::default()),
@@ -78,7 +78,7 @@ mod personal_info {
             serde_json::to_value(response).unwrap(),
             json!({
                 "profile": null,
-                "profileError": "Provider 服务暂不可用",
+                "profileError": "服务商暂不可用",
                 "subscription": null,
             })
         );
@@ -439,6 +439,45 @@ mod batch_update {
 }
 
 #[test]
+fn single_update_should_validate_optional_names_and_accept_clearing() {
+    use gateway_api::admin::accounts::UpdateAccountRequest;
+    use serde_json::json;
+
+    let baseline = json!({
+        "accountId": "acct_name", "enabled": true, "concurrencyLimit": null,
+        "weight": 1, "groupIds": []
+    });
+    let omitted: UpdateAccountRequest = serde_json::from_value(baseline.clone()).unwrap();
+    assert!(omitted.name.is_none());
+    omitted.validate().unwrap();
+    for (name, valid) in [
+        (json!(null), true),
+        (json!("  团队账号  "), true),
+        (json!("a".repeat(512)), true),
+        (json!("账".repeat(170)), true),
+        (json!("账".repeat(171)), false),
+        (json!("a".repeat(513)), false),
+        (json!(""), true),
+        (json!("   "), true),
+        (json!(" \t "), false),
+        (json!("账号\n名称"), false),
+        (json!("账号\u{0085}"), false),
+    ] {
+        let mut input = baseline.clone();
+        input["name"] = name;
+        let request: UpdateAccountRequest = serde_json::from_value(input).unwrap();
+        if valid {
+            request.validate().expect("accept optional bounded name");
+        } else {
+            assert_eq!(request.validate().unwrap_err().field(), "name");
+        }
+    }
+    let mut unknown = baseline;
+    unknown["unknownField"] = json!(true);
+    assert!(serde_json::from_value::<UpdateAccountRequest>(unknown).is_err());
+}
+
+#[test]
 fn single_update_should_accept_optional_unicode_and_multiline_notes() {
     use gateway_api::admin::accounts::UpdateAccountRequest;
     use serde_json::json;
@@ -527,10 +566,15 @@ mod response {
     #[test]
     fn account_usage_currency_should_limit_usd_to_four_fraction_digits() {
         assert_eq!(format_decimal_currency("0.1204956", "USD"), "$0.1205");
-        assert_eq!(format_decimal_currency("0.99996", "USD"), "$1.00");
+        assert_eq!(format_decimal_currency("0.99996", "USD"), "$1");
         assert_eq!(format_decimal_currency("0.0300", "USD"), "$0.03");
+        assert_eq!(format_decimal_currency("0.00", "USD"), "$0");
+        assert_eq!(format_decimal_currency("100.0000", "USD"), "$100");
+        assert_eq!(format_decimal_currency("12.3000", "USD"), "$12.3");
         assert_eq!(format_decimal_currency("12.3456", "USD"), "$12.35");
         assert_eq!(format_decimal_currency("0.1204956", "CNY"), "CNY 0.1204956");
+        assert_eq!(format_decimal_currency("12.3000", "CNY"), "CNY 12.3");
+        assert_eq!(format_decimal_currency("100", "CNY"), "CNY 100");
     }
 }
 
@@ -724,10 +768,28 @@ mod actions {
     }
 
     #[test]
+    fn authorization_accepts_optional_names_with_the_same_text_limits() {
+        for name in ["", " ", "My account"] {
+            let request: StartAccountAuthorizationRequest = serde_json::from_value(json!({
+                "provider": "openai", "name": name
+            }))
+            .expect("decode authorization");
+            assert!(request.validate().is_ok());
+        }
+        for name in ["bad\nname".to_owned(), "x".repeat(513)] {
+            let request: StartAccountAuthorizationRequest = serde_json::from_value(json!({
+                "provider": "openai", "name": name
+            }))
+            .expect("decode authorization");
+            assert_eq!(request.validate().unwrap_err().field(), "name");
+        }
+    }
+
+    #[test]
     fn credential_recovery_requests_should_not_accept_client_revision_fences() {
         let authorization: StartAccountAuthorizationRequest = serde_json::from_value(json!({
             "provider": "openai",
-            "name": "reauthorize",
+            "name": "",
             "accountId": "acct_1"
         }))
         .expect("decode reauthorization");
@@ -993,6 +1055,9 @@ mod import_settings {
             ("weight", json!(0)),
             ("weight", json!(101)),
             ("groupIds", json!(["invalid-group"])),
+            ("name", json!("名".repeat(171))),
+            ("name", json!("名\n称")),
+            ("name", json!("名称\u{0000}")),
             ("notes", json!("备".repeat(501))),
             ("notes", json!("备注\u{0000}")),
             ("notes", json!("备注\u{001b}")),

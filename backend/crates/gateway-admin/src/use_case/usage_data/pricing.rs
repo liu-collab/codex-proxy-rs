@@ -24,9 +24,9 @@ impl DefaultUsageDataService {
             reason: reason.into(),
         };
         let kind = ProviderKind::new(input.provider.clone())
-            .map_err(|_| UsageDataError::invalid("Provider 无效"))?;
+            .map_err(|_| UsageDataError::invalid("服务商无效"))?;
         let Ok(provider) = self.providers.require(&kind) else {
-            return Ok(unavailable("Provider 没有可用的计价规则"));
+            return Ok(unavailable("服务商没有可用的计价规则"));
         };
         let tokens = &input.tokens;
         let price = match &input.price {
@@ -61,9 +61,9 @@ impl DefaultUsageDataService {
                     ProviderAdminErrorKind::Unsupported | ProviderAdminErrorKind::Invalid
                 ) =>
             {
-                return Ok(unavailable("Provider 不支持该计价输入"));
+                return Ok(unavailable("服务商不支持该计价输入"));
             }
-            Err(_) => return Err(UsageDataError::unavailable("Provider 计价失败")),
+            Err(_) => return Err(UsageDataError::unavailable("服务商计价失败")),
         };
         Ok(UsagePricingResult::Estimated {
             id: input.id,

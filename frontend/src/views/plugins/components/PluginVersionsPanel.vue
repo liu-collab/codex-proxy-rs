@@ -36,7 +36,7 @@ const history = computed(() => props.plugin.artifacts.filter(artifact => artifac
       @delete-version="$emit('deleteVersion', $event)"
     />
     <details v-if="history.length" :open="!currentArtifact">
-      <summary class="cursor-pointer text-cp-sm text-cp-text-secondary">
+      <summary class="cursor-pointer text-z-sm text-z-text-secondary">
         {{ currentArtifact ? t('plugins.versions.historicalVersion') : t('plugins.catalog.installedVersion') }} · {{ history.length }}
       </summary>
       <ul class="mt-4 mb-0 grid list-none gap-2 p-0" :aria-label="currentArtifact ? t('plugins.versions.historicalVersion') : t('plugins.catalog.installedVersion')">

@@ -121,7 +121,7 @@ async fn sip_unsupported() -> Response {
 pub(crate) fn realtime_unsupported_response(capability: &str) -> Response {
     openai_error_response(
         StatusCode::NOT_IMPLEMENTED,
-        &format!("{capability} are not supported by the Codex OAuth upstream"),
+        &format!("Unsupported by Codex OAuth: {capability}."),
         "not_supported_error",
         "realtime_capability_not_supported",
     )
@@ -168,7 +168,7 @@ pub(crate) fn live_call_operation(
         Box::new(live_error_response(
             LiveErrorShape::Live,
             StatusCode::BAD_REQUEST,
-            "Codex live call request is invalid",
+            "Codex live call request is invalid.",
             "invalid_request",
         ))
     };
@@ -251,7 +251,7 @@ pub(crate) fn encode_call_request(
         ))
     };
     if sdp.trim().is_empty() {
-        return Err(invalid("Codex live call request requires an SDP offer"));
+        return Err(invalid("Codex live call request requires an SDP offer."));
     }
     let mut payload = serde_json::Map::new();
     payload.insert("sdp".to_owned(), Value::String(sdp.to_owned()));
@@ -260,7 +260,7 @@ pub(crate) fn encode_call_request(
     }
     serde_json::to_vec(&payload)
         .map(Bytes::from)
-        .map_err(|_| invalid("Codex live call request is invalid"))
+        .map_err(|_| invalid("Codex live call request is invalid."))
 }
 
 /// 共用响应身份与传输边界；Live 原始正文另保留上游 Content-Type
@@ -310,7 +310,7 @@ pub(crate) fn normalize_call_request(
                 Box::new(live_error_response(
                     LiveErrorShape::Live,
                     StatusCode::BAD_REQUEST,
-                    "Codex live call request requires a UTF-8 SDP offer",
+                    "Codex live call request requires a UTF-8 SDP offer.",
                     "invalid_request",
                 ))
             })?;

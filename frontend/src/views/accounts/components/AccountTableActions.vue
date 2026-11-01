@@ -41,7 +41,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
       :aria-label="t('accounts.editor.title')"
       @click.stop="emit('edit', account)"
     >
-      <Pencil class="size-3.5 text-cp-link" />
+      <Pencil class="size-3.5 text-z-link" />
     </ZIconButton>
 
     <ZIconButton
@@ -50,7 +50,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
       :disabled="deleting"
       @click.stop="emit('delete', account)"
     >
-      <Trash2 class="size-3.5 text-cp-error" />
+      <Trash2 class="size-3.5 text-z-error" />
     </ZIconButton>
 
     <ZPopover placement="bottom-end">
@@ -68,7 +68,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             @click.stop="(close(), emit('test', account))"
           >
             <template #icon>
-              <Wifi class="size-3.5 text-cp-text-quaternary" />
+              <Wifi class="size-3.5 text-z-text-quaternary" />
             </template>
             {{ t('accounts.connectionTest.title') }}
           </ZMenuItem>
@@ -78,7 +78,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             @click.stop="(close(), emit('toggleScheduling', account))"
           >
             <template #icon>
-              <Power class="size-3.5 text-cp-text-quaternary" />
+              <Power class="size-3.5 text-z-text-quaternary" />
             </template>
             {{ account.enabled ? t('accounts.actions.disableScheduling') : t('accounts.actions.enableScheduling') }}
           </ZMenuItem>
@@ -89,16 +89,16 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             @click.stop="(close(), emit('refresh', account.id))"
           >
             <template #loading>
-              <RefreshCw class="size-3.5 animate-spin text-cp-text-quaternary motion-reduce:animate-none" />
+              <RefreshCw class="size-3.5 animate-spin text-z-text-quaternary motion-reduce:animate-none" />
             </template>
             <template #icon>
-              <RefreshCw class="size-3.5 text-cp-text-quaternary" />
+              <RefreshCw class="size-3.5 text-z-text-quaternary" />
             </template>
             {{ t('accounts.actions.refreshToken') }}
           </ZMenuItem>
           <ZMenuItem v-if="credentialEligible" @click.stop="(close(), emit('reauthorize', account))">
             <template #icon>
-              <KeyRound class="size-3.5 text-cp-text-quaternary" />
+              <KeyRound class="size-3.5 text-z-text-quaternary" />
             </template>
             {{ t('accounts.actions.reauthorize') }}
           </ZMenuItem>
@@ -109,10 +109,10 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             @click.stop="(close(), emit('downloadModelCatalog', account))"
           >
             <template #loading>
-              <RefreshCw class="size-3.5 animate-spin text-cp-text-quaternary motion-reduce:animate-none" />
+              <RefreshCw class="size-3.5 animate-spin text-z-text-quaternary motion-reduce:animate-none" />
             </template>
             <template #icon>
-              <Download class="size-3.5 text-cp-text-quaternary" />
+              <Download class="size-3.5 text-z-text-quaternary" />
             </template>
             {{ t('accounts.actions.downloadModelCatalog') }}
           </ZMenuItem>
@@ -122,7 +122,7 @@ const credentialEligible = computed(() => props.account.authenticationKind === '
             @click.stop="(close(), emit('recover', account.id))"
           >
             <template #icon>
-              <RotateCcw class="size-3.5 text-cp-text-quaternary" />
+              <RotateCcw class="size-3.5 text-z-text-quaternary" />
             </template>
             {{ t('accounts.actions.restoreState') }}
           </ZMenuItem>

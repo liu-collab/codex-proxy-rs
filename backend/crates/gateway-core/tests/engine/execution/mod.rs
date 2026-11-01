@@ -82,7 +82,7 @@ impl ClientBudgetPort for Budget {
             assert!(self.active.load(Ordering::SeqCst));
             if self.reject {
                 Err(
-                    GatewayError::new(GatewayErrorKind::RateLimited, "budget exhausted")
+                    GatewayError::new(GatewayErrorKind::BudgetExhausted, "budget exhausted")
                         .with_client_code("key_daily_budget_exceeded"),
                 )
             } else {
@@ -2639,7 +2639,7 @@ fn final_observation_is_emitted_once_for_success_rejection_and_detached_cancella
             observation_service(ObservationProviderBehavior::CompleteWithUsage, true);
         assert!(matches!(
             service.start(request(&service, ClientTransport::HttpJson)).await,
-            Err(error) if error.kind() == GatewayErrorKind::RateLimited
+            Err(error) if error.kind() == GatewayErrorKind::BudgetExhausted
         ));
         {
             let observations = observer.observations.lock().unwrap();
@@ -3776,7 +3776,7 @@ fn known_catalog_should_reject_a_model_that_the_provider_did_not_publish() {
         (error.kind(), error.client_message()),
         (
             GatewayErrorKind::ModelNotFound,
-            "the requested model was not found in the provider catalogs available to this API key; check the model name",
+            "Model unavailable for this API key. Check the model name.",
         )
     );
     let rejections = store.entry_rejections.lock().unwrap();

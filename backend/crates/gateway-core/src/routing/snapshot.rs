@@ -10,7 +10,8 @@ use crate::account::{FastMode, ProviderAccountId};
 use crate::concurrency::ConcurrencyQueuePolicy;
 use crate::operation::{Operation, OperationKind};
 use crate::policy::{
-    ClientApiKeyId, ClientPolicy, CodexClientMinVersions, PlaintextClientApiKey, RateLimits,
+    ClientApiKeyId, ClientPeerSharing, ClientPolicy, CodexClientMinVersions, PlaintextClientApiKey,
+    RateLimits,
 };
 use crate::settings::{SettingsValues, compiled::CompiledSettings};
 use crate::validation::RoutingError;
@@ -29,6 +30,7 @@ type ModelCatalogAccounts = BTreeMap<ProviderKind, BTreeMap<String, BTreeSet<Pro
 /// Store 读取到的一个启用 Client API Key 策略事实
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotClientPolicyFacts {
+    peer_sharing: ClientPeerSharing,
     name_snapshot: Option<String>,
     request_profiles: BTreeMap<ProviderKind, crate::account::OpaqueProviderData>,
     key_id: ClientApiKeyId,
@@ -38,6 +40,12 @@ pub struct SnapshotClientPolicyFacts {
 }
 
 impl SnapshotClientPolicyFacts {
+    #[must_use]
+    pub const fn with_peer_sharing(mut self, sharing: ClientPeerSharing) -> Self {
+        self.peer_sharing = sharing;
+        self
+    }
+
     #[must_use]
     pub fn with_name_snapshot(mut self, name: Option<String>) -> Self {
         self.name_snapshot = name;
@@ -61,6 +69,7 @@ impl SnapshotClientPolicyFacts {
         limits: RateLimits,
     ) -> Self {
         Self {
+            peer_sharing: ClientPeerSharing::default(),
             key_id,
             name_snapshot: None,
             request_profiles: BTreeMap::new(),
@@ -112,6 +121,7 @@ pub struct SnapshotProviderAccountFacts {
     account_id: ProviderAccountId,
     provider_kind: String,
     model_access: crate::account::AccountModelAccess,
+    authentication_kind: String,
 }
 
 impl SnapshotProviderAccountFacts {
@@ -121,11 +131,18 @@ impl SnapshotProviderAccountFacts {
             account_id,
             provider_kind: provider_kind.into(),
             model_access: crate::account::AccountModelAccess::all(),
+            authentication_kind: String::new(),
         }
     }
 }
 
 impl SnapshotProviderAccountFacts {
+    #[must_use]
+    pub fn with_authentication_kind(mut self, authentication_kind: String) -> Self {
+        self.authentication_kind = authentication_kind;
+        self
+    }
+
     #[must_use]
     pub fn with_model_access(mut self, model_access: crate::account::AccountModelAccess) -> Self {
         self.model_access = model_access;
@@ -472,12 +489,17 @@ async fn compile_runtime_snapshot(
     for account in facts.provider_accounts {
         let provider_kind = ProviderKind::new(account.provider_kind)
             .map_err(|_| RuntimeSnapshotCompileError::InvalidData)?;
+        let direct_account =
+            catalogs.is_direct_account(&provider_kind, &account.authentication_kind);
         // 账号归属独立于当前执行器集合；Provider 撤下后仍保留账号和分组，路由只选已注册执行器
         if accounts
             .insert(
                 account.account_id.clone(),
                 RuntimeAccount::new(provider_kind, BTreeSet::new())
-                    .with_model_access(account.model_access),
+                    .with_model_access(account.model_access)
+                    .with_direct_authentication_kind(
+                        direct_account.then_some(account.authentication_kind),
+                    ),
             )
             .is_some()
         {
@@ -503,7 +525,10 @@ async fn compile_runtime_snapshot(
             .get_mut(&account_id)
             .ok_or(RuntimeSnapshotCompileError::InvalidData)?;
         *account = RuntimeAccount::new(account.provider_kind().clone(), group_ids)
-            .with_model_access(account.model_access().clone());
+            .with_model_access(account.model_access().clone())
+            .with_direct_authentication_kind(
+                account.direct_authentication_kind().map(str::to_owned),
+            );
     }
     let account_directory = Arc::new(RuntimeAccountDirectory::new(accounts));
 
@@ -559,7 +584,8 @@ async fn compile_runtime_snapshot(
                 true,
                 policy.limits,
             )
-            .with_name_snapshot(policy.name_snapshot),
+            .with_name_snapshot(policy.name_snapshot)
+            .with_peer_sharing(policy.peer_sharing),
         );
     }
 
@@ -1012,6 +1038,43 @@ impl RuntimeSnapshot {
                     .iter()
                     .any(|model| &model.id == public_model)
                 && !self.is_known_upstream_model(&upstream_model))
+    }
+
+    /// 通用模型候选资格，不以原生目录来源限制推理，也不替代操作能力与实时选号检查
+    #[must_use]
+    pub fn allows_public_model_for_account(
+        &self,
+        public_model: &PublicModelId,
+        scope: &FrozenAccountScope,
+        account: &ProviderAccountId,
+    ) -> bool {
+        let Some(provider) = scope.account_provider(account) else {
+            return false;
+        };
+        let upstream = self.mapped_model(public_model.as_str());
+        if !scope.allows_model(account, &upstream)
+            || !self.contains_public_model_for_provider(public_model, provider)
+        {
+            return false;
+        }
+        let Ok(upstream) = UpstreamModelId::from_client_wire(upstream) else {
+            return false;
+        };
+        let native = self
+            .provider_models
+            .get(provider)
+            .is_some_and(|models| models.contains_key(&upstream));
+        // 仅由适配器贡献的模型仍受声明账号范围限制，不能借发现型目录扩大资格
+        native
+            || !self
+                .contributed_models()
+                .iter()
+                .any(|model| &model.provider == provider && &model.id == public_model)
+            || self.contributed_models().iter().any(|model| {
+                &model.provider == provider
+                    && &model.id == public_model
+                    && model.accounts.contains(account)
+            })
     }
 
     fn is_known_upstream_model(&self, upstream_model: &UpstreamModelId) -> bool {

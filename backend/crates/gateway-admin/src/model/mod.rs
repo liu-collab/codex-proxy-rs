@@ -14,6 +14,7 @@ pub mod diagnostics;
 pub mod import_tasks;
 pub mod key_usage;
 pub mod observability;
+pub mod peer_link;
 pub mod plugin_client_keys;
 pub mod plugin_resources;
 pub mod plugins;
@@ -26,6 +27,7 @@ pub mod reset_credit_automation;
 pub mod retention;
 pub mod settings;
 pub mod system;
+pub mod upstream_info;
 pub mod usage_data;
 
 /// 管理用例对外返回的稳定错误分类
@@ -68,6 +70,7 @@ pub struct AdminError {
     kind: AdminErrorKind,
     message: String,
     source: Option<gateway_core::error::ErrorSource>,
+    sensitive_context_redacted: bool,
 }
 
 impl AdminError {
@@ -77,6 +80,7 @@ impl AdminError {
             kind,
             message: message.into(),
             source: None,
+            sensitive_context_redacted: false,
         }
     }
 
@@ -87,8 +91,18 @@ impl AdminError {
     }
 
     #[must_use]
+    pub fn redact_sensitive_context(mut self) -> Self {
+        self.sensitive_context_redacted = true;
+        self
+    }
+
+    #[must_use]
     pub fn error_details(&self) -> Option<gateway_core::error::ErrorDetails> {
-        gateway_core::error::ErrorDetails::capture(self.source.as_ref(), None, false)
+        gateway_core::error::ErrorDetails::capture(
+            self.source.as_ref(),
+            None,
+            self.sensitive_context_redacted,
+        )
     }
 
     #[must_use]

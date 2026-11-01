@@ -107,17 +107,17 @@ function remove(rule: PrivacyRule) {
         </div>
         <RulesTable :rules="model.rules" :disabled="disabled" @edit="edit($event)" @toggle="toggle" @remove="remove" @reorder="model = { ...model, rules: $event }" />
         <div v-if="model.rules.length" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-          <span class="text-cp-xs text-cp-text-quaternary">{{ t('settings.privacy.runsInListOrderRulesSteps', { count: model.rules.length, count2: stepCount }) }}</span>
+          <span class="text-z-xs text-z-text-quaternary">{{ t('settings.privacy.runsInListOrderRulesSteps', { count: model.rules.length, count2: stepCount }) }}</span>
           <div class="flex items-center gap-2">
-            <span class="text-cp-xs text-cp-text-secondary">{{ t('settings.privacy.executionFailed') }}</span>
+            <span class="text-z-xs text-z-text-secondary">{{ t('settings.privacy.executionFailed') }}</span>
             <ZSelect v-model="model.onError" size="small" class="w-34" :options="failureOptions" :aria-label="t('settings.privacy.ruleExecutionFailed')" :disabled="disabled" />
             <ZPopover trigger="hover-click" placement="top-end">
               <template #reference="{ open: helpOpen }">
-                <ZIconButton size="small" :aria-label="t('settings.privacy.ruleExecutionInstructions')" :title="undefined" class="hover:bg-transparent! active:bg-transparent!" :aria-expanded="helpOpen">
+                <ZIconButton variant="link" size="small" :aria-label="t('settings.privacy.ruleExecutionInstructions')" :title="undefined" :aria-expanded="helpOpen">
                   <CircleHelp class="size-3.5" />
                 </ZIconButton>
               </template>
-              <div class="max-w-72 space-y-2 p-3 text-cp-sm text-cp-text-secondary">
+              <div class="max-w-72 space-y-2 p-3 text-z-sm text-z-text-secondary">
                 <p class="m-0">
                   {{ t('settings.privacy.skipHelp') }}
                 </p><p class="m-0">

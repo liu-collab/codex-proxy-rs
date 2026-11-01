@@ -1,4 +1,4 @@
-//! Codex 的 `gateway-core` Provider adapter
+﻿//! Codex 的 `gateway-core` Provider adapter
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -102,13 +102,13 @@ use crate::transport::{
     CodexBackendTransport, CodexClientError, CodexRateLimitUpdates, CodexRequestContext,
     CodexResponseMetadata, CodexResponseMetadataUpdates, CodexTransportMetrics,
     CodexUpstreamDiagnostics, CodexWebSocketPool, endpoint_url,
-    normalize_selected_codex_downstream_body, normalize_universal_history_cleanup,
 };
 
 mod execution;
 mod failure;
 #[doc(hidden)]
 pub use failure::context_length_exceeded_error;
+mod guardian;
 mod live;
 mod observation;
 mod upstream_adapter;
@@ -161,6 +161,7 @@ pub struct CodexProvider {
     live_calls_url: Url,
     session_identity: Option<CodexSessionIdentity>,
     session_transport_recovery: CodexSessionTransportRecovery,
+    guardian_routing: guardian::GuardianRouting,
     stream_max_retries: u32,
     input_guard: InputGuardConfig,
     live_registry: Arc<CodexLiveRegistry>,
@@ -366,6 +367,7 @@ impl CodexProvider {
             live_calls_url,
             session_identity: None,
             session_transport_recovery: CodexSessionTransportRecovery::default(),
+            guardian_routing: guardian::GuardianRouting::default(),
             stream_max_retries,
             input_guard: InputGuardConfig::default(),
             live_registry: Arc::new(CodexLiveRegistry::default()),
@@ -419,6 +421,10 @@ impl fmt::Debug for CodexProvider {
 
 #[async_trait]
 impl Provider for CodexProvider {
+    fn is_direct_account(&self, authentication_kind: &str) -> bool {
+        crate::credential::is_direct_account_kind(authentication_kind)
+    }
+
     fn compile_privacy_policy(
         &self,
         policy: &gateway_core::settings::privacy::CodexPrivacyPolicy,
@@ -965,11 +971,43 @@ impl CodexProvider {
         let state_before = trace
             .is_enabled()
             .then(|| crate::transport::diagnostics::evidence::request_state(&upstream_request));
+        let guardian_parent = (!state_owner_cross_account
+            && upstream_request.is_guardian()
+            && matches!(
+                lease.authentication(),
+                crate::credential::CodexRuntimeAuthentication::OAuth(_)
+            ))
+        .then(|| {
+            upstream_request
+                .client_metadata()?
+                .get("parent_response_id")?
+                .as_str()
+        })
+        .flatten()
+        .and_then(|response_id| {
+            self.guardian_routing
+                .get(
+                    context.client_api_key_ref(),
+                    lease.account_id(),
+                    response_id,
+                )
+                .map(|affinity| (response_id.to_owned(), affinity))
+        });
         scope_request_to_account(
             &mut upstream_request,
             lease.installation_id(),
             account_scope,
         );
+        // 父响应的可信关联只恢复此字段，不把首次 Guardian 请求的其他账号状态视为可信
+        if let Some((response_id, _)) = &guardian_parent
+            && let Some(Value::Object(metadata)) =
+                upstream_request.body_mut().get_mut("client_metadata")
+        {
+            metadata.insert(
+                "parent_response_id".to_owned(),
+                Value::String(response_id.clone()),
+            );
+        }
         if let Some(before) = state_before {
             trace.record_evidence("provider.request.account_scope", serde_json::json!({
                 "scope": match account_scope {
@@ -989,20 +1027,13 @@ impl CodexProvider {
             lease.authentication(),
             crate::credential::CodexRuntimeAuthentication::OAuth(_)
         );
-        // 跨模型历史清洗：按最终上游模型族执行，API Key 与 OAuth 路径都覆盖（规范 §6 末条），
-        // 但只对 GPT 系列套用 GPT 的形状约束（§6-1「GPT 系列出站前」）。编码阶段已把最终
-        // 上游模型名写进正文，因此这里直接读正文即可，不需要再传一个可能漂移的副本。
-        let cleanup_model = upstream_request
-            .body()
-            .get("model")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-            .to_owned();
-        normalize_universal_history_cleanup(upstream_request.body_mut(), &cleanup_model);
+        // 跨模型历史清洗只作用于 Codex/OAuth 上游：API Key 账号可能指向第三方
+        // OpenAI 兼容端点，宿主不改写它们的正文形状
         if codex_oauth {
-            normalize_selected_codex_downstream_body(
-                &mut upstream_request,
-                generate.protocol_payload().context(),
+            let responses_lite = upstream_request.responses_lite.as_deref() == Some("true");
+            crate::compat::normalize_selected_codex_downstream_body(
+                upstream_request.body_mut(),
+                responses_lite,
                 &middleware_headers,
                 context.request_id().as_str(),
             );
@@ -1193,6 +1224,7 @@ impl CodexProvider {
                 .for_account(lease.account())
                 .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
+                .with_routing_affinity(guardian_parent.map(|(_, affinity)| affinity))
                 .with_connection_budget(context.connection_budget().clone())
                 .with_middleware_headers(middleware_headers)
                 .with_outbound_middleware(outbound_middleware)
@@ -1209,6 +1241,7 @@ impl CodexProvider {
             session_transport_key,
             session_transport_key_hash,
             session_transport_recovery: self.session_transport_recovery.clone(),
+            guardian_routing: self.guardian_routing.clone(),
             websocket_retry_count,
             stream_max_retries: self.stream_max_retries,
             session_capture,

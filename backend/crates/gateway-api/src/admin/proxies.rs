@@ -140,6 +140,7 @@ impl From<ProxyTestResult> for ProxyTestView {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ProxyAccountView {
+    upstream: Option<super::accounts::AccountUpstreamInfoView>,
     id: String,
     name: String,
     email: Option<String>,
@@ -327,6 +328,13 @@ where
                 .items
                 .into_iter()
                 .map(|account| ProxyAccountView {
+                    upstream: account.upstream.map(|info| {
+                        super::accounts::upstream_info_view(
+                            info,
+                            chrono::Utc::now(),
+                            crate::time::TimePresenter::new(state.admin_services().timezone()),
+                        )
+                    }),
                     id: account.id,
                     name: account.name,
                     email: account.email,

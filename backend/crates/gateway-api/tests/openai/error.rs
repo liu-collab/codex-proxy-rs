@@ -165,9 +165,9 @@ async fn classified_capacity_error_without_special_code_returns_retryable_http_s
 }
 
 #[tokio::test]
-async fn key_budget_errors_preserve_limit_code_and_retry_after() {
+async fn key_budget_errors_use_the_official_quota_type_and_preserve_limit_details() {
     for code in ["key_daily_budget_exceeded", "key_weekly_budget_exceeded"] {
-        let error = GatewayError::new(GatewayErrorKind::RateLimited, "key budget exhausted")
+        let error = GatewayError::new(GatewayErrorKind::BudgetExhausted, "key budget exhausted")
             .with_client_code(code)
             .with_retry_after(std::time::Duration::from_millis(1501));
         let response = gateway_error_response(&error);
@@ -176,6 +176,7 @@ async fn key_budget_errors_preserve_limit_code_and_retry_after() {
         let body: serde_json::Value =
             serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
         assert_eq!(body["error"]["code"], code);
+        assert_eq!(body["error"]["type"], "usage_limit_reached");
     }
 }
 
@@ -357,7 +358,7 @@ fn local_provider_capacity_exhaustion_should_map_to_service_unavailable() {
     );
     assert_eq!(
         projected.safe_message(),
-        "all eligible upstream accounts are temporarily busy"
+        "All eligible upstream accounts are temporarily busy."
     );
 }
 
@@ -389,7 +390,7 @@ fn no_eligible_provider_account_should_preserve_safe_provider_detail() {
     );
     assert_eq!(
         gateway.safe_message(),
-        "no upstream provider is currently available for this request"
+        "No upstream provider is currently available for this request."
     );
 }
 
@@ -407,7 +408,7 @@ fn provider_infrastructure_failure_should_have_a_distinct_client_contract() {
     );
     assert_eq!(
         projected.safe_message(),
-        "provider account infrastructure is temporarily unavailable"
+        "Upstream accounts are temporarily inaccessible."
     );
 }
 
@@ -422,7 +423,7 @@ fn no_eligible_provider_account_should_map_to_service_unavailable() {
     assert_eq!(projected.kind(), GatewayErrorKind::NoAvailableProvider);
     assert_eq!(
         projected.safe_message(),
-        "no upstream provider is currently available for this request"
+        "No upstream provider is currently available for this request."
     );
 }
 
@@ -479,7 +480,7 @@ fn engine_provider_credential_failures_should_not_impersonate_client_auth_failur
         assert_eq!(mapped.kind(), GatewayErrorKind::UpstreamUnavailable);
         assert_eq!(
             mapped.safe_message(),
-            "upstream authentication resource is unavailable"
+            "The upstream account cannot access the service."
         );
     }
 }
@@ -550,7 +551,7 @@ fn engine_provider_runtime_failures_should_collapse_to_safe_unavailability() {
 
         let projected = gateway_error_from_engine(&error);
         assert_eq!(projected.kind(), GatewayErrorKind::UpstreamUnavailable);
-        assert_eq!(projected.safe_message(), "upstream service is unavailable");
+        assert_eq!(projected.safe_message(), "Upstream service is unavailable.");
     }
 }
 
@@ -560,13 +561,13 @@ fn engine_store_error_should_collapse_to_safe_internal_error() {
 
     let projected = gateway_error_from_engine(&error);
     assert_eq!(projected.kind(), GatewayErrorKind::Internal);
-    assert_eq!(projected.safe_message(), "request execution failed");
+    assert_eq!(projected.safe_message(), "Request execution failed.");
 }
 #[test]
 fn openai_error_response_should_preserve_only_safe_contract_fields() {
     let (status, body) = openai_error_response(
         StatusCode::BAD_GATEWAY,
-        "upstream service is unavailable",
+        "Upstream service is unavailable.",
         "server_error",
         "upstream_unavailable",
     );
@@ -577,7 +578,7 @@ fn openai_error_response_should_preserve_only_safe_contract_fields() {
             StatusCode::BAD_GATEWAY,
             serde_json::json!({
                 "error": {
-                    "message": "upstream service is unavailable",
+                    "message": "Upstream service is unavailable.",
                     "type": "server_error",
                     "code": "upstream_unavailable"
                 }
@@ -767,12 +768,12 @@ mod model_routing {
             (
                 "missing-model",
                 BTreeMap::new(),
-                "the requested model was not found in the provider catalogs available to this API key; check the model name",
+                "Model unavailable for this API key. Check the model name.",
             ),
             (
                 "model-a",
                 BTreeMap::from([("model-a".to_owned(), "missing-target".to_owned())]),
-                "the requested model maps to an upstream model that was not found in the provider catalogs available to this API key; check the configured model mapping",
+                "Mapped model unavailable for this API key. Check the model mapping.",
             ),
         ] {
             for stream in [false, true] {

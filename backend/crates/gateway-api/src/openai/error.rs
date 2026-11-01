@@ -33,7 +33,8 @@ pub fn openai_error_response(
     }
 }
 
-/// Codex 将这两个容量码视为不可重试；仅在交付边界转换，内部仍保留真实上游事实
+/// 无重试提示的容量拒绝及旧版 Codex 限流错误需要可重试投影
+/// 仅在交付边界转换，内部仍保留真实上游事实
 pub(super) fn client_error_code(code: &str) -> &str {
     match code {
         "server_is_overloaded" | "slow_down" => "server_error",
@@ -83,7 +84,7 @@ pub fn protocol_error_response(status: StatusCode, body: ProtocolErrorBody) -> R
 pub fn missing_client_api_key_response() -> (StatusCode, Json<Value>) {
     openai_error_response(
         StatusCode::UNAUTHORIZED,
-        "Missing or invalid API key",
+        "Missing or invalid API key.",
         "invalid_request_error",
         "invalid_api_key",
     )
@@ -93,7 +94,7 @@ pub fn missing_client_api_key_response() -> (StatusCode, Json<Value>) {
 pub fn runtime_unavailable_response() -> (StatusCode, Json<Value>) {
     openai_error_response(
         StatusCode::SERVICE_UNAVAILABLE,
-        "Gateway runtime configuration is temporarily unavailable",
+        "Gateway configuration is temporarily unavailable.",
         "server_error",
         "runtime_configuration_unavailable",
     )
@@ -110,7 +111,7 @@ pub fn client_version_rejection_response(
     let (message, code, current_version) = match rejection.current() {
         Some(current) => (
             format!(
-                "{client_label} {current} is below the minimum required version {}. Upgrade {client_label} and retry.",
+                "{client_label} {current} is outdated. Upgrade to {} or later.",
                 rejection.min()
             ),
             "client_version_too_old",
@@ -118,15 +119,15 @@ pub fn client_version_rejection_response(
         ),
         None => (
             format!(
-                "A valid {client_label} version is required. Upgrade to version {} or newer and retry.",
-                rejection.min()
+                "Cannot read the {client_label} version. Check the User-Agent and version headers."
             ),
             "client_version_unavailable",
             None,
         ),
     };
+    // Codex 将 400 视为不可重试的请求错误，426 则会触发 WS 回退和 HTTP 重试
     (
-        StatusCode::UPGRADE_REQUIRED,
+        StatusCode::BAD_REQUEST,
         Json(json!({
             "error": {
                 "message": message,
@@ -144,7 +145,7 @@ pub fn client_version_rejection_response(
 pub fn model_not_found_response() -> (StatusCode, Json<Value>) {
     openai_error_response(
         StatusCode::NOT_FOUND,
-        "The requested model does not exist or is not available",
+        "The requested model does not exist or is not available.",
         "invalid_request_error",
         "model_not_found",
     )
@@ -298,6 +299,11 @@ pub const fn gateway_error_contract(
             StatusCode::TOO_MANY_REQUESTS,
             "rate_limit_error",
             "rate_limit_exceeded",
+        ),
+        GatewayErrorKind::BudgetExhausted => (
+            StatusCode::TOO_MANY_REQUESTS,
+            "usage_limit_reached",
+            "usage_limit_reached",
         ),
         GatewayErrorKind::UpstreamUnavailable => (
             StatusCode::BAD_GATEWAY,

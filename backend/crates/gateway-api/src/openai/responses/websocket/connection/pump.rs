@@ -26,6 +26,7 @@ use tokio::{
 #[expect(clippy::too_many_arguments)]
 pub(super) async fn run_pump<S, E>(
     socket: S,
+    activity: watch::Sender<Instant>,
     commands: mpsc::Receiver<ConnectionCommand>,
     incoming: mpsc::Sender<PendingConnectionEvent>,
     exited: oneshot::Sender<PumpExitReason>,
@@ -58,7 +59,7 @@ pub(super) async fn run_pump<S, E>(
     let (writer, mut reader) = socket.split();
     let writer = Arc::new(middleware::Writer::new(writer, context.clone()));
     let sender: Arc<dyn contract::Sender> = writer.clone();
-    let (activity, received_activity) = watch::channel(());
+    let received_activity = activity.subscribe();
     // 心跳独立于业务写入等待，但共享唯一 writer，避免长写入或排队阻止失联检测
     let reason = tokio::select! {
         biased;
@@ -81,7 +82,7 @@ async fn read_connection<S, E>(
     socket: &mut S,
     incoming: &mpsc::Sender<PendingConnectionEvent>,
     sender: Arc<dyn contract::Sender>,
-    activity: &watch::Sender<()>,
+    activity: &watch::Sender<Instant>,
     context: &PumpContext,
 ) -> PumpExitReason
 where
@@ -106,10 +107,9 @@ where
                 }
             }
             message = socket.next() => {
-                if matches!(&message, Some(Ok(_))) { context.stats.record_read(context.opened_at); }
-                if matches!(&message, Some(Ok(message)) if !matches!(message, Message::Close(_))) {
+                if matches!(&message, Some(Ok(_))) {
                     // 链路活动以真实入站为准，插件丢弃消息不应抹掉对端已经响应的事实
-                    activity.send_replace(());
+                    activity.send_replace(Instant::now());
                 }
                 let message = match message {
                     Some(Ok(message)) => match middleware::transform(message, contract::Direction::Incoming, sender.clone(), context).await {
@@ -201,7 +201,7 @@ where
 
 async fn heartbeat_connection<S, E>(
     writer: Arc<middleware::Writer<S>>,
-    mut activity: watch::Receiver<()>,
+    mut activity: watch::Receiver<Instant>,
     context: &PumpContext,
 ) -> PumpExitReason
 where

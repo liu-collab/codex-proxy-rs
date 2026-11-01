@@ -16,6 +16,16 @@ pub(super) fn upstream(message: impl Into<String>) -> OperationError {
     SystemOperationError::new(SystemOperationErrorKind::Upstream, message)
 }
 
+pub(super) fn http(message: &'static str, source: reqwest::Error) -> OperationError {
+    let failure = upstream(message);
+    let failure = if source.url().is_some() {
+        failure.redact_sensitive_context()
+    } else {
+        failure
+    };
+    failure.with_source(source.without_url())
+}
+
 pub(super) fn internal(message: impl Into<String>) -> OperationError {
     SystemOperationError::new(SystemOperationErrorKind::Internal, message)
 }

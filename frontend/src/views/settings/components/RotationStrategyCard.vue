@@ -36,11 +36,11 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
       >
         <button
           type="button"
-          class="flex min-h-25 w-full cursor-pointer flex-col rounded-cp border-0 px-4 py-3.5 text-left shadow-cp-input outline-none transition-[background-color,box-shadow,color] duration-160 focus-visible:ring-2 focus-visible:ring-cp-control-outline"
+          class="flex min-h-25 w-full cursor-pointer flex-col rounded-z border-0 px-4 py-3.5 text-left shadow-z-input outline-none transition-[background-color,box-shadow,color] duration-160 focus-visible:ring-2 focus-visible:ring-z-control-outline"
           :class="
             model === option.value
-              ? 'bg-cp-control-item-bg-active text-cp-primary-text shadow-cp-tertiary'
-              : 'bg-(--cp-input-bg,var(--cp-input-bg)) text-cp-text hover:bg-(--cp-input-hover-bg,var(--cp-input-hover-bg)) hover:shadow-cp-input-hover'
+              ? 'bg-z-control-item-bg-active text-z-primary-text shadow-z-tertiary'
+              : 'bg-(--z-input-bg,var(--z-input-bg)) text-z-text hover:bg-(--z-input-hover-bg,var(--z-input-hover-bg)) hover:shadow-z-input-hover'
           "
           :aria-pressed="model === option.value"
           :disabled="disabled"
@@ -48,25 +48,25 @@ const customized = computed(() => smartScheduling.value && props.smartDefaults &
         >
           <span class="flex items-center gap-2" :class="option.value === 'smart' ? 'pr-7' : undefined">
             <span
-              class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-cp-bg-container shadow-[inset_0_0_0_1px_var(--cp-color-border)]"
+              class="inline-flex size-4 shrink-0 items-center justify-center rounded-full bg-z-bg-container shadow-[inset_0_0_0_1px_var(--z-color-border)]"
             >
               <span
                 class="size-2 rounded-full transition-opacity duration-150"
-                :class="model === option.value ? 'bg-cp-primary opacity-100' : 'opacity-0'"
+                :class="model === option.value ? 'bg-z-primary opacity-100' : 'opacity-0'"
               />
             </span>
-            <span class="inline-flex items-baseline gap-1 text-cp leading-snug font-emphasis">
+            <span class="inline-flex items-baseline gap-1 text-z leading-snug font-emphasis">
               {{ option.label }}
-              <span v-if="option.value === 'smart' && customized" class="shrink-0 text-cp-xs font-normal text-cp-text-secondary">{{ t('settings.rotation.customized') }}</span>
+              <span v-if="option.value === 'smart' && customized" class="shrink-0 text-z-xs font-normal text-z-text-secondary">{{ t('settings.rotation.customized') }}</span>
             </span>
           </span>
-          <span class="mt-2 block text-cp leading-normal font-emphasis text-cp-text-secondary">
+          <span class="mt-2 block text-z leading-normal font-emphasis text-z-text-secondary">
             {{ option.description }}
           </span>
         </button>
         <ZIconButton
           v-if="option.value === 'smart'"
-          class="absolute top-3 right-3 size-6! rounded-cp-sm p-0"
+          class="absolute top-3 right-3 size-6! rounded-z-sm p-0"
           :aria-label="t('settings.rotation.smartSchedulingSettings')"
           size="small"
           :disabled="disabled || !smartScheduling || !smartDefaults"

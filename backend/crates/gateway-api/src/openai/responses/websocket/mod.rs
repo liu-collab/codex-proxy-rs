@@ -11,11 +11,7 @@ use std::{
 };
 
 use axum::{
-    extract::{
-        Extension, State,
-        connect_info::ConnectInfo,
-        ws::{WebSocket, WebSocketUpgrade},
-    },
+    extract::{Extension, State, connect_info::ConnectInfo},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -45,7 +41,9 @@ use crate::{
 use super::{
     request::OpenAiRequestHeaders, request_client_context, validation::ResponseValidationFacts,
 };
-use connection::{ConnectionEvent, FramePhase, ResponsesWebSocketConnection, WriteContext};
+use connection::{
+    ConnectionEvent, FramePhase, ResponsesWebSocketConnection, Socket, Upgrade, WriteContext,
+};
 use forward::{
     ConnectionReplaySnapshot, ForwardOutcome, execution_response, forward_control_event,
     forward_response, new_replay_capture, send_control, send_gateway_error, send_middleware_error,
@@ -54,7 +52,7 @@ use forward::{
 pub use protocol::{ResponseCreateFrameError, decode_response_create_with_context};
 use protocol::{connection_limit_event, is_response_create};
 
-const TEXT_FRAMES_ONLY: &str = "Responses WebSocket accepts text frames only";
+const TEXT_FRAMES_ONLY: &str = "Responses WebSocket accepts text frames only.";
 const CONNECTION_LIMIT_CLOSE_REASON: &str = "Responses websocket connection limit reached";
 
 /// 将已认证的 `GET /v1/responses` 升级为 Responses WebSocket
@@ -64,7 +62,7 @@ pub(crate) async fn responses_websocket(
     middleware: Option<Extension<FrozenMiddlewarePlan>>,
     lifetime: Option<Extension<Arc<crate::middleware::CallLifetime>>>,
     headers: HeaderMap,
-    websocket: WebSocketUpgrade,
+    websocket: Upgrade,
 ) -> Response {
     let service = state.openai().clone();
     let client = match authenticate_client(&service, &headers).await {
@@ -104,7 +102,7 @@ impl ResponsesWebSocketAdapter {
     #[expect(clippy::too_many_arguments)]
     fn upgrade_with_client_context(
         &self,
-        websocket: WebSocketUpgrade,
+        websocket: Upgrade,
         client: AuthenticatedClient,
         client_ip: Option<IpAddr>,
         user_agent: Option<String>,
@@ -138,15 +136,10 @@ impl ResponsesWebSocketAdapter {
             middleware,
         };
         let origin = crate::middleware::current();
-        websocket
-            // 覆盖 axum/tungstenite 的私有 64 MiB message 与 16 MiB frame 默认值
-            // Responses JSON 的协议可接受性由上游决定，代理不另设 wire 长度上限
-            .max_message_size(usize::MAX)
-            .max_frame_size(usize::MAX)
-            .on_upgrade(move |socket| async move {
-                let _lifetime = lifetime;
-                crate::middleware::scope(origin, serve_responses_websocket(socket, session)).await;
-            })
+        websocket.on_upgrade(move |socket| async move {
+            let _lifetime = lifetime;
+            crate::middleware::scope(origin, serve_responses_websocket(socket, session)).await;
+        })
     }
 }
 
@@ -163,7 +156,7 @@ struct ResponsesWebSocketSession {
     middleware: Option<FrozenMiddlewarePlan>,
 }
 
-async fn serve_responses_websocket(socket: WebSocket, session: ResponsesWebSocketSession) {
+async fn serve_responses_websocket(socket: Socket, session: ResponsesWebSocketSession) {
     let ResponsesWebSocketSession {
         service,
         client,
@@ -288,13 +281,13 @@ async fn serve_responses_websocket(socket: WebSocket, session: ResponsesWebSocke
                 let current = execution.request_settings().ok_or_else(|| {
                     gateway_core::error::GatewayError::new(
                         gateway_core::error::GatewayErrorKind::Internal,
-                        "runtime snapshot is unavailable",
+                        "Gateway configuration is unavailable.",
                     )
                 })?;
                 let rebased = settings.rebase(current.snapshot()).map_err(|_| {
                     gateway_core::error::GatewayError::new(
                         gateway_core::error::GatewayErrorKind::InvalidRequest,
-                        "request settings are invalid",
+                        "Request settings are invalid.",
                     )
                 })?;
                 client = client.with_request_settings(rebased);

@@ -52,8 +52,8 @@ const latencyDetails = computed(() => props.record
   ? usageLatencyDetails(props.record)
   : null)
 
-const panelClass = 'min-w-0 rounded-cp-card bg-cp-fill-quaternary px-4 py-3.5'
-const panelTitleClass = 'm-0 text-cp-sm leading-none font-heavy text-cp-text-secondary'
+const panelClass = 'min-w-0 rounded-z-card bg-z-fill-quaternary px-4 py-3.5'
+const panelTitleClass = 'm-0 text-z-sm leading-none font-heavy text-z-text-secondary'
 
 const accountDisplay = computed(() => props.record
   ? usageAccountText(props.record)
@@ -598,7 +598,7 @@ const tokenDonutOption = computed<EChartsOption>(() => {
             <h3 :class="panelTitleClass">
               {{ t('common.units.tokens') }}
             </h3>
-            <span v-if="!tokenChartComplete" class="text-cp-xs text-cp-text-tertiary">{{ t('usage.request.incompleteDetails') }}</span>
+            <span v-if="!tokenChartComplete" class="text-z-xs text-z-text-tertiary">{{ t('usage.request.incompleteDetails') }}</span>
           </div>
           <div
             class="mt-3 grid min-h-38 min-w-0 flex-1 grid-cols-1 content-center items-center gap-3 sm:grid-cols-[150px_minmax(0,1fr)]"
@@ -607,11 +607,11 @@ const tokenDonutOption = computed<EChartsOption>(() => {
               <BaseChart :option="tokenDonutOption" :height="152" />
               <div class="pointer-events-none absolute inset-0 flex items-center justify-center">
                 <div class="grid text-center">
-                  <span class="text-cp-xs leading-none font-bold text-cp-text-quaternary">
+                  <span class="text-z-xs leading-none font-bold text-z-text-quaternary">
                     {{ t('usage.request.total') }}
                   </span>
                   <strong
-                    class="mt-1 font-mono text-[16px] leading-none font-extrabold tabular-nums text-cp-text"
+                    class="mt-1 font-mono text-[16px] leading-none font-extrabold tabular-nums text-z-text"
                   >
                     {{ tokenDetails?.totalTokensDisplay ?? '—' }}
                   </strong>
@@ -671,14 +671,14 @@ const tokenDonutOption = computed<EChartsOption>(() => {
           </template>
           <template #accountLabel="{ row }">
             <span
-              class="block max-w-full truncate font-mono text-cp-sm font-bold text-cp-text"
+              class="block max-w-full truncate font-mono text-z-sm font-bold text-z-text"
               :title="row.accountId || ''"
             >
               {{ row.accountLabel }}
             </span>
           </template>
           <template #latencyMs="{ row }">
-            <span class="font-mono font-bold tabular-nums text-cp-text">
+            <span class="font-mono font-bold tabular-nums text-z-text">
               {{ formatDuration(row.latencyMs) }}
             </span>
           </template>
@@ -727,6 +727,6 @@ const tokenDonutOption = computed<EChartsOption>(() => {
 }
 
 .attempt-table :deep(tbody td) {
-  background-color: var(--cp-color-fill-tertiary);
+  background-color: var(--z-color-fill-tertiary);
 }
 </style>

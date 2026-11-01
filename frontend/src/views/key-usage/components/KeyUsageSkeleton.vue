@@ -14,7 +14,7 @@ const metrics = computed(() => ([
   {
     label: t('usage.page.cacheHitRate'),
     icon: Gauge,
-    tone: 'text-cp-success-text',
+    tone: 'text-z-success-text',
   },
 ]))
 </script>
@@ -24,7 +24,7 @@ const metrics = computed(() => ([
   <section :aria-label="t('usage.page.usageSummaryLoading')" aria-busy="true" class="grid min-w-0 gap-4 xl:grid-cols-[minmax(340px,0.95fr)_minmax(0,3fr)]">
     <ZCard padding="compact" class="flex min-h-28 min-w-0 flex-col justify-between gap-4" aria-hidden="true">
       <div class="flex min-w-0 flex-1 items-center gap-3">
-        <span class="inline-flex size-8.5 shrink-0 items-center justify-center rounded-cp-lg bg-cp-info-container text-cp-info-on-container"><Zap :size="18" /></span>
+        <span class="inline-flex size-8.5 shrink-0 items-center justify-center rounded-z-lg bg-z-info-container text-z-info-on-container"><Zap :size="18" /></span>
         <ZSkeleton class="h-8 w-44 max-w-full" />
         <ZSkeleton shape="text" class="w-12 shrink-0" />
       </div>
@@ -36,7 +36,7 @@ const metrics = computed(() => ([
     <ZCard padding="compact" class="flex min-h-28 min-w-0 items-center" aria-hidden="true">
       <div class="grid w-full min-w-0 grid-cols-2 gap-x-6 gap-y-5 sm:grid-cols-3 2xl:grid-cols-6">
         <div v-for="item in metrics" :key="item.label" class="min-w-0">
-          <div class="flex min-w-0 items-center gap-2 text-cp-lg leading-[1.15] font-emphasis text-cp-text-secondary">
+          <div class="flex min-w-0 items-center gap-2 text-z-lg leading-[1.15] font-emphasis text-z-text-secondary">
             <component :is="item.icon" class="size-4.5 shrink-0" :class="item.tone" />{{ item.label }}
           </div>
           <ZSkeleton class="mt-5 h-6 w-20 max-w-full" />
@@ -54,7 +54,7 @@ const metrics = computed(() => ([
         <div class="flex min-h-0 flex-1 flex-col justify-between">
           <div v-for="line in 5" :key="line" class="flex items-center gap-3">
             <ZSkeleton shape="text" class="h-2 w-6 shrink-0" />
-            <span class="h-px flex-1 bg-cp-split opacity-50" />
+            <span class="h-px flex-1 bg-z-split opacity-50" />
           </div>
         </div>
         <div class="mt-3 flex justify-between gap-3 pl-9">
@@ -67,7 +67,7 @@ const metrics = computed(() => ([
         <div class="grid flex-1 gap-6 sm:grid-cols-2">
           <div v-for="label in [t('usage.budget.todaySQuota'), t('usage.budget.weeklyQuota')]" :key="label" class="flex min-w-0 flex-col justify-between gap-4">
             <div>
-              <div class="text-cp-sm text-cp-text-secondary">
+              <div class="text-z-sm text-z-text-secondary">
                 {{ label }}
               </div>
               <ZSkeleton class="mt-3 h-8 w-32 max-w-full" />
@@ -96,8 +96,8 @@ const metrics = computed(() => ([
     <template #actions>
       <ZSkeleton shape="text" class="h-3.5 w-56 max-w-full" aria-hidden="true" />
     </template>
-    <div class="grid grid-cols-48 items-center gap-x-0.5 gap-y-1 motion-safe:animate-cp-skeleton motion-reduce:animate-none sm:grid-cols-96" aria-hidden="true">
-      <span v-for="point in 96" :key="point" class="flex h-5 items-center"><span class="h-3.5 w-full rounded-xs bg-cp-fill-secondary" /></span>
+    <div class="grid grid-cols-48 items-center gap-x-0.5 gap-y-1 motion-safe:animate-z-skeleton motion-reduce:animate-none sm:grid-cols-96" aria-hidden="true">
+      <span v-for="point in 96" :key="point" class="flex h-5 items-center"><span class="h-3.5 w-full rounded-xs bg-z-fill-secondary" /></span>
     </div>
   </ZCard>
 </template>

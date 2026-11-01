@@ -74,8 +74,8 @@ onBeforeUnmount(() => {
 <template>
   <span class="inline-flex items-center gap-1.75" :aria-label="statusLabel" :title="statusLabel">
     <span class="relative inline-flex size-2 shrink-0 items-center justify-center">
-      <span ref="heartbeatRing" class="absolute size-2 rounded-full bg-cp-success opacity-0" />
-      <span ref="heartbeatDot" class="relative size-1.5 rounded-full bg-cp-success" />
+      <span ref="heartbeatRing" class="absolute size-2 rounded-full bg-z-success opacity-0" />
+      <span ref="heartbeatDot" class="relative size-1.5 rounded-full bg-z-success" />
     </span>
     <span>{{ t('dashboard.refresh.interval') }}</span>
   </span>

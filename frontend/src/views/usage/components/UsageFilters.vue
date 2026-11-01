@@ -47,7 +47,7 @@ const fieldOptions = computed(() => [
         class="w-full"
       >
         <template #prefix>
-          <Search class="size-4.5 text-cp-text-tertiary" />
+          <Search class="size-4.5 text-z-text-tertiary" />
         </template>
       </ZInput>
     </div>

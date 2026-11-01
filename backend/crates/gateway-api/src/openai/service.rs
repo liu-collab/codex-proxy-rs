@@ -101,7 +101,7 @@ impl OpenAiService {
             .map_err(|_| {
             GatewayError::new(
                 GatewayErrorKind::ModelNotFound,
-                "requested model was not found",
+                "Requested model was not found.",
             )
         })?;
         let previous_response_id = match metadata.continuation() {
@@ -142,7 +142,7 @@ impl OpenAiService {
         let provider = ProviderKind::new("openai").map_err(|_| {
             GatewayError::new(
                 GatewayErrorKind::Internal,
-                "OpenAI provider identifier is invalid",
+                "OpenAI provider identifier is invalid.",
             )
         })?;
         self.execution

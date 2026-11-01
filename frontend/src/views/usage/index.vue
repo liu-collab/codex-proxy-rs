@@ -48,10 +48,14 @@ const {
   providerQuery,
   usagePagination,
   loading,
-  analyticsLoading,
   records,
   summary,
-  insights,
+  health,
+  performance,
+  cost,
+  diagnostics,
+  performanceMetric,
+  costMetric,
   refreshingList,
   diagnosticDimension,
   loadUsageRecords,
@@ -99,12 +103,15 @@ watch(timeRange, () => {
       </template>
     </ZPageHeader>
 
-    <UsageSummaryCards :summary="summary" />
+    <UsageSummaryCards :summary="summary.data" :error="summary.error" />
     <UsageInsightsGrid
       v-model:diagnostic-dimension="diagnosticDimension"
-      :overview="insights.overview"
-      :diagnostics="insights.diagnostics"
-      :loading="analyticsLoading"
+      v-model:performance-metric="performanceMetric"
+      v-model:cost-metric="costMetric"
+      :health="health"
+      :performance="performance"
+      :cost="cost"
+      :diagnostics="diagnostics"
     />
 
     <ZCard
@@ -112,11 +119,11 @@ watch(timeRange, () => {
     >
       <template #header>
         <div>
-          <h2 class="m-0 text-xl leading-[1.15] font-heavy text-cp-text">
+          <h2 class="m-0 text-xl leading-[1.15] font-heavy text-z-text">
             {{ t('usage.page.requestDetails') }}
           </h2>
           <p
-            class="mt-1.75 mb-0 text-cp leading-[1.15] font-emphasis text-cp-text-secondary"
+            class="mt-1.75 mb-0 text-z leading-[1.15] font-emphasis text-z-text-secondary"
           >
             {{ t('usage.page.recordsDescription') }}
           </p>

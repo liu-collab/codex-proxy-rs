@@ -71,29 +71,27 @@ impl OperationFileLock {
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
         {
-            fs::create_dir_all(parent).map_err(|error| {
-                internal(format!("failed to create update lock directory: {error}"))
-            })?;
+            fs::create_dir_all(parent)
+                .map_err(|error| internal("无法创建更新锁目录").with_source(error))?;
         }
         match Self::try_create(path) {
             Ok(()) => Ok(Self { path: path.into() }),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 if !stale_lock(path)? {
-                    return Err(conflict("system update already running"));
+                    return Err(conflict("系统更新正在执行"));
                 }
-                fs::remove_file(path).map_err(|error| {
-                    internal(format!("failed to remove stale update lock: {error}"))
-                })?;
+                fs::remove_file(path)
+                    .map_err(|error| internal("无法清理过期更新锁").with_source(error))?;
                 Self::try_create(path).map_err(|error| {
                     if error.kind() == io::ErrorKind::AlreadyExists {
-                        conflict("system update already running")
+                        conflict("系统更新正在执行")
                     } else {
-                        internal(format!("failed to create update lock: {error}"))
+                        internal("无法创建更新锁").with_source(error)
                     }
                 })?;
                 Ok(Self { path: path.into() })
             }
-            Err(error) => Err(internal(format!("failed to create update lock: {error}"))),
+            Err(error) => Err(internal("无法创建更新锁").with_source(error)),
         }
     }
 
@@ -137,13 +135,11 @@ impl UpdateTempDir {
                 Ok(()) => return Ok(Self { path }),
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(error) => {
-                    return Err(internal(format!(
-                        "failed to create update temp directory: {error}"
-                    )));
+                    return Err(internal("无法创建更新临时目录").with_source(error));
                 }
             }
         }
-        Err(internal("failed to create unique update temp directory"))
+        Err(internal("无法分配更新临时目录"))
     }
 
     pub(crate) fn path(&self) -> &Path {
@@ -168,6 +164,7 @@ pub(crate) struct UpdateOperation {
     target: String,
     completed: bool,
     _file_lock: OperationFileLock,
+    diagnostics: super::diagnostics::Diagnostics,
 }
 
 impl UpdateOperation {
@@ -177,6 +174,7 @@ impl UpdateOperation {
         target: &str,
         current_version: &str,
         file_lock: OperationFileLock,
+        diagnostics: super::diagnostics::Diagnostics,
     ) -> Result<Self, OperationError> {
         set_running(
             path,
@@ -191,6 +189,7 @@ impl UpdateOperation {
             target: target.to_owned(),
             completed: false,
             _file_lock: file_lock,
+            diagnostics,
         })
     }
 
@@ -204,7 +203,10 @@ impl UpdateOperation {
             SystemOperationKind::Update,
             result.as_ref().ok().map(|_| self.target.clone()),
             result.as_ref().ok().cloned(),
-            result.as_ref().err().map(ToString::to_string),
+            result
+                .as_ref()
+                .err()
+                .map(|error| error.message().to_owned()),
         )?;
         self.completed = true;
         Ok(())
@@ -224,6 +226,11 @@ impl Drop for UpdateOperation {
             )
         {
             tracing::warn!(error = %error, "收敛中断的系统更新状态失败");
+            self.diagnostics.record_on_drop(
+                "persist_interrupted_update",
+                Some(self.operation_id.clone()),
+                error,
+            );
         }
     }
 }
@@ -277,7 +284,7 @@ pub(crate) fn set_running(
         kind: Some(kind.into()),
         status: PersistedStatus::Running,
         target_version: target_version.map(ToOwned::to_owned),
-        message: Some("operation running".to_owned()),
+        message: Some("操作正在执行".to_owned()),
         error: None,
         started_at: Some(Utc::now().to_rfc3339()),
         finished_at: None,
@@ -303,7 +310,7 @@ pub(crate) fn finish(
         state.operation.error = Some(error);
     } else {
         state.operation.status = PersistedStatus::Succeeded;
-        state.operation.message = Some("operation succeeded".to_owned());
+        state.operation.message = Some("操作已完成".to_owned());
         state.operation.error = None;
         match kind {
             SystemOperationKind::Update => {
@@ -398,11 +405,11 @@ pub(crate) fn reconcile_installation(
 fn stale_lock(path: &Path) -> Result<bool, OperationError> {
     let modified = fs::metadata(path)
         .and_then(|metadata| metadata.modified())
-        .map_err(|error| internal(format!("failed to read update lock timestamp: {error}")))?;
+        .map_err(|error| internal("无法读取更新锁时间").with_source(error))?;
     modified
         .elapsed()
         .map(|age| age > Duration::from_secs(30 * 60))
-        .map_err(|error| internal(format!("failed to calculate update lock age: {error}")))
+        .map_err(|error| internal("无法检查更新锁是否过期").with_source(error))
 }
 
 fn read_persisted(path: &Path) -> Result<PersistedState, OperationError> {
@@ -410,8 +417,8 @@ fn read_persisted(path: &Path) -> Result<PersistedState, OperationError> {
         return Ok(PersistedState::default());
     }
     let data = fs::read_to_string(path)
-        .map_err(|error| internal(format!("failed to read update state: {error}")))?;
-    serde_json::from_str(&data).map_err(|error| internal(format!("invalid update state: {error}")))
+        .map_err(|error| internal("无法读取系统更新状态").with_source(error))?;
+    serde_json::from_str(&data).map_err(|error| internal("系统更新状态文件损坏").with_source(error))
 }
 
 fn write_persisted(path: &Path, state: &PersistedState) -> Result<(), OperationError> {
@@ -419,12 +426,11 @@ fn write_persisted(path: &Path, state: &PersistedState) -> Result<(), OperationE
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
     {
-        fs::create_dir_all(parent).map_err(|error| {
-            internal(format!("failed to create update state directory: {error}"))
-        })?;
+        fs::create_dir_all(parent)
+            .map_err(|error| internal("无法创建系统更新状态目录").with_source(error))?;
     }
     let data = serde_json::to_vec_pretty(state)
-        .map_err(|error| internal(format!("failed to encode update state: {error}")))?;
+        .map_err(|error| internal("无法生成系统更新状态").with_source(error))?;
     let temporary = temporary_path(path);
     let result = (|| {
         let mut file = fs::OpenOptions::new()
@@ -438,7 +444,7 @@ fn write_persisted(path: &Path, state: &PersistedState) -> Result<(), OperationE
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
     }
-    result.map_err(|error| internal(format!("failed to write update state: {error}")))
+    result.map_err(|error| internal("无法保存系统更新状态").with_source(error))
 }
 
 fn temporary_path(path: &Path) -> PathBuf {

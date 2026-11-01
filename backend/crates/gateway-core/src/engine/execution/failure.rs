@@ -9,15 +9,15 @@ use crate::{
 pub(super) fn authentication_gateway_error(error: ClientAuthenticationError) -> GatewayError {
     match error {
         ClientAuthenticationError::InvalidKey => {
-            GatewayError::new(GatewayErrorKind::Unauthorized, "client API key is invalid")
+            GatewayError::new(GatewayErrorKind::Unauthorized, "Client API key is invalid.")
         }
         ClientAuthenticationError::SnapshotUnavailable => GatewayError::new(
             GatewayErrorKind::Internal,
-            "runtime snapshot is unavailable",
+            "Gateway configuration is unavailable.",
         ),
         ClientAuthenticationError::ProviderUnavailable => GatewayError::new(
             GatewayErrorKind::Internal,
-            "frontend authentication provider is unavailable",
+            "Client authentication service is unavailable.",
         ),
     }
 }
@@ -30,24 +30,24 @@ pub(super) fn map_routing_error(error: crate::validation::RoutingError) -> Gatew
         } => GatewayError::new(
             GatewayErrorKind::ModelNotFound,
             if model == mapped_model {
-                "the requested model was not found in the provider catalogs available to this API key; check the model name"
+                "Model unavailable for this API key. Check the model name."
             } else {
-                "the requested model maps to an upstream model that was not found in the provider catalogs available to this API key; check the configured model mapping"
+                "Mapped model unavailable for this API key. Check the model mapping."
             },
         ),
         crate::validation::RoutingError::NoCapableProvider { .. }
         | crate::validation::RoutingError::NoCapableProviderEndpoint { .. }
         | crate::validation::RoutingError::EmptyAccountScope => GatewayError::new(
             GatewayErrorKind::NoAvailableProvider,
-            "no provider can execute this request",
+            "No provider can execute this request.",
         ),
         crate::validation::RoutingError::UnsupportedProviderEndpoint { .. } => GatewayError::new(
             GatewayErrorKind::Unsupported,
-            "the selected provider does not support this operation",
+            "The selected provider does not support this operation.",
         ),
         _ => GatewayError::new(
             GatewayErrorKind::Internal,
-            "runtime routing configuration is invalid",
+            "Runtime routing configuration is invalid.",
         ),
     }
 }
@@ -55,23 +55,23 @@ pub(super) fn map_routing_error(error: crate::validation::RoutingError) -> Gatew
 pub fn gateway_error_from_engine(error: &EngineError) -> GatewayError {
     match error {
         EngineError::Cancelled => {
-            GatewayError::new(GatewayErrorKind::Cancelled, "request was cancelled")
+            GatewayError::new(GatewayErrorKind::Cancelled, "Request was cancelled.")
         }
         EngineError::Deadline => {
-            GatewayError::new(GatewayErrorKind::Timeout, "request deadline elapsed")
+            GatewayError::new(GatewayErrorKind::Timeout, "Request deadline elapsed.")
         }
         EngineError::Provider(provider) => GatewayError::from_provider(provider),
         EngineError::EmptyRoutingPlan | EngineError::ProviderNotRegistered { .. } => {
             GatewayError::new(
                 GatewayErrorKind::NoAvailableProvider,
-                "no provider is available",
+                "No provider is available.",
             )
         }
         EngineError::Store(source) => {
-            GatewayError::new(GatewayErrorKind::Internal, "request execution failed")
+            GatewayError::new(GatewayErrorKind::Internal, "Request execution failed.")
                 .with_source(source.clone())
         }
-        _ => GatewayError::new(GatewayErrorKind::Internal, "request execution failed"),
+        _ => GatewayError::new(GatewayErrorKind::Internal, "Request execution failed."),
     }
 }
 

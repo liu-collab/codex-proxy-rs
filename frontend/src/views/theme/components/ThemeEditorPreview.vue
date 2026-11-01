@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ThemeName } from '@codex-proxy/ui/theme'
+import type { ThemeScheme } from '@codex-proxy/ui/theme'
 
 import type { CSSProperties } from 'vue'
 
@@ -14,7 +14,7 @@ import ThemeDashboardPreview from './ThemeDashboardPreview.vue'
 import ThemePreviewCanvas from './ThemePreviewCanvas.vue'
 
 defineProps<{
-  theme: ThemeName
+  theme: ThemeScheme
   style: CSSProperties
 }>()
 
@@ -36,10 +36,10 @@ const previewOptions = computed(() => ([
 
 <template>
   <section class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden" :aria-label="t('appearance.preview.themeRealTimePreview')">
-    <header class="shrink-0 flex flex-wrap items-center justify-between gap-3 rounded-cp-lg bg-cp-bg-container px-3 py-2.5 shadow-cp-tertiary">
+    <header class="shrink-0 flex flex-wrap items-center justify-between gap-3 rounded-z-lg bg-z-bg-container px-3 py-2.5 shadow-z-tertiary">
       <div>
-        <strong class="block text-cp-sm font-heavy text-cp-text">{{ t('appearance.preview.livePreview') }}</strong>
-        <span class="mt-0.5 block text-[9px] font-emphasis text-cp-text-quaternary">{{ t('appearance.preview.description') }}</span>
+        <strong class="block text-z-sm font-heavy text-z-text">{{ t('appearance.preview.livePreview') }}</strong>
+        <span class="mt-0.5 block text-[9px] font-emphasis text-z-text-quaternary">{{ t('appearance.preview.description') }}</span>
       </div>
       <ZSegmented v-model="preview" :aria-label="t('appearance.preview.previewType')" size="small" :options="previewOptions" />
     </header>

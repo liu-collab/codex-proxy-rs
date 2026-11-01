@@ -6,6 +6,7 @@ pub mod config;
 mod logging;
 pub mod official_plugins;
 pub mod outbound;
+pub mod peer;
 pub mod plugin_distribution;
 pub mod pricing;
 pub mod process;
@@ -160,6 +161,7 @@ impl HostBundle {
         lease: Arc<dyn WorkerLeaderLeasePort>,
         diagnostics: Arc<dyn gateway_core::diagnostics::OperationalDiagnostics>,
     ) -> Result<(), HostError> {
+        self.system.set_diagnostics(Arc::clone(&diagnostics));
         self.workers.start(plan, lease, diagnostics)?;
         Ok(())
     }

@@ -16,11 +16,15 @@ use gateway_admin::{
 struct RecordingSystemOperations {
     target: Mutex<Option<Option<String>>>,
     channel: Mutex<Option<gateway_admin::model::system::SystemUpdateChannel>>,
+    failure: Option<SystemOperationError>,
 }
 
 #[async_trait]
 impl SystemOperations for RecordingSystemOperations {
     async fn version(&self) -> Result<SystemVersion, SystemOperationError> {
+        if let Some(error) = &self.failure {
+            return Err(error.clone());
+        }
         Ok(SystemVersion {
             version: "1.0.0".to_owned(),
             git_sha: "unknown".to_owned(),
@@ -117,6 +121,33 @@ impl SystemOperations for RecordingSystemOperations {
             message: "accepted".to_owned(),
         })
     }
+}
+
+#[tokio::test]
+async fn system_failure_should_preserve_safe_message_source_and_redaction_marker() {
+    let operations = std::sync::Arc::new(RecordingSystemOperations {
+        failure: Some(
+            SystemOperationError::new(
+                gateway_admin::ports::system::SystemOperationErrorKind::Upstream,
+                "更新包下载失败",
+            )
+            .with_source(std::io::Error::other("native transport diagnostic"))
+            .redact_sensitive_context(),
+        ),
+        ..RecordingSystemOperations::default()
+    });
+    let services = super::AdminHarness::new().system(operations).build().await;
+    let error = services.system().version().await.expect_err("host failure");
+    assert_eq!(
+        error.kind(),
+        gateway_admin::model::AdminErrorKind::BadGateway
+    );
+    assert_eq!(error.message(), "更新包下载失败");
+    assert!(!format!("{error} {error:?}").contains("native transport diagnostic"));
+    let details = error.error_details().expect("host error details");
+    assert!(details.as_str().contains("native transport diagnostic"));
+    let details: serde_json::Value = serde_json::from_str(details.as_str()).expect("details JSON");
+    assert_eq!(details["redacted"], true);
 }
 
 #[tokio::test]

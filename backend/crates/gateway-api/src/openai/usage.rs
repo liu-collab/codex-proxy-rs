@@ -63,7 +63,7 @@ async fn usage_response(
     if Query::<UsageQuery>::try_from_uri(&uri).is_err() {
         return openai_error_response(
             StatusCode::BAD_REQUEST,
-            "Usage query does not accept query parameters",
+            "Usage query does not accept query parameters.",
             "invalid_request_error",
             "invalid_usage_query",
         )
@@ -80,7 +80,7 @@ async fn usage_response(
         Err(_) => {
             return openai_error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
-                "Key usage is temporarily unavailable",
+                "Key usage is temporarily unavailable.",
                 "server_error",
                 "usage_unavailable",
             )

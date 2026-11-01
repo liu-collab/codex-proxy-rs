@@ -25,10 +25,10 @@ const { t } = useI18n({ useScope: 'global' })
 <template>
   <div class="flex items-center gap-0.5">
     <ZIconButton size="small" :aria-label="t('proxies.actions.test')" :loading="testing && !batchTesting" :disabled="batchTesting || testing || updating" @click="emit('test', proxy)">
-      <Wifi class="size-3.5 text-cp-link" />
+      <Wifi class="size-3.5 text-z-link" />
     </ZIconButton>
     <ZIconButton size="small" :aria-label="t('proxies.actions.edit')" :disabled="testing || updating" @click="emit('edit', proxy)">
-      <Pencil class="size-3.5 text-cp-link" />
+      <Pencil class="size-3.5 text-z-link" />
     </ZIconButton>
     <ZPopover placement="bottom-end">
       <template #reference="{ open }">
@@ -40,7 +40,7 @@ const { t } = useI18n({ useScope: 'global' })
         <div class="w-36 p-1.5">
           <ZMenuItem :disabled="testing || updating" @click="(close(), emit('toggle', proxy))">
             <template #icon>
-              <Power class="size-3.5" :class="proxy.enabled ? 'text-cp-warning' : 'text-cp-success'" />
+              <Power class="size-3.5" :class="proxy.enabled ? 'text-z-warning' : 'text-z-success'" />
             </template>
             {{ proxy.enabled ? t('proxies.actions.disableProxy') : t('proxies.actions.enableProxy') }}
           </ZMenuItem>

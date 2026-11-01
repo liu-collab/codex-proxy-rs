@@ -109,16 +109,16 @@ function moveWithKeyboard(index: number, offset: -1 | 1) {
   <section class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)]" :aria-label="t('settings.privacy.steps.processingSteps')">
     <div class="mb-1 flex min-h-8 items-center justify-between gap-2 pr-5 pl-1">
       <div class="flex items-center gap-1">
-        <h3 class="m-0 text-cp leading-none font-medium text-cp-text-secondary">
+        <h3 class="m-0 text-z leading-none font-medium text-z-text-secondary">
           {{ t('settings.privacy.steps.processingSteps') }}
         </h3>
         <ZPopover trigger="hover-click">
           <template #reference="{ open: helpOpen }">
-            <ZIconButton size="small" :aria-label="t('settings.privacy.steps.helpTitle')" :title="undefined" class="size-5! hover:bg-transparent! active:bg-transparent!" :aria-expanded="helpOpen">
+            <ZIconButton variant="link" size="small" :aria-label="t('settings.privacy.steps.helpTitle')" :title="undefined" class="size-5!" :aria-expanded="helpOpen">
               <CircleHelp class="size-3.5" />
             </ZIconButton>
           </template>
-          <div class="max-w-72 space-y-2 p-3 text-cp-sm text-cp-text-secondary">
+          <div class="max-w-72 space-y-2 p-3 text-z-sm text-z-text-secondary">
             <p class="m-0">
               {{ t('settings.privacy.steps.executionOrderHelp') }}
             </p>
@@ -131,7 +131,7 @@ function moveWithKeyboard(index: number, offset: -1 | 1) {
           </div>
         </ZPopover>
       </div>
-      <ZIconButton size="small" :aria-label="t('settings.privacy.steps.addSteps')" class="bg-cp-fill-quaternary! hover:bg-cp-fill-tertiary!" :disabled="!canAdd" @click="emit('add')">
+      <ZIconButton size="small" :aria-label="t('settings.privacy.steps.addSteps')" class="bg-z-fill-quaternary! hover:bg-z-fill-tertiary!" :disabled="!canAdd" @click="emit('add')">
         <Plus class="size-3.5" />
       </ZIconButton>
     </div>
@@ -147,8 +147,8 @@ function moveWithKeyboard(index: number, offset: -1 | 1) {
           <ol ref="list" class="m-0 grid list-none gap-1 p-1 pr-4">
             <li
               v-for="(item, index) in items" :key="stepKey(item.step)"
-              class="relative min-w-0 rounded-cp transition-colors motion-reduce:transition-none"
-              :class="selected === index ? 'bg-cp-primary-container text-cp-primary-on-container hover:bg-cp-primary-container-hover' : 'bg-cp-fill-quaternary text-cp-text hover:bg-cp-bg-text-hover'"
+              class="relative min-w-0 rounded-z transition-colors motion-reduce:transition-none"
+              :class="selected === index ? 'bg-z-primary-container text-z-primary-on-container hover:bg-z-primary-container-hover' : 'bg-z-fill-quaternary text-z-text hover:bg-z-bg-text-hover'"
             >
               <ZIconButton
                 size="small" :disabled="sortingDisabled"
@@ -161,14 +161,14 @@ function moveWithKeyboard(index: number, offset: -1 | 1) {
               </ZIconButton>
               <button
                 type="button"
-                class="grid w-full min-w-0 cursor-pointer gap-0.5 rounded-cp border-0 bg-transparent py-2 pr-2 pl-9 text-left outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline"
+                class="grid w-full min-w-0 cursor-pointer gap-0.5 rounded-z border-0 bg-transparent py-2 pr-2 pl-9 text-left outline-none focus-visible:ring-2 focus-visible:ring-z-control-outline"
                 :aria-current="selected === index ? 'step' : undefined"
                 :aria-label="t('settings.privacy.steps.step', { value: index + 1, field: item.field, scope: item.scope, action: item.action, effect: item.effect })"
                 @click="selected = index"
               >
-                <span class="truncate pr-7 text-cp-sm leading-5 font-emphasis" :title="item.field">{{ item.field }}</span>
-                <span class="truncate text-cp-xs leading-4" :class="selected === index ? 'text-cp-primary-on-container' : 'text-cp-text-secondary'" :title="`${item.scope} · ${item.action}`">{{ item.scope }} · {{ item.action }}</span>
-                <span class="truncate font-mono text-cp-xs leading-4" :class="selected === index ? 'text-cp-primary-on-container' : 'text-cp-text-tertiary'" :title="item.effect">{{ item.effect }}</span>
+                <span class="truncate pr-7 text-z-sm leading-5 font-emphasis" :title="item.field">{{ item.field }}</span>
+                <span class="truncate text-z-xs leading-4" :class="selected === index ? 'text-z-primary-on-container' : 'text-z-text-secondary'" :title="`${item.scope} · ${item.action}`">{{ item.scope }} · {{ item.action }}</span>
+                <span class="truncate font-mono text-z-xs leading-4" :class="selected === index ? 'text-z-primary-on-container' : 'text-z-text-tertiary'" :title="item.effect">{{ item.effect }}</span>
               </button>
               <ZIconButton size="small" class="absolute top-1.5 right-1.5 size-6! p-0" :disabled="steps.length === 1" :aria-label="t('settings.privacy.steps.deleteStep', { value: index + 1, field: item.field })" @click="emit('remove', index)">
                 <Trash2 class="size-3.5" />

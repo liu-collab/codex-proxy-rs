@@ -19,6 +19,29 @@ impl ClientBudgetLimits {
     pub fn is_limited(self) -> bool {
         self.daily_usd != Decimal::ZERO || self.weekly_usd != Decimal::ZERO
     }
+
+    /// 准入与对外预算查询共用真实账本口径，展示字符串不参与访问判断
+    #[must_use]
+    pub fn access(self, daily_used: Decimal, weekly_used: Decimal) -> ClientBudgetAccess {
+        ClientBudgetAccess {
+            daily_limit_reached: self.daily_usd != Decimal::ZERO && daily_used >= self.daily_usd,
+            weekly_limit_reached: self.weekly_usd != Decimal::ZERO
+                && weekly_used >= self.weekly_usd,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientBudgetAccess {
+    pub daily_limit_reached: bool,
+    pub weekly_limit_reached: bool,
+}
+
+impl ClientBudgetAccess {
+    #[must_use]
+    pub const fn allowed(self) -> bool {
+        !self.daily_limit_reached && !self.weekly_limit_reached
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

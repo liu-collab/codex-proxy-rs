@@ -42,15 +42,17 @@ pub(super) fn map_provider_error(
         ProviderAdminErrorKind::BadGateway => AdminErrorKind::BadGateway,
         ProviderAdminErrorKind::Internal => AdminErrorKind::Internal,
     };
-    let message = match kind {
-        AdminErrorKind::Invalid => "Provider 请求不合法",
-        AdminErrorKind::NotFound => "Provider 资源不存在",
-        AdminErrorKind::Conflict => "Provider 资源状态冲突，请刷新后重试",
-        AdminErrorKind::BadGateway => "上游服务请求失败",
-        AdminErrorKind::UpstreamResultUnknown => "上游执行结果未知，请刷新状态后再决定是否重试",
-        AdminErrorKind::Unavailable => "Provider 服务暂不可用",
-        AdminErrorKind::Internal => "服务内部错误",
-        _ => "Provider 操作失败",
+    let message = match error.kind() {
+        ProviderAdminErrorKind::Invalid => "服务商请求参数不合法",
+        ProviderAdminErrorKind::Unsupported => "该服务商不支持此操作",
+        ProviderAdminErrorKind::NotFound => "服务商资源不存在",
+        ProviderAdminErrorKind::Conflict => "服务商资源状态冲突，请刷新后重试",
+        ProviderAdminErrorKind::BadGateway => "上游服务请求失败",
+        ProviderAdminErrorKind::Ambiguous => "上游执行结果未知，请刷新状态后再决定是否重试",
+        ProviderAdminErrorKind::Unavailable | ProviderAdminErrorKind::CredentialRefreshRequired => {
+            "服务商暂不可用"
+        }
+        ProviderAdminErrorKind::Internal => "服务内部错误",
     };
     AdminError::new(kind, error.public_message().unwrap_or(message)).with_source(OperationFailure {
         operation: resource,

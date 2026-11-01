@@ -246,7 +246,7 @@ pub(crate) fn error_response(error: MiddlewareError) -> Response {
         MiddlewareError::Rejected | MiddlewareError::Remote { rejected: true, .. } => {
             openai_error_response(
                 StatusCode::FORBIDDEN,
-                "Request rejected by middleware",
+                "Request rejected by middleware.",
                 "invalid_request_error",
                 "middleware_rejected",
             )
@@ -255,7 +255,7 @@ pub(crate) fn error_response(error: MiddlewareError) -> Response {
         MiddlewareError::Fault | MiddlewareError::Remote { .. } | MiddlewareError::InvalidState => {
             openai_error_response(
                 StatusCode::BAD_GATEWAY,
-                "Request middleware failed",
+                "Request middleware failed.",
                 "server_error",
                 "middleware_failed",
             )

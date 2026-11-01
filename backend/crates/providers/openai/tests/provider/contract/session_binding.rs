@@ -3,6 +3,71 @@
 use super::*;
 
 #[tokio::test]
+async fn session_affinity_storage_tolerates_delays_but_rejects_expired_requests_before_sending() {
+    for (delay_ms, should_succeed) in [(250, true), (750, false)] {
+        let store = Arc::new(MemoryAccountStore::default());
+        create_account(&store, "acct_subagent_a").await;
+        let affinity = Arc::new(MemorySessionAffinity::with_operation_delay(
+            Duration::from_millis(delay_ms),
+        ));
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/codex/responses"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_raw(
+                    format!("event: response.created\ndata: {{\"type\":\"response.created\",\"response\":{{\"id\":\"resp_scope_capture\",\"status\":\"in_progress\"}}}}\n\n{CAPTURE_COMPLETED_SSE}"),
+                    "text/event-stream",
+                ),
+            )
+            .expect(if should_succeed { 1 } else { 0 })
+            .mount(&server)
+            .await;
+        let provider = provider_with_affinity_and_base_url(&store, affinity.clone(), server.uri());
+
+        // 只推进存储等待的虚拟时间，网络交付恢复真实时钟，避免依赖宿主调度速度
+        tokio::time::pause();
+        let result = provider
+            .execute(
+                planned_request("openai", turn_request("delayed-session", "delayed-turn")),
+                context("req_affinity_delay", CancellationToken::new()),
+            )
+            .await;
+        tokio::time::resume();
+
+        if should_succeed {
+            let mut stream = result.expect("delayed binding and turn association must succeed");
+            assert_eq!(
+                stream.metadata().provider_account_id().as_str(),
+                "acct_subagent_a"
+            );
+            assert_eq!(affinity.binding_count(), 1);
+            assert_eq!(affinity.alias_ttls().len(), 1);
+            let mut completed = false;
+            while let Some(event) = stream.next().await {
+                completed |= event
+                    .unwrap()
+                    .canonical_facts()
+                    .iter()
+                    .any(|event| matches!(event, GatewayEvent::Completed(_)));
+            }
+            assert!(completed, "admitted request must complete through upstream");
+        } else {
+            let error = result
+                .err()
+                .expect("expired storage wait must reject the request");
+            assert_eq!(
+                error.kind(),
+                ProviderErrorKind::ProviderInfrastructureUnavailable
+            );
+            assert_eq!(error.send_state(), UpstreamSendState::NotSent);
+            assert!(error.retry_is_prohibited());
+            assert_eq!(affinity.binding_count(), 0);
+        }
+        server.verify().await;
+    }
+}
+
+#[tokio::test]
 async fn cyber_policy_session_exclusion_has_actionable_non_retryable_error() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_subagent_a").await;
@@ -63,7 +128,10 @@ async fn cyber_policy_session_exclusion_has_actionable_non_retryable_error() {
         .client_visible_upstream_error()
         .expect("actionable client message");
     assert_eq!(visible.code(), Some("cyber_policy"));
-    assert!(visible.message().contains("Do not repeatedly retry"));
+    assert_eq!(
+        visible.message(),
+        "No account is available for this session after an upstream cyber policy rejection."
+    );
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
     // 可见但不属于固定账号范围的候选不能掩盖会话限制
     create_account(&store, "acct_subagent_b").await;

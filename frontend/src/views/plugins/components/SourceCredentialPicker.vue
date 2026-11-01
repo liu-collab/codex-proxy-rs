@@ -34,7 +34,7 @@ function toggle(id: string, checked: boolean) {
     <div
       v-for="credential in credentials"
       :key="credential.id"
-      class="flex min-w-0 items-center gap-3 rounded-cp bg-cp-fill-alter px-3 py-1.5"
+      class="flex min-w-0 items-center gap-3 rounded-z bg-z-fill-alter px-3 py-1.5"
       :class="disabled ? 'opacity-60' : undefined"
     >
       <ZCheckbox
@@ -44,13 +44,13 @@ function toggle(id: string, checked: boolean) {
         @update:model-value="toggle(credential.id, $event)"
       />
       <span class="flex min-w-0 flex-1 items-center gap-3">
-        <strong class="max-w-[45%] shrink-0 truncate text-cp-sm text-cp-text" :title="credential.name">{{ credential.name }}</strong>
-        <span class="min-w-0 flex-1 truncate font-mono text-cp-xs text-cp-text-secondary" :title="`${credential.origin}${credential.pathPrefix}`">
+        <strong class="max-w-[45%] shrink-0 truncate text-z-sm text-z-text" :title="credential.name">{{ credential.name }}</strong>
+        <span class="min-w-0 flex-1 truncate font-mono text-z-xs text-z-text-secondary" :title="`${credential.origin}${credential.pathPrefix}`">
           {{ credential.origin }}{{ credential.pathPrefix }}
         </span>
       </span>
       <ZIconButton size="small" :aria-label="t('plugins.credentials.deleteDownloadCredentials', { name: credential.name })" :disabled="disabled" @click="$emit('delete', credential)">
-        <Trash2 class="size-3.5 text-cp-error" />
+        <Trash2 class="size-3.5 text-z-error" />
       </ZIconButton>
     </div>
   </div>

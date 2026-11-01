@@ -51,15 +51,15 @@ const emptyCards: DashboardSummaryResponse['cards'] = {
     todayTokensValue: 0,
     yesterdayTokensValue: 0,
     totalTokens: '0',
-    totalBillingAmountUsd: '—',
+    totalBillingAmountUsd: '$0.00',
   },
   cache: {
-    todayHitRate: '—',
+    todayHitRate: '0%',
     todayHitRateValue: null,
     yesterdayHitRateValue: null,
-    totalHitRate: '—',
+    totalHitRate: '0%',
     totalCachedInputTokens: '0',
-    averageFirstTokenLatencyMs: '—',
+    averageFirstTokenLatencyMs: '0 ms',
   },
 }
 
@@ -178,7 +178,7 @@ function metricCards(
         },
         {
           label: t('usage.averageTtft'),
-          value: cache.averageFirstTokenLatencyMs,
+          value: numericMetricDisplay(cache.averageFirstTokenLatencyMs, '0 ms'),
           tone: 'info',
         },
       ],
@@ -205,14 +205,14 @@ function metricCards(
         },
         {
           label: t('dashboard.metrics.totalCharges'),
-          value: formatDashboardUsd(tokens.totalBillingAmountUsd),
+          value: formatDashboardUsd(numericMetricDisplay(tokens.totalBillingAmountUsd, '$0.00')),
           tone: 'success',
         },
       ],
     },
     {
       title: t('dashboard.metrics.cacheHits'),
-      value: cache.todayHitRate,
+      value: numericMetricDisplay(cache.todayHitRate, '0%'),
       valueRaw: cache.todayHitRateValue,
       valueFormatter: formatDashboardRate,
       icon: Timer,
@@ -229,7 +229,7 @@ function metricCards(
       details: [
         {
           label: t('dashboard.metrics.totalCacheHits'),
-          value: cache.totalHitRate,
+          value: numericMetricDisplay(cache.totalHitRate, '0%'),
           tone: 'warning',
         },
         {
@@ -240,6 +240,12 @@ function metricCards(
       ],
     },
   ]
+}
+
+function numericMetricDisplay(value: string, zero: string) {
+  return !value || value === '—' || value === '-'
+    ? zero
+    : value
 }
 
 function formatAccountCount(value: number) {
@@ -266,7 +272,7 @@ function recentTrendWindow(points: DashboardTrendPoint[]) {
 function formatDashboardRate(value: number) {
   return Number.isFinite(value)
     ? `${(value * 100).toFixed(1)}%`
-    : '—'
+    : '0%'
 }
 
 function aggregateUsageTrend(points: DashboardTrendPoint[]) {
@@ -380,49 +386,49 @@ const trendMetrics = computed(() => ({
   inputTokens: {
     label: t('dashboard.metrics.inputTokens'),
     tone: 'info',
-    colorVar: '--cp-color-blue-solid',
+    colorToken: 'color-blue-solid',
   },
   outputTokens: {
     label: t('dashboard.metrics.outputTokens'),
     tone: 'success',
-    colorVar: '--cp-color-green-solid',
+    colorToken: 'color-green-solid',
   },
   cachedInputTokens: {
     label: t('dashboard.metrics.cachedInputTokens'),
     tone: 'normal',
-    colorVar: '--cp-color-text-tertiary',
+    colorToken: 'color-text-tertiary',
   },
   firstTokenP95Ms: {
     label: t('dashboard.metrics.firstTokenP95Ms'),
     tone: 'normal',
-    colorVar: '--cp-color-cyan-solid',
+    colorToken: 'color-cyan-solid',
   },
   latencyP95Ms: {
     label: t('dashboard.metrics.latencyP95Ms'),
     tone: 'warning',
-    colorVar: '--cp-color-orange-solid',
+    colorToken: 'color-orange-solid',
   },
   outputThroughputP50: {
     label: t('dashboard.metrics.outputThroughputP50'),
     tone: 'success',
-    colorVar: '--cp-color-green-solid',
+    colorToken: 'color-green-solid',
   },
   errors: {
     label: t('dashboard.metrics.errors'),
     tone: 'danger',
-    colorVar: '--cp-color-red-solid',
+    colorToken: 'color-red-solid',
   },
   successRate: {
     label: t('dashboard.metrics.successRate'),
     tone: 'success',
-    colorVar: '--cp-color-green-solid',
+    colorToken: 'color-green-solid',
   },
   requests: {
     label: t('dashboard.metrics.totalRequests'),
     tone: 'info',
-    colorVar: '--cp-color-blue-solid',
+    colorToken: 'color-blue-solid',
   },
-} satisfies Record<DashboardTrendMetric, { label: string, tone: MetricTone, colorVar: string }>))
+} satisfies Record<DashboardTrendMetric, { label: string, tone: MetricTone, colorToken: string }>))
 
 export function trendMetricView(metric: DashboardTrendMetric) {
   return { metric, ...trendMetrics.value[metric] }

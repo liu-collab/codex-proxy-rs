@@ -26,11 +26,11 @@ interface MetricItem {
 }
 
 const toneClasses: Record<MetricTone, string> = {
-  primary: 'text-cp-text',
-  secondary: 'text-cp-text-secondary',
-  success: 'text-cp-success-text',
-  warning: 'text-cp-warning',
-  active: 'text-cp-success',
+  primary: 'text-z-text',
+  secondary: 'text-z-text-secondary',
+  success: 'text-z-success-text',
+  warning: 'text-z-warning',
+  active: 'text-z-success',
 }
 
 const metrics = computed<MetricItem[]>(() => {
@@ -88,7 +88,7 @@ const metrics = computed<MetricItem[]>(() => {
 <template>
   <dl v-if="kind === 'usage'" class="m-0 grid grid-cols-[auto_auto] justify-start gap-x-2 gap-y-0.5 text-xs leading-4">
     <template v-for="metric in metrics" :key="metric.label">
-      <dt class="text-cp-text-quaternary">
+      <dt class="text-z-text-quaternary">
         {{ metric.label }}
       </dt>
       <dd class="m-0 font-mono font-semibold tabular-nums" :class="toneClasses[metric.tone]">

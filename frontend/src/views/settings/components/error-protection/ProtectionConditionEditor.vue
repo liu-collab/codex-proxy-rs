@@ -91,7 +91,7 @@ function toggleMissing(missing: boolean) {
 </script>
 
 <template>
-  <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-cp bg-cp-bg-container p-3 md:grid-cols-[9rem_7rem_minmax(0,1fr)_auto]">
+  <div class="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-z bg-z-bg-container p-3 md:grid-cols-[9rem_7rem_minmax(0,1fr)_auto]">
     <div class="grid min-w-0 grid-cols-2 gap-2 md:col-span-2 md:grid-cols-[9rem_7rem]">
       <ZSelect
         :model-value="condition.field"
@@ -111,10 +111,10 @@ function toggleMissing(missing: boolean) {
     <div class="col-span-full grid min-w-0 gap-1 md:col-span-1 md:col-start-3 md:row-start-1" role="group" :aria-label="t('settings.errorProtection.valuesHelp')">
       <div class="grid gap-2">
         <div v-for="(value, index) in condition.values" :key="index" class="flex min-w-0 items-center gap-2">
-          <span v-if="condition.values.length > 1" class="w-4 shrink-0 text-center text-cp-xs text-cp-text-tertiary">
+          <span v-if="condition.values.length > 1" class="w-4 shrink-0 text-center text-z-xs text-z-text-tertiary">
             {{ index > 0 ? t('settings.errorProtection.or') : '' }}
           </span>
-          <span v-if="value === null" class="flex min-h-9 min-w-0 flex-1 items-center rounded-cp bg-cp-fill-quaternary px-3 text-cp-sm text-cp-text-secondary">
+          <span v-if="value === null" class="flex min-h-9 min-w-0 flex-1 items-center rounded-z bg-z-fill-quaternary px-3 text-z-sm text-z-text-secondary">
             {{ t('settings.errorProtection.missing') }}
           </span>
           <ZInput
@@ -148,7 +148,7 @@ function toggleMissing(missing: boolean) {
               <ChevronDown class="size-3.5" />
             </ZButton>
           </template>
-          <div :id="optionsId" class="grid max-w-72 gap-3 p-3 text-cp-sm">
+          <div :id="optionsId" class="grid max-w-72 gap-3 p-3 text-z-sm">
             <ZCheckbox :model-value="condition.ignoreCase" :disabled="disabled" :label="t('settings.errorProtection.ignoreCase')" @update:model-value="update({ ignoreCase: $event })" />
             <ZCheckbox
               v-if="condition.operator === 'equals' || hasMissing"
@@ -157,10 +157,10 @@ function toggleMissing(missing: boolean) {
               :label="t('settings.errorProtection.missing')"
               @update:model-value="toggleMissing"
             />
-            <p class="m-0 leading-relaxed text-cp-text-tertiary">
+            <p class="m-0 leading-relaxed text-z-text-tertiary">
               {{ t('settings.errorProtection.missingHelp') }}
             </p>
-            <p v-if="condition.field === 'message'" class="m-0 leading-relaxed text-cp-text-tertiary">
+            <p v-if="condition.field === 'message'" class="m-0 leading-relaxed text-z-text-tertiary">
               {{ t('settings.errorProtection.messageHelp') }}
             </p>
           </div>
@@ -170,7 +170,7 @@ function toggleMissing(missing: boolean) {
     <ZIconButton class="col-start-2 row-start-1 md:col-start-4" :disabled="disabled" :aria-label="t('settings.errorProtection.removeCondition')" @click="emit('remove')">
       <Trash2 class="size-4" />
     </ZIconButton>
-    <p v-if="error" :id="errorId" role="alert" class="col-span-full m-0 text-cp-sm text-cp-error-text">
+    <p v-if="error" :id="errorId" role="alert" class="col-span-full m-0 text-z-sm text-z-error-text">
       {{ error }}
     </p>
   </div>

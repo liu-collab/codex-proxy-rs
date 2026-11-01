@@ -13,19 +13,15 @@ const DEFAULT_RESTART_DELAY_MS: u64 = 1_200;
 pub(crate) fn spawn_replacement(config: &SystemUpdateConfig) -> Result<(), OperationError> {
     let executable = config.executable_path()?;
     let metadata = fs::metadata(&executable)
-        .map_err(|error| internal(format!("failed to schedule replacement process: {error}")))?;
+        .map_err(|error| internal("无法启动替换进程").with_source(error))?;
     if !metadata.is_file() {
-        return Err(internal(
-            "failed to schedule replacement process: executable is not a file",
-        ));
+        return Err(internal("当前程序不是普通文件，无法在线重启"));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt as _;
         if metadata.permissions().mode() & 0o111 == 0 {
-            return Err(internal(
-                "failed to schedule replacement process: executable is not executable",
-            ));
+            return Err(internal("当前程序没有执行权限，无法在线重启"));
         }
     }
 
@@ -58,5 +54,5 @@ pub(crate) fn spawn_replacement(config: &SystemUpdateConfig) -> Result<(), Opera
     command
         .spawn()
         .map(|_| ())
-        .map_err(|error| internal(format!("failed to schedule replacement process: {error}")))
+        .map_err(|error| internal("无法启动替换进程").with_source(error))
 }

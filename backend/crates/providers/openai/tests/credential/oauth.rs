@@ -10,7 +10,9 @@ use gateway_admin::model::provider_credentials::{
     AuthorizationMutationTarget, AuthorizationOwnerBinding, PendingAuthorizationMutation,
 };
 use gateway_admin::model::{MutationActor, MutationContext};
-use gateway_core::account::{AccountStatus, ProviderAccountId};
+use gateway_core::account::{
+    AccountStatus, ProviderAccountId, ProviderAccountStore, ProviderAccountUpdate,
+};
 use gateway_core::routing::ProviderKind;
 use provider_openai::credential::token_client::{
     AuthorizationCodeExchangeError, AuthorizationCodeExchanger, AuthorizationCodeGrant,
@@ -155,6 +157,13 @@ fn id_token(payload: serde_json::Value) -> String {
 async fn complete(
     id_token: String,
 ) -> Result<(CompletedCodexOAuthCredential, String, String), CodexOAuthAdminError> {
+    complete_with_name(id_token, "new OAuth account").await
+}
+
+async fn complete_with_name(
+    id_token: String,
+    name: &str,
+) -> Result<(CompletedCodexOAuthCredential, String, String), CodexOAuthAdminError> {
     let pending_store = Arc::new(PendingStore::default());
     let service = CodexOAuthAdminService::new(
         pending_store.clone(),
@@ -165,7 +174,13 @@ async fn complete(
     );
     let started = service
         .start_authorization(StartCodexOAuthAuthorization {
-            mutation: mutation(),
+            mutation: PendingAuthorizationMutation::new(
+                ProviderKind::new("openai").expect("provider"),
+                AuthorizationMutationTarget::Create {
+                    name: name.to_owned(),
+                },
+                mutation().owner_binding().clone(),
+            ),
         })
         .await
         .expect("start OAuth authorization");
@@ -403,7 +418,7 @@ async fn separate_new_authorizations_use_distinct_surface_stable_ids() {
 }
 
 #[tokio::test]
-async fn repeated_reauthorization_derives_the_same_surface_id_for_one_account() {
+async fn repeated_reauthorization_preserves_surface_id_with_a_cleared_name() {
     let store = Arc::new(MemoryAccountStore::default());
     store
         .seed_oauth_credential(ImportCodexOAuthCredential {
@@ -416,6 +431,15 @@ async fn repeated_reauthorization_derives_the_same_surface_id_for_one_account() 
         })
         .await;
     let account_id = ProviderAccountId::new("acct_surface_reauth").expect("account id");
+    store
+        .update_account(ProviderAccountUpdate {
+            account_id: account_id.clone(),
+            name: String::new(),
+            email: Some("reauthorize@example.com".to_owned()),
+            plan_type: None,
+        })
+        .await
+        .unwrap();
     let mut surface_ids = Vec::new();
     for request_id in ["surface-reauth-first", "surface-reauth-second"] {
         let service = CodexOAuthAdminService::new(
@@ -450,6 +474,23 @@ async fn repeated_reauthorization_derives_the_same_surface_id_for_one_account() 
     }
 
     assert_eq!(surface_ids[0], surface_ids[1]);
+}
+
+#[tokio::test]
+async fn first_exchange_preserves_optional_local_name_and_upstream_email() {
+    for name in ["", "My account"] {
+        let (credential, _, _) = complete_with_name(
+            id_token(serde_json::json!({ "email": "identity@example.com" })),
+            name,
+        )
+        .await
+        .expect("complete authorization with optional name");
+        let CompletedCodexOAuthCredential::Create(account) = credential else {
+            panic!("expected account creation");
+        };
+        assert_eq!(account.account.name(), name);
+        assert_eq!(account.account.email(), Some("identity@example.com"));
+    }
 }
 
 #[tokio::test]

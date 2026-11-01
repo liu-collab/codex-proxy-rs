@@ -9,10 +9,10 @@ import { detectRequestLocation, getSettings, updateSettings } from '@/api'
 import { ApiError } from '@/api/request'
 import { useAsyncAction } from '@/composables/useAsyncAction'
 import { t } from '@/i18n'
-import { normalizeRequestLocation, requestLocationError } from '@/utils/location'
+import { normalizeRequestLocation } from '@/utils/location'
 import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
-import { protectionSettingsError, trimProtectionText } from '../components/error-protection/form'
+import { trimProtectionText } from '../components/error-protection/form'
 
 type RotationStrategy = (typeof rotationOptions.value)[number]['value']
 
@@ -122,16 +122,6 @@ export function useSettingsForm() {
   const usageRetentionDaysValue = numericModel('usageRetentionDays')
   const concurrencyWaitTimeoutSecondsValue = numericModel('concurrencyWaitTimeoutSeconds')
 
-  const minCodexDesktopVersionError = computed(() => versionError(form.minCodexDesktopVersion))
-  const minCodexCliVersionError = computed(() => versionError(form.minCodexCliVersion))
-
-  function versionError(value: string): string {
-    const normalized = value.trim()
-    return normalized && !isSemver(normalized)
-      ? t('settings.form.enterStandardSemverForExample')
-      : ''
-  }
-
   function applySettings(data: Awaited<ReturnType<typeof getSettings>>) {
     form.codexPrivacyPolicy = cloneDeep(data.codexPrivacyPolicy)
     form.configRevision = data.configRevision
@@ -238,20 +228,6 @@ export function useSettingsForm() {
     mappings.value = rows
   }
 
-  function mappingPayload() {
-    const entries: Record<string, string> = {}
-    for (const row of mappings.value) {
-      const requested = row.requestedModel.trim()
-      const upstream = row.upstreamModel.trim()
-      if (!requested || !upstream)
-        throw new Error(t('settings.form.fillInModelMappingCompletely'))
-      if (entries[requested])
-        throw new Error(t('settings.form.duplicateClientModel', { requested }))
-      entries[requested] = upstream
-    }
-    return entries
-  }
-
   async function saveSettings() {
     const smartScheduling = form.smartScheduling
     if (!smartScheduling)
@@ -260,112 +236,11 @@ export function useSettingsForm() {
     if (saving.value || loading.value || detectingLocation.value || !savedSettings)
       return
     const { refreshMarginSeconds, refreshConcurrency, maxConcurrentPerAccount, openaiGuardianReservedConcurrency, openaiAccountAffinity, maxAccountRotations, openaiSessionAffinityTtlHours, rotationStrategy, maxWaitingPerKey, maxWaitingPerAccount, concurrencyWaitTimeoutSeconds, responsesMaxDecompressedBodyMiB } = form
-    if (!openaiAccountAffinity || maxAccountRotations === null || openaiSessionAffinityTtlHours === null || refreshMarginSeconds === null || refreshConcurrency === null || maxConcurrentPerAccount === null || openaiGuardianReservedConcurrency === null || !rotationStrategy || maxWaitingPerKey === null || maxWaitingPerAccount === null || concurrencyWaitTimeoutSeconds === null) {
-      ZNotification.warning({
-        message: t('settings.form.requiredSettings'),
-      })
-      return
-    }
-    if (!Number.isInteger(openaiSessionAffinityTtlHours) || openaiSessionAffinityTtlHours < 1 || openaiSessionAffinityTtlHours > 720) {
-      ZNotification.warning({
-        message: t('settings.form.invalidAffinityDuration'),
-      })
-      return
-    }
-    if (!Number.isInteger(maxAccountRotations) || maxAccountRotations < 0 || maxAccountRotations > 31) {
-      ZNotification.warning({
-        message: t('settings.form.invalidSwitchLimit'),
-      })
-      return
-    }
-    if (!Number.isInteger(maxConcurrentPerAccount) || maxConcurrentPerAccount < 0 || maxConcurrentPerAccount > 4294967295) {
-      ZNotification.warning({
-        message: t('settings.form.invalidConcurrency'),
-      })
-      return
-    }
-    if (!Number.isInteger(openaiGuardianReservedConcurrency) || openaiGuardianReservedConcurrency < 0 || openaiGuardianReservedConcurrency > 4294967295) {
-      ZNotification.warning({
-        message: t('settings.form.invalidReviewConcurrency'),
-      })
-      return
-    }
-    if (responsesMaxDecompressedBodyMiB === null || !Number.isInteger(responsesMaxDecompressedBodyMiB) || responsesMaxDecompressedBodyMiB < 1
-      || !Number.isSafeInteger(responsesMaxDecompressedBodyMiB * MIB)) {
-      ZNotification.warning({
-        message: t('settings.form.invalidBodyLimit'),
-      })
-      return
-    }
-    const resetCreditMaxWeeklyRemainingPercent = form.resetCreditMaxWeeklyRemainingPercent
-    if (resetCreditMaxWeeklyRemainingPercent !== null && (!Number.isInteger(resetCreditMaxWeeklyRemainingPercent) || resetCreditMaxWeeklyRemainingPercent < 0 || resetCreditMaxWeeklyRemainingPercent > 100)) {
-      ZNotification.warning({
-        message: t('settings.form.invalidQuotaThreshold'),
-      })
-      return
-    }
-    const resetCreditLeadMinutes = form.resetCreditLeadMinutes
-    if (resetCreditLeadMinutes === null || !Number.isInteger(resetCreditLeadMinutes) || resetCreditLeadMinutes < 1 || resetCreditLeadMinutes > 1440) {
-      ZNotification.warning({
-        message: t('settings.form.invalidResetLeadTime'),
-      })
-      return
-    }
-    const usageRetentionDays = form.usageRetentionDays
-    if (usageRetentionDays === null || !Number.isInteger(usageRetentionDays) || usageRetentionDays < 1 || usageRetentionDays > 31) {
-      ZNotification.warning({
-        message: t('settings.form.invalidRetention'),
-      })
-      return
-    }
-    if (![maxWaitingPerKey, maxWaitingPerAccount].every(value => Number.isInteger(value) && value >= 0 && value <= 1000)
-      || !Number.isInteger(concurrencyWaitTimeoutSeconds) || concurrencyWaitTimeoutSeconds < 1 || concurrencyWaitTimeoutSeconds > 120) {
-      ZNotification.warning({
-        message: t('settings.form.invalidQueueSettings'),
-      })
-      return
-    }
-    if (minCodexDesktopVersionError.value || minCodexCliVersionError.value) {
-      ZNotification.warning({
-        message: t('settings.form.invalidClientVersion'),
-      })
-      return
-    }
+    const { resetCreditMaxWeeklyRemainingPercent, resetCreditLeadMinutes, usageRetentionDays } = form
     // 关闭时保留已保存的自定义值，未完成的草稿不阻止停止覆盖。
     const requestLocation = form.requestLocationEnabled
       ? normalizeRequestLocation(form.requestLocation)
       : savedSettings.form.requestLocation
-    const locationError = requestLocationError(requestLocation)
-    if (locationError) {
-      ZNotification.warning({ message: locationError })
-      return
-    }
-    const protectionError = protectionSettingsError(form.accountErrorProtection)
-    if (protectionError) {
-      ZNotification.warning({ message: protectionError })
-      return
-    }
-    const scheduleTime = form.accountWarmupScheduleTime.trim()
-    const timeRegex = /^(?:[01]\d|2[0-3]):[0-5]\d(?:,(?:[01]\d|2[0-3]):[0-5]\d)*$/
-    if (!scheduleTime || !timeRegex.test(scheduleTime)) {
-      ZNotification.warning({
-        message: t('settings.form.invalidWarmupTimes'),
-      })
-      return
-    }
-    const warmupModel = form.accountWarmupModel.trim()
-    if (form.accountWarmupEnabled && !warmupModel) {
-      ZNotification.warning({
-        message: t('settings.form.warmupModelRequired'),
-      })
-      return
-    }
-    if (warmupModel.length > 128) {
-      ZNotification.warning({
-        message: t('settings.form.invalidWarmupModel'),
-      })
-      return
-    }
     await saveAction.run(async () => {
       const result = await updateSettings({
         configRevision: savedSettings.form.configRevision,
@@ -376,23 +251,26 @@ export function useSettingsForm() {
         codexPrivacyPolicy: cloneDeep(form.codexPrivacyPolicy),
         requestLocationEnabled: form.requestLocationEnabled,
         requestLocation,
-        modelMappings: mappingPayload(),
-        refreshMarginSeconds,
-        refreshConcurrency,
-        maxConcurrentPerAccount,
-        openaiGuardianReservedConcurrency,
-        openaiAccountAffinity,
-        maxAccountRotations,
-        openaiSessionAffinityTtlHours,
-        maxWaitingPerKey,
-        maxWaitingPerAccount,
-        concurrencyWaitTimeoutSeconds,
-        responsesMaxDecompressedBodyBytes: responsesMaxDecompressedBodyMiB * MIB,
-        rotationStrategy,
+        modelMappings: Object.fromEntries(mappings.value.map(row => [
+          row.requestedModel.trim(),
+          row.upstreamModel.trim(),
+        ])),
+        refreshMarginSeconds: refreshMarginSeconds!,
+        refreshConcurrency: refreshConcurrency!,
+        maxConcurrentPerAccount: maxConcurrentPerAccount!,
+        openaiGuardianReservedConcurrency: openaiGuardianReservedConcurrency!,
+        openaiAccountAffinity: openaiAccountAffinity as AccountAffinity,
+        maxAccountRotations: maxAccountRotations!,
+        openaiSessionAffinityTtlHours: openaiSessionAffinityTtlHours!,
+        maxWaitingPerKey: maxWaitingPerKey!,
+        maxWaitingPerAccount: maxWaitingPerAccount!,
+        concurrencyWaitTimeoutSeconds: concurrencyWaitTimeoutSeconds!,
+        responsesMaxDecompressedBodyBytes: responsesMaxDecompressedBodyMiB! * MIB,
+        rotationStrategy: rotationStrategy as RotationStrategy,
         smartScheduling: { ...smartScheduling },
         minCodexDesktopVersion: form.minCodexDesktopVersion.trim() || null,
         minCodexCliVersion: form.minCodexCliVersion.trim() || null,
-        usageRetentionDays,
+        usageRetentionDays: usageRetentionDays!,
         opsEventRetentionDays: form.opsEventRetentionDays,
         auditRetentionDays: form.auditRetentionDays,
         accountErrorProtection: {
@@ -403,9 +281,9 @@ export function useSettingsForm() {
           probeModel: trimProtectionText(form.accountErrorProtection.probeModel) || null,
         },
         accountWarmupEnabled: form.accountWarmupEnabled,
-        accountWarmupScheduleTime: scheduleTime,
-        accountWarmupModel: warmupModel || null,
-        resetCreditLeadMinutes,
+        accountWarmupScheduleTime: form.accountWarmupScheduleTime.trim(),
+        accountWarmupModel: form.accountWarmupModel.trim() || null,
+        resetCreditLeadMinutes: resetCreditLeadMinutes!,
         resetCreditMaxWeeklyRemainingPercent,
       })
       applySettings(result)
@@ -414,8 +292,11 @@ export function useSettingsForm() {
       })
     }, {
       onError: (cause) => {
-        if (cause instanceof ApiError && cause.status !== 409)
+        // 明确拒绝的请求保留草稿，执行结果未知时仍回读设置以同步已提交的版本
+        if (cause instanceof ApiError && cause.status !== 409
+          && (cause.kind !== 'api' || cause.status < 400 || cause.status >= 500)) {
           void loadSettings(true)
+        }
       },
     })
   }
@@ -447,8 +328,6 @@ export function useSettingsForm() {
     usageRetentionDaysValue,
     resetCreditLeadMinutesValue,
     resetCreditMaxWeeklyRemainingPercentValue,
-    minCodexDesktopVersionError,
-    minCodexCliVersionError,
     saveSettings,
     loadSettings,
   }
@@ -469,45 +348,4 @@ function requestProfileUpdates(
     updates[provider] = clonedCurrent[provider] ?? null
   }
   return updates
-}
-
-function isSemver(value: string): boolean {
-  if (value.length > 64 || value.startsWith('v'))
-    return false
-
-  const buildParts = value.split('+')
-  if (buildParts.length > 2)
-    return false
-  const [versionAndPrerelease = '', build] = buildParts
-  if (build !== undefined && !validIdentifiers(build, false))
-    return false
-
-  const prereleaseSeparator = versionAndPrerelease.indexOf('-')
-  const core = prereleaseSeparator < 0
-    ? versionAndPrerelease
-    : versionAndPrerelease.slice(0, prereleaseSeparator)
-  const prerelease = prereleaseSeparator < 0
-    ? undefined
-    : versionAndPrerelease.slice(prereleaseSeparator + 1)
-  if (prerelease !== undefined && !validIdentifiers(prerelease, true))
-    return false
-
-  const coreParts = core.split('.')
-  return coreParts.length === 3 && coreParts.every(validCoreNumericIdentifier)
-}
-
-function validIdentifiers(value: string, rejectNumericLeadingZeros: boolean): boolean {
-  return Boolean(value) && value.split('.').every((identifier) => {
-    if (!identifier || !/^[\da-z-]+$/i.test(identifier))
-      return false
-    return !rejectNumericLeadingZeros || !/^\d+$/.test(identifier) || validNumericIdentifier(identifier)
-  })
-}
-
-function validNumericIdentifier(value: string): boolean {
-  return /^(?:0|[1-9]\d*)$/.test(value)
-}
-
-function validCoreNumericIdentifier(value: string): boolean {
-  return validNumericIdentifier(value) && BigInt(value) <= 18_446_744_073_709_551_615n
 }

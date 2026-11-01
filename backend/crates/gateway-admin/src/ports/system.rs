@@ -38,11 +38,13 @@ pub enum SystemOperationErrorKind {
 }
 
 /// 不泄漏路径、命令行或发布凭据的系统操作错误
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("system operation failed: {message}")]
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("{message}")]
 pub struct SystemOperationError {
     kind: SystemOperationErrorKind,
     message: String,
+    source: Option<gateway_core::error::ErrorSource>,
+    sensitive_context_redacted: bool,
 }
 
 impl SystemOperationError {
@@ -51,7 +53,35 @@ impl SystemOperationError {
         Self {
             kind,
             message: message.into(),
+            source: None,
+            sensitive_context_redacted: false,
         }
+    }
+
+    #[must_use]
+    pub fn with_source(mut self, source: impl Into<gateway_core::error::ErrorSource>) -> Self {
+        self.source = Some(source.into());
+        self
+    }
+
+    #[must_use]
+    pub fn redact_sensitive_context(mut self) -> Self {
+        self.sensitive_context_redacted = true;
+        self
+    }
+
+    #[must_use]
+    pub const fn sensitive_context_redacted(&self) -> bool {
+        self.sensitive_context_redacted
+    }
+
+    #[must_use]
+    pub fn error_details(&self) -> Option<gateway_core::error::ErrorDetails> {
+        gateway_core::error::ErrorDetails::capture(
+            self.source.as_ref(),
+            None,
+            self.sensitive_context_redacted,
+        )
     }
 
     #[must_use]

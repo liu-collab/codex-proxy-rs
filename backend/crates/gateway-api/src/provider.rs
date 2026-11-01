@@ -73,18 +73,18 @@ async fn count_tokens(
     };
     let provider = match ProviderKind::new(provider) {
         Ok(provider) => provider,
-        Err(_) => return invalid_request("provider identifier is invalid"),
+        Err(_) => return invalid_request("Provider identifier is invalid."),
     };
     let model = match UpstreamModelId::new(model) {
         Ok(model) => model,
-        Err(_) => return invalid_request("provider model identifier is invalid"),
+        Err(_) => return invalid_request("Provider model identifier is invalid."),
     };
     if serde_json::from_slice::<serde::de::IgnoredAny>(&body).is_err() {
-        return invalid_request("token count request must be valid JSON");
+        return invalid_request("Token count request must be valid JSON.");
     }
     let payload = match RawJsonPayload::new(TOKEN_COUNT_PROTOCOL, body) {
         Ok(payload) => payload,
-        Err(_) => return invalid_request("token count request is invalid"),
+        Err(_) => return invalid_request("Token count request is invalid."),
     };
     let (client_ip, user_agent) = request_client_context(
         &headers,
@@ -124,12 +124,12 @@ async fn provider_http(
     body: Bytes,
 ) -> Response {
     if method == Method::GET && !body.is_empty() {
-        return invalid_request("GET provider HTTP operations cannot carry a request body");
+        return invalid_request("GET provider HTTP operations cannot carry a request body.");
     }
     let method = match method {
         Method::GET => ProviderHttpMethod::Get,
         Method::POST => ProviderHttpMethod::Post,
-        _ => return invalid_request("provider HTTP method is unsupported"),
+        _ => return invalid_request("Provider HTTP method is unsupported."),
     };
     let service = state.openai();
     let client = match authenticate_client(service, &headers).await {
@@ -138,7 +138,7 @@ async fn provider_http(
     };
     let provider = match ProviderKind::new(provider) {
         Ok(provider) => provider,
-        Err(_) => return invalid_request("provider identifier is invalid"),
+        Err(_) => return invalid_request("Provider identifier is invalid."),
     };
     let connection_options = headers
         .get_all(header::CONNECTION)
@@ -158,7 +158,7 @@ async fn provider_http(
         .collect();
     let payload = match RawHttpPayload::new(PROVIDER_HTTP_PROTOCOL, body) {
         Ok(payload) => payload,
-        Err(_) => return invalid_request("provider HTTP request is invalid"),
+        Err(_) => return invalid_request("Provider HTTP request is invalid."),
     };
     let operation = match ProviderHttpRequest::new(
         endpoint,
@@ -168,7 +168,7 @@ async fn provider_http(
         payload,
     ) {
         Ok(request) => Operation::ProviderHttp(request),
-        Err(_) => return invalid_request("provider HTTP request is invalid"),
+        Err(_) => return invalid_request("Provider HTTP request is invalid."),
     };
     let (client_ip, user_agent) = request_client_context(
         &headers,

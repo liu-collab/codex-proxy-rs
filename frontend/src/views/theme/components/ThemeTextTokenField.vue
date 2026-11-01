@@ -21,11 +21,11 @@ const { t } = useI18n({ useScope: 'global' })
 </script>
 
 <template>
-  <div class="grid gap-2 rounded-cp-lg bg-cp-fill-quaternary px-3 py-3">
+  <div class="grid gap-2 rounded-z-lg bg-z-fill-quaternary px-3 py-3">
     <div class="flex items-center justify-between gap-3">
       <div class="min-w-0">
-        <strong class="text-cp-sm font-bold text-cp-text">{{ label }}</strong>
-        <code class="mt-1 block truncate font-mono text-[10px] text-cp-text-quaternary">{{ token }}</code>
+        <strong class="text-z-sm font-bold text-z-text">{{ label }}</strong>
+        <code class="mt-1 block truncate font-mono text-[10px] text-z-text-quaternary">{{ token }}</code>
       </div>
       <ZIconButton
         v-if="overridden"

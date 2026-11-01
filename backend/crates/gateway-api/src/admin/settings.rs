@@ -581,13 +581,13 @@ fn wire_model_mappings(mappings: DomainModelMappings) -> ModelMappings {
 
 fn map_wire_error(error: WireValidationError) -> AdminError {
     let message = match error.field() {
-        "settingsRefreshConcurrencyOverflow" => "refreshConcurrency 不合法".to_owned(),
-        "settingsMaxConcurrencyOverflow" => "maxConcurrentPerAccount 不合法".to_owned(),
-        "settingsUsageRetentionOverflow" => "usageRetentionDays 不合法".to_owned(),
-        "settingsOpsRetentionOverflow" => "opsEventRetentionDays 不合法".to_owned(),
-        "settingsAuditRetentionOverflow" => "auditRetentionDays 不合法".to_owned(),
-        "requestLocation" => "请求位置不合法，请检查国家代码、地区和城市".to_owned(),
-        "providerRequestProfiles" => "Provider 请求画像格式不合法或字段冲突".to_owned(),
+        "settingsRefreshConcurrencyOverflow" => "刷新并发数不合法".to_owned(),
+        "settingsMaxConcurrencyOverflow" => "单账号并发上限不合法".to_owned(),
+        "settingsUsageRetentionOverflow" => "用量记录保留天数不合法".to_owned(),
+        "settingsOpsRetentionOverflow" => "运维事件保留天数不合法".to_owned(),
+        "settingsAuditRetentionOverflow" => "审计记录保留天数不合法".to_owned(),
+        "requestLocation" => "请求位置的国家代码、地区或城市不合法".to_owned(),
+        "providerRequestProfiles" => "服务商客户端身份配置无效或字段冲突".to_owned(),
         "minCodexDesktopVersion" => "Codex Desktop 最低版本格式不合法".to_owned(),
         "minCodexCliVersion" => "Codex CLI 最低版本格式不合法".to_owned(),
         field => format!("{field} 字段不合法"),

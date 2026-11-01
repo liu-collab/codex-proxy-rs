@@ -138,11 +138,11 @@ function canDelete(record: BackupRecord): boolean {
         <span>{{ t('settings.backup.backupRecords') }}</span>
         <ZPopover trigger="hover-click" placement="bottom-start">
           <template #reference="{ open }">
-            <ZIconButton :aria-label="t('settings.backup.backupScopeDescription')" :title="undefined" :aria-expanded="open" class="size-6! hover:bg-transparent! active:bg-transparent!">
+            <ZIconButton variant="link" :aria-label="t('settings.backup.backupScopeDescription')" :title="undefined" :aria-expanded="open" class="size-6!">
               <CircleHelp class="size-3.5" aria-hidden="true" />
             </ZIconButton>
           </template>
-          <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+          <div class="max-w-72 space-y-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
             <p>{{ t('settings.backup.contents') }}</p>
             <p>{{ t('settings.backup.usageRetentionHourSummary') }}</p>
           </div>
@@ -188,7 +188,7 @@ function canDelete(record: BackupRecord): boolean {
         :empty-text="t('settings.backup.noBackupRecordYet')"
       >
         <template #id="{ row }">
-          <span class="text-cp-text-secondary" :title="row.id">{{ shortId(row.id) }}</span>
+          <span class="text-z-text-secondary" :title="row.id">{{ shortId(row.id) }}</span>
         </template>
 
         <template #status="{ row }">
@@ -196,27 +196,27 @@ function canDelete(record: BackupRecord): boolean {
         </template>
 
         <template #fileName="{ row }">
-          <span class="text-cp-text-secondary" :title="row.objectKey">{{ formatFileName(row) }}</span>
+          <span class="text-z-text-secondary" :title="row.objectKey">{{ formatFileName(row) }}</span>
         </template>
 
         <template #sizeBytes="{ row }">
-          <span class="text-cp-text-secondary">{{ formatSize(row.sizeBytes) }}</span>
+          <span class="text-z-text-secondary">{{ formatSize(row.sizeBytes) }}</span>
         </template>
 
         <template #expiresAt="{ row }">
-          <span class="text-cp-text-secondary">
+          <span class="text-z-text-secondary">
             {{ row.expiresAtDisplay ?? '—' }}
           </span>
         </template>
 
         <template #trigger="{ row }">
-          <span class="text-cp-text-secondary">
+          <span class="text-z-text-secondary">
             {{ triggerLabel(row.triggerKind) }}
           </span>
         </template>
 
         <template #startedAt="{ row }">
-          <span class="text-cp-text-secondary">
+          <span class="text-z-text-secondary">
             {{ row.startedAtDisplay ?? '—' }}
           </span>
         </template>

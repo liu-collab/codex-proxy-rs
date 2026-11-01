@@ -125,10 +125,10 @@ function scopeLabel(binding: PluginCapabilityBinding) {
 </script>
 
 <template>
-  <details v-if="groups.length || showCommand" class="group text-cp-xs text-cp-text-secondary">
-    <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-cp py-1 outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline [&::-webkit-details-marker]:hidden">
+  <details v-if="groups.length || showCommand" class="group text-z-xs text-z-text-secondary">
+    <summary class="flex cursor-pointer list-none flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-z py-1 outline-none focus-visible:ring-2 focus-visible:ring-z-control-outline [&::-webkit-details-marker]:hidden">
       <span class="min-w-0 wrap-break-word">{{ summary }}</span>
-      <span class="inline-flex shrink-0 items-center gap-1 text-cp-primary-text">
+      <span class="inline-flex shrink-0 items-center gap-1 text-z-primary-text">
         {{ t('plugins.configuration.featureDetails') }}
         <ChevronDown class="size-3.5 transition-transform group-open:rotate-180 motion-reduce:transition-none" aria-hidden="true" />
       </span>
@@ -137,7 +137,7 @@ function scopeLabel(binding: PluginCapabilityBinding) {
       <div class="grid gap-5 pr-6">
         <dl v-if="groups.length" class="m-0 grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
           <div v-for="group in groups" :key="group.id" class="grid min-w-0 content-start gap-1">
-            <dt class="wrap-break-word text-cp-sm font-emphasis text-cp-text">
+            <dt class="wrap-break-word text-z-sm font-emphasis text-z-text">
               {{ group.label }}
             </dt>
             <dd class="m-0 grid min-w-0 gap-1 leading-relaxed">
@@ -149,7 +149,7 @@ function scopeLabel(binding: PluginCapabilityBinding) {
           </div>
         </dl>
         <div v-if="showCommand" class="grid gap-1.5">
-          <span class="text-cp-sm font-emphasis text-cp-text">{{ t('plugins.configuration.terminalCommands') }}</span>
+          <span class="text-z-sm font-emphasis text-z-text">{{ t('plugins.configuration.terminalCommands') }}</span>
           <code class="break-all">codex-proxy-rs plugin {{ instance.id }} --help</code>
         </div>
       </div>

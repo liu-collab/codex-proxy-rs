@@ -3,9 +3,9 @@ import { t } from '@/i18n'
 import { isRecord } from '@/utils/data'
 
 // 详情弹窗共享的字段展示约定：占位符、标签/值样式，供弹窗与其子组件复用。
-export const fieldLabelClass = 'text-cp-xs leading-none font-bold text-cp-text-quaternary'
+export const fieldLabelClass = 'text-z-xs leading-none font-bold text-z-text-quaternary'
 export const fieldValueBaseClass
-  = 'mt-1.5 mb-0 min-w-0 truncate text-cp-sm leading-none font-bold text-cp-text'
+  = 'mt-1.5 mb-0 min-w-0 truncate text-z-sm leading-none font-bold text-z-text'
 
 export function displayValue(value: unknown) {
   if (value === undefined || value === null || value === '')
@@ -37,10 +37,10 @@ export function attemptOutcomeText(outcome: string) {
 
 export function attemptOutcomeClass(outcome: string) {
   if (outcome === 'succeeded')
-    return 'text-cp-success-text'
+    return 'text-z-success-text'
   if (outcome === 'failed')
-    return 'text-cp-error-text'
-  return 'text-cp-text-secondary'
+    return 'text-z-error-text'
+  return 'text-z-text-secondary'
 }
 
 export function visibleRequestText(record: UsageRecordDetail) {

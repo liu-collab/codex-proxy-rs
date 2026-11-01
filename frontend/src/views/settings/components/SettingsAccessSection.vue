@@ -12,8 +12,6 @@ import ResponseBodyLimitCard from './ResponseBodyLimitCard.vue'
 defineProps<{
   disabled: boolean
   loading: boolean
-  desktopError: string
-  cliError: string
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
@@ -58,8 +56,6 @@ onMounted(loadStatus)
         v-model:min-codex-desktop-version="minCodexDesktopVersion"
         v-model:min-codex-cli-version="minCodexCliVersion"
         :loading="loading"
-        :desktop-error="desktopError"
-        :cli-error="cliError"
       />
       <ResponseBodyLimitCard v-model="responsesMaxDecompressedBodyMiB" />
     </fieldset>

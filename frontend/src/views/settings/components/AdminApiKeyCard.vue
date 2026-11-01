@@ -54,18 +54,18 @@ interface AdminApiKeyStatus {
     </template>
 
     <div class="grid max-w-6xl gap-4">
-      <div class="flex min-h-16 items-center justify-between gap-4 rounded-cp bg-cp-fill-quaternary px-4 py-3">
+      <div class="flex min-h-16 items-center justify-between gap-4 rounded-z bg-z-fill-quaternary px-4 py-3">
         <div class="flex min-w-0 items-center gap-3">
           <ZMotionIcon
-            class="inline-flex size-9 shrink-0 items-center justify-center rounded-cp bg-cp-bg-container text-cp-cyan-solid shadow-cp-tertiary"
+            class="inline-flex size-9 shrink-0 items-center justify-center rounded-z bg-z-bg-container text-z-cyan-solid shadow-z-tertiary"
           >
             <KeyRound class="size-4" />
           </ZMotionIcon>
           <div class="min-w-0">
-            <p class="m-0 text-cp leading-[1.15] font-bold text-cp-text">
+            <p class="m-0 text-z leading-[1.15] font-bold text-z-text">
               {{ status.exists ? t('common.status.enabled') : t('settings.adminApiKey.notGenerated') }}
             </p>
-            <p class="mt-1.5 mb-0 truncate text-cp-sm leading-[1.15] font-emphasis text-cp-text-secondary">
+            <p class="mt-1.5 mb-0 truncate text-z-sm leading-[1.15] font-emphasis text-z-text-secondary">
               {{
                 loading
                   ? t('common.status.loading')
@@ -79,12 +79,12 @@ interface AdminApiKeyStatus {
       </div>
 
       <div v-if="generatedKey" class="grid gap-2">
-        <p class="m-0 text-cp leading-[1.15] font-emphasis text-cp-text-secondary">
+        <p class="m-0 text-z leading-[1.15] font-emphasis text-z-text-secondary">
           {{ t('settings.adminApiKey.generatedNotice') }}
         </p>
         <div class="flex min-w-0 items-center gap-2">
           <code
-            class="min-w-0 flex-1 rounded-cp bg-cp-fill-quaternary px-3 py-2.5 font-mono text-cp-sm leading-normal font-emphasis break-all text-cp-text"
+            class="min-w-0 flex-1 rounded-z bg-z-fill-quaternary px-3 py-2.5 font-mono text-z-sm leading-normal font-emphasis break-all text-z-text"
           >
             {{ generatedKey }}
           </code>

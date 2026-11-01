@@ -17,7 +17,7 @@ const props = defineProps<{
   error: string
 }>()
 
-const emit = defineEmits<{ select: [id: string], stop: [], viewAccounts: [] }>()
+const emit = defineEmits<{ select: [id: string], stop: [], viewAccounts: [], afterLeave: [] }>()
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -48,7 +48,7 @@ function handleRetentionKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-  <ZDialog v-model="open" :title="t('accounts.filters.importTasks')" :description="t('accounts.importTasks.description')" width="48rem">
+  <ZDialog v-model="open" :title="t('accounts.filters.importTasks')" :description="t('accounts.importTasks.description')" width="48rem" @closed="emit('afterLeave')">
     <ZEmpty v-if="!tasks.length && !error" class="min-h-[min(20rem,50dvh)] content-center" :icon="ListTodo" :title="loading ? t('accounts.importTasks.loadingImportTasks') : t('accounts.importTasks.noImportTasks')" :description="t('accounts.importTasks.empty')" />
     <div v-else-if="tasks.length" class="min-h-[min(20rem,50dvh)] min-w-0">
       <div v-if="tasks.length > 1" class="mb-5">
@@ -69,6 +69,8 @@ function handleRetentionKeydown(event: KeyboardEvent) {
         <ZPopover v-model="retentionOpen" trigger="hover-click" placement="top-start" :hover-delay="240">
           <template #reference>
             <ZIconButton
+              variant="link"
+              :title="undefined"
               :aria-label="t('accounts.importTasks.taskRetentionInstructions')"
               size="small"
               :aria-expanded="retentionOpen"
@@ -78,7 +80,7 @@ function handleRetentionKeydown(event: KeyboardEvent) {
               <CircleAlert class="size-4" />
             </ZIconButton>
           </template>
-          <div :id="retentionId" role="tooltip" class="grid w-72 max-w-[calc(100vw-2rem)] gap-2 p-4 text-cp-xs leading-relaxed text-cp-text-secondary">
+          <div :id="retentionId" role="tooltip" class="grid w-72 max-w-[calc(100vw-2rem)] gap-2 p-4 text-z-xs leading-relaxed text-z-text-secondary">
             <p class="m-0">
               {{ t('accounts.importTasks.resultsRetainedForHour') }}
             </p>

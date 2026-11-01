@@ -30,18 +30,10 @@ pub(super) struct ConnectionStats {
     pub(super) ping_received_count: AtomicU64,
     pub(super) ping_written_count: AtomicU64,
     pub(super) pong_received_count: AtomicU64,
-    pub(super) last_read_ms: AtomicU64,
     pub(super) last_write_ms: AtomicU64,
 }
 
 impl ConnectionStats {
-    pub(super) fn record_read(&self, opened_at: Instant) {
-        self.last_read_ms.store(
-            u64::try_from(opened_at.elapsed().as_millis()).unwrap_or(u64::MAX),
-            Ordering::Relaxed,
-        );
-    }
-
     pub(super) fn record_write(&self, opened_at: Instant) {
         self.last_write_ms.store(
             u64::try_from(opened_at.elapsed().as_millis()).unwrap_or(u64::MAX),

@@ -10,6 +10,36 @@ use super::{
 };
 
 #[tokio::test]
+async fn authorization_persists_an_unnamed_account_with_its_email() {
+    let Some(database) = TestDatabase::create("authorization_unnamed").await else {
+        return;
+    };
+    let store = admin_account_store(&database.pool);
+    let mut prepared = credential("acct_unnamed", "unnamed-user");
+    prepared.name.clear();
+    prepared.email = Some("identity@example.com".into());
+    let (authorization, context) = command(prepared);
+    let result = store
+        .commit_authorization(authorization, &context)
+        .await
+        .unwrap();
+    let account = store
+        .load_account(
+            result.result.account_id.as_str(),
+            AccountRuntimeSnapshot::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(account.account.name, "");
+    assert_eq!(
+        account.account.email.as_deref(),
+        Some("identity@example.com")
+    );
+    database.close().await;
+}
+
+#[tokio::test]
 async fn concurrent_authorization_retries_share_one_account_write_and_one_receipt() {
     let Some(database) = TestDatabase::create("authorization_receipt_race").await else {
         return;
@@ -174,13 +204,43 @@ async fn reauthorization_replay_keeps_the_committed_revision_and_later_profile_e
             },
         )),
     };
+    let rename = UpdateAccount {
+        account_id: id.to_string(),
+        name: Some("renamed team".to_owned()),
+        notes: None,
+        enabled: true,
+        concurrency_limit: None,
+        weight: gateway_core::account::AccountWeight::DEFAULT,
+        model_access: None,
+        group_ids: vec![],
+        outbound_proxy: None,
+    };
+    store
+        .update_account(rename.clone(), &context)
+        .await
+        .unwrap();
     let committed = store
         .commit_authorization(command.clone(), &context)
         .await
         .unwrap();
-    sqlx::query("update provider_accounts set name='later profile' where id=$1")
-        .bind(id.as_str())
-        .execute(&database.pool)
+    assert_eq!(
+        store
+            .load_account(id.as_str(), Default::default())
+            .await
+            .unwrap()
+            .unwrap()
+            .account
+            .name,
+        "renamed team"
+    );
+    store
+        .update_account(
+            UpdateAccount {
+                name: Some("later profile".to_owned()),
+                ..rename
+            },
+            &context,
+        )
         .await
         .unwrap();
     let replayed = store

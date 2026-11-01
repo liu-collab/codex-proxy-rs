@@ -75,7 +75,6 @@ use provider_openai::credential::{
     CodexCredentialSelector, ImportCodexOAuthCredential,
 };
 use provider_openai::transport::CodexWebSocketPool;
-use provider_openai::transport::input_guard::InputGuardConfig;
 use provider_openai::transport::profile::{CodexWireProfile, CodexWireProfileState};
 use provider_openai::{CodexProvider, OFFICIAL_CODEX_BASE_URL};
 use serde_json::{Map, Value, json};
@@ -146,7 +145,7 @@ async fn account_client_preparation_keeps_ca_read_cause_without_exposing_path() 
     assert!(diagnostic.as_str().contains("OS cause:"));
     assert!(!diagnostic.as_str().contains("PRIVATE_"));
     let gateway = gateway_core::error::GatewayError::from_provider(&snapshot);
-    assert_eq!(gateway.safe_message(), "upstream service is unavailable");
+    assert_eq!(gateway.safe_message(), "Upstream service is unavailable.");
     assert_eq!(gateway.diagnostic(), Some(diagnostic));
 }
 
@@ -355,89 +354,6 @@ async fn native_openai_revalidates_translated_transport_without_reselecting() {
     assert_eq!(error.kind(), ProviderErrorKind::Unsupported);
     assert_eq!(error.send_state(), UpstreamSendState::NotSent);
     assert!(upstream.received_requests().await.unwrap().is_empty());
-}
-
-/// 输入守卫的超限失败必须是"上下文超限"形状：`code=context_length_exceeded`、
-/// `type=invalid_request_error`，且**不带** HTTP 400 正文——它要由交付边界渲染成
-/// `response.failed` 事件，否则客户端会当成普通 400，不触发压缩。
-#[test]
-fn input_guard_rejection_uses_the_context_length_exceeded_shape() {
-    let error = provider_openai::context_length_exceeded_error(300_000, 272_000);
-
-    assert_eq!(error.kind(), ProviderErrorKind::InvalidRequest);
-    assert_eq!(error.send_state(), UpstreamSendState::NotSent);
-    let detail = error
-        .client_visible_upstream_error()
-        .expect("client-visible detail");
-    assert_eq!(detail.code(), Some("context_length_exceeded"));
-    assert_eq!(detail.error_type(), Some("invalid_request_error"));
-    assert!(
-        detail.message().contains("300000") && detail.message().contains("272000"),
-        "消息要带上估算值与阈值，便于客户端与运营定位：{}",
-        detail.message()
-    );
-    assert!(
-        error.client_visible_upstream_response().is_none(),
-        "超限不得走 HTTP 400 正文：必须交给交付边界渲染成 response.failed 事件"
-    );
-}
-
-/// 网关按次转发，不提供上游存储语义：`store=true` / `background=true` 必须在
-/// 出站前被拒绝（HTTP 400 + `unsupported_storage`），且一次都不打上游。
-#[tokio::test]
-async fn generate_rejects_store_and_background_as_unsupported_storage() {
-    for field in ["store", "background"] {
-        let store = Arc::new(MemoryAccountStore::default());
-        create_account(&store, "acct_provider_contract").await;
-        let upstream = MockServer::start().await;
-        let leases = Arc::new(TestLeaseCoordinator::default());
-        let provider = provider_with_affinity_and_base_url_and_leases(
-            &store,
-            Arc::new(MemorySessionAffinity::default()),
-            upstream.uri(),
-            Arc::clone(&leases),
-        );
-        let mut body = Map::from_iter([
-            ("model".to_owned(), json!("gpt-5.4")),
-            ("input".to_owned(), json!("hello")),
-            ("store".to_owned(), json!(false)),
-        ]);
-        body.insert(field.to_owned(), json!(true));
-        let operation = Operation::Generate(GenerateRequest::from_protocol_payload(
-            ProtocolPayload::json_object("openai", body).expect("OpenAI payload"),
-        ));
-
-        let Err(error) = provider
-            .execute(
-                planned_request("openai", operation),
-                context("req_unsupported_storage", CancellationToken::new()),
-            )
-            .await
-        else {
-            panic!("`{field}` 必须在出站前被拒绝");
-        };
-
-        assert_eq!(error.kind(), ProviderErrorKind::InvalidRequest);
-        assert_eq!(error.send_state(), UpstreamSendState::NotSent);
-        assert_eq!(
-            error
-                .client_visible_upstream_error()
-                .expect("client error")
-                .code(),
-            Some("unsupported_storage")
-        );
-        let response = error
-            .client_visible_upstream_response()
-            .expect("client response");
-        assert_eq!(response.status(), 400);
-        let visible: Value = serde_json::from_slice(response.body()).expect("JSON error body");
-        assert_eq!(visible["error"]["code"], "unsupported_storage");
-        assert_eq!(visible["error"]["type"], "invalid_request_error");
-        assert!(
-            upstream.received_requests().await.unwrap().is_empty(),
-            "被拒绝的请求不得触达上游"
-        );
-    }
 }
 
 #[tokio::test]
@@ -936,10 +852,7 @@ async fn replay_compatibility_should_keep_encrypted_history_when_removing_nonemp
 }
 
 #[tokio::test]
-async fn replay_compatibility_should_drop_reasoning_content_regardless_of_ciphertext() {
-    // 非空数组 content 一律移除：加密历史与纯明文历史一视同仁（规范 §10 明确不再使用
-    // "仅当存在 encrypted_content 才删除 reasoning content"的旧规则）。
-    // 非数组形状的 content 不属于 reasoning 内容合同，保持原样。
+async fn replay_compatibility_should_preserve_plaintext_only_and_unrecognized_content_shapes() {
     let input = json!([
         {"type":"reasoning","summary":[],"content":[{"type":"reasoning_text","text":"only history"}]},
         {"type":"reasoning","summary":[],"content":[1],"encrypted_content":""},
@@ -949,43 +862,9 @@ async fn replay_compatibility_should_drop_reasoning_content_regardless_of_cipher
         {"type":"reasoning","summary":[],"content":{"status":"keep"},"encrypted_content":"test-cipher"},
         {"type":"reasoning","summary":[],"content":"keep","encrypted_content":"test-cipher"}
     ]);
-    let mut expected = input.clone();
-    // 前 5 条是非空数组 → 全部丢 content；后两条是非数组形状 → 原样保留。
-    for item in expected.as_array_mut().unwrap().iter_mut().take(5) {
-        item.as_object_mut().unwrap().shift_remove("content");
-    }
     for websocket in [false, true] {
         let actual = capture_replay_compatibility_request(input.clone(), false, websocket).await;
-        assert_eq!(actual["input"].to_string(), expected.to_string());
-    }
-}
-
-/// `UUID-序号` 形状的 encrypted_content 是占位值：删除密文；该项 id 也是 36 位
-/// UUID 时一并删除。真实密文与非纯数字后缀都不是占位形状，保持原样。
-#[tokio::test]
-async fn replay_compatibility_should_drop_placeholder_ciphertext_and_orphan_id() {
-    let input = json!([
-        {"type":"reasoning","id":"0193a5b2-1f4e-7c3a-9b2d-8e6f0a1b2c3d","summary":[],"encrypted_content":"0193a5b2-1f4e-7c3a-9b2d-8e6f0a1b2c3d-42"},
-        {"type":"reasoning","id":"rs_keep","summary":[],"encrypted_content":"0193a5b2-1f4e-7c3a-9b2d-8e6f0a1b2c3d-7"},
-        {"type":"reasoning","id":"rs_cipher","summary":[],"encrypted_content":"gAAAAABm-real-cipher-text"},
-        {"type":"reasoning","id":"rs_suffix","summary":[],"encrypted_content":"0193a5b2-1f4e-7c3a-9b2d-8e6f0a1b2c3d-4a"}
-    ]);
-    let mut expected = input.clone();
-    {
-        let items = expected.as_array_mut().expect("input array");
-        // 第一条：占位密文 + UUID id → 两者都删。
-        let first = items[0].as_object_mut().expect("item");
-        first.shift_remove("encrypted_content");
-        first.shift_remove("id");
-        // 第二条：占位密文但 id 不是 UUID → 只删密文。
-        items[1]
-            .as_object_mut()
-            .expect("item")
-            .shift_remove("encrypted_content");
-    }
-    for websocket in [false, true] {
-        let actual = capture_replay_compatibility_request(input.clone(), false, websocket).await;
-        assert_eq!(actual["input"].to_string(), expected.to_string());
+        assert_eq!(actual["input"].to_string(), input.to_string());
     }
 }
 
@@ -1010,32 +889,17 @@ async fn replay_compatibility_should_leave_normal_official_history_unchanged() {
     }
 }
 
-/// 规范 §6 末条要求历史清洗覆盖 HTTP/SSE、WebSocket、**API Key** 与 OAuth 四条路径，
-/// §6-1 把适用范围限定为"GPT 系列出站前"；两者合起来即：API Key 账号出站到 GPT 系列时
-/// 同样套用历史形状约束。
-///
-/// 这条**推翻了**此前"API Key 账号完全不套用 Codex 规则"的旧口径。依据：§6 末条明确要求
-/// 覆盖该路径，而 §10"不要沿用的旧规则"并未把旧口径列入保留项。非 GPT 系列的 API Key
-/// 出站仍然保持原样（判定见 `normalize_universal_history_cleanup`）。
 #[tokio::test]
-async fn replay_compatibility_should_apply_history_cleanup_to_api_key_accounts() {
+async fn replay_compatibility_should_not_apply_codex_rules_to_api_key_accounts() {
     let input = json!([{
         "type":"reasoning","id":"rs_api","status":"completed","summary":[],
         "content":[{"type":"reasoning_text","text":"API-specific history"}],
         "encrypted_content":"test-cipher"
     }]);
-    let mut expected = input.clone();
-    let item = expected[0].as_object_mut().expect("reasoning item");
-    item.shift_remove("status");
-    item.shift_remove("content");
     for websocket in [false, true] {
         let actual = capture_replay_compatibility_request(input.clone(), true, websocket).await;
-        assert_eq!(actual["input"].to_string(), expected.to_string());
+        assert_eq!(actual["input"].to_string(), input.to_string());
     }
-    // 真实密文、summary 与 id 都不是历史形状问题，保持原样。
-    assert_eq!(expected[0]["encrypted_content"], "test-cipher");
-    assert_eq!(expected[0]["id"], "rs_api");
-    assert_eq!(expected[0]["summary"], json!([]));
 }
 
 #[tokio::test]
@@ -1368,47 +1232,14 @@ fn provider_and_quota_with_runtime_ports(
         .no_proxy()
         .build()
         .expect("client");
+    let websocket_pool = Arc::new(CodexWebSocketPool::default());
     let catalog = Arc::new(CodexCredentialCatalogService::new(
         store.repository(),
-        profile,
-        http,
+        profile.clone(),
+        http.clone(),
         base_url.clone(),
         catalog_cache(),
     ));
-    provider_and_quota_with_catalog(
-        store,
-        session_affinity,
-        base_url,
-        leases,
-        stream_max_retries,
-        cooldowns,
-        policy,
-        catalog,
-    )
-}
-
-/// 数据面与目录端点分离时的 Provider 构造：WebSocket 数据面无法同时提供目录 HTTP 接口。
-#[expect(clippy::too_many_arguments)]
-fn provider_and_quota_with_catalog(
-    store: &Arc<MemoryAccountStore>,
-    session_affinity: Arc<MemorySessionAffinity>,
-    base_url: String,
-    leases: Arc<TestLeaseCoordinator>,
-    stream_max_retries: u32,
-    cooldowns: Arc<MemoryCooldownPort>,
-    policy: Arc<dyn gateway_core::provider_ports::ProviderRuntimePolicyPort>,
-    catalog: Arc<CodexCredentialCatalogService>,
-) -> (
-    Arc<CodexProvider>,
-    Arc<CodexCredentialQuotaService>,
-    Arc<CodexWebSocketPool>,
-) {
-    let profile = wire_profile();
-    let http = reqwest::Client::builder()
-        .no_proxy()
-        .build()
-        .expect("client");
-    let websocket_pool = Arc::new(CodexWebSocketPool::default());
     let quota = Arc::new(CodexCredentialQuotaService::new(
         store.repository(),
         profile.clone(),
@@ -1442,38 +1273,6 @@ fn provider_and_quota_with_catalog(
     )
     .expect("official OpenAI provider");
     (Arc::new(provider), quota, websocket_pool)
-}
-
-/// 使用已预热的目录 Service 构造 Provider，默认会话语义、租约与重试预算
-fn provider_with_catalog(
-    store: &Arc<MemoryAccountStore>,
-    base_url: String,
-    catalog: Arc<CodexCredentialCatalogService>,
-) -> Arc<CodexProvider> {
-    provider_and_quota_with_catalog(
-        store,
-        Arc::new(MemorySessionAffinity::default()),
-        base_url,
-        Arc::new(TestLeaseCoordinator::default()),
-        u32::try_from(DEFAULT_STREAM_MAX_RETRIES).expect("default retry budget fits u32"),
-        Arc::new(MemoryCooldownPort::new()),
-        crate::support::runtime_policy(),
-        catalog,
-    )
-    .0
-}
-
-/// 打开 GPT 输入守卫的 Provider；构造器先交回 `Arc`，这里解包后重新包装
-fn provider_with_input_guard(
-    store: &Arc<MemoryAccountStore>,
-    base_url: String,
-    config: InputGuardConfig,
-) -> Arc<CodexProvider> {
-    Arc::new(
-        Arc::try_unwrap(provider_with_base_url(store, base_url))
-            .expect("freshly built provider is uniquely owned")
-            .with_input_guard(config),
-    )
 }
 
 pub(super) async fn create_account(store: &Arc<MemoryAccountStore>, id: &str) {
@@ -1681,10 +1480,6 @@ fn contract_account_scope() -> Arc<FrozenAccountScope> {
         "acct_prefetch_limit",
         "acct_presentation",
         "acct_provider_contract",
-        "acct_input_guard",
-        "acct_review_http",
-        "acct_review_ws",
-        "acct_user_agent",
         "acct_scope_new",
         "acct_scope_old",
         "acct_scope_same",
@@ -3830,7 +3625,6 @@ async fn standalone_search_preserves_wire_and_scopes_turn_metadata_to_the_select
     let metadata_values = captured_header_values(request, "x-codex-turn-metadata");
     assert_eq!(metadata_values.len(), 1);
     let metadata: Value = serde_json::from_slice(&metadata_values[0]).expect("turn metadata JSON");
-    // 会话与线程映射为账号内 scoped id；轮次引用保留客户端原值
     assert_scoped_id(metadata["session_id"].as_str().unwrap(), "session");
     assert_scoped_id(metadata["thread_id"].as_str().unwrap(), "thread");
     assert_eq!(metadata["turn_id"], "turn");
@@ -6452,7 +6246,6 @@ async fn cross_account_scope_removes_only_account_bound_body_fields() {
 
     assert!(body.get("authorization").is_none());
     assert!(body.get("conversation").is_none());
-    // 跨账号只清理账号绑定状态；会话 id 保留但换成当前账号的 scoped id
     assert_scoped_id(
         body["conversation_id"].as_str().unwrap(),
         "client-correlation",
@@ -6656,8 +6449,7 @@ async fn http_account_scoping_keeps_unicode_metadata_ascii_in_headers_and_body()
         assert!(body.pointer("/client_metadata/installationId").is_none());
         let headers = captured_header_values(&request, "x-codex-turn-metadata");
         assert_eq!(headers.len(), 1);
-        let original: Value = serde_json::from_str(raw).expect("original metadata");
-        let mut expected = original.clone();
+        let mut expected: Value = serde_json::from_str(raw).expect("original metadata");
         expected["installation_id"] = json!(installation_id);
         for encoded in [
             std::str::from_utf8(&headers[0]).expect("UTF-8 header"),
@@ -7300,489 +7092,6 @@ async fn subagent_requests_should_share_the_root_session_account_affinity_key() 
     );
 }
 
-/// 审核覆盖用的目录：`gpt-5.6-luna` 在位，`terraform`/`terra` 缺失，用来固定候选顺序。
-fn review_catalog() -> Value {
-    json!({
-        "models": [
-            {"slug": "gpt-5.6-sol", "display_name": "Sol"},
-            {"slug": "gpt-5.6-luna", "display_name": "Luna"}
-        ]
-    })
-}
-
-fn review_operation(context: Map<String, Value>, client_metadata: Value) -> Operation {
-    Operation::Generate(GenerateRequest::from_protocol_payload(
-        ProtocolPayload::json_object(
-            "openai",
-            json!({
-                "model": "gpt-5.6-sol",
-                "input": "review this change",
-                "reasoning": {"effort": "low"},
-                "client_metadata": client_metadata
-            })
-            .as_object()
-            .expect("object")
-            .clone(),
-        )
-        .expect("OpenAI payload")
-        .with_context(context),
-    ))
-}
-
-fn assert_review_override(outbound: &Value) {
-    assert_eq!(
-        outbound["model"],
-        json!("gpt-5.6-luna"),
-        "审核请求必须改写到目录里的审核模型"
-    );
-    assert_eq!(
-        outbound["reasoning"]["effort"],
-        json!("xhigh"),
-        "审核请求必须使用覆盖后的推理强度"
-    );
-    assert!(
-        outbound.to_string().contains("review this change"),
-        "改写只动模型与推理强度，正文其余字段保持：{outbound}"
-    );
-}
-
-#[tokio::test]
-async fn review_subagent_requests_rewrite_model_and_effort_before_routing_over_http() {
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, "acct_review_http").await;
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/codex/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(review_catalog()))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/codex/responses"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("content-type", "text/event-stream")
-                .set_body_string(CAPTURE_COMPLETED_SSE),
-        )
-        .expect(1)
-        .mount(&server)
-        .await;
-    let provider = provider_with_base_url(&store, server.uri());
-    // 生产顺序：Core 在本请求路由前刷新目录，覆盖才有候选可选。
-    provider
-        .query_model_capabilities()
-        .await
-        .expect("warm model catalog");
-
-    // HTTP 头 `x-openai-subagent: review` 由 API 层注入成这个扁平键。
-    let operation = review_operation(
-        Map::from_iter([("use_websocket".to_owned(), json!(false))]),
-        json!({"x-openai-subagent": "review"}),
-    );
-    let original = operation.clone();
-    let mut stream = provider
-        .execute(
-            planned_request("openai", operation.clone()),
-            context("req_review_http", CancellationToken::new()),
-        )
-        .await
-        .expect("provider stream");
-    while let Some(event) = stream.next().await {
-        event.expect("review response");
-    }
-    assert_eq!(operation, original, "覆盖只作用于每次发送的请求副本");
-
-    let requests = server.received_requests().await.expect("upstream requests");
-    let posted = requests
-        .iter()
-        .filter(|request| request.method.as_str() == "POST")
-        .collect::<Vec<_>>();
-    assert_eq!(posted.len(), 1, "审核请求只应发送一次");
-    assert_review_override(&captured_request_body(posted[0]));
-}
-
-#[tokio::test]
-async fn review_subagent_requests_rewrite_model_and_effort_before_routing_over_websocket() {
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, "acct_review_ws").await;
-    // 目录端点与数据面分离：数据面只提供 WebSocket 升级。
-    let catalog_server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/codex/models"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(review_catalog()))
-        .mount(&catalog_server)
-        .await;
-    let catalog = Arc::new(CodexCredentialCatalogService::new(
-        store.repository(),
-        wire_profile(),
-        reqwest::Client::builder()
-            .no_proxy()
-            .build()
-            .expect("client"),
-        catalog_server.uri(),
-        catalog_cache(),
-    ));
-    catalog.synchronize().await.expect("warm model catalog");
-
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
-    let base_url = format!("http://{}", listener.local_addr().expect("address"));
-    let server = tokio::spawn(async move {
-        let (socket, _) = listener.accept().await.expect("accept WebSocket");
-        let mut websocket = accept_codex_test_websocket(socket).await;
-        let request = websocket.next().await.expect("request").expect("frame");
-        let request: Value =
-            serde_json::from_str(request.to_text().expect("text")).expect("request JSON");
-        for event in [
-            json!({"type":"response.created","response":{"id":"resp_review","model":"gpt-5.6-luna"}}),
-            json!({
-                "type":"response.completed",
-                "response":{
-                    "id":"resp_review","model":"gpt-5.6-luna","status":"completed","output":[],
-                    "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
-                }
-            }),
-        ] {
-            websocket
-                .send(Message::Text(event.to_string().into()))
-                .await
-                .expect("response");
-        }
-        request
-    });
-
-    let provider = provider_with_catalog(&store, base_url, catalog);
-    // WebSocket 帧没有 HTTP 头，审核信号只走 turn metadata 的 subagent_kind。
-    let operation = review_operation(
-        Map::from_iter([("use_websocket".to_owned(), json!(true))]),
-        json!({"x-codex-turn-metadata": "{\"subagent_kind\":\"review\"}"}),
-    );
-    let original = operation.clone();
-    let mut stream = provider
-        .execute(
-            planned_request("openai", operation.clone()),
-            context("req_review_ws", CancellationToken::new()),
-        )
-        .await
-        .expect("provider stream");
-    assert_eq!(stream.metadata().transport().as_str(), "websocket");
-    while let Some(event) = stream.next().await {
-        event.expect("review response");
-    }
-    assert_eq!(operation, original, "覆盖只作用于每次发送的请求副本");
-
-    let outbound = server.await.expect("server task");
-    assert_review_override(&outbound);
-}
-
-/// 守卫口径的请求构造：`model` 是声明模型，正文输入由调用方给定。
-fn guarded_operation(model: &str, input: Value, turn_metadata: Option<&str>) -> Operation {
-    let mut body = Map::from_iter([
-        ("model".to_owned(), json!(model)),
-        ("input".to_owned(), input),
-    ]);
-    if let Some(turn_metadata) = turn_metadata {
-        body.insert("turnMetadata".to_owned(), json!(turn_metadata));
-    }
-    Operation::Generate(GenerateRequest::from_protocol_payload(
-        ProtocolPayload::json_object("openai", body)
-            .expect("OpenAI payload")
-            .with_context(Map::from_iter([("use_websocket".to_owned(), json!(false))])),
-    ))
-}
-
-async fn execute_and_drain(
-    provider: &Arc<CodexProvider>,
-    request_id: &str,
-    request: ProviderRequest,
-) -> Result<(), gateway_core::error::ProviderError> {
-    let mut stream = Arc::clone(provider)
-        .execute(request, context(request_id, CancellationToken::new()))
-        .await?;
-    while let Some(event) = stream.next().await {
-        event?;
-    }
-    Ok(())
-}
-
-/// 阈值取配置下限 1000，正文 8000 个 ASCII 字符 ≈ 2000 token，必然超限。
-fn guarded_provider(store: &Arc<MemoryAccountStore>, base_url: String) -> Arc<CodexProvider> {
-    provider_with_input_guard(
-        store,
-        base_url,
-        InputGuardConfig::from_settings(true, 1_000).expect("guard config"),
-    )
-}
-
-#[tokio::test]
-async fn input_guard_rejects_oversized_gpt_requests_without_sending() {
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, "acct_input_guard").await;
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/codex/responses"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(CAPTURE_COMPLETED_SSE))
-        .mount(&server)
-        .await;
-    let provider = guarded_provider(&store, server.uri());
-
-    let error = match provider
-        .execute(
-            planned_request(
-                "openai",
-                guarded_operation("gpt-5.4", json!("x".repeat(8_000)), None),
-            ),
-            context("req_input_guard_reject", CancellationToken::new()),
-        )
-        .await
-    {
-        Ok(_) => panic!("oversized GPT input must be rejected before sending"),
-        Err(error) => error,
-    };
-    assert_eq!(error.kind(), ProviderErrorKind::InvalidRequest);
-    assert_eq!(error.send_state(), UpstreamSendState::NotSent);
-    let detail = error
-        .client_visible_upstream_error()
-        .expect("visible failure detail");
-    assert_eq!(detail.code(), Some("context_length_exceeded"));
-    assert_eq!(detail.error_type(), Some("invalid_request_error"));
-    // 超限必须由交付边界渲染成 response.failed 事件；挂 HTTP 400 正文会让客户端
-    // 按普通 400 处理而不触发压缩。
-    assert!(error.client_visible_upstream_response().is_none());
-    assert!(
-        server
-            .received_requests()
-            .await
-            .expect("requests")
-            .is_empty(),
-        "拒绝必须发生在上游零请求"
-    );
-}
-
-#[tokio::test]
-async fn input_guard_allows_compaction_non_gpt_and_disabled_requests() {
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, "acct_input_guard").await;
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/codex/responses"))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .insert_header("content-type", "text/event-stream")
-                .set_body_string(CAPTURE_COMPLETED_SSE),
-        )
-        .mount(&server)
-        .await;
-    let guarded = guarded_provider(&store, server.uri());
-    let oversized = || json!("x".repeat(8_000));
-
-    // 压缩请求携带完整历史，拒绝它会让客户端永远压不下上下文：两种既有标记都豁免。
-    for (request_id, operation) in [
-        (
-            "req_input_guard_compaction_trigger",
-            guarded_operation(
-                "gpt-5.4",
-                json!([{"type": "compaction_trigger"}, "x".repeat(8_000)]),
-                None,
-            ),
-        ),
-        (
-            "req_input_guard_compaction_kind",
-            guarded_operation(
-                "gpt-5.4",
-                oversized(),
-                Some(r#"{"request_kind":"compaction"}"#),
-            ),
-        ),
-    ] {
-        execute_and_drain(&guarded, request_id, planned_request("openai", operation))
-            .await
-            .expect("compaction requests must be exempt");
-    }
-
-    // 非 GPT 系列不参与长上下文计费，不设限。
-    execute_and_drain(
-        &guarded,
-        "req_input_guard_non_gpt",
-        planned_request_for_model(
-            "openai",
-            guarded_operation("deepseek-flash", oversized(), None),
-            "deepseek-flash",
-        ),
-    )
-    .await
-    .expect("non-GPT requests must be exempt");
-
-    // 默认关闭：运营没打开开关时行为与加入守卫前一致。
-    execute_and_drain(
-        &provider_with_base_url(&store, server.uri()),
-        "req_input_guard_disabled",
-        planned_request("openai", guarded_operation("gpt-5.4", oversized(), None)),
-    )
-    .await
-    .expect("disabled guard must forward oversized input");
-
-    assert_eq!(
-        server.received_requests().await.expect("requests").len(),
-        4,
-        "豁免请求与非 GPT 请求必须照常发送"
-    );
-}
-
-/// 下游官方形状 UA：产品名与版本属于下游，环境段是出站身份要继承的部分。
-const DOWNSTREAM_AGENT: &str = "codex_cli_rs/0.200.0 (Mac OS 15.7.1; arm64) xterm-256color";
-
-fn user_agent_operation(use_websocket: bool, downstream_agent: Option<&str>) -> Operation {
-    let mut context = Map::from_iter([("use_websocket".to_owned(), json!(use_websocket))]);
-    if let Some(agent) = downstream_agent {
-        context.insert("downstream_user_agent".to_owned(), json!(agent));
-    }
-    Operation::Generate(GenerateRequest::from_protocol_payload(
-        ProtocolPayload::json_object(
-            "openai",
-            Map::from_iter([
-                ("model".to_owned(), json!("gpt-5.4")),
-                ("input".to_owned(), json!("hello")),
-            ]),
-        )
-        .expect("OpenAI payload")
-        .with_context(context),
-    ))
-}
-
-/// 期望的出站 UA：产品名与版本取画像，环境段取下游。
-fn expected_user_agent(terminal: &str) -> String {
-    let mut profile = wire_profile().snapshot();
-    profile.os_type = "Mac OS".to_owned();
-    profile.os_version = "15.7.1".to_owned();
-    profile.arch = "arm64".to_owned();
-    profile.terminal = terminal.to_owned();
-    profile.user_agent()
-}
-
-#[tokio::test]
-async fn outbound_user_agent_combines_the_profile_product_with_the_downstream_system_over_http() {
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, "acct_user_agent").await;
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/codex/responses"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(CAPTURE_COMPLETED_SSE))
-        .mount(&server)
-        .await;
-    let provider = provider_with_base_url(&store, server.uri());
-
-    let profile = wire_profile().snapshot();
-    let unknown_terminal = "codex_cli_rs/0.200.0 (Mac OS 15.7.1; arm64) unknown";
-    let non_official = "curl/8.5.0 (Mac OS 15.7.1; arm64) xterm-256color";
-    for (request_id, downstream_agent) in [
-        ("req_user_agent_official", Some(DOWNSTREAM_AGENT)),
-        ("req_user_agent_unknown_terminal", Some(unknown_terminal)),
-        ("req_user_agent_non_official", Some(non_official)),
-        ("req_user_agent_absent", None),
-    ] {
-        execute_and_drain(
-            &provider,
-            request_id,
-            planned_request("openai", user_agent_operation(false, downstream_agent)),
-        )
-        .await
-        .expect("user-agent request");
-    }
-
-    let requests = server.received_requests().await.expect("requests");
-    let agents = requests
-        .iter()
-        .map(|request| {
-            request
-                .headers
-                .get("user-agent")
-                .and_then(|value| value.to_str().ok())
-                .expect("outbound user-agent")
-                .to_owned()
-        })
-        .collect::<Vec<_>>();
-    assert_eq!(
-        agents,
-        vec![
-            // 官方形状：只继承环境段，产品名与版本仍是画像值。
-            expected_user_agent("xterm-256color"),
-            // 终端为 unknown 时回落画像值，不把 unknown 当出站默认。
-            expected_user_agent(&profile.terminal),
-            // 产品名不在白名单：整体回退画像，不逐字段猜测。
-            profile.user_agent(),
-            // 没有下游 UA：同样是画像值。
-            profile.user_agent(),
-        ]
-    );
-    assert!(
-        !agents[0].contains("0.200.0"),
-        "下游客户端版本不能出现在出站 UA 里"
-    );
-}
-
-#[tokio::test]
-async fn outbound_user_agent_combines_the_profile_product_with_the_downstream_system_over_websocket()
- {
-    let store = Arc::new(MemoryAccountStore::default());
-    create_account(&store, "acct_user_agent").await;
-    let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
-    let base_url = format!("http://{}", listener.local_addr().expect("address"));
-    let captured = Arc::new(Mutex::new(None));
-    let slot = Arc::clone(&captured);
-    let server = tokio::spawn(async move {
-        let (socket, _) = listener.accept().await.expect("accept WebSocket");
-        let mut websocket =
-            crate::transport::accept_codex_test_websocket_with(socket, move |request, response| {
-                *slot.lock().expect("agent slot") = request
-                    .headers()
-                    .get("user-agent")
-                    .and_then(|value| value.to_str().ok())
-                    .map(str::to_owned);
-                response.headers_mut().insert(
-                    "sec-websocket-extensions",
-                    "permessage-deflate".parse().expect("extension"),
-                );
-            })
-            .await;
-        let _ = websocket.next().await.expect("request").expect("frame");
-        websocket
-            .send(Message::Text(
-                json!({
-                    "type":"response.completed",
-                    "response":{
-                        "id":"resp_user_agent","model":"gpt-5.4","status":"completed","output":[],
-                        "usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}
-                    }
-                })
-                .to_string()
-                .into(),
-            ))
-            .await
-            .expect("response");
-    });
-
-    let provider = provider_with_base_url(&store, base_url);
-    let mut stream = provider
-        .execute(
-            planned_request("openai", user_agent_operation(true, Some(DOWNSTREAM_AGENT))),
-            context("req_user_agent_ws", CancellationToken::new()),
-        )
-        .await
-        .expect("provider stream");
-    assert_eq!(stream.metadata().transport().as_str(), "websocket");
-    while let Some(event) = stream.next().await {
-        event.expect("user-agent response");
-    }
-    server.await.expect("server task");
-
-    let agent = captured
-        .lock()
-        .expect("agent slot")
-        .clone()
-        .expect("captured user-agent");
-    assert_eq!(agent, expected_user_agent("xterm-256color"));
-    assert!(!agent.contains("0.200.0"));
-}
-
 #[tokio::test]
 async fn explicit_session_id_should_override_turn_specific_prompt_cache_keys_for_affinity() {
     let store = Arc::new(MemoryAccountStore::default());
@@ -7887,6 +7196,7 @@ async fn affinity_quota_switch_should_clear_old_turn_state_without_a_provider_st
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            expected_connection: None,
             plan_type: None,
             account_id: first_account.id().clone(),
             expected_revision: first_account.revision(),
@@ -8875,6 +8185,7 @@ async fn official_usage_limit_failure_persists_fact_without_fabricating_usage() 
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            expected_connection: None,
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -9515,6 +8826,12 @@ async fn stream_failures_preserve_error_fields_independent_of_retry_classificati
                     false,
                 ),
                 (
+                    "unsupported_parameter",
+                    "Hosted tool 'web_search' requires authorization and metering that are not supported by rustponsesapi.",
+                    ProviderErrorKind::InvalidRequest,
+                    false,
+                ),
+                (
                     "invalid_prompt",
                     "Invalid prompt: we've limited access to this content for safety reasons.",
                     ProviderErrorKind::InvalidRequest,
@@ -9547,9 +8864,21 @@ async fn stream_failures_preserve_error_fields_independent_of_retry_classificati
                 events.push(json!({"type": "response.output_text.delta", "output_index": 0, "content_index": 0, "delta": "hello"}));
             }
             let mut original = json!({"type": "response.failed", "response": {"id": "resp_capacity", "error": {"code": code, "message": message}}});
+            if code == "unsupported_parameter" {
+                original = json!({"type":"error","status":400,"error":{
+                    "type":"invalid_request_error","code":code,"message":message,"param":"tools"
+                }});
+            }
             if code == "turn_rate_limit_exceeded" {
                 original["response"]["error"]["headers"] = json!({"retry-after": "7"});
             }
+            let expected_status = original["status"]
+                .as_u64()
+                .map(|status| u16::try_from(status).expect("valid upstream status"));
+            let expected_error_type = original.get("error").unwrap_or(&original["response"]["error"])
+                ["type"]
+                .as_str()
+                .map(str::to_owned);
             events.push(original.clone());
             let (base_url, _http_server, websocket_server) = if use_websocket {
                 let listener = TcpListener::bind("127.0.0.1:0").await.expect("listener");
@@ -9613,6 +8942,7 @@ async fn stream_failures_preserve_error_fields_independent_of_retry_classificati
                     None => panic!("expected upstream failure"),
                 }
             };
+            assert!(error.continuation_recovery_disposition().is_none());
             let capacity = expected_kind == ProviderErrorKind::UpstreamCapacityUnavailable;
             assert_eq!(
                 error.kind(),
@@ -9620,7 +8950,7 @@ async fn stream_failures_preserve_error_fields_independent_of_retry_classificati
                 "unexpected error for {code}, websocket={use_websocket}, semantic_output={semantic_output}: {error:?}"
             );
             assert_eq!(error.replay_is_safe(), capacity && !semantic_output);
-            assert_eq!(error.upstream_status(), None);
+            assert_eq!(error.upstream_status(), expected_status);
             if code == "turn_rate_limit_exceeded" {
                 assert!(error.retry_is_prohibited());
                 assert_eq!(error.retry_after(), Some(Duration::from_secs(7)));
@@ -9636,9 +8966,9 @@ async fn stream_failures_preserve_error_fields_independent_of_retry_classificati
             assert_eq!(
                 error.upstream_failure_fields(),
                 Some(&gateway_core::upstream::UpstreamFailureFields {
-                    status: None,
+                    status: expected_status,
                     code: Some(code.to_owned()),
-                    error_type: None,
+                    error_type: expected_error_type,
                     message: Some(message.to_owned()),
                 })
             );
@@ -10445,6 +9775,7 @@ async fn quota_limited_account_diagnostic_uses_upstream() {
     let observed_at = SystemTime::now();
     store
         .compare_and_swap_quota(QuotaObservation {
+            expected_connection: None,
             plan_type: None,
             account_id: account.id().clone(),
             expected_revision: account.revision(),
@@ -10845,8 +10176,6 @@ async fn reasoning_effort_observation_follows_configuration_updates_across_conti
                 "model":"gpt-5.4","input":input,"reasoning":{"effort":baseline},
                 "session_id":"effort-observation",
             });
-            // 本仓库按次转发，HTTP 路径出站前拒绝 store=true；原生续写只在 WebSocket
-            // 路径成立，HTTP 轮次按独立请求发送，仍能覆盖思考强度的观测口径
             let previous = (index > 0 && index != 3 && use_websocket)
                 .then(|| format!("resp_effort_{}", index - 1));
             if let Some(previous) = &previous {
@@ -11020,7 +10349,7 @@ async fn provider_compiles_catalog_presentation_for_codex_models() {
             .await
             .expect("requests")
             .iter()
-            .any(|request| request.url.query() == Some("client_version=0.144.0"))
+            .any(|request| request.url.query() == Some("client_version=0.154.0"))
     );
 }
 
@@ -11647,106 +10976,6 @@ async fn connection_limit_payload_survives_exhausted_retry_budget() {
     );
 }
 
-/// 规范 §6 末条：跨模型历史清洗必须覆盖 **API Key** 路径，不能只挂在 Codex/OAuth 分支下。
-/// 断言 reasoning 的非空 `content`、`UUID-序号` 占位密文与其 UUID `id` 都被清除，
-/// 而 `summary` 与普通消息逐字保留。
-#[tokio::test]
-async fn api_key_path_applies_the_universal_history_cleanup() {
-    let upstream = MockServer::start().await;
-    let store = Arc::new(MemoryAccountStore::default());
-    store
-        .seed_api_key(
-            "acct_provider_contract",
-            upstream.uri(),
-            provider_openai::credential::ResponsesTransport::Http,
-        )
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/responses"))
-        .and(header("authorization", "Bearer sk-api-test-only"))
-        .respond_with(
-            ResponseTemplate::new(200).set_body_raw(CAPTURE_COMPLETED_SSE, "text/event-stream"),
-        )
-        .expect(1)
-        .mount(&upstream)
-        .await;
-    let provider = provider_with_base_url(&store, upstream.uri());
-    let body = json!({
-        "model": "gpt-5.4",
-        "input": [
-            {
-                "type": "reasoning",
-                "summary": [{"type": "summary_text", "text": "keep"}],
-                "content": [{"type": "reasoning_text", "text": "drop"}]
-            },
-            {
-                "type": "reasoning",
-                "id": "0193a5b2-1f4e-7c3a-9b2d-8e6f0a1b2c3d",
-                "summary": [],
-                "encrypted_content": "0193a5b2-1f4e-7c3a-9b2d-8e6f0a1b2c3d-42"
-            },
-            {
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": "keep me"}]
-            }
-        ]
-    });
-
-    execute_and_drain(
-        &provider,
-        "req_api_key_history_cleanup",
-        planned_request(
-            "openai",
-            Operation::Generate(GenerateRequest::from_protocol_payload(
-                ProtocolPayload::json_object(
-                    "openai",
-                    body.as_object().expect("request object").clone(),
-                )
-                .expect("OpenAI payload"),
-            )),
-        ),
-    )
-    .await
-    .expect("API Key 路径的历史清洗请求应当完成");
-
-    let sent: Value = serde_json::from_slice(
-        &upstream
-            .received_requests()
-            .await
-            .expect("captured requests")[0]
-            .body,
-    )
-    .expect("outbound JSON");
-    let items = sent["input"].as_array().expect("input array");
-    assert!(
-        !items[0]
-            .as_object()
-            .expect("reasoning item")
-            .contains_key("content"),
-        "API Key 路径同样必须删除 reasoning 的非空 content"
-    );
-    assert_eq!(items[0]["summary"][0]["text"], "keep", "summary 保持不动");
-    assert!(
-        !items[1]
-            .as_object()
-            .expect("reasoning item")
-            .contains_key("encrypted_content"),
-        "API Key 路径同样必须删除占位密文"
-    );
-    assert!(
-        !items[1]
-            .as_object()
-            .expect("reasoning item")
-            .contains_key("id"),
-        "占位项的 UUID id 必须连带删除"
-    );
-    assert_eq!(
-        items[2]["content"][0]["text"], "keep me",
-        "普通消息逐字保留"
-    );
-}
-
 #[tokio::test]
 async fn api_key_native_endpoints_preserve_bodies_headers_and_own_base_url() {
     for prefix in ["", "/v1", "/custom/v2"] {
@@ -11912,21 +11141,21 @@ const API_KEY_DOWNSTREAM_HEADERS: &[&str] = &[
     "referer",
     "sec-ch-ua",
     "sec-fetch-site",
-    "x-grok-turn-idx",
-    "x-xai-future-field",
     "session_id",
-    // 会话身份头不再是"业务扩展"：出站只输出网关重建的伪名，下游原值不得透传。
-    "session-id",
-    "thread-id",
-    "x-client-request-id",
-    "x-codex-window-id",
     "x-openai-actor-authorization",
     "authorization",
     "cookie",
     "chatgpt-account-id",
 ];
 
-const API_KEY_BUSINESS_HEADERS: &[&str] = &["x-codex-future", "x-openai-internal-future"];
+const API_KEY_BUSINESS_HEADERS: &[&str] = &[
+    "x-grok-turn-idx",
+    "x-xai-future-field",
+    "session-id",
+    "thread-id",
+    "x-codex-future",
+    "x-openai-internal-future",
+];
 
 fn generate_with_downstream_headers() -> Operation {
     let mut headers: Vec<_> = API_KEY_DOWNSTREAM_HEADERS
@@ -11968,7 +11197,7 @@ async fn api_key_default_http_uses_own_prefix_plain_json_and_only_own_authentica
             )
             .await;
         // 后台发现不协商客户端版本；客户端目录独立请求并按实际版本缓存
-        for query in [None, Some("client_version=0.144.0")] {
+        for query in [None, Some("client_version=1.0.0")] {
             Mock::given(method("GET"))
                 .and(path(format!("{prefix}/models")))
                 .and(move |request: &wiremock::Request| request.url.query() == query)
@@ -12030,15 +11259,10 @@ async fn api_key_default_http_uses_own_prefix_plain_json_and_only_own_authentica
         assert!(!request.headers.contains_key("content-encoding"));
         for name in API_KEY_DOWNSTREAM_HEADERS
             .iter()
-            .filter(|name| !matches!(**name, "authorization" | "x-client-request-id"))
+            .filter(|name| **name != "authorization")
         {
             assert!(!request.headers.contains_key(*name), "leaked {name}");
         }
-        // 会话身份头由网关重建：允许存在，但绝不能是下游原值。
-        assert_ne!(
-            request.headers["x-client-request-id"], "downstream-value",
-            "leaked x-client-request-id"
-        );
         assert_eq!(request.headers["x-business-extension"], "keep");
         for name in API_KEY_BUSINESS_HEADERS {
             if matches!(*name, "session-id" | "thread-id") {
@@ -12061,7 +11285,7 @@ async fn api_key_default_http_uses_own_prefix_plain_json_and_only_own_authentica
             .filter(|request| request.method == "GET")
             .collect::<Vec<_>>();
         assert_eq!(model_requests.len(), 2);
-        for query in [None, Some("client_version=0.144.0")] {
+        for query in [None, Some("client_version=1.0.0")] {
             let model_request = model_requests
                 .iter()
                 .find(|request| request.url.query() == query)
@@ -12268,16 +11492,10 @@ async fn api_key_websocket_uses_api_path_and_bearer_without_oauth_identity() {
                 );
                 for name in API_KEY_DOWNSTREAM_HEADERS
                     .iter()
-                    .filter(|name| !matches!(**name, "authorization" | "x-client-request-id"))
+                    .filter(|name| **name != "authorization")
                 {
                     assert!(!request.headers().contains_key(*name), "leaked {name}");
                 }
-                // 会话身份头由网关重建：允许存在，但绝不能是下游原值。
-                assert_ne!(
-                    request.headers()["x-client-request-id"],
-                    "downstream-value",
-                    "leaked x-client-request-id"
-                );
                 assert_eq!(request.headers()["x-business-extension"], "keep");
                 for name in API_KEY_BUSINESS_HEADERS {
                     if matches!(*name, "session-id" | "thread-id") {
@@ -13360,130 +12578,40 @@ pub(crate) async fn assert_local_connection_capacity_is_not_an_upstream_failure(
     assert!(failure.pre_delivery_retry().is_none());
 }
 
-const GROK_PASSTHROUGH_HEADERS_CONTEXT_KEY: &str = "opaque_request_headers";
-
-fn grok_marked_context() -> Map<String, Value> {
-    Map::from_iter([(
-        GROK_PASSTHROUGH_HEADERS_CONTEXT_KEY.to_owned(),
-        json!([["X-Grok-Model-Override", "dGVzdA=="]]),
-    )])
-}
-
 #[tokio::test]
-async fn grok_marked_request_removes_only_exact_leading_instruction_identity() {
-    let original = "You are Grok released by xAI.\nKeep Grok tool names and xAI examples.";
-    for (content, expected) in [
-        (json!("You are Grok released by xAI."), json!("")),
-        (
+async fn downstream_client_markers_preserve_instruction_content() {
+    let original = "You are Grok released by xAI.\nKeep tool names and examples.";
+    for api_key in [false, true] {
+        for content in [
             json!(original),
-            json!("\nKeep Grok tool names and xAI examples."),
-        ),
-        (
             json!([
-                {"type": "input_text", "text": original, "future": "Grok"},
-                {"type": "input_text", "text": original}
+                {"type": "input_text", "text": original, "future": "keep"},
+                {"type": "input_text", "text": "Keep the second block."}
             ]),
-            json!([
-                {"type": "input_text", "text": "\nKeep Grok tool names and xAI examples.", "future": "Grok"},
-                {"type": "input_text", "text": original}
-            ]),
-        ),
-    ] {
-        let mut body = json!({
-            "instructions": "Keep top-level instructions.",
-            "input": [{"type": "message", "role": "developer", "content": content}],
-            "tools": [{"type": "function", "name": "grok", "description": original}]
-        })
-        .as_object()
-        .expect("request object")
-        .clone();
-        body = capture_grok_request(body, grok_marked_context(), false).await;
-        assert_eq!(body["input"][0]["content"], expected);
-        assert_eq!(body["instructions"], "Keep top-level instructions.");
-        assert_eq!(body["tools"][0]["description"], original);
-        let once = body.clone();
-        body = capture_grok_request(body, grok_marked_context(), false).await;
-        assert_eq!(body, once);
-    }
-}
-
-#[tokio::test]
-async fn grok_unrelated_text_and_unmarked_requests_are_preserved() {
-    let original = "You are Grok released by xAI. Be concise.";
-    for (role, content, context) in [
-        ("user", original, grok_marked_context()),
-        (
-            "developer",
-            "Quoted example: You are Grok released by xAI.",
-            grok_marked_context(),
-        ),
-        ("developer", original, Map::new()),
-        (
-            "developer",
-            original,
-            Map::from_iter([(
-                GROK_PASSTHROUGH_HEADERS_CONTEXT_KEY.to_owned(),
-                json!([["X-Grok-Future-Field", "dGVzdA=="]]),
-            )]),
-        ),
-        (
-            "developer",
-            original,
-            Map::from_iter([(
-                GROK_PASSTHROUGH_HEADERS_CONTEXT_KEY.to_owned(),
-                json!([["X-AuthenticateResponse", "dGVzdA=="]]),
-            )]),
-        ),
-    ] {
-        let mut body = json!({
-            "model": "gpt-5.4", "store": false, "stream": true,
-            "input": [{"type": "message", "role": role, "content": content}]
-        })
-        .as_object()
-        .expect("request object")
-        .clone();
-        let original_body = body.clone();
-        body = capture_grok_request(body, context, false).await;
-        assert_eq!(body, original_body);
-    }
-}
-
-#[tokio::test]
-async fn grok_downstream_identity_should_only_change_selected_codex_oauth_requests() {
-    let original = "You are Grok released by xAI. Be concise.";
-    let original_body = json!({
-        "model": "gpt-5.4",
-        "store": false,
-        "stream": true,
-        "instructions": "Preserve original instructions.",
-        "input": [{"type": "message", "role": "developer", "content": original}]
-    });
-    for (api_key, marked, expected) in [
-        (false, true, " Be concise."),
-        (false, false, original),
-        (true, true, original),
-    ] {
-        let sent = capture_grok_request(
-            original_body.as_object().expect("request object").clone(),
-            if marked {
-                grok_marked_context()
-            } else {
-                Map::new()
-            },
-            api_key,
-        )
-        .await;
-
-        assert_eq!(sent["input"][0]["content"], expected);
-        if !marked || api_key {
-            for (key, expected) in original_body.as_object().expect("request object") {
-                assert_eq!(sent.get(key), Some(expected), "client field: {key}");
-            }
+        ] {
+            let body = json!({
+                "model": "gpt-5.4", "store": false, "stream": true,
+                "instructions": original,
+                "input": [
+                    {"type": "message", "role": "developer", "content": content},
+                    {"type": "message", "role": "user", "content": original}
+                ],
+                "tools": [{"type": "function", "name": "echo", "description": original}]
+            })
+            .as_object()
+            .unwrap()
+            .clone();
+            let context = Map::from_iter([(
+                "opaque_request_headers".to_owned(),
+                json!([["X-Grok-Model-Override", STANDARD.encode(b"test")]]),
+            )]);
+            let sent = capture_client_request(body.clone(), context, api_key).await;
+            assert_eq!(sent, body);
         }
     }
 }
 
-async fn capture_grok_request(
+async fn capture_client_request(
     body: Map<String, Value>,
     mut protocol_context: Map<String, Value>,
     api_key: bool,
@@ -13524,7 +12652,7 @@ async fn capture_grok_request(
                 "openai",
                 Operation::Generate(GenerateRequest::from_protocol_payload(payload)),
             ),
-            context("req_grok_boundary", CancellationToken::new()),
+            context("req_client_body", CancellationToken::new()),
         )
         .await
         .expect("request preparation");

@@ -31,13 +31,13 @@ function copyCommand(command: string) {
     <article
       v-for="item in commands"
       :key="item.label"
-      class="grid grid-cols-[minmax(0,1fr)_28px] items-start gap-2.5 rounded-cp bg-cp-bg-container px-3.5 py-3 shadow-cp-tertiary"
+      class="grid grid-cols-[minmax(0,1fr)_28px] items-start gap-2.5 rounded-z bg-z-bg-container px-3.5 py-3 shadow-z-tertiary"
     >
       <div class="min-w-0">
-        <p class="m-0 text-cp-xs font-heavy text-cp-text-quaternary">
+        <p class="m-0 text-z-xs font-heavy text-z-text-quaternary">
           {{ item.label }}
         </p>
-        <code class="mt-1.5 block overflow-x-auto whitespace-nowrap font-mono text-cp-sm leading-normal font-semibold text-cp-text">{{ item.command }}</code>
+        <code class="mt-1.5 block overflow-x-auto whitespace-nowrap font-mono text-z-sm leading-normal font-semibold text-z-text">{{ item.command }}</code>
       </div>
       <ZIconButton size="small" :aria-label="t('settings.clientVersion.copyCommand')" @click="copyCommand(item.command)">
         <Copy class="size-3.5" />

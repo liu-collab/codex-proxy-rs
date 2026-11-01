@@ -132,19 +132,9 @@ export function useAccountGroups() {
     if (saving.value)
       return
     const name = form.value.name.trim()
-    if (!name) {
-      ZNotification.warning({
-        message: t('groups.actions.enterGroupName'),
-      })
-      return
-    }
     const color = normalizeRgbaHexColor(form.value.color)
-    if (!color) {
-      ZNotification.warning({
-        message: t('groups.actions.selectValidGroupingColor'),
-      })
+    if (!color)
       return
-    }
 
     await savingAction.run(async () => {
       const updating = Boolean(editingGroup.value)

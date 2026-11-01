@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { RequestLocation } from '@/api'
 
-import { ZCard, ZForm, ZSwitch } from '@codex-proxy/ui'
+import { ZCard, ZSwitch } from '@codex-proxy/ui'
 import { useI18n } from 'vue-i18n'
 import RequestLocationDetectButton from '@/components/RequestLocationDetectButton.vue'
 import RequestLocationFields from '@/components/RequestLocationFields.vue'
@@ -23,9 +23,9 @@ const enabled = defineModel<boolean>('enabled', { required: true })
         <ZSwitch v-model="enabled" :label="t('settings.location.enableLocationOverlay')" :disabled="disabled" />
         <RequestLocationDetectButton :loading="detectingLocation" :disabled="disabled" @detect="emit('detectLocation')" />
       </div>
-      <ZForm class="mt-4 max-w-6xl">
-        <RequestLocationFields v-model="location" :disabled="disabled || !enabled" />
-      </ZForm>
+      <div class="grid min-w-0 gap-4.5 mt-4 max-w-6xl">
+        <RequestLocationFields v-model="location" :form-prop="enabled ? 'requestLocation' : undefined" :disabled="disabled || !enabled" />
+      </div>
     </template>
   </ZCard>
 </template>

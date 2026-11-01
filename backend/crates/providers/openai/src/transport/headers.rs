@@ -260,11 +260,10 @@ impl CodexBackendClient {
 pub(super) fn append_passthrough_headers(headers: &mut HeaderMap, passthrough: &HeaderMap) {
     for name in passthrough.keys() {
         // 身份与传输字段只由画像/正文/网关重建生成；其余协议头保留原始多值字节
-        // 会话身份只由网关重建的伪名承载（见 scope_request_to_account）：原始头改名
-        // 透传会让真名与伪名同时出站，等于没脱敏
+        // 会话身份由 correlation 按账号映射后写回：这里的透传值替换重建值，
+        // 下游原值不会直接出站
         let raw = name.as_str();
         if is_managed_identity_header(raw)
-            || crate::transport::request::SESSION_IDENTITY_HEADER_NAMES.contains(&raw)
             || matches!(
                 raw,
                 "openai-beta"

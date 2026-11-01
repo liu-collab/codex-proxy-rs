@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import type { ResolvedTheme, ThemeColorPreset, ThemeColorPresetId, ThemeMode, ThemeSeedOverrides } from '@codex-proxy/ui/theme'
+import type { Theme, ThemeColorPreset, ThemeColorPresetId, ThemeMode, ThemeSeedOverrides } from '@codex-proxy/ui/theme'
 
 import type { ThemeEditorDraft, ThemeEditorGlobalCategory } from '../composables/useThemeEditor'
 import { ZSegmented } from '@codex-proxy/ui'
 
-import { resolveThemeSeedTokens, THEME_COLOR_PRESETS } from '@codex-proxy/ui/theme'
+import { createTheme, themeColorPresets } from '@codex-proxy/ui/theme'
 import { Check, ChevronDown, Laptop, Moon, Sun } from '@lucide/vue'
 
 import { computed, shallowRef } from 'vue'
@@ -16,7 +16,7 @@ import ThemeNumberTokenField from './ThemeNumberTokenField.vue'
 
 const props = defineProps<{
   draft: ThemeEditorDraft
-  resolved: ResolvedTheme
+  resolved: Theme
   query: string
 }>()
 
@@ -43,11 +43,11 @@ const { t } = useI18n({ useScope: 'global' })
 const category = defineModel<ThemeEditorGlobalCategory>('category', { required: true })
 const derivedOpen = shallowRef(false)
 
-const localizedPresets = computed(() => THEME_COLOR_PRESETS.map(preset => ({
+const localizedPresets = computed(() => themeColorPresets.map(preset => ({
   ...preset,
   ...uiLocale.value.theme[preset.id],
 })))
-const colorPresets = THEME_COLOR_PRESETS.map(preset => preset.seed)
+const colorPresets = themeColorPresets.map(preset => preset.seed)
 const categoryOptions = computed(() => ([
   {
     label: t('common.fields.color'),
@@ -80,12 +80,12 @@ const modeOptions = computed(() => ([
   },
 ]))
 const presetSwatchesById = new Map(
-  THEME_COLOR_PRESETS.map(preset => [
+  themeColorPresets.map(preset => [
     preset.id,
     [
-      resolveThemeSeedTokens('light', preset.seed, undefined, preset.appearance?.light).colorBgBase,
+      createTheme({ scheme: 'light', colorId: preset.id }).seedTokens.colorBgBase,
       preset.seed,
-      resolveThemeSeedTokens('dark', preset.seed, undefined, preset.appearance?.dark).colorBgBase,
+      createTheme({ scheme: 'dark', colorId: preset.id }).seedTokens.colorBgBase,
     ],
   ]),
 )
@@ -146,7 +146,7 @@ const semanticColorFields = computed(() =>
 
 const derivedTokens = computed(() =>
   Object.entries(props.resolved.tokens)
-    .filter(([name]) => name.startsWith('--cp-color-') || name.startsWith('--cp-control-'))
+    .filter(([name]) => name.startsWith('color-') || name.startsWith('control-'))
     .filter(([name]) => matches(name)),
 )
 
@@ -166,7 +166,7 @@ function presetSwatches(preset: ThemeColorPreset) {
 
 <template>
   <div class="grid gap-4">
-    <div class="grid gap-2 rounded-cp-lg bg-cp-bg-container p-2 shadow-cp-tertiary">
+    <div class="grid gap-2 rounded-z-lg bg-z-bg-container p-2 shadow-z-tertiary">
       <ZSegmented
         :model-value="draft.mode"
         :aria-label="t('appearance.globalTokens.themeMode')"
@@ -182,10 +182,10 @@ function presetSwatches(preset: ThemeColorPreset) {
     <template v-if="category === 'color'">
       <section v-if="matches(t('appearance.globalTokens.brandColorLabel'))" class="grid gap-2" aria-labelledby="theme-preset-title">
         <div class="flex items-center justify-between px-1">
-          <h3 id="theme-preset-title" class="m-0 text-cp font-heavy text-cp-text">
+          <h3 id="theme-preset-title" class="m-0 text-z font-heavy text-z-text">
             {{ t('appearance.globalTokens.brandColor') }}
           </h3>
-          <code class="font-mono text-[10px] text-cp-text-quaternary">colorPrimary</code>
+          <code class="font-mono text-[10px] text-z-text-quaternary">colorPrimary</code>
         </div>
         <div class="grid grid-cols-2 gap-2" role="radiogroup" :aria-label="t('appearance.globalTokens.presetThemes')">
           <button
@@ -193,14 +193,14 @@ function presetSwatches(preset: ThemeColorPreset) {
             :key="preset.id"
             type="button"
             role="radio"
-            class="relative flex min-h-20 flex-col items-stretch justify-between gap-2 rounded-cp-lg bg-cp-fill-quaternary p-2.5 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-cp-bg-text-hover focus-visible:ring-2 focus-visible:ring-cp-control-outline"
-            :class="draft.color === preset.id ? 'bg-cp-control-item-bg-active shadow-cp-tertiary' : undefined"
+            class="relative flex min-h-20 flex-col items-stretch justify-between gap-2 rounded-z-lg bg-z-fill-quaternary p-2.5 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-z-bg-text-hover focus-visible:ring-2 focus-visible:ring-z-control-outline"
+            :class="draft.color === preset.id ? 'bg-z-control-item-bg-active shadow-z-tertiary' : undefined"
             :aria-checked="draft.color === preset.id"
             :aria-label="`${preset.label}: ${preset.description}`"
             :title="preset.description"
             @click="emit('preset', preset.id)"
           >
-            <span class="flex h-4 overflow-hidden rounded-full shadow-cp-tertiary">
+            <span class="flex h-4 overflow-hidden rounded-full shadow-z-tertiary">
               <span
                 v-for="swatch in presetSwatches(preset)"
                 :key="swatch"
@@ -209,14 +209,14 @@ function presetSwatches(preset: ThemeColorPreset) {
               />
             </span>
             <span class="min-w-0 pr-4">
-              <strong class="block text-cp-xs font-heavy text-cp-text">{{ preset.label }}</strong>
-              <span class="mt-0.5 block truncate text-[9px] font-emphasis text-cp-text-quaternary">
+              <strong class="block text-z-xs font-heavy text-z-text">{{ preset.label }}</strong>
+              <span class="mt-0.5 block truncate text-[9px] font-emphasis text-z-text-quaternary">
                 {{ preset.description }}
               </span>
             </span>
             <Check
               v-if="draft.color === preset.id"
-              class="absolute right-2 bottom-2 size-3 text-cp-primary-text"
+              class="absolute right-2 bottom-2 size-3 text-z-primary-text"
               stroke-width="3"
             />
           </button>
@@ -234,7 +234,7 @@ function presetSwatches(preset: ThemeColorPreset) {
       </section>
 
       <section v-if="semanticColorFields.length > 0" class="grid gap-2" aria-labelledby="theme-semantic-title">
-        <h3 id="theme-semantic-title" class="m-0 px-1 text-cp font-heavy text-cp-text">
+        <h3 id="theme-semantic-title" class="m-0 px-1 text-z font-heavy text-z-text">
           {{ t('appearance.globalTokens.semanticColorsTitle') }}
         </h3>
         <ThemeColorTokenField
@@ -254,11 +254,11 @@ function presetSwatches(preset: ThemeColorPreset) {
       <details
         v-if="derivedTokens.length > 0"
         :open="derivedOpen"
-        class="group rounded-cp-lg bg-cp-bg-container shadow-cp-tertiary"
+        class="group rounded-z-lg bg-z-bg-container shadow-z-tertiary"
         @toggle="derivedOpen = ($event.target as HTMLDetailsElement).open"
       >
         <summary
-          class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-cp-sm font-bold text-cp-text"
+          class="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-z-sm font-bold text-z-text"
         >
           {{ t('appearance.globalTokens.derivedVariablesMapAliasToken') }}
           <ChevronDown class="size-3.5 transition-transform duration-150 group-open:rotate-180" />
@@ -267,12 +267,12 @@ function presetSwatches(preset: ThemeColorPreset) {
           <div
             v-for="[name, value] in derivedTokens"
             :key="name"
-            class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-cp bg-cp-fill-quaternary px-2.5 py-2"
+            class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-z bg-z-fill-quaternary px-2.5 py-2"
           >
-            <code class="truncate font-mono text-[9px] text-cp-text-secondary">{{ name.replace('--cp-', '') }}</code>
+            <code class="truncate font-mono text-[9px] text-z-text-secondary">{{ name }}</code>
             <span class="flex items-center gap-2">
-              <span class="size-3 rounded-full shadow-cp-tertiary" :style="{ backgroundColor: value }" />
-              <code class="font-mono text-[9px] text-cp-text-quaternary">{{ value }}</code>
+              <span class="size-3 rounded-full shadow-z-tertiary" :style="{ backgroundColor: value }" />
+              <code class="font-mono text-[9px] text-z-text-quaternary">{{ value }}</code>
             </span>
           </div>
         </div>
@@ -324,7 +324,7 @@ function presetSwatches(preset: ThemeColorPreset) {
 
     <section v-else class="grid gap-2" :aria-label="t('appearance.globalTokens.styleToken')">
       <div
-        class="rounded-cp-lg bg-cp-primary-container px-3 py-3 text-[10px] leading-normal font-emphasis text-cp-primary-on-container"
+        class="rounded-z-lg bg-z-primary-container px-3 py-3 text-[10px] leading-normal font-emphasis text-z-primary-on-container"
       >
         {{ t('appearance.globalTokens.surfaceDescription') }}
       </div>

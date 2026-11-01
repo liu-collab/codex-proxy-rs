@@ -124,7 +124,7 @@ async fn image_operation(
         .map_err(|_| {
             GatewayError::new(
                 GatewayErrorKind::Internal,
-                "OpenAI protocol identifier is invalid",
+                "OpenAI protocol identifier is invalid.",
             )
         })?
         .with_context(context);

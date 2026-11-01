@@ -266,7 +266,7 @@ async fn non_structured_bodies_use_safe_fallback_without_losing_status_or_ids() 
         assert_eq!(
             error["error"],
             json!({
-                "message": "upstream service is unavailable",
+                "message": "Upstream service is unavailable.",
                 "code": "upstream_unavailable",
                 "type": "server_error",
             })
@@ -365,7 +365,10 @@ async fn provider_failure_facts_survive_without_a_complete_http_response() {
         "observed-turn-state"
     );
     assert!(error["headers"].get("x-oai-request-id").is_none());
-    assert_eq!(error["error"]["message"], "upstream service is unavailable");
+    assert_eq!(
+        error["error"]["message"],
+        "Upstream service is unavailable."
+    );
 }
 
 #[tokio::test]

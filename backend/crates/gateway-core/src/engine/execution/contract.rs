@@ -196,7 +196,7 @@ impl PreparedRootExecution {
             .map_err(|_| {
                 GatewayError::new(
                     GatewayErrorKind::InvalidRequest,
-                    "execution settings are invalid",
+                    "Execution settings are invalid.",
                 )
             })?;
         self.client.policy = settings.apply_policy(self.client.policy.clone());
@@ -224,7 +224,7 @@ impl PreparedRootExecution {
         let started_at = SystemTime::now();
         let deadline_at = Deadline::from_timeout(started_at, client.execution_timeout())
             .ok_or_else(|| {
-                GatewayError::new(GatewayErrorKind::Internal, "system clock is invalid")
+                GatewayError::new(GatewayErrorKind::Internal, "System clock is invalid.")
             })?;
         let execution_effects = Arc::new(ExecutionEffects::default());
         let execution_effects_baseline = execution_effects.epoch();
@@ -411,7 +411,7 @@ pub trait ExecutionService: Send + Sync {
         Box::pin(async {
             Err(GatewayError::new(
                 GatewayErrorKind::Unauthorized,
-                "plugin model entry is unavailable",
+                "Plugin model entry is unavailable.",
             ))
         })
     }
@@ -505,6 +505,7 @@ pub(super) fn duration_ms(duration: Duration) -> u64 {
 }
 
 pub(super) fn new_request_id() -> Result<ModelRequestId, GatewayError> {
-    ModelRequestId::new(format!("req_{}", Uuid::now_v7().simple()))
-        .map_err(|_| GatewayError::new(GatewayErrorKind::Internal, "failed to allocate request ID"))
+    ModelRequestId::new(format!("req_{}", Uuid::now_v7().simple())).map_err(|_| {
+        GatewayError::new(GatewayErrorKind::Internal, "Failed to allocate request ID.")
+    })
 }

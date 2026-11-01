@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { ProtectionDraft } from './form'
 import type { ProtectionRule } from '@/api/modules/settings/protection'
-import { ZButton, ZCard, ZCheckbox, ZForm, ZFormItem, ZIconButton, ZInput, ZPopover, ZSwitch } from '@codex-proxy/ui'
+import { ZButton, ZCard, ZCheckbox, ZFormItem, ZIconButton, ZInput, ZPopover, ZSwitch } from '@codex-proxy/ui'
 
 import { Activity, CircleAlert, Gauge, Plus, Snowflake, Timer } from '@lucide/vue'
 
@@ -17,9 +17,6 @@ const { t } = useI18n({ useScope: 'global' })
 
 const policy = defineModel<ProtectionDraft>({ required: true })
 const expandedId = shallowRef<string | null>(null)
-const rulesError = computed(() => policy.value.enabled && !policy.value.rules.length
-  ? t('settings.errorProtection.validation.required')
-  : '')
 const probeModelId = useId()
 const helpId = useId()
 
@@ -85,7 +82,7 @@ function removeRule(id: string) {
     :title="t('settings.errorProtection.title')"
     :description="t('settings.errorProtection.description')"
   >
-    <ZForm class="max-w-6xl sm:grid-cols-2 sm:items-end">
+    <div class="grid min-w-0 gap-4.5 max-w-6xl sm:grid-cols-2 sm:items-end">
       <ZSwitch
         :model-value="policy.enabled"
         :disabled="disabled"
@@ -94,63 +91,65 @@ function removeRule(id: string) {
         @update:model-value="update({ enabled: $event })"
       />
 
-      <section class="col-span-full grid min-w-0 gap-3" :aria-label="t('settings.errorProtection.rules')">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <div class="flex min-w-0 items-center gap-1">
-            <span class="text-cp-sm font-emphasis text-cp-text-secondary">{{ t('settings.errorProtection.anyRule') }}</span>
-            <ZPopover trigger="hover-click" placement="top-start" :hover-delay="240">
-              <template #reference="{ open }">
-                <ZIconButton
-                  size="small"
-                  :aria-label="t('settings.errorProtection.matchingHelpTitle')"
-                  :aria-expanded="open"
-                  :aria-describedby="open ? helpId : undefined"
-                >
-                  <CircleAlert class="size-3.5" />
-                </ZIconButton>
+      <ZFormItem prop="accountErrorProtection.rules" class="col-span-full">
+        <section class="grid min-w-0 gap-3" :aria-label="t('settings.errorProtection.rules')">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex min-w-0 items-center gap-1">
+              <span class="text-z-sm font-emphasis text-z-text-secondary">{{ t('settings.errorProtection.anyRule') }}</span>
+              <ZPopover trigger="hover-click" placement="top-start" :hover-delay="240">
+                <template #reference="{ open }">
+                  <ZIconButton
+                    variant="link"
+                    :title="undefined"
+                    size="small"
+                    :aria-label="t('settings.errorProtection.matchingHelpTitle')"
+                    :aria-expanded="open"
+                    :aria-describedby="open ? helpId : undefined"
+                  >
+                    <CircleAlert class="size-3.5" />
+                  </ZIconButton>
+                </template>
+                <div :id="helpId" class="grid max-w-80 gap-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
+                  <p class="m-0">
+                    {{ t('settings.errorProtection.matchingHelp') }}
+                  </p>
+                  <p class="m-0">
+                    {{ t('settings.errorProtection.missingHelp') }}
+                  </p>
+                  <p class="m-0">
+                    {{ t('settings.errorProtection.limitsHelp') }}
+                  </p>
+                </div>
+              </ZPopover>
+            </div>
+            <ZButton size="small" :disabled="disabled || policy.rules.length >= protectionLimits.rules" @click="addRule">
+              <template #icon>
+                <Plus class="size-3.5" />
               </template>
-              <div :id="helpId" class="grid max-w-80 gap-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
-                <p class="m-0">
-                  {{ t('settings.errorProtection.matchingHelp') }}
-                </p>
-                <p class="m-0">
-                  {{ t('settings.errorProtection.missingHelp') }}
-                </p>
-                <p class="m-0">
-                  {{ t('settings.errorProtection.limitsHelp') }}
-                </p>
-              </div>
-            </ZPopover>
+              {{ t('settings.errorProtection.addRule') }}
+            </ZButton>
           </div>
-          <ZButton size="small" :disabled="disabled || policy.rules.length >= protectionLimits.rules" @click="addRule">
-            <template #icon>
-              <Plus class="size-3.5" />
+          <p v-if="!policy.rules.length" class="m-0 rounded-z bg-z-fill-quaternary px-4 py-4 text-z-sm text-z-text-tertiary">
+            {{ t('settings.errorProtection.emptyRules') }}
+          </p>
+          <div v-else class="grid min-w-0 gap-2">
+            <template v-for="(rule, index) in policy.rules" :key="rule.id">
+              <span v-if="index > 0" class="pl-4 text-z-xs font-emphasis text-z-text-tertiary">{{ t('settings.errorProtection.or') }}</span>
+              <ProtectionRuleRow
+                :rule="rule"
+                :expanded="expandedId === rule.id"
+                :disabled="disabled"
+                @toggle="expandedId = expandedId === rule.id ? null : rule.id"
+                @remove="removeRule(rule.id)"
+                @update="updateRule"
+              />
             </template>
-            {{ t('settings.errorProtection.addRule') }}
-          </ZButton>
-        </div>
-        <p v-if="!policy.rules.length" class="m-0 rounded-cp bg-cp-fill-quaternary px-4 py-4 text-cp-sm text-cp-text-tertiary">
-          {{ t('settings.errorProtection.emptyRules') }}
-        </p>
-        <div v-else class="grid min-w-0 gap-2">
-          <template v-for="(rule, index) in policy.rules" :key="rule.id">
-            <span v-if="index > 0" class="pl-4 text-cp-xs font-emphasis text-cp-text-tertiary">{{ t('settings.errorProtection.or') }}</span>
-            <ProtectionRuleRow
-              :rule="rule"
-              :expanded="expandedId === rule.id"
-              :disabled="disabled"
-              @toggle="expandedId = expandedId === rule.id ? null : rule.id"
-              @remove="removeRule(rule.id)"
-              @update="updateRule"
-            />
-          </template>
-        </div>
-        <p v-if="rulesError" class="m-0 text-cp-sm text-cp-error-text" role="alert">
-          {{ rulesError }}
-        </p>
-      </section>
+          </div>
+        </section>
+      </ZFormItem>
 
       <ZFormItem
+        prop="accountErrorProtection.threshold" :show-message="policy.threshold !== null"
         :label="t('settings.errorProtection.failureCountThreshold')"
         :description="t('settings.errorProtection.thresholdHelp')"
       >
@@ -167,12 +166,13 @@ function removeRule(id: string) {
             <Activity class="size-4" />
           </template>
           <template #suffix>
-            <span class="text-cp-sm">{{ t('settings.errorProtection.times') }}</span>
+            <span class="text-z-sm">{{ t('settings.errorProtection.times') }}</span>
           </template>
         </ZInput>
       </ZFormItem>
 
       <ZFormItem
+        prop="accountErrorProtection.windowSeconds" :show-message="policy.windowSeconds !== null"
         :label="t('settings.errorProtection.countValidity')"
         :description="t('settings.errorProtection.windowHelp')"
       >
@@ -189,12 +189,13 @@ function removeRule(id: string) {
             <Timer class="size-4" />
           </template>
           <template #suffix>
-            <span class="text-cp-sm">{{ t('settings.errorProtection.seconds') }}</span>
+            <span class="text-z-sm">{{ t('settings.errorProtection.seconds') }}</span>
           </template>
         </ZInput>
       </ZFormItem>
 
       <ZFormItem
+        prop="accountErrorProtection.durationSeconds" :show-message="policy.durationSeconds !== null"
         :label="t('settings.errorProtection.cooldownTime')"
         :description="t('settings.errorProtection.cooldownHelp')"
       >
@@ -211,11 +212,12 @@ function removeRule(id: string) {
             <Snowflake class="size-4" />
           </template>
           <template #suffix>
-            <span class="text-cp-sm">{{ t('settings.errorProtection.seconds') }}</span>
+            <span class="text-z-sm">{{ t('settings.errorProtection.seconds') }}</span>
           </template>
         </ZInput>
       </ZFormItem>
       <ZFormItem
+        prop="policy.probeEnabled"
         :label="t('settings.errorProtection.recoveryProbeModel')"
         :description="t('settings.errorProtection.probeModelHelp')"
         :for="probeModelId"
@@ -241,6 +243,6 @@ function removeRule(id: string) {
           </template>
         </ZInput>
       </ZFormItem>
-    </ZForm>
+    </div>
   </ZCard>
 </template>

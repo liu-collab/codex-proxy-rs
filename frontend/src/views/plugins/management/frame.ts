@@ -4,7 +4,7 @@ import type {
   PluginManagementResource,
   PluginManagementView,
 } from '@/api'
-import { THEME_TOKEN_NAMES } from '@codex-proxy/ui/theme'
+import { getThemeVarName, themeTokenNames } from '@codex-proxy/ui/theme'
 import { generate, parse, walk } from 'css-tree'
 import bridgeSource from 'virtual:plugin-bridge-source'
 import { getPluginManagementResource, PLUGIN_MANAGEMENT_TIMEOUT_MS } from '@/api'
@@ -128,17 +128,17 @@ export function readPluginFrameTheme(): PluginFrameTheme {
   const root = document.documentElement
   const computed = getComputedStyle(root)
   const tokens: Record<string, string> = {}
-  for (const token of THEME_TOKEN_NAMES) {
-    const value = safeThemeValue(computed.getPropertyValue(token))
+  for (const token of themeTokenNames) {
+    const value = safeThemeValue(computed.getPropertyValue(getThemeVarName(token)))
     if (value)
       tokens[token] = value
   }
   const font = safeThemeValue(computed.getPropertyValue('--font-sans')) || safeThemeValue(computed.fontFamily)
   const fontCode = safeThemeValue(computed.getPropertyValue('--font-mono'))
   if (font)
-    tokens['--cp-font-family'] = font
+    tokens['font-family'] = font
   if (fontCode)
-    tokens['--cp-font-family-code'] = fontCode
+    tokens['font-family-code'] = fontCode
   return {
     name: root.dataset.theme === 'dark'
       ? 'dark'
@@ -324,10 +324,14 @@ function injectFrameBoundary(document: Document, bridgeScript: string) {
   // 宿主统一提供最小高度与整页滚动；flow-root 包含子元素外边距与浮动。
   layout.textContent = `
     html { overflow: hidden; }
-    body { margin: 0; display: flow-root; box-sizing: border-box; min-height: var(--cp-plugin-viewport-height, 0px); }
+    body { margin: 0; display: flow-root; box-sizing: border-box; min-height: var(--plugin-viewport-height, 0px); }
   `
   head.append(layout)
   head.prepend(bridge)
+  // 桥接先于页面脚本执行，命名空间元数据必须在桥接之前解析
+  const themePrefix = document.querySelector('meta[name="codex-proxy-ui-theme-prefix"]')
+  if (themePrefix)
+    head.prepend(themePrefix)
   head.prepend(referrer)
   head.prepend(policy)
 }

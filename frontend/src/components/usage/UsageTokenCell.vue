@@ -43,34 +43,34 @@ const tokenItems = computed(() => [
 <template>
   <div class="flex items-center justify-end gap-1.5">
     <div
-      class="grid grid-cols-[auto_auto] items-center justify-end gap-x-2 gap-y-1 font-mono text-cp-sm leading-none font-bold tabular-nums"
+      class="grid grid-cols-[auto_auto] items-center justify-end gap-x-2 gap-y-1 font-mono text-z-sm leading-none font-bold tabular-nums"
     >
-      <span class="inline-flex items-center gap-1 text-cp-success-text">
+      <span class="inline-flex items-center gap-1 text-z-success-text">
         <ArrowDown class="size-3" />
         {{ tokenDetails.inputTokensDisplay }}
       </span>
-      <span class="inline-flex items-center gap-1 text-cp-info-text">
+      <span class="inline-flex items-center gap-1 text-z-info-text">
         <ArrowUp class="size-3" />
         {{ tokenDetails.outputTokensDisplay }}
       </span>
-      <span class="col-span-2 inline-flex items-center justify-end gap-1 text-cp-info-text">
+      <span class="col-span-2 inline-flex items-center justify-end gap-1 text-z-info-text">
         <Archive class="size-3" />
         {{ tokenDetails.cachedInputTokensDisplay }}
       </span>
     </div>
 
     <UsageDetailPopover :title="t('usage.tokens.tokenDetails')" :trigger-label="t('usage.tokens.viewTokenDetails')">
-      <div class="grid gap-1.5 text-cp-text-secondary">
+      <div class="grid gap-1.5 text-z-text-secondary">
         <div v-for="item in tokenItems" :key="item.label" class="flex justify-between gap-4">
           <span class="whitespace-nowrap">{{ item.label }}</span>
-          <span class="whitespace-nowrap font-mono font-heavy text-cp-text">
+          <span class="whitespace-nowrap font-mono font-heavy text-z-text">
             {{ item.value }}
           </span>
         </div>
       </div>
-      <div class="mt-1 flex justify-between border-t border-cp-split pt-2">
-        <span class="whitespace-nowrap text-cp-text-secondary">{{ t('usage.tokens.totalTokens') }}</span>
-        <span class="whitespace-nowrap font-mono font-heavy text-cp-info-text">
+      <div class="mt-1 flex justify-between border-t border-z-split pt-2">
+        <span class="whitespace-nowrap text-z-text-secondary">{{ t('usage.tokens.totalTokens') }}</span>
+        <span class="whitespace-nowrap font-mono font-heavy text-z-info-text">
           {{ tokenDetails.totalTokensDisplay }}
         </span>
       </div>

@@ -217,6 +217,18 @@ async fn privacy_rejection_is_not_sent_and_cannot_retry_or_rotate() {
     assert_eq!(error.kind(), ProviderErrorKind::InvalidRequest);
     assert_eq!(error.send_state(), UpstreamSendState::NotSent);
     assert!(error.retry_is_prohibited());
+    let visible = error.client_visible_upstream_error().unwrap();
+    assert_eq!(visible.code(), Some("privacy_policy_rejected"));
+    assert_eq!(visible.error_type(), Some("invalid_request_error"));
+    assert_eq!(
+        visible.message(),
+        "A gateway privacy rule could not process this request."
+    );
+    assert!(!visible.message().contains("$.input"));
+    assert_eq!(
+        error.diagnostic().unwrap().code(),
+        Some("privacy_policy_rejected")
+    );
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 

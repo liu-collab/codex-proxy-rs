@@ -1544,36 +1544,52 @@ fn decoder_should_classify_incomplete_reasons_and_preserve_native_wire() {
 }
 
 #[test]
-fn decoder_should_classify_failed_event_without_retaining_body() {
-    let body = concat!(
-        "event: response.created\n",
-        "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n",
-        "event: response.failed\n",
-        "data: {\"type\":\"response.failed\",\"error\":{\"code\":\"rate_limit_exceeded\",\"type\":\"server_error\",\"message\":\"secret\"}}\n\n",
-    );
-    let error = GrokCanonicalDecoder::new("fallback")
-        .push(body.as_bytes())
-        .expect_err("failed response must surface");
+fn decoder_should_preserve_structured_failure_fields_and_hide_raw_debug() {
+    for (event, expected_error_type) in [
+        (
+            serde_json::json!({"type":"response.failed","error":{"code":"rate_limit_exceeded","type":"server_error","message":"secret"}}),
+            Some("server_error"),
+        ),
+        (
+            serde_json::json!({"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","type":"provider_specific_error","message":"secret"}}}),
+            Some("provider_specific_error"),
+        ),
+        (
+            serde_json::json!({"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"secret"}}}),
+            None,
+        ),
+        (
+            serde_json::json!({"type":"error","code":"rate_limit_exceeded","message":"secret"}),
+            None,
+        ),
+    ] {
+        let body = format!(
+            "event: {}\ndata: {event}\n\n",
+            event["type"].as_str().unwrap()
+        );
+        let error = GrokCanonicalDecoder::new("fallback")
+            .push(body.as_bytes())
+            .expect_err("failed response must surface");
 
-    assert_eq!(
-        error.kind(),
-        gateway_core::error::ProviderErrorKind::RateLimited
-    );
-    assert_eq!(
-        error.upstream_code().map(|code| code.as_str()),
-        Some("rate_limit_exceeded")
-    );
-    let visible = error
-        .client_visible_upstream_error()
-        .expect("structured upstream message is client-visible");
-    assert_eq!(visible.message(), "secret");
-    assert_eq!(visible.code(), Some("rate_limit_exceeded"));
-    assert_eq!(visible.error_type(), Some("server_error"));
-    let raw: serde_json::Value =
-        serde_json::from_str(error.raw_upstream_error().unwrap().as_str()).unwrap();
-    assert_eq!(raw["error"]["message"], "secret");
-    assert_eq!(raw["error"]["code"], "rate_limit_exceeded");
-    assert!(!format!("{error:?}").contains("secret"));
+        assert_eq!(
+            error.kind(),
+            gateway_core::error::ProviderErrorKind::RateLimited
+        );
+        assert_eq!(
+            error.upstream_code().map(|code| code.as_str()),
+            Some("rate_limit_exceeded")
+        );
+        let visible = error
+            .client_visible_upstream_error()
+            .expect("structured upstream message is client-visible");
+        assert_eq!(visible.message(), "secret");
+        assert_eq!(visible.code(), Some("rate_limit_exceeded"));
+        assert_eq!(visible.error_type(), expected_error_type);
+        let raw: serde_json::Value =
+            serde_json::from_str(error.raw_upstream_error().unwrap().as_str()).unwrap();
+        assert_eq!(raw, event);
+        assert!(!format!("{error:?}").contains("secret"));
+    }
 }
 
 #[test]

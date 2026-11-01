@@ -146,11 +146,11 @@ defineExpose({ focusField })
         <template v-if="field.description" #label-extra>
           <ZPopover trigger="hover-click" placement="top-start">
             <template #reference>
-              <ZIconButton :aria-label="t('common.form.fieldHelp', { label: field.label })" class="size-3.5!" :title="undefined">
+              <ZIconButton variant="link" :aria-label="t('common.form.fieldHelp', { label: field.label })" class="size-3.5!" :title="undefined">
                 <Info class="size-3.5" />
               </ZIconButton>
             </template>
-            <p class="m-0 max-w-72 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
+            <p class="m-0 max-w-72 p-3 text-z-xs leading-relaxed text-z-text-secondary">
               {{ field.description }}
             </p>
           </ZPopover>

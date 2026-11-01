@@ -46,13 +46,13 @@ const desktopCommands = computed(() => ([
 
 <template>
   <section class="grid gap-4" aria-labelledby="codex-desktop-online-title">
-    <div class="grid gap-3 rounded-cp-card bg-cp-fill-quaternary p-4">
+    <div class="grid gap-3 rounded-z-card bg-z-fill-quaternary p-4">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
-          <h3 id="codex-desktop-online-title" class="m-0 text-cp-sm font-heavy text-cp-text">
+          <h3 id="codex-desktop-online-title" class="m-0 text-z-sm font-heavy text-z-text">
             {{ t('settings.clientVersion.onlineInstallationAndUpgrade') }}
           </h3>
-          <p class="mt-1.5 mb-0 text-cp-sm leading-[1.45] font-semibold text-cp-text-secondary">
+          <p class="mt-1.5 mb-0 text-z-sm leading-[1.45] font-semibold text-z-text-secondary">
             {{ t('settings.clientVersion.desktopUpgradeHelp') }}
           </p>
         </div>
@@ -60,7 +60,7 @@ const desktopCommands = computed(() => ([
           href="https://chatgpt.com/download/"
           target="_blank"
           rel="noopener noreferrer"
-          class="inline-flex h-cp-control shrink-0 items-center gap-2 rounded-cp-sm bg-cp-fill-tertiary px-3.5 text-cp font-bold text-cp-text shadow-cp-tertiary transition-[background-color,transform] hover:bg-cp-bg-text-active motion-safe:active:translate-y-px"
+          class="inline-flex h-z-control shrink-0 items-center gap-2 rounded-z-sm bg-z-fill-tertiary px-3.5 text-z font-bold text-z-text shadow-z-tertiary transition-[background-color,transform] hover:bg-z-bg-text-active motion-safe:active:translate-y-px"
         >
           {{ t('settings.clientVersion.officialDownloadPage') }}
           <ExternalLink class="size-3.5" />

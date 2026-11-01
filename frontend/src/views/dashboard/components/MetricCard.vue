@@ -19,20 +19,20 @@ const props = defineProps<{
 const { t } = useI18n({ useScope: 'global' })
 
 const trendToneClasses: Record<MetricTone, string> = {
-  normal: 'bg-cp-text-tertiary',
-  info: 'bg-cp-info-text',
-  success: 'bg-cp-success-text',
-  warning: 'bg-cp-warning-text',
-  danger: 'bg-cp-error-text',
+  normal: 'bg-z-text-tertiary',
+  info: 'bg-z-info-text',
+  success: 'bg-z-success-text',
+  warning: 'bg-z-warning-text',
+  danger: 'bg-z-error-text',
 }
 
 const themeColor = useThemeColor()
 const sparklineColorTokens: Record<MetricTone, { token: string, fallback: string }> = {
-  normal: { token: '--cp-color-blue-solid', fallback: '#5983F4' },
-  info: { token: '--cp-color-blue-solid', fallback: '#5983F4' },
-  success: { token: '--cp-color-green-solid', fallback: '#12B981' },
-  warning: { token: '--cp-color-orange-solid', fallback: '#F59E0B' },
-  danger: { token: '--cp-color-error', fallback: '#EF4444' },
+  normal: { token: 'color-blue-solid', fallback: '#5983F4' },
+  info: { token: 'color-blue-solid', fallback: '#5983F4' },
+  success: { token: 'color-green-solid', fallback: '#12B981' },
+  warning: { token: 'color-orange-solid', fallback: '#F59E0B' },
+  danger: { token: 'color-error', fallback: '#EF4444' },
 }
 
 const sparklineOption = computed<EChartsOption | null>(() => {
@@ -87,16 +87,16 @@ const sparklineOption = computed<EChartsOption | null>(() => {
   <ZCard as="article" padding="compact" class="relative h-38.5 w-full">
     <div class="flex items-start gap-3">
       <ZMotionIcon
-        class="inline-flex size-8.5 shrink-0 items-center justify-center rounded-cp-lg"
+        class="inline-flex size-8.5 shrink-0 items-center justify-center rounded-z-lg"
         :class="metricToneIconClasses[metric.tone]"
       >
         <component :is="metric.icon" :size="18" />
       </ZMotionIcon>
-      <span class="mt-1 text-cp leading-[1.15] font-emphasis text-cp-text-secondary">{{ metric.title }}</span>
+      <span class="mt-1 text-z leading-[1.15] font-emphasis text-z-text-secondary">{{ metric.title }}</span>
     </div>
 
     <div class="mt-3.25 flex h-7.75 items-end gap-2">
-      <strong class="font-mono text-[28px] leading-[1.05] font-heavy tabular-nums text-cp-text">
+      <strong class="font-mono text-[28px] leading-[1.05] font-heavy tabular-nums text-z-text">
         <AnimatedMetricValue :value="metric.value" :raw-value="metric.valueRaw" :formatter="metric.valueFormatter" />
       </strong>
       <i
@@ -117,10 +117,10 @@ const sparklineOption = computed<EChartsOption | null>(() => {
     </div>
 
     <div
-      class="mt-3 grid h-7.5 w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center rounded-cp-lg bg-cp-fill-alter/70 px-3"
+      class="mt-3 grid h-7.5 w-full grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center rounded-z-lg bg-z-fill-alter/70 px-3"
     >
       <span class="inline-grid min-w-0 w-full grid-cols-[auto_minmax(0,1fr)] items-baseline gap-2.5">
-        <span class="shrink-0 text-cp-xs leading-none font-emphasis text-cp-text-quaternary">
+        <span class="shrink-0 text-z-xs leading-none font-emphasis text-z-text-quaternary">
           {{ metric.details[0]?.label }}
         </span>
         <b
@@ -131,7 +131,7 @@ const sparklineOption = computed<EChartsOption | null>(() => {
         </b>
       </span>
       <span class="inline-grid min-w-0 w-full grid-cols-[auto_minmax(0,auto)] items-baseline justify-end gap-2.5">
-        <span class="shrink-0 text-cp-xs leading-none font-emphasis text-cp-text-quaternary">
+        <span class="shrink-0 text-z-xs leading-none font-emphasis text-z-text-quaternary">
           {{ metric.details[1]?.label }}
         </span>
         <b

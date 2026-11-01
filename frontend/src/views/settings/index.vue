@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ZButton, ZConfirmDialog, ZIconButton, ZPageHeader, ZSegmented, ZSelect } from '@codex-proxy/ui'
+import { ZButton, ZConfirmDialog, ZForm, ZIconButton, ZPageHeader, ZSegmented } from '@codex-proxy/ui'
 
 import { Save, Undo2 } from '@lucide/vue'
 
@@ -22,6 +22,7 @@ import RotationStrategyCard from './components/RotationStrategyCard.vue'
 import SettingsAccessSection from './components/SettingsAccessSection.vue'
 import TokenRefreshCard from './components/TokenRefreshCard.vue'
 import { useSettingsForm } from './composables/useSettingsForm'
+import { useSettingsFormRules } from './composables/useSettingsFormRules'
 import { useSettingsLeaveGuard } from './composables/useSettingsLeaveGuard'
 import { rotationOptions } from './constants'
 import PricingSection from './pricing/index.vue'
@@ -65,8 +66,8 @@ const isBasicSection = computed(() => section.value !== 'pricing' && section.val
 const visited = reactive(new Set<string>())
 const settingsVisited = shallowRef(false)
 
-function switchSection(value = 'runtime'): void {
-  void router.push(value === 'runtime'
+function switchSection(value = 'runtime') {
+  return router.push(value === 'runtime'
     ? '/settings'
     : `/settings/${value}`)
 }
@@ -98,11 +99,39 @@ const {
   usageRetentionDaysValue,
   resetCreditLeadMinutesValue,
   resetCreditMaxWeeklyRemainingPercentValue,
-  minCodexDesktopVersionError,
-  minCodexCliVersionError,
   saveSettings,
   loadSettings,
 } = useSettingsForm()
+const disabled = computed(() => saving.value || loading.value || detectingLocation.value || !!error.value)
+const formRef = useTemplateRef<InstanceType<typeof ZForm>>('formElement')
+const formModel = computed(() => ({ ...form, modelMappings: mappings.value }))
+const rules = useSettingsFormRules(() => form)
+
+async function requestSave() {
+  if (disabled.value || !hasChanges.value)
+    return
+  await formRef.value?.validate(async (valid, errors) => {
+    if (valid) {
+      await saveSettings()
+      return
+    }
+    const path = Object.keys(errors ?? {})[0]
+    if (!path)
+      return
+    const field = formRef.value?.getField(path)
+    const target = field?.$el?.closest('[data-settings-section]')?.getAttribute('data-settings-section')
+    if (target)
+      await switchSection(target)
+    await nextTick()
+    field?.scrollIntoView({ block: 'center' })
+    field?.focus()
+  })
+}
+
+function resetForm() {
+  resetSettings()
+  formRef.value?.clearValidate()
+}
 const backupSection = useTemplateRef<InstanceType<typeof SettingsBackupSection>>('backupSection')
 const hasUnsavedChanges = computed(() => hasChanges.value || !!backupSection.value?.hasChanges)
 const { showLeaveConfirm, confirmLeave } = useSettingsLeaveGuard(hasUnsavedChanges)
@@ -113,8 +142,6 @@ watch(() => !loading.value && route.hash === '#reset-credits', async (ready) => 
     document.getElementById('reset-credits')?.scrollIntoView({ block: 'start' })
   }
 }, { immediate: true })
-
-const disabled = computed(() => saving.value || loading.value || detectingLocation.value || !!error.value)
 
 watch(section, (value) => {
   visited.add(value)
@@ -129,27 +156,20 @@ watch(section, (value) => {
   <div class="w-full" :class="section === 'pricing' ? 'flex h-[calc(100dvh-2rem)] flex-none! flex-col min-[961px]:h-[calc(100dvh-3rem)]' : undefined">
     <ZPageHeader :title="t('navigation.settings')" :description="t('settings.page.description')" />
 
-    <div class="mt-4 flex min-h-cp-control shrink-0 flex-wrap items-center justify-between gap-3">
+    <div class="mt-4 flex min-h-z-control shrink-0 flex-wrap items-center justify-between gap-3">
       <ZSegmented
         :model-value="section"
         :aria-label="t('settings.page.sectionsLabel')"
-        class="hidden! bg-(--cp-input-bg)! sm:inline-grid!"
-        :options="sectionOptions"
-        @update:model-value="switchSection"
-      />
-      <ZSelect
-        :model-value="section"
-        :aria-label="t('settings.page.sectionsLabel')"
-        class="w-full sm:hidden"
+        class="w-full sm:w-auto"
         :options="sectionOptions"
         @update:model-value="switchSection"
       />
       <div v-if="isBasicSection || hasChanges" class="ml-auto flex items-center justify-end gap-2">
-        <span v-if="hasChanges" class="mr-1 size-1.5 shrink-0 rounded-full bg-cp-warning" aria-hidden="true" />
-        <ZIconButton v-if="hasChanges" :aria-label="t('settings.page.undoAllBasicSettingsChanges')" variant="solid" :disabled="saving || loading || detectingLocation" @click="resetSettings">
+        <span v-if="hasChanges" class="mr-1 size-1.5 shrink-0 rounded-full bg-z-warning" aria-hidden="true" />
+        <ZIconButton v-if="hasChanges" :aria-label="t('settings.page.undoAllBasicSettingsChanges')" variant="solid" :disabled="saving || loading || detectingLocation" @click="resetForm">
           <Undo2 class="size-4" />
         </ZIconButton>
-        <ZButton type="primary" :loading="saving" :disabled="disabled || !hasChanges" @click="saveSettings">
+        <ZButton type="primary" :loading="saving" :disabled="disabled || !hasChanges" @click="requestSave">
           <template #icon>
             <Save class="size-4" />
           </template>
@@ -158,21 +178,20 @@ watch(section, (value) => {
       </div>
     </div>
 
-    <div v-if="settingsVisited" v-show="isBasicSection" class="mt-5 grid w-full gap-5">
+    <ZForm v-if="settingsVisited" v-show="isBasicSection" ref="formElement" :model="formModel" :rules="rules" :validate-on-rule-change="false" novalidate class="mt-5 w-full" @submit="requestSave">
       <SettingsAccessSection
         v-if="visited.has('access')"
         v-show="section === 'access'"
         v-model:min-codex-desktop-version="form.minCodexDesktopVersion"
         v-model:min-codex-cli-version="form.minCodexCliVersion"
         v-model:responses-max-decompressed-body-mi-b="responsesMaxDecompressedBodyMiBValue"
+        data-settings-section="access"
         :disabled="disabled"
         :loading="loading"
-        :desktop-error="minCodexDesktopVersionError"
-        :cli-error="minCodexCliVersionError"
       />
 
       <fieldset v-show="section !== 'access'" :disabled="disabled" class="m-0 grid min-w-0 gap-5 border-0 p-0" :aria-label="t('settings.page.basicSettings')">
-        <template v-if="section === 'runtime'">
+        <div v-if="visited.has('runtime')" v-show="section === 'runtime'" data-settings-section="runtime" class="grid min-w-0 gap-5">
           <RotationStrategyCard
             v-model="form.rotationStrategy"
             v-model:smart-scheduling="form.smartScheduling"
@@ -204,9 +223,9 @@ watch(section, (value) => {
             v-model:max-weekly-remaining-percent="resetCreditMaxWeeklyRemainingPercentValue"
           />
           <RequestHistoryCard v-model="usageRetentionDaysValue" />
-        </template>
+        </div>
 
-        <div v-if="visited.has('upstream')" v-show="section === 'upstream'" class="grid min-w-0 gap-5">
+        <div v-if="visited.has('upstream')" v-show="section === 'upstream'" data-settings-section="upstream" class="grid min-w-0 gap-5">
           <TokenRefreshCard v-model:refresh-margin-seconds="refreshMarginSecondsValue" v-model:refresh-concurrency="refreshConcurrencyValue" />
           <ClientProfileCard
             v-model="form.providerRequestProfiles"
@@ -230,7 +249,7 @@ watch(section, (value) => {
           />
         </div>
       </fieldset>
-    </div>
+    </ZForm>
 
     <SettingsBackupSection v-if="visited.has('backup')" v-show="section === 'backup'" ref="backupSection" class="mt-5" :active="section === 'backup'" />
     <PricingSection v-if="visited.has('pricing')" v-show="section === 'pricing'" class="mt-5 min-h-0 flex-1" />

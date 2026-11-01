@@ -43,16 +43,16 @@ const items = computed(() => orderedPanelQuotaWindows(props.windows)
       class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] sm:items-center sm:gap-5"
     >
       <div class="min-w-0">
-        <h3 class="m-0 text-cp-sm font-heavy text-cp-text">
+        <h3 class="m-0 text-z-sm font-heavy text-z-text">
           {{ item.label }}
         </h3>
-        <p class="mt-1 mb-0 text-cp-xs leading-normal font-emphasis text-cp-text-secondary">
+        <p class="mt-1 mb-0 text-z-xs leading-normal font-emphasis text-z-text-secondary">
           {{ t('accounts.quota.reset') }}<span class="font-mono tabular-nums">{{ item.resetAtDisplay }}</span>
         </p>
       </div>
       <div class="flex min-w-0 items-center gap-3">
         <div
-          class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-cp-border-secondary"
+          class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-z-border-secondary"
           role="progressbar"
           :aria-label="t('accounts.quota.remainingQuota', { label: item.label })"
           aria-valuemin="0"
@@ -66,12 +66,12 @@ const items = computed(() => orderedPanelQuotaWindows(props.windows)
             :style="item.barStyle"
           />
         </div>
-        <span class="shrink-0 text-cp-xs font-heavy tabular-nums" :class="item.percentTextClass">
+        <span class="shrink-0 text-z-xs font-heavy tabular-nums" :class="item.percentTextClass">
           {{ item.remainingDisplay }}
         </span>
       </div>
     </div>
-    <p v-if="items.length === 0" class="m-0 text-cp-sm font-emphasis text-cp-text-secondary">
+    <p v-if="items.length === 0" class="m-0 text-z-sm font-emphasis text-z-text-secondary">
       {{ t('accounts.quota.unobserved') }}
     </p>
   </section>

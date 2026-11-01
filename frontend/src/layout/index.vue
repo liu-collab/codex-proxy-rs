@@ -67,7 +67,7 @@ watch(
 </script>
 
 <template>
-  <div class="relative flex h-dvh overflow-hidden bg-cp-bg-layout" :inert="mobileSidebarOpen">
+  <div class="relative flex h-dvh overflow-hidden bg-z-bg-layout" :inert="mobileSidebarOpen">
     <AppSidebar
       :collapsed="sidebarCollapsed"
       @toggle="toggleSidebar"

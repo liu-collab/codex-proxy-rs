@@ -5,7 +5,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProxyCatalog } from '@/composables/useProxyCatalog'
 
-const props = withDefaults(defineProps<{ accountId?: string, currentProxyId?: string | null, endpoint?: string | null, disabled?: boolean, preserve?: boolean, error?: string }>(), { preserve: true })
+const props = withDefaults(defineProps<{ accountId?: string, currentProxyId?: string | null, endpoint?: string | null, disabled?: boolean, preserve?: boolean, formProp: string }>(), { preserve: true })
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -71,7 +71,7 @@ const selection = computed({
 </script>
 
 <template>
-  <ZFormItem :label="t('accounts.proxy.outboundTunnel')" :error="error">
+  <ZFormItem :prop="formProp" :show-message="false" :label="t('accounts.proxy.outboundTunnel')">
     <ZSelect v-model="selection" class="w-full" :options="options" :disabled="disabled || loading" :aria-label="t('accounts.proxy.outboundTunnel')" />
   </ZFormItem>
 </template>

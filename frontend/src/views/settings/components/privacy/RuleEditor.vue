@@ -155,11 +155,11 @@ async function apply() {
           </section>
           <section class="flex min-h-0 flex-col gap-2.5" :aria-label="t('settings.privacy.rules.testPreview')">
             <div class="flex shrink-0 items-center justify-between gap-3">
-              <h3 class="m-0 text-cp-sm font-emphasis">
+              <h3 class="m-0 text-z-sm font-emphasis">
                 {{ t('settings.privacy.rules.previewOfEntireRule') }}
               </h3>
               <div class="flex items-center gap-2">
-                <span v-if="outcome" class="text-cp-xs text-cp-text-quaternary">{{ outcome.status === 'skipped' ? t('settings.privacy.rules.ruleSkipped') : t('settings.privacy.rules.matches', { matches: outcome.matches }) }}</span>
+                <span v-if="outcome" class="text-z-xs text-z-text-quaternary">{{ outcome.status === 'skipped' ? t('settings.privacy.rules.ruleSkipped') : t('settings.privacy.rules.matches', { matches: outcome.matches }) }}</span>
                 <ZButton size="small" variant="text" :loading="loading" :aria-label="t('settings.privacy.rules.testThisRule')" @click="test">
                   <template #icon>
                     <Play class="size-3.5" />
@@ -172,11 +172,11 @@ async function apply() {
                 <ZTextarea v-model="sample" size="small" resize="none" :placeholder="t('settings.privacy.rules.samplePlaceholder')" maxlength="262144" :aria-label="t('settings.privacy.rules.testSample')" class="h-full font-mono [&_textarea]:block [&_textarea]:h-full" spellcheck="false" />
               </ZFormItem>
               <div class="grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-2">
-                <span class="flex min-h-4 items-center text-cp leading-none font-medium text-cp-text-secondary">{{ t('settings.privacy.rules.afterProcessing') }}</span>
-                <pre class="cp-scrollbar m-0 min-h-0 overflow-auto rounded-cp bg-cp-fill-quaternary p-3 font-mono text-cp-xs break-all whitespace-pre-wrap" data-preview-output>{{ processed || t('settings.privacy.testPlaceholder') }}</pre>
+                <span class="flex min-h-4 items-center text-z leading-none font-medium text-z-text-secondary">{{ t('settings.privacy.rules.afterProcessing') }}</span>
+                <pre class="z-scrollbar m-0 min-h-0 overflow-auto rounded-z bg-z-fill-quaternary p-3 font-mono text-z-xs break-all whitespace-pre-wrap" data-preview-output>{{ processed || t('settings.privacy.testPlaceholder') }}</pre>
               </div>
             </div>
-            <p v-if="localError || outcome?.reason" role="alert" class="m-0 shrink-0 text-cp-sm text-cp-error-text">
+            <p v-if="localError || outcome?.reason" role="alert" class="m-0 shrink-0 text-z-sm text-z-error-text">
               {{ localError || outcome?.reason }}
             </p>
           </section>

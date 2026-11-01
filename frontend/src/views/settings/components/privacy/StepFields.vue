@@ -62,11 +62,11 @@ watch(() => step.value.action, (action) => {
       <template #label-extra>
         <ZPopover trigger="hover-click">
           <template #reference="{ open: helpOpen }">
-            <ZIconButton size="small" :aria-label="t('settings.privacy.steps.fieldPathSyntax')" :title="undefined" class="-my-2 hover:bg-transparent! active:bg-transparent!" :aria-expanded="helpOpen">
+            <ZIconButton variant="link" size="small" :aria-label="t('settings.privacy.steps.fieldPathSyntax')" :title="undefined" class="-my-2" :aria-expanded="helpOpen">
               <CircleHelp class="size-3.5" />
             </ZIconButton>
           </template>
-          <div class="max-w-72 p-3 text-cp-sm text-cp-text-secondary">
+          <div class="max-w-72 p-3 text-z-sm text-z-text-secondary">
             {{ t('settings.privacy.steps.jsonPathHelp') }}<br>{{ t('settings.privacy.steps.targetHelp') }}
           </div>
         </ZPopover>
@@ -84,11 +84,11 @@ watch(() => step.value.action, (action) => {
       <template #label-extra>
         <ZPopover trigger="hover-click">
           <template #reference="{ open: helpOpen }">
-            <ZIconButton size="small" :aria-label="t('settings.privacy.steps.regularSyntaxDescription')" :title="undefined" class="-my-2 hover:bg-transparent! active:bg-transparent!" :aria-expanded="helpOpen">
+            <ZIconButton variant="link" size="small" :aria-label="t('settings.privacy.steps.regularSyntaxDescription')" :title="undefined" class="-my-2" :aria-expanded="helpOpen">
               <CircleHelp class="size-3.5" />
             </ZIconButton>
           </template>
-          <div class="max-w-72 p-3 text-cp-sm text-cp-text-secondary">
+          <div class="max-w-72 p-3 text-z-sm text-z-text-secondary">
             {{ t('settings.privacy.steps.useOrForCaptureGroupsAndFor') }}<br>{{ t('settings.privacy.steps.usesRustRegexSyntaxAndDoesNot') }}
           </div>
         </ZPopover>

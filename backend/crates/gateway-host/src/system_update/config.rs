@@ -130,7 +130,7 @@ impl SystemUpdateConfig {
         }
         env::current_exe()
             .and_then(fs::canonicalize)
-            .map_err(|error| internal(format!("failed to resolve executable: {error}")))
+            .map_err(|error| internal("无法确定当前程序位置").with_source(error))
     }
 
     pub(crate) fn official_plugins_dir(&self) -> Result<PathBuf, OperationError> {
@@ -138,7 +138,7 @@ impl SystemUpdateConfig {
         let parent = executable
             .parent()
             .filter(|path| !path.as_os_str().is_empty())
-            .ok_or_else(|| internal("failed to resolve official plugin release directory"))?;
+            .ok_or_else(|| internal("无法确定官方插件安装目录"))?;
         Ok(parent.join("plugins").join("official"))
     }
 
@@ -146,7 +146,7 @@ impl SystemUpdateConfig {
         self.web_dist_dir
             .as_deref()
             .filter(|path| !path.as_os_str().is_empty())
-            .ok_or_else(|| conflict("web assets directory is not configured"))
+            .ok_or_else(|| conflict("尚未配置管理页面文件目录，无法在线更新"))
     }
 }
 

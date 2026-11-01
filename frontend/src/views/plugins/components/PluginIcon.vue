@@ -17,7 +17,7 @@ const source = computed(() => props.artifact.metadata.icon
 </script>
 
 <template>
-  <span class="inline-flex shrink-0 items-center justify-center overflow-hidden bg-cp-fill-alter text-cp-text-secondary" aria-hidden="true">
+  <span class="inline-flex shrink-0 items-center justify-center overflow-hidden bg-z-fill-alter text-z-text-secondary" aria-hidden="true">
     <img
       v-if="source && source !== failedSource"
       :key="source"

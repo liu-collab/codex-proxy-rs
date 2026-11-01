@@ -87,20 +87,20 @@ watch(() => props.disabled, (value) => {
         aria-haspopup="listbox"
         :aria-expanded="open"
         :aria-controls="open ? panelId : undefined"
-        class="flex min-h-cp-control w-full min-w-0 items-center gap-3 rounded-cp border-0 px-3.5 py-2 text-left text-cp shadow-cp-input outline-none transition-[background-color,box-shadow] duration-160 motion-reduce:transition-none"
+        class="flex min-h-z-control w-full min-w-0 items-center gap-3 rounded-z border-0 px-3.5 py-2 text-left text-z shadow-z-input outline-none transition-[background-color,box-shadow] duration-160 motion-reduce:transition-none"
         :class="disabled
-          ? 'cursor-not-allowed bg-cp-bg-container-disabled text-cp-text-disabled shadow-none'
+          ? 'cursor-not-allowed bg-z-bg-container-disabled text-z-text-disabled shadow-none'
           : open
-            ? 'cursor-pointer bg-(--cp-input-active-bg) text-cp-text shadow-cp-input-active'
-            : 'cursor-pointer bg-(--cp-input-bg) text-cp-text hover:bg-(--cp-input-hover-bg) hover:shadow-cp-input-hover focus-visible:bg-(--cp-input-active-bg) focus-visible:shadow-cp-input-active'"
+            ? 'cursor-pointer bg-(--z-input-active-bg) text-z-text shadow-z-input-active'
+            : 'cursor-pointer bg-(--z-input-bg) text-z-text hover:bg-(--z-input-hover-bg) hover:shadow-z-input-hover focus-visible:bg-(--z-input-active-bg) focus-visible:shadow-z-input-active'"
         @keydown="handleKeydown"
         @keydown.down.prevent="open = !disabled"
       >
-        <FileArchive v-if="selectedAsset" class="size-4 shrink-0 text-cp-text-tertiary" aria-hidden="true" />
-        <span class="min-w-0 flex-1 truncate text-cp-sm" :class="{ 'text-cp-text-quaternary': !selectedAsset }">
+        <FileArchive v-if="selectedAsset" class="size-4 shrink-0 text-z-text-tertiary" aria-hidden="true" />
+        <span class="min-w-0 flex-1 truncate text-z-sm" :class="{ 'text-z-text-quaternary': !selectedAsset }">
           {{ selectedAsset?.name ?? t('plugins.assets.selectPluginPackage') }}
         </span>
-        <ChevronDown class="size-4 shrink-0 text-cp-text-tertiary transition-transform motion-reduce:transition-none" :class="{ 'rotate-180': open }" aria-hidden="true" />
+        <ChevronDown class="size-4 shrink-0 text-z-text-tertiary transition-transform motion-reduce:transition-none" :class="{ 'rotate-180': open }" aria-hidden="true" />
       </button>
     </template>
     <div :id="panelId" ref="panel" role="listbox" :aria-label="t('plugins.assets.packageLabel')" aria-required="true" :style="{ width: `${width}px` }" class="max-w-[calc(100vw-2rem)] p-1.5">
@@ -115,11 +115,11 @@ watch(() => props.disabled, (value) => {
             :title="asset.name"
             :aria-selected="selected === asset.name"
             :disabled="disabled"
-            class="flex w-full min-w-0 items-center gap-3 rounded-cp-sm border-0 px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-cp-control-outline focus-visible:ring-inset"
-            :class="disabled ? 'cursor-not-allowed opacity-55' : selected === asset.name ? 'cursor-pointer bg-cp-control-item-bg-active hover:bg-cp-control-item-bg-active-hover' : 'cursor-pointer bg-transparent hover:bg-cp-fill-tertiary'"
+            class="flex w-full min-w-0 items-center gap-3 rounded-z-sm border-0 px-3 py-2.5 text-left outline-none transition-colors focus-visible:ring-2 focus-visible:ring-z-control-outline focus-visible:ring-inset"
+            :class="disabled ? 'cursor-not-allowed opacity-55' : selected === asset.name ? 'cursor-pointer bg-z-control-item-bg-active hover:bg-z-control-item-bg-active-hover' : 'cursor-pointer bg-transparent hover:bg-z-fill-tertiary'"
             @click="select(asset.name)"
           >
-            <span class="min-w-0 flex-1 truncate text-cp-sm" :class="selected === asset.name ? 'text-cp-primary-text' : 'text-cp-text'">{{ asset.name }}</span>
+            <span class="min-w-0 flex-1 truncate text-z-sm" :class="selected === asset.name ? 'text-z-primary-text' : 'text-z-text'">{{ asset.name }}</span>
             <ZTag class="shrink-0 tabular-nums">
               {{ formatPluginFileSize(asset.size) }}
             </ZTag>

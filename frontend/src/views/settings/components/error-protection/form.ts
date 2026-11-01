@@ -103,17 +103,7 @@ export function protectionRulesError(policy: Pick<AccountErrorProtection, 'enabl
   return ''
 }
 
-export function protectionSettingsError(policy: ProtectionDraft): string {
-  const { threshold, windowSeconds, durationSeconds } = policy
-  if (threshold === null || windowSeconds === null || durationSeconds === null)
-    return t('settings.form.protectionSettingsRequired')
-  if (!Number.isInteger(threshold) || threshold < 2 || threshold > 1000
-    || !Number.isInteger(windowSeconds) || windowSeconds < 60 || windowSeconds > 3600
-    || !Number.isInteger(durationSeconds) || durationSeconds < 300 || durationSeconds > 604800) {
-    return t('settings.form.invalidProtectionSettings')
-  }
-  if (exceedsCharacters(trimProtectionText(policy.probeModel), 128) || /\p{Cc}/u.test(policy.probeModel))
-    return t('settings.form.invalidProbeModel')
+export function protectionPolicyError(policy: ProtectionDraft): string {
   const rulesError = protectionRulesError(policy)
   if (rulesError)
     return rulesError

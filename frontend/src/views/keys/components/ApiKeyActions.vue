@@ -34,7 +34,7 @@ const { t } = useI18n({ useScope: 'global' })
       :aria-label="t('keys.actions.editKey')"
       @click.stop="emit('edit', apiKey)"
     >
-      <Pencil class="size-3.5 text-cp-link" />
+      <Pencil class="size-3.5 text-z-link" />
     </ZIconButton>
     <ZIconButton
       size="small"
@@ -43,7 +43,7 @@ const { t } = useI18n({ useScope: 'global' })
       :disabled="revealing"
       @click.stop="emit('use', apiKey)"
     >
-      <Terminal class="size-3.5 text-cp-primary-text" />
+      <Terminal class="size-3.5 text-z-primary-text" />
     </ZIconButton>
 
     <ZPopover placement="bottom-end">
@@ -56,19 +56,19 @@ const { t } = useI18n({ useScope: 'global' })
         <div class="w-36 p-1.5">
           <ZMenuItem @click.stop="(close(), emit('resetBudget', apiKey))">
             <template #icon>
-              <RotateCcw class="size-3.5 text-cp-text-quaternary" />
+              <RotateCcw class="size-3.5 text-z-text-quaternary" />
             </template>
             {{ t('keys.actions.resetUsedCredit') }}
           </ZMenuItem>
           <ZMenuItem :disabled="revealing" @click.stop="(close(), emit('importClient', apiKey))">
             <template #icon>
-              <Upload class="size-3.5 text-cp-text-quaternary" />
+              <Upload class="size-3.5 text-z-text-quaternary" />
             </template>
             {{ t('keys.configuration.importTo') }}
           </ZMenuItem>
           <ZMenuItem :loading="updatingStatus" @click.stop="(close(), emit('toggle', apiKey))">
             <template #icon>
-              <Power class="size-3.5" :class="apiKey.enabled ? 'text-cp-warning' : 'text-cp-success'" />
+              <Power class="size-3.5" :class="apiKey.enabled ? 'text-z-warning' : 'text-z-success'" />
             </template>
             {{ apiKey.enabled ? t('keys.actions.disableKey') : t('keys.actions.enableKey') }}
           </ZMenuItem>

@@ -57,7 +57,7 @@ const releaseStatus = computed(() => {
         ? t('dashboard.clientIdentity.customVersion')
         : t('dashboard.clientIdentity.active'),
       title: t('dashboard.clientIdentity.activeDescription'),
-      tone: 'bg-cp-info-container text-cp-info-on-container',
+      tone: 'bg-z-info-container text-z-info-on-container',
       icon: ShieldCheck,
     }
   }
@@ -67,7 +67,7 @@ const releaseStatus = computed(() => {
     return {
       label: t('dashboard.clientIdentity.upToDate'),
       title: t('dashboard.clientIdentity.upToDateDescription'),
-      tone: 'bg-cp-success-container text-cp-success-on-container',
+      tone: 'bg-z-success-container text-z-success-on-container',
       icon: CheckCircle2,
     }
   }
@@ -75,7 +75,7 @@ const releaseStatus = computed(() => {
     return {
       label: t('dashboard.clientIdentity.updateAvailable'),
       title: t('dashboard.clientIdentity.latestRelease', { releaseLabel: releaseLabel.value }),
-      tone: 'bg-cp-warning-container text-cp-warning-on-container',
+      tone: 'bg-z-warning-container text-z-warning-on-container',
       icon: TriangleAlert,
     }
   }
@@ -83,14 +83,14 @@ const releaseStatus = computed(() => {
     return {
       label: t('dashboard.clientIdentity.checkFailed'),
       title: current.release.error || t('dashboard.clientIdentity.checkFailedDescription'),
-      tone: 'bg-cp-error-container text-cp-error-on-container',
+      tone: 'bg-z-error-container text-z-error-on-container',
       icon: TriangleAlert,
     }
   }
   return {
     label: t('dashboard.clientIdentity.pending'),
     title: t('dashboard.clientIdentity.pendingDescription'),
-    tone: 'bg-cp-cyan-container text-cp-cyan-on-container',
+    tone: 'bg-z-cyan-container text-z-cyan-on-container',
     icon: RefreshCw,
   }
 })
@@ -189,7 +189,7 @@ watch(
   <ZCard as="article" class="flex min-h-95 w-full flex-col">
     <template #header>
       <div class="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <h2 class="m-0 pt-0.5 text-xl leading-[1.15] font-heavy text-cp-text text-balance">
+        <h2 class="m-0 pt-0.5 text-xl leading-[1.15] font-heavy text-z-text text-balance">
           {{ t('dashboard.clientIdentity.title') }}
         </h2>
         <div v-if="providerOptions.length > 1" class="min-w-0 max-w-full overflow-x-auto">
@@ -210,7 +210,7 @@ watch(
       <div v-else class="flex flex-1">
         <section
           :aria-label="t('dashboard.clientIdentity.attributes')"
-          class="grid min-w-0 flex-1 content-between gap-6 rounded-cp-lg bg-cp-fill-alter/70 px-5 py-5.5 sm:px-6 sm:py-5"
+          class="grid min-w-0 flex-1 content-between gap-6 rounded-z-lg bg-z-fill-alter/70 px-5 py-5.5 sm:px-6 sm:py-5"
           :class="
             verifiedLabel || checkedLabel
               ? 'sm:grid-rows-[auto_minmax(0,1fr)_auto_auto]'
@@ -218,14 +218,14 @@ watch(
           "
         >
           <div class="flex min-w-0 items-center justify-between gap-3">
-            <div class="flex min-w-0 items-center gap-2 text-cp-text">
-              <span class="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-cp-fill-tertiary">
-                <Box class="size-3.75 text-cp-text-secondary" />
+            <div class="flex min-w-0 items-center gap-2 text-z-text">
+              <span class="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-z-fill-tertiary">
+                <Box class="size-3.75 text-z-text-secondary" />
               </span>
-              <span class="truncate text-cp-xs leading-none font-heavy" :title="profile.product">{{ profile.product }}</span>
+              <span class="truncate text-z-xs leading-none font-heavy" :title="profile.product">{{ profile.product }}</span>
             </div>
             <span
-              class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-cp-sm leading-none font-bold"
+              class="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-z-sm leading-none font-bold"
               :class="releaseStatus.tone"
               :title="releaseStatus.title"
             >
@@ -241,16 +241,16 @@ watch(
                 class="inline-flex max-w-full min-w-0 items-baseline gap-2 font-mono leading-none tabular-nums"
                 :title="profile.version"
               >
-                <span class="wrap-break-word text-[27px] leading-[1.05] font-heavy text-cp-text">
+                <span class="wrap-break-word text-[27px] leading-[1.05] font-heavy text-z-text">
                   {{ versionParts.release }}
                 </span>
-                <span v-if="versionParts.prerelease" class="truncate text-cp-sm font-bold text-cp-text-secondary">
+                <span v-if="versionParts.prerelease" class="truncate text-z-sm font-bold text-z-text-secondary">
                   {{ versionParts.prerelease }}
                 </span>
               </strong>
               <span
                 v-if="profile.build"
-                class="shrink-0 font-mono text-[10px] leading-none font-emphasis tabular-nums text-cp-text-quaternary"
+                class="shrink-0 font-mono text-[10px] leading-none font-emphasis tabular-nums text-z-text-quaternary"
               >
                 {{ t('common.fields.build') }} {{ profile.build }}
               </span>
@@ -259,12 +259,12 @@ watch(
 
           <dl class="m-0 flex min-w-0 flex-wrap gap-x-7 gap-y-5">
             <div v-if="profile.provider === 'xai'" class="min-w-0 flex-auto">
-              <dt class="flex items-center gap-1.5 text-[10px] leading-none font-bold text-cp-text-quaternary">
-                <ShieldCheck class="size-3.25 text-cp-text-tertiary" />
+              <dt class="flex items-center gap-1.5 text-[10px] leading-none font-bold text-z-text-quaternary">
+                <ShieldCheck class="size-3.25 text-z-text-tertiary" />
                 {{ t('dashboard.clientIdentity.authProtocol') }}
               </dt>
               <dd
-                class="mt-2 mb-0 font-mono text-cp-lg leading-snug font-bold wrap-anywhere tabular-nums text-cp-text"
+                class="mt-2 mb-0 font-mono text-z-lg leading-snug font-bold wrap-anywhere tabular-nums text-z-text"
                 :title="authProtocol"
               >
                 {{ authProtocol }}
@@ -272,28 +272,28 @@ watch(
             </div>
 
             <div class="min-w-0 flex-auto">
-              <dt class="flex items-center gap-1.5 text-[10px] leading-none font-bold text-cp-text-quaternary">
-                <Monitor class="size-3.25 text-cp-text-tertiary" />
+              <dt class="flex items-center gap-1.5 text-[10px] leading-none font-bold text-z-text-quaternary">
+                <Monitor class="size-3.25 text-z-text-tertiary" />
                 {{ profile.provider === 'openai' ? t('dashboard.clientIdentity.emulatedEnvironment') : t('dashboard.clientIdentity.environment') }}
               </dt>
               <dd
-                class="mt-2 mb-0 font-mono text-cp-lg leading-snug font-bold wrap-anywhere tabular-nums text-cp-text"
+                class="mt-2 mb-0 font-mono text-z-lg leading-snug font-bold wrap-anywhere tabular-nums text-z-text"
                 :title="runtimeEnvironment.title"
               >
                 {{ runtimeEnvironment.primary }}
-                <span v-if="runtimeEnvironment.details.length" class="text-cp-xs font-emphasis text-cp-text-secondary">
+                <span v-if="runtimeEnvironment.details.length" class="text-z-xs font-emphasis text-z-text-secondary">
                   <template v-for="detail in runtimeEnvironment.details" :key="detail"> · {{ detail }} </template>
                 </span>
               </dd>
             </div>
 
             <div v-for="(attribute, index) in identityAttributes" :key="index" class="min-w-0 max-w-full">
-              <dt class="flex items-center gap-1.5 text-[10px] leading-none font-bold text-cp-text-quaternary">
-                <Terminal class="size-3.25 text-cp-text-tertiary" />
+              <dt class="flex items-center gap-1.5 text-[10px] leading-none font-bold text-z-text-quaternary">
+                <Terminal class="size-3.25 text-z-text-tertiary" />
                 {{ attribute.label }}
               </dt>
               <dd
-                class="mt-2 mb-0 font-mono text-[16px] leading-snug font-heavy wrap-anywhere tabular-nums text-cp-text"
+                class="mt-2 mb-0 font-mono text-[16px] leading-snug font-heavy wrap-anywhere tabular-nums text-z-text"
                 :title="attribute.value"
               >
                 {{ attribute.value }}
@@ -303,7 +303,7 @@ watch(
 
           <footer
             v-if="verifiedLabel || checkedLabel"
-            class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[10px] leading-none font-emphasis text-cp-text-quaternary"
+            class="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-1 text-[10px] leading-none font-emphasis text-z-text-quaternary"
           >
             <span v-if="verifiedLabel" :title="profile.userAgent">{{ verifiedLabel }}</span>
             <span v-if="checkedLabel">{{ checkedLabel }}</span>

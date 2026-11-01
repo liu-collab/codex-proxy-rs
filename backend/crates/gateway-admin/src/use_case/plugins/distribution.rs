@@ -71,7 +71,7 @@ impl PluginsService {
         validate_update_policy(&binding)?;
         let PluginUpdateSource::Github { repository } = &binding.source else {
             return Err(AdminError::invalid(
-                "该来源不提供 Release 更新查询，请显式选择并安装插件包",
+                "该来源不支持更新查询，请手动安装插件包",
             ));
         };
         let (tag, allow_prerelease) = match &binding.policy {
@@ -356,9 +356,7 @@ fn validate_update_policy(binding: &PluginSourceBinding) -> Result<(), AdminErro
     if !matches!(binding.source, PluginUpdateSource::Github { .. })
         && !matches!(binding.policy, PluginUpdatePolicy::Manual {})
     {
-        return Err(AdminError::invalid(
-            "只有 GitHub 来源支持 Release 更新检查策略",
-        ));
+        return Err(AdminError::invalid("仅 GitHub 来源支持发行版本更新检查"));
     }
     if let PluginUpdatePolicy::Pinned { tag, .. } = &binding.policy
         && (tag.is_empty()
@@ -366,7 +364,7 @@ fn validate_update_policy(binding: &PluginSourceBinding) -> Result<(), AdminErro
             || tag.chars().any(char::is_control)
             || tag.trim() != tag)
     {
-        return Err(AdminError::invalid("固定 Release tag 不合法"));
+        return Err(AdminError::invalid("固定版本标签不合法"));
     }
     Ok(())
 }

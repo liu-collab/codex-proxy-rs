@@ -72,7 +72,7 @@ async fn models_response(
         {
             return openai_error_response(
                 StatusCode::BAD_REQUEST,
-                "Invalid client_version",
+                "Invalid client_version.",
                 "invalid_request_error",
                 "invalid_client_version",
             )
@@ -134,7 +134,7 @@ async fn models_response(
 fn catalog_unavailable_response() -> Response {
     openai_error_response(
         StatusCode::SERVICE_UNAVAILABLE,
-        "Model catalog is temporarily unavailable",
+        "Model catalog is temporarily unavailable.",
         "server_error",
         "model_catalog_unavailable",
     )
@@ -207,10 +207,7 @@ fn adapted_codex_model_json(profile: &PublicModelProfile, index: usize) -> Value
             })
         })
         .collect::<Vec<_>>();
-    let reasoning_supported = presentation
-        .supported_reasoning_efforts()
-        .iter()
-        .any(|effort| effort != "none");
+    let reasoning_summary = presentation.reasoning_summary();
     let context_window = presentation.context_window_tokens();
     let max_context_window = presentation.max_context_window_tokens();
     let input_modalities = if presentation.image_input() {
@@ -252,8 +249,8 @@ fn adapted_codex_model_json(profile: &PublicModelProfile, index: usize) -> Value
         "base_instructions": CODEX_BASE_INSTRUCTIONS,
         "model_messages": Value::Null,
         "include_skills_usage_instructions": false,
-        "supports_reasoning_summary_parameter": reasoning_supported,
-        "default_reasoning_summary": "auto",
+        "supports_reasoning_summary_parameter": reasoning_summary,
+        "default_reasoning_summary": if reasoning_summary { "auto" } else { "none" },
         "support_verbosity": presentation.verbosity(),
         "default_verbosity": Value::Null,
         "apply_patch_tool_type": presentation.agent_tools().then_some("freeform"),

@@ -311,6 +311,74 @@ async fn live_sideband_rejects_disabled_account_even_before_scope_refresh() {
 }
 
 #[tokio::test]
+async fn live_proxy_failures_return_actionable_errors_and_release_the_call_claim() {
+    use gateway_core::{account::OutboundProxy, live::LiveHangupRequest};
+    use tokio::{io::AsyncWriteExt, net::TcpListener};
+
+    let (provider, store, _upstream) = bootstrap().await;
+    let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    store.set_egress(
+        ACCOUNT,
+        Some(OutboundProxy::parse(&format!("http://{}", proxy.local_addr().unwrap())).unwrap()),
+        None,
+    );
+    let proxy_task = tokio::spawn(async move {
+        for _ in 0..3 {
+            let (mut socket, _) = proxy.accept().await.unwrap();
+            let head = read_live_head(&mut socket).await;
+            assert!(head.starts_with("CONNECT api.openai.com:443 "));
+            socket
+                .write_all(b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                .await
+                .unwrap();
+        }
+    });
+    let gateway = provider.live_gateway().unwrap();
+    let key = ClientApiKeyId::new("key_openai_contract").unwrap();
+    let allowed = scope(AccountModelAccess::default());
+    // 拨号失败释放 claim；第二次仍须到达代理，不能被本地 busy 拦住
+    for _ in 0..2 {
+        let error = gateway
+            .open_sideband(LiveSidebandRequest {
+                call_id: CALL,
+                client_api_key_id: &key,
+                account_scope: &allowed,
+                style: LiveSidebandStyle::Live,
+                protocol_headers: Vec::new(),
+                subprotocols: Vec::new(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), LiveGatewayErrorKind::UpstreamUnavailable);
+        assert_eq!(error.status(), 503);
+        assert_eq!(
+            error.message(),
+            "The voice connection could not be established."
+        );
+        assert!(!error.message().contains("407"));
+        assert!(error.body().is_none());
+    }
+    let error = gateway
+        .hangup(LiveHangupRequest {
+            call_id: CALL,
+            client_api_key_id: &key,
+            content_type: None,
+            body: Bytes::new(),
+            protocol_headers: Vec::new(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), 503);
+    assert_eq!(
+        error.message(),
+        "The voice call request could not be completed."
+    );
+    assert!(!error.message().contains("api.openai.com"));
+    assert!(error.body().is_none());
+    proxy_task.await.unwrap();
+}
+
+#[tokio::test]
 async fn live_bootstrap_rejects_missing_planned_model_before_upstream_send() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, ACCOUNT).await;

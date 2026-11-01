@@ -67,14 +67,14 @@ watch(
 
       <div class="min-w-0 flex-1">
         <div class="flex min-w-0 items-center gap-2">
-          <h3 id="profile-display-name" class="m-0 min-w-0 truncate text-cp-lg leading-tight font-heavy text-cp-text">
+          <h3 id="profile-display-name" class="m-0 min-w-0 truncate text-z-lg leading-tight font-heavy text-z-text">
             {{ displayName }}
           </h3>
-          <AccountPlanBadge v-if="account.planType" :plan-type="account.planType" :plan-type-display="account.planTypeDisplay" size="sm" />
+          <AccountPlanBadge :upstream="account.upstream" :authentication-kind="account.authenticationKind" :plan-type="account.planType" :plan-type-display="account.planTypeDisplay" size="sm" />
         </div>
         <div
           v-if="username || accountIdentity"
-          class="mt-1.5 grid min-w-0 gap-0.5 text-cp-xs font-semibold text-cp-text-secondary"
+          class="mt-1.5 grid min-w-0 gap-0.5 text-z-xs font-semibold text-z-text-secondary"
         >
           <span v-if="username" class="truncate">{{ username }}</span>
           <span v-if="accountIdentity" class="truncate" :title="accountIdentity">{{ accountIdentity }}</span>

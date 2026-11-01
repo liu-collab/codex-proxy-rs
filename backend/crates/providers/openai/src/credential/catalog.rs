@@ -32,6 +32,8 @@ const PLAN_CATALOG_CACHE_TTL: Duration = Duration::from_secs(5 * 60);
 const MAX_CATALOG_FETCH_ATTEMPTS: usize = 3;
 const MAX_PLAN_CATALOG_MODELS: usize = 2_048;
 const MAX_CLIENT_CATALOGS: usize = 32;
+// 保持原先 32 份、每份 1 MiB 的原生正文缓存预算，不把缓存容量变成上游目录合同
+const MAX_CLIENT_CATALOG_CACHE_BYTES: usize = 32 * 1024 * 1024;
 const MODEL_CATALOG_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_CONCURRENT_API_CATALOGS: usize = 4;
 const CLIENT_CATALOG_ERROR_TTL: Duration = Duration::from_secs(5);
@@ -218,6 +220,20 @@ struct CachedClientCatalog {
     result: ClientCatalogResult,
 }
 
+impl CachedClientCatalog {
+    fn native_bytes(&self) -> usize {
+        self.result.as_ref().map_or(0, |models| {
+            models
+                .iter()
+                .map(|model| match &model.content {
+                    ProviderModelContent::Native(payload) => payload.body().len(),
+                    ProviderModelContent::Adapted(_) => 0,
+                })
+                .sum()
+        })
+    }
+}
+
 struct ClientCatalogEntry {
     key: ClientCatalogKey,
     created_at: Instant,
@@ -386,19 +402,15 @@ impl CodexCredentialCatalogService {
     async fn cached_client_account_catalog(
         &self,
         account: &ProviderAccount,
-        _client_version: &str,
+        client_version: &str,
         profile: CodexWireProfile,
     ) -> ClientCatalogResult {
-        // 目录请求的出站 client_version 一律使用服务端画像版本：下游客户端版本只用于
-        // 本地适配（请求形状与响应合同分流），不透传上游。缓存键与查询参数同源，
-        // 因此目录缓存也不会按下游版本分片。
-        let profile_version = profile.codex_version.clone();
         let key = ClientCatalogKey {
             account_id: account.id().clone(),
             revision: account.revision(),
             plan: account.plan_type().map(str::to_owned),
             upstream_account_id: account.upstream_account_id().map(str::to_owned),
-            client_version: profile_version.clone(),
+            client_version: client_version.to_owned(),
             profile: profile.clone(),
         };
         let value = {
@@ -436,7 +448,7 @@ impl CodexCredentialCatalogService {
                     CodexWireProfileState::new(profile),
                 );
                 let result = self
-                    .fetch_account_models(&client, account, Some(profile_version.as_str()))
+                    .fetch_account_models(&client, account, Some(client_version))
                     .await
                     .map(|fetched| {
                         fetched
@@ -464,6 +476,30 @@ impl CodexCredentialCatalogService {
                 }
             })
             .await;
+        // 完成中的 OnceCell 仍由并发读者持有；移出缓存只影响后续查询，不丢弃本次成功结果
+        let mut cache = self
+            .client_catalogs
+            .lock()
+            .map_err(|_| CodexCredentialCatalogError::Cache)?;
+        if result.native_bytes() > MAX_CLIENT_CATALOG_CACHE_BYTES {
+            cache.retain(|entry| !Arc::ptr_eq(&entry.value, &value));
+        } else {
+            let mut bytes: usize = cache
+                .iter()
+                .filter_map(|entry| entry.value.get())
+                .map(CachedClientCatalog::native_bytes)
+                .sum();
+            while bytes > MAX_CLIENT_CATALOG_CACHE_BYTES {
+                let Some(index) = cache.iter().position(|entry| entry.value.initialized()) else {
+                    break;
+                };
+                let entry = cache.remove(index);
+                bytes -= entry
+                    .value
+                    .get()
+                    .map_or(0, CachedClientCatalog::native_bytes);
+            }
+        }
         result.result.clone()
     }
 

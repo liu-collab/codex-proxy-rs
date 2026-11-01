@@ -22,15 +22,15 @@ const open = shallowRef(false)
       </ZButton>
     </template>
 
-    <div class="flex min-h-16 max-w-6xl items-center gap-3 rounded-cp bg-cp-fill-quaternary px-4 py-3">
-      <ZMotionIcon class="inline-flex size-9 shrink-0 items-center justify-center rounded-cp bg-cp-bg-container text-cp-primary-text shadow-cp-tertiary">
+    <div class="flex min-h-16 max-w-6xl items-center gap-3 rounded-z bg-z-fill-quaternary px-4 py-3">
+      <ZMotionIcon class="inline-flex size-9 shrink-0 items-center justify-center rounded-z bg-z-bg-container text-z-primary-text shadow-z-tertiary">
         <LockKeyhole class="size-4" aria-hidden="true" />
       </ZMotionIcon>
       <div class="min-w-0">
-        <p class="m-0 text-cp leading-[1.15] font-bold text-cp-text">
+        <p class="m-0 text-z leading-[1.15] font-bold text-z-text">
           {{ t('settings.password.verifyCurrentPassword') }}
         </p>
-        <p class="mt-1.5 mb-0 text-cp-sm leading-snug font-emphasis text-cp-text-secondary">
+        <p class="mt-1.5 mb-0 text-z-sm leading-snug font-emphasis text-z-text-secondary">
           {{ t('settings.password.sessionNotice') }}
         </p>
       </div>

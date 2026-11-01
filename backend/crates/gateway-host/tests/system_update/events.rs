@@ -3,6 +3,76 @@
 use super::*;
 
 #[tokio::test]
+async fn download_failure_should_not_publish_download_url_in_events_or_status() {
+    for diagnostics_result in [None, Some(false), Some(true)] {
+        let server = MockServer::start().await;
+        let fixture = Fixture::new();
+        fixture
+            .mount_custom_release(
+                &server,
+                &format!("{}/archive?token=private-download-sentinel", server.uri()),
+                None,
+            )
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/archive"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", "https://untrusted.example/archive"),
+            )
+            .mount(&server)
+            .await;
+        let service = fixture.service(&server);
+        let diagnostics = Arc::new(RecordingDiagnostics {
+            reject: diagnostics_result == Some(true),
+            ..RecordingDiagnostics::default()
+        });
+        if diagnostics_result.is_some() {
+            service.set_diagnostics(diagnostics.clone());
+        }
+        let events = service.update_events();
+        let status = complete_update(&service, TARGET_VERSION).await;
+        assert_eq!(status.operation.status, SystemOperationStatus::Failed);
+        assert_eq!(status.operation.error.as_deref(), Some("更新包下载失败"));
+        let events = events.collect::<Vec<_>>().await;
+        let terminal = events.last().expect("terminal event");
+        assert!(terminal.terminal);
+        assert_eq!(
+            Some(terminal.message.as_str()),
+            status.operation.error.as_deref()
+        );
+        assert!(
+            events
+                .iter()
+                .all(|event| !event.message.contains("private-download-sentinel"))
+        );
+        assert!(
+            !fs::read_to_string(fixture.state())
+                .expect("persisted state")
+                .contains("private-download-sentinel")
+        );
+        if diagnostics_result.is_some() {
+            let failures = diagnostics.failures.lock().expect("diagnostic failures");
+            assert_eq!(failures.len(), 1);
+            let failure = &failures[0];
+            assert_eq!(failure.operation, "install");
+            assert_eq!(failure.correlation_id, status.operation.operation_id);
+            let details = failure.details.as_ref().expect("download failure details");
+            assert!(!details.as_str().contains("private-download-sentinel"));
+            assert!(!details.as_str().contains(&server.uri()));
+            let details: serde_json::Value =
+                serde_json::from_str(details.as_str()).expect("details JSON");
+            assert_eq!(details["redacted"], true);
+            assert!(
+                details["causes"]["messages"]
+                    .as_array()
+                    .is_some_and(|messages| !messages.is_empty())
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn update_events_should_close_after_terminal_update_log() {
     let fixture = Fixture::new();
     let mut config = fixture.config("https://api.github.com/repos");
@@ -144,6 +214,11 @@ async fn terminal_event_should_only_be_visible_after_status_is_persisted() {
                 let status = service.update_status().await.expect("terminal status");
                 assert_eq!(status.operation.status, SystemOperationStatus::Failed);
                 assert!(status.operation.finished_at.is_some());
+                assert_eq!(event.message, "更新包校验失败，请重新下载");
+                assert_eq!(
+                    status.operation.error.as_deref(),
+                    Some(event.message.as_str())
+                );
                 return;
             }
         }

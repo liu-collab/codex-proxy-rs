@@ -1,4 +1,4 @@
-﻿//! Codex HTTP/SSE/WebSocket 上游 transport
+//! Codex HTTP/SSE/WebSocket 上游 transport
 
 mod automatic_context;
 pub mod canonical;
@@ -10,7 +10,6 @@ mod client_sse;
 pub(crate) mod connection;
 mod correlation;
 pub mod diagnostics;
-mod downstream;
 pub mod endpoints;
 pub mod headers;
 pub mod input_guard;
@@ -25,11 +24,9 @@ pub mod request;
 pub mod reset_credits;
 mod response_meta;
 pub mod review_override;
+pub(crate) mod routing_affinity;
 pub(crate) mod session;
 pub mod subscription;
-pub(crate) use downstream::{
-    normalize_selected_codex_downstream_body, normalize_universal_history_cleanup,
-};
 pub(crate) use endpoints::parse_upstream_base_url;
 pub mod tls;
 pub mod usage;
@@ -40,7 +37,7 @@ pub use self::{
     catalog::{
         CodexCatalogCapabilities, CodexCatalogCapabilityEvidence, CodexCatalogLimits,
         CodexCatalogMetadata, CodexCatalogModel, CodexCatalogVisibility, CodexModelCatalogError,
-        CodexModelCatalogSnapshot, MAX_CODEX_MODEL_CATALOG_BYTES, parse_codex_model_catalog,
+        CodexModelCatalogSnapshot, parse_codex_model_catalog,
     },
     client::{
         CodexAccountSelectionTelemetry, CodexBackendClient, CodexBackendJsonResponse,

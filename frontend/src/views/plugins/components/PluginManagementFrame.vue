@@ -56,7 +56,7 @@ onMounted(pushLayout)
 
 <template>
   <div ref="container" class="relative isolate flex min-w-0 w-full" :style="{ minHeight: `${viewportHeight}px` }" :aria-busy="loading || (!frameReady && !loadError)">
-    <div v-if="!loadError && (loading || !frameReady)" class="absolute inset-0 z-10 flex bg-cp-bg-layout">
+    <div v-if="!loadError && (loading || !frameReady)" class="absolute inset-0 z-10 flex bg-z-bg-layout">
       <PluginPageLoading />
     </div>
     <iframe

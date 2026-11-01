@@ -118,18 +118,14 @@ curl http://127.0.0.1:8080/v1/models \
 | 部署与使用 | [部署、备份与恢复](deploy/README.md) · [客户端接入与生图](deploy/README.md#客户端配置) |
 | 接口集成 | [API 参考](docs/api.md) · [模型定价](docs/api.md#模型定价) |
 | 使用插件 | [安装、配置与使用](docs/plugins.md) |
-| 开发插件 | [SDK 与合同](backend/crates/gateway-plugin/sdk/README.md) · [打包工具](backend/apps/plugin-cli/README.md) · [官方示例](modules/plugins/README.md) |
-| 开发共用组件 | [组件库说明](modules/ui/README.md) · [组件参考](modules/ui/playground/components/index.md) |
+| 开发插件 | [SDK 与合同](backend/crates/gateway-plugin/sdk/README.md) · [打包工具](backend/apps/plugin-cli/README.md) · [官方示例](https://github.com/zyycn/codex-proxy-plugins/blob/main/README.md) |
+| 开发共用组件 | [组件库说明](https://github.com/zyycn/codex-proxy-ui/blob/main/README.md) · [组件参考](https://github.com/zyycn/codex-proxy-ui/blob/main/playground/components/index.md) · [Playground](https://zyycn.github.io/codex-proxy-ui/) |
 | 开发宿主 | [开发与源码联调](docs/development.md) · [系统架构](docs/architecture.md) · [管理端主题](docs/theme.md) · [数据库迁移](backend/migrations/README.md) |
 | 参与协作 | [贡献、审查与验证](CONTRIBUTING.md) |
 
 ## 社区
 
-欢迎到 [Discussions 讨论区](https://github.com/zyycn/codex-proxy-rs/discussions)交流：
-[使用问答](https://github.com/zyycn/codex-proxy-rs/discussions/categories/使用问答)、
-[想法讨论](https://github.com/zyycn/codex-proxy-rs/discussions/categories/想法讨论)、
-[实验反馈](https://github.com/zyycn/codex-proxy-rs/discussions/categories/实验反馈)与
-[经验分享](https://github.com/zyycn/codex-proxy-rs/discussions/categories/经验分享)
+问题反馈与功能建议请使用 [GitHub Issues](https://github.com/zyycn/codex-proxy-rs/issues)，填写要求见 [贡献说明](CONTRIBUTING.md#提交-issue)
 
 感谢 [LINUX DO](https://linux.do) 社区提供开放、友善的技术交流平台
 

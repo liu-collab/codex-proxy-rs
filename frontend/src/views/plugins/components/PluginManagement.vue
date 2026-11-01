@@ -150,7 +150,7 @@ const tabOptions = computed(() => ([
       :loading="Boolean(management.busyInstanceId.value)"
       @confirm="management.confirmVersionSwitch"
     >
-      <p class="m-0 text-cp-sm">
+      <p class="m-0 text-z-sm">
         {{ management.pendingVersionSwitch.value?.artifact.metadata.displayName }}：
         {{ management.pendingVersionSwitch.value?.currentVersion }} → {{ management.pendingVersionSwitch.value?.artifact.metadata.version }}
       </p>
@@ -186,7 +186,7 @@ const tabOptions = computed(() => ([
       :loading="Boolean(management.busyDigest.value)"
       @confirm="management.confirmArtifactDelete"
     >
-      <div class="flex min-w-0 items-center gap-2 text-cp-sm font-normal">
+      <div class="flex min-w-0 items-center gap-2 text-z-sm font-normal">
         <p class="m-0 min-w-0 wrap-anywhere">
           {{ t('plugins.management.delete', { displayName: management.pendingArtifact.value?.metadata.displayName, version: management.pendingArtifact.value?.metadata.version }) }}
         </p>
@@ -205,7 +205,7 @@ const tabOptions = computed(() => ([
           </p>
         </PluginHelpPopover>
       </div>
-      <p class="mt-3 mb-0 text-cp-xs font-normal text-cp-text-secondary">
+      <p class="mt-3 mb-0 text-z-xs font-normal text-z-text-secondary">
         {{ t('plugins.management.deleteVersionCleanupLabel') }}
       </p>
     </ZConfirmDialog>
@@ -219,11 +219,11 @@ const tabOptions = computed(() => ([
       :loading="Boolean(management.busyInstanceId.value)"
       @confirm="management.confirmInstanceDelete"
     >
-      <div class="grid gap-3 text-cp-sm font-normal">
+      <div class="grid gap-3 text-z-sm font-normal">
         <p class="m-0 wrap-anywhere">
           {{ management.pendingDeleteInstance.value?.name }}
         </p>
-        <p class="m-0 text-cp-xs">
+        <p class="m-0 text-z-xs">
           {{ t('plugins.management.deleteConfigurationHelp') }}
         </p>
       </div>
@@ -239,7 +239,7 @@ const tabOptions = computed(() => ([
       :confirm-disabled="!management.uninstall.acknowledged.value"
       @confirm="management.uninstall.confirm"
     >
-      <div class="grid gap-3 text-cp-sm font-normal">
+      <div class="grid gap-3 text-z-sm font-normal">
         <p class="m-0 wrap-anywhere">
           {{ t('plugins.management.versionCount', { displayName: management.uninstall.pending.value?.artifact.metadata.displayName, count: management.uninstall.pending.value?.artifacts.length }) }}
         </p>
@@ -248,7 +248,7 @@ const tabOptions = computed(() => ([
             {{ instance.name }}
           </li>
         </ul>
-        <div class="flex items-center gap-1.5 text-cp-xs text-cp-text-secondary">
+        <div class="flex items-center gap-1.5 text-z-xs text-z-text-secondary">
           <span>{{ t('plugins.management.uninstallCleanupLabel') }}</span>
           <PluginHelpPopover :label="t('plugins.management.uninstallCleanupInstructions')">
             <p class="m-0">
@@ -260,7 +260,7 @@ const tabOptions = computed(() => ([
           </PluginHelpPopover>
         </div>
         <ZCheckbox v-model="management.uninstall.acknowledged.value" :label="t('plugins.management.permanentDeleteLabel')" :disabled="management.uninstall.busy.value" />
-        <p v-if="management.uninstall.progress.value" role="status" class="m-0 text-cp-xs text-cp-text-secondary">
+        <p v-if="management.uninstall.progress.value" role="status" class="m-0 text-z-xs text-z-text-secondary">
           {{ management.uninstall.progress.value }}
         </p>
       </div>
@@ -275,7 +275,7 @@ const tabOptions = computed(() => ([
       :loading="Boolean(management.busyCredentialId.value)"
       @confirm="management.confirmCredentialDelete"
     >
-      <p class="m-0 wrap-anywhere text-cp-sm font-normal">
+      <p class="m-0 wrap-anywhere text-z-sm font-normal">
         {{ management.pendingCredential.value?.name }}
       </p>
     </ZConfirmDialog>

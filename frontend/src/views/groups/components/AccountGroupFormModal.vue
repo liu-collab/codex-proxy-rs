@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import type { FormRules } from '@codex-proxy/ui'
 import type { AccountGroupFormValue } from '../composables/useAccountGroups'
 
 import type { AccountGroup } from '@/api'
-import { ZButton, ZColorPicker, ZDialog, ZForm, ZFormItem, ZInput, ZSegmented, ZTextarea } from '@codex-proxy/ui'
-import { computed } from 'vue'
+import { normalizeRgbaHexColor, ZButton, ZColorPicker, ZDialog, ZForm, ZFormItem, ZInput, ZSegmented, ZTextarea } from '@codex-proxy/ui'
+import { computed, useTemplateRef, watch } from 'vue'
 
 import { useI18n } from 'vue-i18n'
 import { ACCOUNT_GROUP_COLOR_PRESETS } from '../constants'
@@ -21,6 +22,27 @@ const { t } = useI18n({ useScope: 'global' })
 
 const open = defineModel<boolean>({ required: true })
 const form = defineModel<AccountGroupFormValue>('form', { required: true })
+const formRef = useTemplateRef<InstanceType<typeof ZForm>>('formElement')
+const rules = computed<FormRules<AccountGroupFormValue>>(() => ({
+  name: {
+    required: true,
+    whitespace: true,
+    trigger: ['blur', 'change'],
+    message: t('groups.actions.enterGroupName'),
+  },
+  color: {
+    validator: (_rule, value) => !!normalizeRgbaHexColor(value),
+    trigger: 'change',
+    message: t('groups.actions.selectValidGroupingColor'),
+  },
+}))
+watch(open, () => formRef.value?.clearValidate())
+
+async function requestSave() {
+  if (props.saving || !await formRef.value?.validate().catch(() => false))
+    return
+  emit('save')
+}
 const title = computed(() => props.group
   ? t('groups.actions.editGroup')
   : t('groups.filters.createGroup'))
@@ -37,8 +59,8 @@ const description = computed(() => props.group
     width="36rem"
     :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving"
   >
-    <ZForm class="grid gap-5">
-      <ZFormItem :label="t('groups.editor.groupName')" required>
+    <ZForm ref="formElement" :model="form" :rules="rules" scroll-to-error focus-on-error novalidate @submit="requestSave">
+      <ZFormItem prop="name" :show-message="false" :label="t('groups.editor.groupName')" required>
         <ZInput
           v-model="form.name"
           :aria-label="t('groups.editor.groupName')"
@@ -46,7 +68,7 @@ const description = computed(() => props.group
           :disabled="saving"
         />
       </ZFormItem>
-      <ZFormItem :label="t('groups.editor.groupColor')" required>
+      <ZFormItem prop="color" :show-message="Boolean(form.color.trim())" :label="t('groups.editor.groupColor')" required>
         <ZColorPicker
           v-model="form.color"
           :aria-label="t('groups.editor.selectGroupColor')"
@@ -100,8 +122,7 @@ const description = computed(() => props.group
       <ZButton
         type="primary"
         :loading="saving"
-        :disabled="!form.name.trim()"
-        @click="emit('save')"
+        @click="requestSave"
       >
         {{ t('groups.editor.saveGroup') }}
       </ZButton>

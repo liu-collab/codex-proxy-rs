@@ -2,6 +2,7 @@ import type { BarSeriesOption, EChartsOption, LineSeriesOption } from 'echarts'
 import type { Ref } from 'vue'
 import type { dashboardTrendView, normalizeDashboardTrendKind } from '../presenter'
 import type { DashboardTrendMetric } from '@/api'
+import { getThemeVarName } from '@codex-proxy/ui/theme'
 import { usePreferredReducedMotion } from '@vueuse/core'
 import { computed, shallowRef, watch } from 'vue'
 import { sampleGapBridgeSeries } from '@/components/charts/timeSeriesGap'
@@ -467,13 +468,13 @@ export function useRequestTrendChart(options: {
   }
 
   function summaryMarkerStyle(item: TrendSummaryItem) {
-    return item.colorVar
-      ? { backgroundColor: `var(${item.colorVar})` }
+    return item.colorToken
+      ? { backgroundColor: `var(${getThemeVarName(item.colorToken)})` }
       : undefined
   }
 
   function trendColor(metric: DashboardTrendMetric) {
-    return themeColor(trendMetricView(metric).colorVar, palette.value.textSecondary)
+    return themeColor(trendMetricView(metric).colorToken, palette.value.textSecondary)
   }
 
   function handleTrendChange(value: string) {

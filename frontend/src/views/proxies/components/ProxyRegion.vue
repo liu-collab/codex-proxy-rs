@@ -45,11 +45,11 @@ const description = computed(() => {
 </script>
 
 <template>
-  <span class="grid min-w-0 grid-cols-[1.125rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1" :class="location ? 'text-cp-text' : 'text-cp-text-tertiary'" :title="description">
+  <span class="grid min-w-0 grid-cols-[1.125rem_minmax(0,1fr)] items-center gap-x-2 gap-y-1" :class="location ? 'text-z-text' : 'text-z-text-tertiary'" :title="description">
     <img v-if="flag" :src="flag" alt="" aria-hidden="true" class="size-4.5 shrink-0" loading="lazy" decoding="async">
-    <Globe v-else class="size-4 shrink-0 text-cp-text-tertiary" aria-hidden="true" />
+    <Globe v-else class="size-4 shrink-0 text-z-text-tertiary" aria-hidden="true" />
     <span class="truncate">{{ label }}</span>
-    <span v-if="customLocation" class="col-start-2 truncate text-cp-xs text-cp-text-secondary" :title="t('proxies.region.customLocation', { customLabel, timezone: customLocation.timezone })">
+    <span v-if="customLocation" class="col-start-2 truncate text-z-xs text-z-text-secondary" :title="t('proxies.region.customLocation', { customLabel, timezone: customLocation.timezone })">
       {{ t('proxies.region.custom', { customLabel }) }}
     </span>
   </span>

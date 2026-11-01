@@ -1,3 +1,4 @@
+import { getThemeVarName } from '@codex-proxy/ui/theme'
 import { escape } from 'es-toolkit'
 import { isRecord } from '@/utils/data'
 
@@ -31,7 +32,7 @@ export function chartTooltipStyle(
       fontFamily: options.fontFamily ?? (getComputedStyle(document.documentElement).fontFamily),
       fontWeight: options.fontWeight ?? 650,
     },
-    extraCssText: 'border-radius: 12px; box-shadow: var(--cp-box-shadow);',
+    extraCssText: `border-radius: 12px; box-shadow: var(${getThemeVarName('box-shadow')});`,
   }
 
   if (!options.axisPointer)

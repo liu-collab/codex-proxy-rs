@@ -52,8 +52,7 @@ impl ReleaseFiles {
 }
 
 fn read_error(error: io::Error) -> OperationError {
-    tracing::warn!(error = %error, "核对系统安装文件失败");
-    internal("无法核对安装文件，请检查文件完整性与读取权限")
+    internal("无法核对安装文件").with_source(error)
 }
 
 fn hash_directory(path: &Path) -> io::Result<String> {

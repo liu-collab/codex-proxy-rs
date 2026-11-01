@@ -105,7 +105,7 @@ watch(valid, value => emit('validityChange', value), { immediate: true })
 
 <template>
   <div class="grid gap-4">
-    <article v-for="entry in entries" :key="entry.key" class="grid gap-4 rounded-cp bg-cp-fill-alter p-4">
+    <article v-for="entry in entries" :key="entry.key" class="grid gap-4 rounded-z bg-z-fill-alter p-4">
       <div class="flex items-center gap-2">
         <ZSwitch :model-value="Boolean(bindingFor(entry.key))" :label="`${pluginCapabilityLabel(entry.capability)} · ${entry.label}`" :disabled="disabled" @update:model-value="toggle(entry, $event)" />
         <PluginHelpPopover v-if="entry.stage === 'observation'" :label="t('plugins.bindings.observationHelpTitle')">
@@ -113,7 +113,7 @@ watch(valid, value => emit('validityChange', value), { immediate: true })
         </PluginHelpPopover>
       </div>
       <template v-if="bindingFor(entry.key)">
-        <p v-if="entry.scope === 'none'" class="text-cp-xs text-cp-text-secondary">
+        <p v-if="entry.scope === 'none'" class="text-z-xs text-z-text-secondary">
           {{ entry.globalLabel }}
         </p>
         <div v-else class="flex items-center gap-2">

@@ -30,11 +30,11 @@ const modeOptions = computed(() => ([
   },
 ]))
 const levelClasses: Record<ProfileActivityLevel, string> = {
-  0: 'bg-cp-activity-level-0',
-  1: 'bg-cp-activity-level-1',
-  2: 'bg-cp-activity-level-2',
-  3: 'bg-cp-activity-level-3',
-  4: 'bg-cp-activity-level-4',
+  0: 'bg-z-activity-level-0',
+  1: 'bg-z-activity-level-1',
+  2: 'bg-z-activity-level-2',
+  3: 'bg-z-activity-level-3',
+  4: 'bg-z-activity-level-4',
 }
 const grid = computed(() => buildProfileActivityGrid(props.calendar, mode.value))
 const rangeLabel = computed(() => grid.value.rangeLabel)
@@ -53,7 +53,7 @@ const monthLabels = computed(() =>
   <section class="min-w-0" aria-labelledby="profile-token-activity-title">
     <div class="mb-4 flex flex-wrap items-end justify-between gap-3">
       <div>
-        <h3 id="profile-token-activity-title" class="m-0 text-cp-lg font-heavy text-cp-text">
+        <h3 id="profile-token-activity-title" class="m-0 text-z-lg font-heavy text-z-text">
           {{ t('accounts.profile.activity.tokenActivity') }}
         </h3>
       </div>
@@ -75,7 +75,7 @@ const monthLabels = computed(() =>
           <span
             v-for="(month, monthIndex) in monthLabels"
             :key="`${month.weekIndex}-${month.label}`"
-            class="row-start-1 h-4 whitespace-nowrap text-[10px] leading-4 font-semibold text-cp-text-quaternary"
+            class="row-start-1 h-4 whitespace-nowrap text-[10px] leading-4 font-semibold text-z-text-quaternary"
             :class="monthIndex === monthLabels.length - 1 ? 'text-right' : undefined"
             :style="{
               gridColumn: `${month.weekIndex + (monthIndex === monthLabels.length - 1 ? 0 : 1)} / span 2`,

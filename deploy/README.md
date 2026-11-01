@@ -237,6 +237,20 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 示例配置均填写 `us`，修改后重启应用生效。身份与位置字段见 [运行设置 API](../docs/api.md#8-运行设置)
 后台账号操作使用 Provider 自己的官方画像；发布资料刷新不改写用户选择或 `config.yaml`
 
+### CPR 互联
+
+在上游的「API 密钥」中为专用 Key 选择账号分组并开启「CPR 互联」，按需公开账号池、额度和套餐信息。
+共享 Key 的实际推理只使用这些分组中的直连 OAuth 账号；分组内的 API Key 转供账号不会参与
+
+在下游导入或编辑 OpenAI API Key 账号，填写上游 API 地址和该 Key，后台自动发现 CPR 互联能力。
+地址包含自定义前缀时保留完整前缀，后台在该地址下请求 `cpr/link`。
+列表与详情显示已保存的观测，手动刷新提交后台任务；旧观测和查询失败分别提示，不要求上游实时可用
+
+第三方网关通过插件实现相同协议也可被识别，不按软件名称判定兼容。
+上游明确返回 Key 预算耗尽时，下游暂停该账号；后续同步确认允许使用后自动恢复，普通限流冷却独立保留。
+金额只供展示，缺少访问状态时不根据余额推断恢复。账号池额度观测作为 Smart 选择的参考，不能保证下一次请求成功；
+协议和公开边界见 [CPR 互联 API](../docs/api.md#cpr-互联只读协议)
+
 ### 批量维护代理
 
 在“代理管理 → 新增代理”切换到“批量”，每行粘贴一个完整代理 URL、`host:port` 或 `host:port:用户名:密码`，最多 100 条。
@@ -305,8 +319,10 @@ Responses 流式请求完成准入后，每 15 秒无输出会发送一次 SSE �
 `api.request_timeout_seconds` 默认 `null`，只控制 HTTP 路由返回响应前的等待，不是流式正文或 WebSocket 每轮执行的总时限。
 排队、插件显式执行期限与客户端断开的边界见 [请求期限](../docs/api.md#请求期限)
 
-OpenAI 上游 WebSocket 被动回应 Ping，不主动发送心跳；Pong 写入最多等待 5 秒。
-下游 Responses WebSocket 每 25 秒发送 Ping，第一条未响应的 Ping 发出后 30 秒没有 Pong 或其他有效入站帧即断开；
+OpenAI Responses 上游 WebSocket 每 25 秒发送 Ping 保活，并回应上游 Ping；Ping/Pong 写入最多等待 5 秒，
+不因等待 Pong 超时主动断开。入站背压期间暂停主动 Ping，恢复后不集中补发。
+下游 Responses WebSocket 每 25 秒发送 Ping，第一条未响应的 Ping 发出后 30 秒没有入站活动即断开；
+接收中的消息字节、Pong 和其他有效入站消息均算活动，慢速上传不必等整帧收齐才刷新探活状态。
 后续 Ping 不延长这次截止，心跳入队及写入最多等待 5 秒。两段心跳各自处理，不跨 WS 转发或转换为 SSE 事件。
 心跳不重置上游业务消息的 `openai.ws_pool.stream_idle_timeout_ms`
 
@@ -473,7 +489,8 @@ metrics_exporter = "none"
   先备份并区分本地真实账号文件与代理密钥文件，不要直接删除全部登录状态
 - 已调用生图但失败：查看服务端账号的凭据、权限、额度和请求错误，不能只凭文本对话成功判断
 - `401`：检查代理密钥是否正确、是否启用；Actor 标记不能代替密钥
-- `426`：检查客户端版本及反向代理是否保留版本头，低于管理员设置的最低版本时需要更新客户端。
+- `400` 且错误码为 `client_version_too_old` 或 `client_version_unavailable`：检查客户端版本及反向代理是否保留版本头，
+  低于管理员设置的最低版本时需要更新客户端
   手机远程控制的版本识别范围见 [版本门禁规则](../docs/api.md#1-鉴权与公共约定)
 - 地址包含 `5173/dev/v1`：这是开发代理地址，依赖 Vite 服务。日常使用改成后端或 HTTPS 地址；
   验证 WebSocket 时直接连接后端，当前 Vite 代理未显式开启 WebSocket 转发
@@ -654,6 +671,12 @@ CPR_GIT_SHA="$(git rev-parse HEAD)" \
 CPR_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 docker compose -f deploy/compose.yaml build codex-proxy-rs
 ```
+
+### 账号名称迁移
+
+OAuth 账号仍使用默认授权名称（如「Codex 账号」「OpenAI 账号」「xAI 账号」）且保存了邮箱时，
+升级会清空默认名称，账号列表按邮箱前缀和完整邮箱分两行展示。
+自定义名称、已有改名审计记录的账号、无邮箱账号及 API Key 名称保留原值
 
 ### 错误保护配置升级
 

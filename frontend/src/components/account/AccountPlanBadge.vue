@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import type { AccountUpstream } from '@/api'
 import { computed } from 'vue'
 
+import { accountUpstreamPending } from '@/utils/account-upstream'
 import { stableVisualIndex } from '@/utils/color'
+import AccountUpstreamBadge from './AccountUpstreamBadge.vue'
 
 const props = withDefaults(
   defineProps<{
     planType?: string | null
     authenticationKind?: string
+    upstream?: AccountUpstream | null
     planTypeDisplay: string
     size?: 'xs' | 'sm' | 'md'
   }>(),
@@ -17,17 +21,18 @@ const props = withDefaults(
 )
 
 const planPalettes: Record<string, string> = {
-  free: 'bg-cp-cyan-container text-cp-cyan-on-container',
-  plus: 'bg-cp-blue-container-strong text-cp-blue-on-container',
-  pro: 'bg-cp-purple-container-strong text-cp-purple-on-container',
-  prolite: 'bg-cp-purple-container text-cp-purple-on-container',
+  api: 'bg-z-cyan-container-strong text-z-cyan-on-container',
+  free: 'bg-z-cyan-container text-z-cyan-on-container',
+  plus: 'bg-z-blue-container-strong text-z-blue-on-container',
+  pro: 'bg-z-purple-container-strong text-z-purple-on-container',
+  prolite: 'bg-z-purple-container text-z-purple-on-container',
 }
 
 const fallbackPalettes = [
-  'bg-cp-blue-container text-cp-blue-on-container',
-  'bg-cp-green-container text-cp-green-on-container',
-  'bg-cp-cyan-container text-cp-cyan-on-container',
-  'bg-cp-orange-container text-cp-orange-on-container',
+  'bg-z-blue-container text-z-blue-on-container',
+  'bg-z-green-container text-z-green-on-container',
+  'bg-z-cyan-container text-z-cyan-on-container',
+  'bg-z-orange-container text-z-orange-on-container',
 ] as const
 
 const rawPlanType = computed(() => props.authenticationKind === 'api_key'
@@ -41,8 +46,8 @@ const sizeClass = computed(() => {
   if (props.size === 'xs')
     return 'h-4.5 rounded-full px-1.5 text-[10px] font-bold'
   return props.size === 'sm'
-    ? 'h-5 rounded-full px-1.75 text-cp-xs font-bold'
-    : 'h-5.5 rounded-full px-2 text-cp-xs font-heavy'
+    ? 'h-5 rounded-full px-1.75 text-z-xs font-bold'
+    : 'h-5.5 rounded-full px-2 text-z-xs font-heavy'
 })
 
 const paletteClass = computed(() => {
@@ -56,8 +61,10 @@ const paletteClass = computed(() => {
 </script>
 
 <template>
+  <AccountUpstreamBadge v-if="upstream?.discovered && upstream.observedAt" :size="size" />
   <span
-    class="inline-flex min-w-0 max-w-full items-center justify-center whitespace-nowrap leading-none shadow-cp-tertiary"
+    v-else-if="!accountUpstreamPending(upstream)"
+    class="inline-flex min-w-0 max-w-full items-center justify-center whitespace-nowrap leading-none shadow-z-tertiary"
     :class="[sizeClass, paletteClass]"
     :title="displayText || undefined"
   >

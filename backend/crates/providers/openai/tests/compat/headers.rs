@@ -5,7 +5,7 @@ use gateway_core::operation::{GenerateRequest, ProtocolPayload};
 use provider_openai::encode_generate_request;
 use tokio_tungstenite::tungstenite::http::HeaderMap as WsHeaderMap;
 
-use super::super::*;
+use super::*;
 
 const DOWNSTREAM_TRANSPORT_HEADERS: &[(&str, &str)] = &[
     ("CF-Visitor", r#"{"scheme":"https"}"#),
@@ -42,6 +42,9 @@ const DOWNSTREAM_CLIENT_HEADERS: &[(&str, &str)] = &[
     ("session_id", "synthetic-alias"),
     ("sec-fetch-future", "future"),
     ("sec-ch-ua-future", "future"),
+];
+
+const BUSINESS_EXTENSION_HEADERS: &[(&str, &str)] = &[
     ("x-grok-turn-idx", "7"),
     ("X-Grok-Model-Override", "synthetic-model"),
     ("x-grok-session-id", "synthetic-grok-session"),
@@ -124,6 +127,7 @@ fn request_with_opaque_headers(use_websocket: bool) -> CodexResponsesRequest {
             DOWNSTREAM_TRANSPORT_HEADERS
                 .iter()
                 .chain(DOWNSTREAM_CLIENT_HEADERS)
+                .chain(BUSINESS_EXTENSION_HEADERS)
                 .map(|(name, value)| json!([name, STANDARD.encode(value.as_bytes())])),
         );
     let payload = ProtocolPayload::json_object(
@@ -230,6 +234,13 @@ async fn backend_http_should_preserve_business_headers_without_downstream_transp
         .expect("opaque HTTP response");
     let raw = server.await.expect("opaque HTTP server task");
 
+    for &(name, value) in BUSINESS_EXTENSION_HEADERS {
+        assert_eq!(
+            raw_header_values(&raw, name),
+            vec![value.as_bytes().to_vec()],
+            "lost {name}"
+        );
+    }
     for &(name, _) in DOWNSTREAM_CLIENT_HEADERS {
         assert!(raw_header_values(&raw, name).is_empty(), "leaked {name}");
     }
@@ -384,6 +395,9 @@ async fn backend_websocket_should_preserve_business_headers_without_downstream_t
             .collect::<Vec<_>>()
     };
 
+    for &(name, value) in BUSINESS_EXTENSION_HEADERS {
+        assert_eq!(values(name), vec![value.as_bytes().to_vec()], "lost {name}");
+    }
     for (name, _) in DOWNSTREAM_TRANSPORT_HEADERS
         .iter()
         .chain(DOWNSTREAM_CLIENT_HEADERS)

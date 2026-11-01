@@ -528,7 +528,8 @@ impl ResponsesSseFailure {
     pub(crate) fn from_raw_event(event: &str, raw_body: &str, value: &Value) -> Self {
         Self {
             event: event.to_string(),
-            message: failure_message(value).unwrap_or_else(|| "Codex upstream SSE failed".into()),
+            message: failure_message(value)
+                .unwrap_or_else(|| "The upstream response stream failed.".into()),
             upstream_code: failure_code(value),
             upstream_message: failure_message(value),
             upstream_type: failure_type(value),

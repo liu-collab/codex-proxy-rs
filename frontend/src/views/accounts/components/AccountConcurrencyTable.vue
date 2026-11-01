@@ -53,27 +53,27 @@ const columns = computed(() => (defineTableColumns<AccountConcurrencyEntry>([
 
 <template>
   <ZTable
-    class="h-[min(60dvh,20rem)]! min-h-0 [--cp-table-row-height:3rem]"
+    class="h-[min(60dvh,20rem)]! min-h-0 [--z-table-row-height:3rem]"
     :columns="columns" :data="entries" row-key="leaseId"
     :loading="loading" :empty-text="emptyText"
   >
     <template #key="{ row }">
       <span
-        class="block truncate font-emphasis text-cp-text"
+        class="block truncate font-emphasis text-z-text"
         :title="[row.clientKeyName, row.clientKeyId].filter(Boolean).join('\n') || undefined"
       >
         {{ row.clientKeyName ?? row.clientKeyId ?? '—' }}
       </span>
     </template>
     <template #model="{ displayValue }">
-      <span class="text-cp font-normal text-cp-text-secondary" :title="String(displayValue)">{{ displayValue }}</span>
+      <span class="text-z font-normal text-z-text-secondary" :title="String(displayValue)">{{ displayValue }}</span>
     </template>
     <template #startedAtDisplay="{ displayValue }">
-      <span class="text-cp">{{ displayValue }}</span>
+      <span class="text-z">{{ displayValue }}</span>
     </template>
     <template #clientIp="{ row }">
-      <UsageClientIpCell v-if="row.clientIp" :record="row" class="text-cp!" />
-      <span v-else class="text-cp-text-quaternary">—</span>
+      <UsageClientIpCell v-if="row.clientIp" :record="row" class="text-z!" />
+      <span v-else class="text-z-text-quaternary">—</span>
     </template>
   </ZTable>
 </template>

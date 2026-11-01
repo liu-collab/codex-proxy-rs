@@ -90,12 +90,12 @@
 
 ```mermaid
 flowchart LR
-  A[Pinia 持久化配置] --> B[resolveTheme]
+  A[Pinia 持久化配置] --> B[createTheme]
   B --> C[Seed Token]
   C --> D[Map Token]
   D --> E[Alias Token]
   E --> F[Component Token]
-  F --> G[#cp-runtime-theme]
+  F --> G[#z-runtime-theme]
   G --> H[Vue / Tailwind / ECharts]
 
   B --> I[Theme Editor 草稿]
@@ -119,7 +119,7 @@ flowchart LR
 [SDK 页面与宿主桥](../backend/crates/gateway-plugin/sdk/docs/capabilities.md#页面宿主桥-v2)。
 `theme/` 根目录只保留公开入口 `index.ts` 和唯一类型文件 `types.ts`；内部实现按 `core/`、`derive/`、`runtime/` 分层，不增加嵌套 barrel。
 纯派生模块不访问 DOM，`theme/runtime/browser.ts` 不包含派生规则，Theme Store 不复制算法。
-普通 Map 字段按 camelCase → kebab-case 统一生成 `--cp-*`；Semantic 与 Preset Color 仅维护各自的短角色表。
+普通 Map 字段按 camelCase → kebab-case 统一生成 `--z-*`；Semantic 与 Preset Color 仅维护各自的短角色表。
 `ThemeTokenName` 在 `types.ts` 中由 Map 契约推导，无需手写重复的联合类型和对象映射
 
 下文未带宿主路径的 `theme/`、`styles/` 均指 `codex-proxy-ui/src/` 下的目录，联调入口见[开发文档](development.md#源码联调)
@@ -215,20 +215,20 @@ Quaternary；主按钮白字与功能色文字遵循各自的容器配对规则
 
 ### Alias Token
 
-Alias 按视觉角色命名，使用 `--cp-` 命名空间；整体分层对齐 Ant Design，并以 Container / On Container 表达成对的
+Alias 按视觉角色命名，使用 `--z-` 命名空间；整体分层对齐 Ant Design，并以 Container / On Container 表达成对的
 语义表面与前景：
 
 | 角色 | CSS Token | 主要消费者 |
 | --- | --- | --- |
-| 品牌交互 | `--cp-color-primary*` | 主操作、选中态、焦点与强调 |
-| 链接 | `--cp-color-link*` | 普通文本链接 |
-| 表面 | `--cp-color-bg-*` | 页面、容器、浮层和遮罩 |
-| 填充 | `--cp-color-fill-*` | 轨道、弱背景和静态层级 |
-| 文字 | `--cp-color-text*` | 标题、正文和辅助信息 |
-| 选择 | `--cp-control-item-bg-active*` | Segmented、Select 和选择控件 |
-| 焦点 | `--cp-control-outline` | 键盘焦点和输入反馈 |
-| 功能色 | `--cp-color-info / success / warning / error-*` | 系统反馈与状态 |
-| 预设彩色 | `--cp-color-{blue,cyan,green,orange,purple,red}-{container,container-strong,border,solid,text,on-container}` | 分类标签与数据强调 |
+| 品牌交互 | `--z-color-primary*` | 主操作、选中态、焦点与强调 |
+| 链接 | `--z-color-link*` | 普通文本链接 |
+| 表面 | `--z-color-bg-*` | 页面、容器、浮层和遮罩 |
+| 填充 | `--z-color-fill-*` | 轨道、弱背景和静态层级 |
+| 文字 | `--z-color-text*` | 标题、正文和辅助信息 |
+| 选择 | `--z-control-item-bg-active*` | Segmented、Select 和选择控件 |
+| 焦点 | `--z-control-outline` | 键盘焦点和输入反馈 |
+| 功能色 | `--z-color-info / success / warning / error-*` | 系统反馈与状态 |
+| 预设彩色 | `--z-color-{blue,cyan,green,orange,purple,red}-{container,container-strong,border,solid,text,on-container}` | 分类标签与数据强调 |
 
 Alias 不在页面中追加修色；中性与彩色文字在派生层执行各自的背景配对约束。Component
 Token 直接覆盖时不会自动重算同组件的其他状态；需要保持梯度关系时应修改 Seed，而不是逐个覆盖 Map Token
@@ -239,16 +239,16 @@ Token 直接覆盖时不会自动重算同组件的其他状态；需要保持�
 
 | 组件 | 代表 Token |
 | --- | --- |
-| Button | `--cp-button-primary-color / bg / hover-bg / active-bg`、`--cp-button-secondary-bg / hover-bg / active-bg` |
-| IconButton | `--cp-icon-button-secondary-bg / hover-bg / active-bg` |
-| Input | `--cp-input-bg / hover-bg / active-bg / error-active-bg` 与对应 Shadow |
-| Menu | `--cp-menu-item-selected-bg` |
-| Popover | `--cp-popover-header-bg` |
-| Table | `--cp-table-row-bg / stripe-bg / hover-bg / selected-bg / selected-hover-bg / height` |
-| Card | `--cp-card-bg / border-radius / shadow` |
-| Layout | `--cp-layout-sider-bg / shadow` |
-| Scrollbar | `--cp-scrollbar-thumb-bg / hover-bg` |
-| BrandMark | `--cp-brand-mark-bg` |
+| Button | `--z-button-primary-color / bg / hover-bg / active-bg`、`--z-button-secondary-bg / hover-bg / active-bg` |
+| IconButton | `--z-icon-button-secondary-bg / hover-bg / active-bg` |
+| Input | `--z-input-bg / hover-bg / active-bg / error-active-bg` 与对应 Shadow |
+| Menu | `--z-menu-item-selected-bg` |
+| Popover | `--z-popover-header-bg` |
+| Table | `--z-table-row-bg / stripe-bg / hover-bg / selected-bg / selected-hover-bg / height` |
+| Card | `--z-card-bg / border-radius / shadow` |
+| Layout | `--z-layout-sider-bg / shadow` |
+| Scrollbar | `--z-scrollbar-thumb-bg / hover-bg` |
+| BrandMark | `--z-brand-mark-bg` |
 
 组件状态由 UI 库的 Component 派生层统一生成，页面不维护混色系数：
 
@@ -308,13 +308,17 @@ Theme Store 统一读取持久化配置并初始化主题，首个 Vue 组件渲
 
 ### CSS Variables 提交
 
+主题内部和持久化配置使用 `color-primary`、`input-bg` 等语义 Token 名，不包含 CSS 前缀。
+UI 构建插件 `CodexProxyUI({ themePrefix: 'z' })` 同时配置变量生成与样式引用，默认前缀为 `z`；
+它与组件导出名、DOM 类名和 utility 类名独立，修改后需重新构建。配置方式见 UI 的[主题定制](../modules/ui/playground/guide/theme.md#自定义主题前缀)
+
 全局主题由 `<head>` 中唯一的运行时样式节点承载：
 
 ```html
-<style id="cp-runtime-theme">
+<style id="z-runtime-theme">
 :root[data-theme='dark'][data-theme-color='relay-blue'] {
   color-scheme: dark;
-  --cp-color-bg-layout: #0B111C;
+  --z-color-bg-layout: #0B111C;
   /* 其余 Map、Alias 与 Component Token */
 }
 </style>
@@ -324,14 +328,15 @@ Theme Store 统一读取持久化配置并初始化主题，首个 Vue 组件渲
 全局弹窗通过 Teleport 挂到 `body` 后仍继承根变量
 
 > [!NOTE]
-> Theme Editor 预览是例外：草稿 Token 以内联变量写在影子环境的局部根节点上，仅影响预览，不污染已保存主题
+> Theme Editor 预览是例外：草稿 Token 经 `createThemeVars()` 转换后以内联变量写在影子环境的局部根节点上，仅影响预览，不污染已保存主题
 
 ### 切换与图表
 
 - 用户主动切换时，以点击位置为圆心运行 View Transition；不支持时使用 180ms 颜色过渡
 - 初始化、系统主题变化或减少动态效果时直接提交，不播放扩散动画
 - 每次有效提交只增加一次 `themeRevision`，相同签名不会重复刷新
-- `useThemeColor()` 在正式页面读取根 CSS Variables，在影子预览中优先读取注入的局部 Token
+- `useThemeColor()` 接收语义 Token 名，通过 `getThemeVarName()` 读取当前前缀下的 CSS Variables；影子预览优先读取注入的局部变量
+- 插件桥接传递语义 Token，由插件构建元数据指定的前缀生成 CSS 变量，宿主与插件可独立配置
 - 图表 Option 在主题 revision 或预览 Token 改变后重算，`BaseChart` 通过 `setOption` 更新现有 Canvas
 
 ## 主题编辑器
@@ -381,24 +386,24 @@ Store 在其他入口发生变化时更新保存基线；没有未保存修改�
 
 ### CSS Token
 
-- 全局 Token：`--cp-color-bg-container`、`--cp-font-size`
-- Component Token：`--cp-table-row-hover-bg`、`--cp-input-active-shadow`
-- Preset Color Token：`--cp-color-purple-container-strong`、`--cp-color-cyan-on-container`
+- 全局 Token：`--z-color-bg-container`、`--z-font-size`
+- Component Token：`--z-table-row-hover-bg`、`--z-input-active-shadow`
+- Preset Color Token：`--z-color-purple-container-strong`、`--z-color-cyan-on-container`
 - 业务组件按[通用颜色消费](#通用颜色消费)选择角色，不在主题层声明业务域名称
-- Map 与 Component 字段由 `theme/core/tokens.ts` 统一生成 CSS Token；禁止在解析器中再写平行的逐项映射表
+- Map 与 Component 字段由 `theme/core/tokens.ts` 统一生成语义 Token，运行时通过 `createThemeVars()` 输出 CSS 变量；禁止在解析器中再写平行的逐项映射表
 - 不使用 `accent`、`soft`、`current`、`subtle` 等与现有角色重叠的平行词汇
 
 ### Vue 与 Tailwind CSS 4
 
-组件优先使用 `bg-cp-*`、`text-cp-*`、`shadow-cp-*`、`rounded-cp-*` 等由 `@theme inline` 暴露的 utility：
+组件优先使用 `bg-z-*`、`text-z-*`、`shadow-z-*`、`rounded-z-*` 等由 `@theme inline` 暴露的 utility：
 
 ```vue
-<section class="rounded-cp-card bg-cp-bg-container text-cp-text shadow-cp-card">
+<section class="rounded-z-card bg-z-bg-container text-z-text shadow-z-card">
   ...
 </section>
 ```
 
-仅当值需要在 CSS 函数、SVG 或局部派生中参与计算时，直接读取 `var(--cp-*)`。不在页面组件中重新实现色阶、
+仅当值需要在 CSS 函数、SVG 或局部派生中参与计算时，CSS 中直接读取 `var(--z-*)`，JavaScript 中通过 `getThemeVarName()` 生成变量名。不在页面组件中重新实现色阶、
 对比度或明暗算法
 
 共享包的 `styles/tailwind.css` 是唯一 `@theme inline` 注册表，只注册 Tailwind 名称，不保存主题值。注册表按基础、排版、颜色、圆角、阴影、间距与尺寸排序；
@@ -418,6 +423,7 @@ utility / arbitrary variant；Vue Transition、跨浏览器 Range、动态富文
 - 表格斑马纹使用 `table-row-stripe-bg`；选中行悬停使用 `table-row-selected-hover-bg`，不被普通 Hover 覆盖
 - 结构化浮层头部使用 `popover-header-bg`，明暗模式分别检查它与表格背景的区分
 - Card 和选项默认不增加装饰性边框；键盘焦点必须保留可见反馈
+- 帮助与说明图标常态、Hover 和 Active 均保持透明背景，按钮使用 `variant="link"`，保留键盘焦点反馈；已有说明浮层时不重复显示原生 `title` 提示
 - 阴影保持中性，`shadowStrength` 只调节层级强弱，不给阴影染品牌色
 
 ## 扩展指南
@@ -425,8 +431,8 @@ utility / arbitrary variant；Vue Transition、跨浏览器 Range、动态富文
 ### 增加预置主题
 
 1. 在 `ThemeColorPresetId` 增加稳定 ID
-2. 在 `THEME_COLOR_PRESETS` 声明名称、描述与主色 Seed
-3. 不新增页面特判，确认预置可通过同一 `resolveTheme()` 派生
+2. 在 `themeColorPresets` 声明名称、描述与主色 Seed
+3. 不新增页面特判，确认预置可通过同一 `createTheme()` 派生
 4. 在浅色、深色和系统模式下检查文本、浮层、Input、表格与图表
 
 ### 增加全局 Seed 或 Alias

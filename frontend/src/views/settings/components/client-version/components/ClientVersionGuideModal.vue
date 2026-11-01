@@ -48,7 +48,7 @@ const sectionOptions = [
     width="48rem"
   >
     <template #icon>
-      <PackageOpen class="size-4.5 text-cp-info" />
+      <PackageOpen class="size-4.5 text-z-info" />
     </template>
 
     <div class="grid gap-4">

@@ -5,18 +5,19 @@ import type { AccountCreateForm, AccountImportMode } from '../../utils/accountCr
 import type { Account, AccountGroupRef } from '@/api'
 
 import { Openai, Xai } from '@boxicons/vue'
-import { ZButton, ZDialog, ZIconButton, ZSegmented } from '@codex-proxy/ui'
+import { ZButton, ZDialog, ZForm, ZIconButton, ZSegmented } from '@codex-proxy/ui'
 import { Copy, LayoutGrid, Settings2 } from '@lucide/vue'
-import { computed } from 'vue'
+import { computed, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
 import ProviderIconGroup from '@/components/ProviderIconGroup.vue'
 import { useCopyText } from '@/composables/useCopyText'
-import { accountCreateProvider, accountProxyError } from '../../utils/accountCreate'
-import { accountModelAccessError } from '../../utils/modelAccess'
-import { parseAccountSchedulingForm } from '../../utils/schedulingForm'
+import { useAccountApiKeyFormRules } from '../../composables/useAccountApiKeyFormRules'
+import { useAccountSettingsFormRules } from '../../composables/useAccountSettingsFormRules'
+import { accountCreateProvider } from '../../utils/accountCreate'
 import AccountApiKeyFields from '../AccountApiKeyFields.vue'
 import AccountIdentityCell from '../AccountIdentityCell.vue'
+import AccountNameField from '../AccountNameField.vue'
 import AccountImportFields from './AccountImportFields.vue'
 import AccountOAuthFields from './AccountOAuthFields.vue'
 import AccountSetupFields from './AccountSetupFields.vue'
@@ -26,18 +27,16 @@ const props = withDefaults(defineProps<{
   groups: AccountGroupRef[]
   groupsLoading: boolean
   saving?: boolean
-  oauthLoading?: boolean
   reauthorizing?: boolean
   account?: Account | null
   authorization: AccountAuthorizationView
 }>(), {
   saving: false,
-  oauthLoading: false,
   reauthorizing: false,
   account: null,
 })
 
-const emit = defineEmits<{ create: [], generateOauth: [] }>()
+const emit = defineEmits<{ create: [], generateOauth: [], afterLeave: [] }>()
 
 const { t } = useI18n({ useScope: 'global' })
 
@@ -51,11 +50,18 @@ const accountCopyValue = computed(() =>
   || props.account?.id
   || '',
 )
-const busy = computed(() => props.saving || props.oauthLoading)
+const busy = computed(() => props.saving
+  || props.authorization.status === 'starting'
+  || props.authorization.status === 'completing')
 const canSelect = computed(() => form.value.source?.kind === 'bundle' || Boolean(accountCreateProvider(form.value)))
-const proxyError = computed(() => accountProxyError(form.value))
-const modelError = computed(() => accountModelAccessError(form.value.modelAccess))
-const scheduling = computed(() => parseAccountSchedulingForm(form.value.concurrencyLimit, form.value.weight))
+const formRef = useTemplateRef<InstanceType<typeof ZForm>>('formElement')
+const settingsRules = useAccountSettingsFormRules(() => ({
+  ...form.value,
+  name: form.value.source?.kind === 'provider'
+    ? form.value.name
+    : undefined,
+}))
+const apiKeyRules = useAccountApiKeyFormRules()
 const view = computed(() => resolveAccountCreatePresentation({
   form: form.value,
   provider: accountCreateProvider(form.value),
@@ -81,9 +87,24 @@ const importText = computed({
   },
 })
 
-function continueToImport() {
-  if (canSelect.value && !modelError.value && scheduling.value.valid && !props.groupsLoading && !proxyError.value && !busy.value)
-    form.value.step = 'import'
+watch([
+  open,
+  () => form.value.step,
+  mode,
+], () => formRef.value?.clearValidate())
+
+async function continueToImport() {
+  if (!canSelect.value || props.groupsLoading || busy.value || !await formRef.value?.validate().catch(() => false))
+    return
+  form.value.step = 'import'
+}
+
+async function requestCreate() {
+  if (!view.value.canSubmit)
+    return
+  if (mode.value === 'api_key' && !await formRef.value?.validate().catch(() => false))
+    return
+  emit('create')
 }
 </script>
 
@@ -95,18 +116,19 @@ function continueToImport() {
     :type="view.modal.type"
     :width="view.modal.width"
     :show-close="!busy" :close-on-click-modal="!busy" :close-on-press-escape="!busy"
+    @closed="emit('afterLeave')"
   >
     <template #icon>
-      <Settings2 v-if="view.configuring" class="text-cp-text" :size="20" aria-hidden="true" />
-      <LayoutGrid v-else-if="view.isBatch" class="text-cp-text" :size="20" aria-hidden="true" />
-      <Xai v-else-if="view.provider === 'xai'" class="text-cp-text" :width="20" :height="20" aria-hidden="true" />
-      <Openai v-else-if="view.provider === 'openai'" class="text-cp-text" :width="20" :height="20" aria-hidden="true" />
+      <Settings2 v-if="view.configuring" class="text-z-text" :size="20" aria-hidden="true" />
+      <LayoutGrid v-else-if="view.isBatch" class="text-z-text" :size="20" aria-hidden="true" />
+      <Xai v-else-if="view.provider === 'xai'" class="text-z-text" :width="20" :height="20" aria-hidden="true" />
+      <Openai v-else-if="view.provider === 'openai'" class="text-z-text" :width="20" :height="20" aria-hidden="true" />
     </template>
 
     <div class="grid gap-4">
       <div
         v-if="reauthorizing && account"
-        class="flex flex-wrap items-center justify-between gap-4 rounded-cp bg-cp-fill-quaternary px-4 py-3.5"
+        class="flex flex-wrap items-center justify-between gap-4 rounded-z bg-z-fill-quaternary px-4 py-3.5"
       >
         <AccountIdentityCell
           class="min-w-0 flex-1"
@@ -115,6 +137,8 @@ function continueToImport() {
         />
         <div class="flex shrink-0 items-center gap-3">
           <AccountPlanBadge
+            :upstream="account.upstream"
+            :authentication-kind="account.authenticationKind"
             :plan-type="account.planType"
             :plan-type-display="account.planTypeDisplay"
             size="sm"
@@ -135,17 +159,9 @@ function continueToImport() {
         </div>
       </div>
 
-      <AccountSetupFields
-        v-if="view.configuring"
-        v-model="form"
-        :disabled="busy"
-        :groups="groups"
-        :groups-loading="groupsLoading"
-        :proxy-error="form.proxyId.trim() ? proxyError : undefined"
-      />
-      <p v-if="view.configuring && !scheduling.valid" class="m-0 text-xs text-cp-error" role="alert">
-        {{ scheduling.message }}
-      </p>
+      <ZForm v-if="view.configuring" ref="formElement" :model="form" :rules="settingsRules" scroll-to-error focus-on-error novalidate @submit="continueToImport">
+        <AccountSetupFields v-model="form" :disabled="busy" :groups="groups" :groups-loading="groupsLoading" />
+      </ZForm>
       <template v-if="!view.configuring">
         <ZSegmented
           v-if="!reauthorizing && !view.isBatch"
@@ -163,13 +179,16 @@ function continueToImport() {
           :can-start="true"
           :panel-title="`${view.label} ${reauthorizing ? t('accounts.actions.reauthorize') : t('accounts.onboarding.authorize')}`"
           :panel-description="view.oauth.description"
-          :loading="oauthLoading"
+          :loading="authorization.status === 'starting'"
           :callback-label="view.oauth.callbackLabel"
           :callback-placeholder="view.oauth.callbackPlaceholder"
           :disabled="busy"
           @regenerate="emit('generateOauth')"
         />
-        <AccountApiKeyFields v-else-if="mode === 'api_key'" v-model="form.apiKey" :disabled="busy" />
+        <ZForm v-else-if="mode === 'api_key'" ref="formElement" :model="form" :rules="apiKeyRules" scroll-to-error focus-on-error novalidate @submit="requestCreate">
+          <AccountNameField v-model="form.name" required :disabled="busy" :placeholder="t('accounts.credentials.enterUpstreamName')" />
+          <AccountApiKeyFields v-model="form.apiKey" :disabled="busy" />
+        </ZForm>
         <AccountImportFields
           v-else
           :key="mode"
@@ -189,10 +208,10 @@ function continueToImport() {
       <ZButton v-else class="mr-auto" :disabled="busy" @click="form.step = 'settings'">
         {{ t('common.actions.previous') }}
       </ZButton>
-      <ZButton v-if="view.configuring" type="primary" :disabled="!canSelect || !scheduling.valid || Boolean(modelError) || groupsLoading || Boolean(proxyError) || busy" @click="continueToImport">
+      <ZButton v-if="view.configuring" type="primary" :disabled="!canSelect || groupsLoading || busy" @click="continueToImport">
         {{ t('accounts.onboarding.continueImporting') }}
       </ZButton>
-      <ZButton v-else type="primary" :loading="saving || oauthLoading" :disabled="!view.canSubmit" @click="emit('create')">
+      <ZButton v-else type="primary" :loading="saving || authorization.status === 'completing'" :disabled="!view.canSubmit" @click="requestCreate">
         {{ view.submitLabel }}
       </ZButton>
     </template>

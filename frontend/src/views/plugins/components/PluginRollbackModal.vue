@@ -41,7 +41,7 @@ watch(() => props.plan, () => {
   <ZDialog v-model="open" :title="t('plugins.rollback.rollBackPluginVersion')" :description="t('plugins.rollback.description')" width="36rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
     <ZForm class="grid gap-4">
       <ZFormItem :label="t('plugins.catalog.currentVersion')">
-        <p class="m-0 break-all text-cp-sm text-cp-text">
+        <p class="m-0 break-all text-z-sm text-z-text">
           {{ instance?.name }} <span v-if="plan" class="font-mono">· {{ plan.currentVersion }}</span>
         </p>
       </ZFormItem>
@@ -65,7 +65,7 @@ watch(() => props.plan, () => {
           :aria-label="t('plugins.rollback.rollBackToTargetVersion')"
         />
       </ZFormItem>
-      <p v-else-if="plan" role="status" class="m-0 text-cp-sm text-cp-text-secondary">
+      <p v-else-if="plan" role="status" class="m-0 text-z-sm text-z-text-secondary">
         {{ t('plugins.rollback.empty') }}
       </p>
     </ZForm>

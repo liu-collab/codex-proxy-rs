@@ -789,9 +789,16 @@ fn selection_failure(error: &CredentialSelectionError) -> ProviderError {
         ProviderDiagnostic::new(error.to_string()).with_classification("account_selection", code)
     });
     let mapped = match error {
-        CredentialSelectionError::Cancelled => provider_error(ProviderErrorKind::Cancelled, UpstreamSendState::NotSent).with_retry_prohibited(),
-        CredentialSelectionError::ContinuationOwnerChanged => continuation_replay_required_error("scope_unavailable"),
-        CredentialSelectionError::SessionBound(error) => selection_failure(error).with_retry_prohibited(),
+        CredentialSelectionError::Cancelled => {
+            provider_error(ProviderErrorKind::Cancelled, UpstreamSendState::NotSent)
+                .with_retry_prohibited()
+        }
+        CredentialSelectionError::ContinuationOwnerChanged => {
+            continuation_replay_required_error("scope_unavailable")
+        }
+        CredentialSelectionError::SessionBound(error) => {
+            selection_failure(error).with_retry_prohibited()
+        }
         CredentialSelectionError::QueueRejected(error) => {
             provider_error(error.provider_kind(), UpstreamSendState::NotSent)
         }
@@ -811,7 +818,7 @@ fn selection_failure(error: &CredentialSelectionError) -> ProviderError {
         )
         .with_retry_prohibited()
         .with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
-            "No account is available for this session because of an earlier upstream cyber_policy rejection. Do not repeatedly retry this session. This does not indicate an account ban or a service-wide outage.",
+            "No account is available for this session after an upstream cyber policy rejection.",
             Some("cyber_policy".to_owned()),
             Some("invalid_request_error".to_owned()),
         )),
@@ -824,7 +831,7 @@ fn selection_failure(error: &CredentialSelectionError) -> ProviderError {
             UpstreamSendState::NotSent,
         )
         .with_client_visible_upstream_error(ClientVisibleUpstreamError::new(
-            "All eligible accounts have exhausted their quota. Retry after quota resets or add an available account.",
+            "All eligible accounts have exhausted their quota.",
             Some("usage_limit_reached".to_owned()),
             Some("usage_limit_reached".to_owned()),
         )),
@@ -844,14 +851,15 @@ fn selection_failure(error: &CredentialSelectionError) -> ProviderError {
             ProviderErrorKind::ProviderInfrastructureUnavailable,
             UpstreamSendState::NotSent,
         ),
-        CredentialSelectionError::PolicyRejected | CredentialSelectionError::PolicyFiltered => provider_error(
-            ProviderErrorKind::RequestPolicyDenied,
-            UpstreamSendState::NotSent,
-        ),
-        CredentialSelectionError::PolicyUnavailable => provider_error(
-            ProviderErrorKind::Unavailable,
-            UpstreamSendState::NotSent,
-        ),
+        CredentialSelectionError::PolicyRejected | CredentialSelectionError::PolicyFiltered => {
+            provider_error(
+                ProviderErrorKind::RequestPolicyDenied,
+                UpstreamSendState::NotSent,
+            )
+        }
+        CredentialSelectionError::PolicyUnavailable => {
+            provider_error(ProviderErrorKind::Unavailable, UpstreamSendState::NotSent)
+        }
     };
     match diagnostic {
         Some(diagnostic) => mapped.with_diagnostic(diagnostic),

@@ -1,4 +1,5 @@
 import type { InjectionKey, Ref } from 'vue'
+import { getThemeVarName } from '@codex-proxy/ui/theme'
 
 import { storeToRefs } from 'pinia'
 import { inject, provide } from 'vue'
@@ -20,7 +21,7 @@ export function useThemeColor() {
   const { themeRevision } = storeToRefs(useThemeStore())
   return (name: string, fallback: string) => {
     if (scopedTokens) {
-      const scopedValue = scopedTokens.value[name]
+      const scopedValue = scopedTokens.value[getThemeVarName(name)]
       if (typeof scopedValue === 'string' && scopedValue.trim())
         return scopedValue.trim()
       if (typeof scopedValue === 'number')
@@ -36,5 +37,5 @@ export function useThemeColor() {
 function readCssVariable(name: string, fallback: string) {
   if (typeof document === 'undefined')
     return fallback
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback
+  return getComputedStyle(document.documentElement).getPropertyValue(getThemeVarName(name)).trim() || fallback
 }

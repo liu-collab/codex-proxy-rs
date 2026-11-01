@@ -35,39 +35,39 @@ export interface ProxyBatchInput {
 export const proxyBatchStates = computed<Record<ProxyBatchStatus, { label: string, tone: string }>>(() => ({
   pending: {
     label: t('proxies.batchTest.toBeExecuted'),
-    tone: 'text-cp-text-secondary',
+    tone: 'text-z-text-secondary',
   },
   running: {
     label: t('common.status.running'),
-    tone: 'text-cp-info-text',
+    tone: 'text-z-info-text',
   },
   succeeded: {
     label: t('common.status.success'),
-    tone: 'text-cp-success-text',
+    tone: 'text-z-success-text',
   },
   failed: {
     label: t('common.status.failed'),
-    tone: 'text-cp-error-text',
+    tone: 'text-z-error-text',
   },
   error: {
     label: t('proxies.batchTest.requestFailed'),
-    tone: 'text-cp-error-text',
+    tone: 'text-z-error-text',
   },
   conflict: {
     label: t('proxies.batchTest.configurationConflict'),
-    tone: 'text-cp-warning-text',
+    tone: 'text-z-warning-text',
   },
   busy: {
     label: t('proxies.batchTest.testingIsBusy'),
-    tone: 'text-cp-warning-text',
+    tone: 'text-z-warning-text',
   },
   unknown: {
     label: t('proxies.batchTest.resultToBeConfirmed'),
-    tone: 'text-cp-warning-text',
+    tone: 'text-z-warning-text',
   },
   skipped: {
     label: t('proxies.batchTest.notExecuted'),
-    tone: 'text-cp-text-secondary',
+    tone: 'text-z-text-secondary',
   },
 }))
 

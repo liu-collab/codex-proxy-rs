@@ -146,12 +146,11 @@ fn map_system_error(error: SystemOperationError) -> AdminError {
         SystemOperationErrorKind::Upstream => AdminErrorKind::BadGateway,
         SystemOperationErrorKind::Internal => AdminErrorKind::Internal,
     };
-    let message = match kind {
-        AdminErrorKind::Invalid => "系统操作请求不合法",
-        AdminErrorKind::Conflict => error.message(),
-        AdminErrorKind::BadGateway => "系统更新服务请求失败",
-        AdminErrorKind::Internal => "系统操作失败",
-        _ => "系统操作失败",
+    let failure = AdminError::new(kind, error.message());
+    let failure = if error.sensitive_context_redacted() {
+        failure.redact_sensitive_context()
+    } else {
+        failure
     };
-    AdminError::new(kind, message)
+    failure.with_source(error)
 }

@@ -47,14 +47,14 @@ pub trait SettingsService: Send + Sync {
         &self,
         _provider: &str,
     ) -> Result<gateway_core::account::OpaqueProviderData, AdminError> {
-        Err(AdminError::invalid("当前 Provider 不支持客户端身份配置"))
+        Err(AdminError::invalid("该服务商不支持客户端身份配置"))
     }
     async fn preview_client_profile(
         &self,
         _provider: &str,
         _configuration: Option<&gateway_core::account::OpaqueProviderData>,
     ) -> Result<gateway_core::account::OpaqueProviderData, AdminError> {
-        Err(AdminError::invalid("当前 Provider 不支持客户端身份配置"))
+        Err(AdminError::invalid("该服务商不支持客户端身份配置"))
     }
     async fn load(&self) -> Result<RuntimeSettings, AdminError>;
     async fn replace(
@@ -86,7 +86,7 @@ impl DefaultSettingsService {
         provider: &str,
     ) -> Result<std::sync::Arc<dyn crate::ports::provider::ProviderAdmin>, AdminError> {
         let kind = gateway_core::routing::ProviderKind::new(provider)
-            .map_err(|_| AdminError::invalid("Provider 不合法"))?;
+            .map_err(|_| AdminError::invalid("服务商无效"))?;
         self.providers
             .require(&kind)
             .map_err(|error| super::map_provider_error(error, "client profile"))
@@ -170,7 +170,7 @@ impl SettingsService for DefaultSettingsService {
             .keys()
             .any(|provider| !providers.contains_key(provider))
         {
-            return Err(AdminError::invalid("Provider 不支持价目管理"));
+            return Err(AdminError::invalid("该服务商不支持价目管理"));
         }
         let mut current = self.pricing_source.fetch().await?;
         if current != command.preview {
@@ -242,7 +242,7 @@ impl SettingsService for DefaultSettingsService {
                     || model.chars().any(char::is_control)
             })
         {
-            return Err(AdminError::invalid("Provider、模型 ID 或批量数量不合法"));
+            return Err(AdminError::invalid("服务商、模型 ID 或批量数量不合法"));
         }
         if command.change == PricingChange::Delete
             && command.models.iter().any(|model| {

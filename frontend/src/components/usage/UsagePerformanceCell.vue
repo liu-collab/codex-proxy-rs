@@ -16,10 +16,10 @@ const performance = computed(() => usagePerformanceDetails(props.record))
 </script>
 
 <template>
-  <div class="grid justify-items-end gap-y-1.5 whitespace-nowrap font-mono text-cp-sm leading-none font-heavy tabular-nums">
-    <span class="text-cp-text">{{ performance.throughputDisplay }}</span>
-    <span class="text-cp-xs text-cp-text-secondary">
-      <span :title="t('usage.performance.ttftHelp')" class="text-cp-text-quaternary">TTFT</span>
+  <div class="grid justify-items-end gap-y-1.5 whitespace-nowrap font-mono text-z-sm leading-none font-heavy tabular-nums">
+    <span class="text-z-text">{{ performance.throughputDisplay }}</span>
+    <span class="text-z-xs text-z-text-secondary">
+      <span :title="t('usage.performance.ttftHelp')" class="text-z-text-quaternary">TTFT</span>
       {{ performance.firstTokenDisplay }}
     </span>
   </div>

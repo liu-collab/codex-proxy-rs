@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { AccountAffinity } from '@/api'
 
-import { ZCard, ZForm, ZFormItem, ZIconButton, ZInput, ZPopover, ZSegmented } from '@codex-proxy/ui'
+import { ZCard, ZFormItem, ZIconButton, ZInput, ZPopover, ZSegmented } from '@codex-proxy/ui'
 
 import { CircleAlert } from '@lucide/vue'
 import { computed } from 'vue'
@@ -32,16 +32,16 @@ const affinityOptions = computed(() => ([
 
 <template>
   <ZCard :title="t('settings.affinity.title')">
-    <ZForm class="max-w-6xl sm:grid-cols-2 lg:grid-cols-3">
-      <ZFormItem :label="t('settings.affinity.mode')" :description="t('settings.affinity.description')">
+    <div class="grid min-w-0 gap-4.5 max-w-6xl sm:grid-cols-2 lg:grid-cols-3">
+      <ZFormItem :show-message="false" prop="openaiAccountAffinity" :label="t('settings.affinity.mode')" :description="t('settings.affinity.description')">
         <template #label-extra>
           <ZPopover class="-my-1" trigger="hover-click" placement="top-start">
             <template #reference="{ open }">
-              <ZIconButton :aria-label="t('settings.affinity.accountAffinityInstructions')" :title="undefined" :aria-expanded="open" class="size-6! hover:bg-transparent! active:bg-transparent!">
+              <ZIconButton variant="link" :aria-label="t('settings.affinity.accountAffinityInstructions')" :title="undefined" :aria-expanded="open" class="size-6!">
                 <CircleAlert class="size-3.5" aria-hidden="true" />
               </ZIconButton>
             </template>
-            <div class="max-w-72 space-y-2 px-3 py-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+            <div class="max-w-72 space-y-2 px-3 py-2 text-z-sm leading-relaxed text-z-text-secondary">
               <p>{{ t('settings.affinity.modes.relaxedHelp') }}</p>
               <p>{{ t('settings.affinity.modes.preferredHelp') }}</p>
               <p>{{ t('settings.affinity.modes.strictHelp') }}</p>
@@ -51,16 +51,16 @@ const affinityOptions = computed(() => ([
         </template>
         <ZSegmented v-model="accountAffinity" :aria-label="t('settings.affinity.mode')" :options="affinityOptions" :disabled="props.disabled" class="w-full" />
       </ZFormItem>
-      <ZFormItem :label="t('settings.affinity.duration')" :description="t('settings.affinity.durationHelp')">
+      <ZFormItem :show-message="Boolean(affinityTtlHours.trim())" prop="openaiSessionAffinityTtlHours" :label="t('settings.affinity.duration')" :description="t('settings.affinity.durationHelp')">
         <ZInput v-model="affinityTtlHours" :aria-label="t('settings.affinity.durationHours')" type="number" min="1" max="720" step="1" :disabled="props.disabled">
           <template #suffix>
             {{ t('settings.affinity.hours') }}
           </template>
         </ZInput>
       </ZFormItem>
-      <ZFormItem :label="t('settings.affinity.maxAccountSwitches')" :description="t('settings.affinity.switchLimitHelp')">
+      <ZFormItem :show-message="Boolean(maxAccountRotations.trim())" prop="maxAccountRotations" :label="t('settings.affinity.maxAccountSwitches')" :description="t('settings.affinity.switchLimitHelp')">
         <ZInput v-model="maxAccountRotations" :aria-label="t('settings.affinity.maxAccountSwitches')" type="number" min="0" max="31" step="1" :disabled="props.disabled" />
       </ZFormItem>
-    </ZForm>
+    </div>
   </ZCard>
 </template>

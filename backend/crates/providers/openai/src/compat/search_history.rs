@@ -4,13 +4,12 @@ use gateway_core::engine::middleware::MiddlewareHeader;
 use gateway_protocol::openai::X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER;
 use serde_json::{Map, Value, json};
 
-use crate::transport::protocol::responses::CodexResponsesRequest;
-
 // TODO(https://github.com/openai/codex/issues/51962): 官方修复历史搜索项与工具声明不匹配后，
 // 用含 web_search_call 的普通请求和 Lite 压缩请求验证直连均可完成，再移除此补偿及对应合同测试
 // Codex 0.163.0 本地压缩可保留搜索历史却使用空工具；真实上游对照中补声明可消除相应 500
 pub(super) fn normalize_search_history(
-    request: &mut CodexResponsesRequest,
+    body: &mut Map<String, Value>,
+    responses_lite: bool,
     middleware_headers: &[MiddlewareHeader],
     request_id: &str,
 ) {
@@ -22,11 +21,8 @@ pub(super) fn normalize_search_history(
                 .name()
                 .eq_ignore_ascii_case(X_OPENAI_INTERNAL_CODEX_RESPONSES_LITE_HEADER)
         })
-        .map_or(
-            request.responses_lite.as_deref() == Some("true"),
-            |header| header.value().as_ref() == b"true",
-        );
-    if normalize_body(request.body_mut(), responses_lite) {
+        .map_or(responses_lite, |header| header.value().as_ref() == b"true");
+    if normalize_body(body, responses_lite) {
         tracing::debug!(
             request_id,
             compatibility = "web_search_history",

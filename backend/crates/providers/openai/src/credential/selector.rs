@@ -9,9 +9,10 @@ use gateway_core::error::ErrorSource;
 
 use gateway_core::account::{
     AccountAffinity, AccountCandidate, AccountCapacitySnapshot, AccountEligibilityPolicy,
-    AccountErrorReason, AccountFeedbackStats, AccountRuntimeSignals, AccountSchedulingBlocker,
-    AccountSelectionContext, AccountSelectionPolicy, AccountSelector, AccountStatus,
-    CredentialState, PreferredAccountSelection, ProviderAccount, ProviderAccountId, QuotaEvidence,
+    AccountErrorReason, AccountFeedbackStats, AccountQuotaSignals, AccountRuntimeSignals,
+    AccountSchedulingBlocker, AccountSelectionContext, AccountSelectionPolicy, AccountSelector,
+    AccountStatus, CredentialState, PreferredAccountSelection, ProviderAccount, ProviderAccountId,
+    QuotaEvidence, RotationStrategy,
 };
 use gateway_core::concurrency::{CapacityWait, ConcurrencyWaitQueue, QueueRejection, WaitPriority};
 use gateway_core::engine::{AttemptContext, ContinuationAttempt, policy::AccountPolicyError};
@@ -45,7 +46,9 @@ const CLOUDFLARE_CHALLENGE_BACKOFF: [Duration; 4] = [
     Duration::from_secs(120),
 ];
 const CLOUDFLARE_PATH_BLOCK_THRESHOLD: u32 = 3;
-const SESSION_AFFINITY_TIMEOUT: Duration = Duration::from_millis(100);
+// 绑定失败会阻止发送，预算容纳短暂调度抖动；可丢失的策略排除记录保持独立预算
+const SESSION_AFFINITY_TIMEOUT: Duration = Duration::from_millis(500);
+const CYBER_POLICY_TIMEOUT: Duration = Duration::from_millis(100);
 const CYBER_POLICY_SESSION_TTL: Duration = Duration::from_secs(60 * 60);
 const MAX_ACCOUNT_SNAPSHOT_RETRIES: u32 = 3;
 const COOLDOWN_READ_CONCURRENCY: usize = 128;
@@ -132,6 +135,7 @@ pub struct CodexCredentialSelector {
     session_affinity: Arc<dyn ProviderSessionAffinityPort>,
     session_exclusions: Arc<dyn ProviderSessionExclusionPort>,
     quota: Arc<CodexCredentialQuotaService>,
+    upstream_info: Option<Arc<dyn gateway_core::account::UpstreamInfoSource>>,
     cookie_policy: CodexCookiePolicy,
     risk_recovery: Mutex<HashMap<String, RiskRecoveryState>>,
     account_feedback: Arc<AccountFeedbackStats>,
@@ -291,6 +295,7 @@ impl CodexCredentialSelector {
             session_affinity,
             session_exclusions,
             quota,
+            upstream_info: None,
             cookie_policy,
             risk_recovery: Mutex::new(HashMap::new()),
             waiting: ConcurrencyWaitQueue::default(),
@@ -318,6 +323,42 @@ impl CodexCredentialSelector {
             CodexSelectionModel::Requested(request.upstream_model),
         )
         .await
+    }
+
+    #[must_use]
+    pub(crate) fn with_upstream_info(
+        mut self,
+        upstream_info: Arc<dyn gateway_core::account::UpstreamInfoSource>,
+    ) -> Self {
+        self.upstream_info = Some(upstream_info);
+        self
+    }
+
+    fn quota_signals(
+        &self,
+        account: &ProviderAccount,
+        model: CodexSelectionModel<'_>,
+        strategy: RotationStrategy,
+    ) -> Option<AccountQuotaSignals> {
+        if account.authentication_kind() == CODEX_AUTHENTICATION_KIND_OAUTH {
+            return self.quota.scheduling_signals(account);
+        }
+        if strategy != RotationStrategy::Smart {
+            return None;
+        }
+        let signal =
+            self.upstream_info
+                .as_ref()?
+                .signal(account, model.model()?, SystemTime::now())?;
+        let rank = if signal.exhausted {
+            Some(0)
+        } else {
+            signal
+                .remaining_percent
+                .map(|percent| (percent.clamp(0.0, 100.0) * 100.0).round() as u64)
+        };
+        // 选号只读取 Smart 额度分，额度恢复由互联同步事务独立提交
+        Some(AccountQuotaSignals::new(None, rank))
     }
 
     pub(crate) async fn select_with_cyber_policy(
@@ -694,7 +735,11 @@ impl CodexCredentialSelector {
                             failure_rate_basis_points: None,
                             first_output_latency_ms: None,
                         })
-                        .with_provider_quota(self.quota.scheduling_signals(&account))
+                        .with_provider_quota(self.quota_signals(
+                            &account,
+                            model,
+                            request.attempt.account_selection_policy().strategy(),
+                        ))
                         .with_rate_limit(rate_limits.get(account.id()).copied().flatten())
                         .with_runtime_health(health.0, health.1);
                     AccountCandidate { account, signals }
@@ -1157,7 +1202,7 @@ impl CodexCredentialSelector {
     ) -> Option<CodexCyberPolicyScope> {
         let key = key?.clone();
         let state = match tokio::time::timeout(
-            SESSION_AFFINITY_TIMEOUT,
+            CYBER_POLICY_TIMEOUT,
             self.session_exclusions.load(&self.provider_kind, &key),
         )
         .await
@@ -1169,7 +1214,7 @@ impl CodexCredentialSelector {
             }
             Err(_) => {
                 tracing::warn!(
-                    timeout_ms = SESSION_AFFINITY_TIMEOUT.as_millis(),
+                    timeout_ms = CYBER_POLICY_TIMEOUT.as_millis(),
                     "OpenAI cyber policy state read timed out"
                 );
                 None
@@ -1187,7 +1232,7 @@ impl CodexCredentialSelector {
             return;
         };
         match tokio::time::timeout(
-            SESSION_AFFINITY_TIMEOUT,
+            CYBER_POLICY_TIMEOUT,
             self.session_exclusions.record_failure(
                 &self.provider_kind,
                 &scope.key,
@@ -1208,7 +1253,7 @@ impl CodexCredentialSelector {
             Err(_) => {
                 tracing::warn!(
                     account_id = %account.id(),
-                    timeout_ms = SESSION_AFFINITY_TIMEOUT.as_millis(),
+                    timeout_ms = CYBER_POLICY_TIMEOUT.as_millis(),
                     "OpenAI cyber policy exclusion write timed out"
                 );
             }
@@ -1223,7 +1268,7 @@ impl CodexCredentialSelector {
             return;
         };
         match tokio::time::timeout(
-            SESSION_AFFINITY_TIMEOUT,
+            CYBER_POLICY_TIMEOUT,
             self.session_exclusions
                 .clear(&self.provider_kind, &scope.key, state.revision()),
         )
@@ -1235,7 +1280,7 @@ impl CodexCredentialSelector {
             }
             Err(_) => {
                 tracing::warn!(
-                    timeout_ms = SESSION_AFFINITY_TIMEOUT.as_millis(),
+                    timeout_ms = CYBER_POLICY_TIMEOUT.as_millis(),
                     "OpenAI cyber policy exclusion clear timed out"
                 );
             }

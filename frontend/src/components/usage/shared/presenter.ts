@@ -58,10 +58,10 @@ export function usageTransportType(transport?: string | null) {
 export function usageTransportTypeClass(transport?: string | null) {
   const type = usageTransportType(transport)
   if (type === 'WS')
-    return 'bg-cp-blue-container text-cp-blue-on-container'
+    return 'bg-z-blue-container text-z-blue-on-container'
   if (type === 'SSE')
-    return 'bg-cp-green-container text-cp-green-on-container'
-  return 'bg-cp-fill-tertiary text-cp-text-secondary'
+    return 'bg-z-green-container text-z-green-on-container'
+  return 'bg-z-fill-tertiary text-z-text-secondary'
 }
 
 export function usageAccountText(record: Pick<UsageCommonRecord, 'accountEmail' | 'accountName' | 'accountId'>) {

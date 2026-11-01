@@ -3,6 +3,32 @@
 use super::*;
 
 #[tokio::test]
+async fn update_detail_should_record_decode_failure_while_returning_safe_warning() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repository/releases"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("not release JSON"))
+        .mount(&server)
+        .await;
+    let fixture = Fixture::new();
+    let service = fixture.service(&server);
+    let diagnostics = Arc::new(RecordingDiagnostics::default());
+    service.set_diagnostics(diagnostics.clone());
+
+    let detail = service
+        .update_detail(true, None)
+        .await
+        .expect("failure detail");
+    assert_eq!(detail.warning.as_deref(), Some("GitHub 发行信息格式无效"));
+    let failures = diagnostics.failures.lock().expect("diagnostic failures");
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].operation, "check_release");
+    let details = failures[0].details.as_ref().expect("decoding details");
+    assert!(details.as_str().contains("expected ident"));
+    assert!(!details.as_str().contains(&server.uri()));
+}
+
+#[tokio::test]
 async fn update_detail_should_report_refresh_failure_and_clear_previous_update() {
     let server = MockServer::start().await;
     let fixture = Fixture::new();
@@ -18,7 +44,10 @@ async fn update_detail_should_report_refresh_failure_and_clear_previous_update()
         .await
         .expect("failure detail");
     assert!(!detail.has_update);
-    assert!(detail.warning.is_some());
+    assert_eq!(
+        detail.warning.as_deref(),
+        Some("GitHub 发行查询失败（HTTP 404）")
+    );
     assert!(!detail.cached);
     assert_eq!(detail.latest_version, "1.0.0");
     assert!(detail.notes.is_none());

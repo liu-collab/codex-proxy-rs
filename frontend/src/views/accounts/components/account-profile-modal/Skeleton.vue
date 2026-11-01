@@ -13,7 +13,7 @@ const { t } = useI18n({ useScope: 'global' })
     <section class="grid min-w-0 gap-4 overflow-hidden">
       <div class="flex items-center justify-between">
         <ZSkeleton shape="text" class="h-4 w-20" />
-        <ZSkeleton class="h-7 w-32 rounded-cp opacity-70" />
+        <ZSkeleton class="h-7 w-32 rounded-z opacity-70" />
       </div>
       <div class="grid min-w-190 gap-1" style="grid-template-columns: repeat(52, minmax(0, 1fr))">
         <div v-for="week in 52" :key="week" class="grid gap-1">

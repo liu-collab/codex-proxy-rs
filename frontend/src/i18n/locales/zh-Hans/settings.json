@@ -582,6 +582,7 @@
       "fillInModelMappingCompletely": "请完整填写模型映射",
       "duplicateClientModel": "存在重复的客户端模型：{requested}",
       "requiredSettings": "请完整填写并发、队列、凭据刷新参数和调度策略",
+      "invalidRefreshSettings": "凭据刷新提前量和并发数须为非负整数",
       "invalidAffinityDuration": "亲和时长应为 1～720 小时的整数",
       "invalidSwitchLimit": "最大换号次数应为 0～31 的整数，0 表示不换号",
       "invalidConcurrency": "默认账号并发上限应为 0～4294967295 的整数，0 表示不限制",
@@ -591,13 +592,11 @@
       "invalidResetLeadTime": "重置卡提前使用时间应为 1～1440 分钟的整数",
       "invalidRetention": "历史保留天数应为 1–31 的整数",
       "invalidQueueSettings": "队列容量应为 0～1000 的整数，排队超时应为 1～120 秒的整数",
-      "invalidClientVersion": "请修正客户端最低版本格式",
       "invalidProbeModel": "探测模型最多 128 个字符，不能包含控制字符",
       "invalidWarmupTimes": "预激活时间格式无效，请输入 HH:MM 格式（如 08:00 或 08:00,13:00）",
       "warmupModelRequired": "启用预激活时请选择模型",
       "invalidWarmupModel": "预激活模型名称不能超过 128 个字符",
       "settingsSaved": "设置已保存",
-      "protectionSettingsRequired": "请完整填写错误保护参数",
       "invalidProtectionSettings": "失败阈值应为 2～1000，计数有效期为 60～3600 秒，冷却时长为 300～604800 秒"
     },
     "page": {

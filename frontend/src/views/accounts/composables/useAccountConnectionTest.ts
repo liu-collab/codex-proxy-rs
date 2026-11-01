@@ -199,8 +199,8 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
         label: t('accounts.connectionTest.testing'),
         description: t('accounts.connectionTest.runningDescription'),
         icon: Clock3,
-        badge: 'bg-cp-info-container text-cp-info-on-container',
-        iconClass: 'text-cp-info',
+        badge: 'bg-z-info-container text-z-info-on-container',
+        iconClass: 'text-z-info',
       }
     }
     if (connectionTestStatus.value === 'success') {
@@ -208,8 +208,8 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
         label: t('accounts.connectionTest.successTitle'),
         description: t('accounts.connectionTest.completedDescription'),
         icon: CheckCircle2,
-        badge: 'bg-cp-success-container text-cp-success-on-container',
-        iconClass: 'text-cp-success',
+        badge: 'bg-z-success-container text-z-success-on-container',
+        iconClass: 'text-z-success',
       }
     }
     if (connectionTestStatus.value === 'error') {
@@ -217,16 +217,16 @@ export function useAccountConnectionTest(options: { reload: () => Promise<unknow
         label: t('accounts.connectionTest.failed'),
         description: t('accounts.connectionTest.failedDescription'),
         icon: XCircle,
-        badge: 'bg-cp-error-container text-cp-error-on-container',
-        iconClass: 'text-cp-error',
+        badge: 'bg-z-error-container text-z-error-on-container',
+        iconClass: 'text-z-error',
       }
     }
     return {
       label: t('accounts.connectionTest.readyTitle'),
       description: t('accounts.connectionTest.readyDescription'),
       icon: Wifi,
-      badge: 'bg-cp-fill-quaternary text-cp-text-secondary',
-      iconClass: 'text-cp-text-quaternary',
+      badge: 'bg-z-fill-quaternary text-z-text-secondary',
+      iconClass: 'text-z-text-quaternary',
     }
   })
 

@@ -15,12 +15,12 @@ const { t } = useI18n({ useScope: 'global' })
 
 <template>
   <span
-    class="inline-flex items-center gap-1 whitespace-nowrap text-cp-sm font-bold text-cp-text"
+    class="inline-flex items-center gap-1 whitespace-nowrap text-z-sm font-bold text-z-text"
   >
     <span>{{ usageReasoningEffort(record) }}</span>
     <span
       v-if="record.subagentKind"
-      class="inline-flex shrink-0 text-cp-purple-text"
+      class="inline-flex shrink-0 text-z-purple-text"
       :title="t('usage.reasoning.subagentRequest')"
       :aria-label="t('usage.reasoning.subagentRequest')"
     >
@@ -28,7 +28,7 @@ const { t } = useI18n({ useScope: 'global' })
     </span>
     <span
       v-if="record.subagentKind === 'review'"
-      class="inline-flex shrink-0 text-cp-purple-text"
+      class="inline-flex shrink-0 text-z-purple-text"
       :title="t('usage.reasoning.reviewSubagentRequest')"
       :aria-label="t('usage.reasoning.reviewSubagentRequest')"
     >

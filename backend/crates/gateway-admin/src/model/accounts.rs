@@ -30,9 +30,10 @@ pub struct ProviderAccountCapabilities {
     pub consume_reset_credit: bool,
 }
 
-/// 导入时统一应用的账号备注、调度与分组设置；缺省时保留原有导入语义
+/// 导入时应用的账号设置；名称只覆盖单账号导入，其余设置统一应用
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountImportSettings {
+    pub name: Option<String>,
     pub notes: Option<String>,
     pub enabled: bool,
     pub concurrency_limit: Option<AccountConcurrencyLimit>,
@@ -226,6 +227,8 @@ pub struct AccountCapacity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdateAccount {
     pub account_id: String,
+    /// 缺省保留名称，空字符串清除名称并使用邮箱展示
+    pub name: Option<String>,
     /// 缺省保留备注；空字符串清空备注
     pub notes: Option<String>,
     pub enabled: bool,

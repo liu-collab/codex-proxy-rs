@@ -562,9 +562,12 @@ async fn http_settings_freeze_before_plan_resolution_and_apply_before_admission(
         .unwrap();
     assert_eq!(
         response.status(),
-        StatusCode::UPGRADE_REQUIRED,
+        StatusCode::BAD_REQUEST,
         "request changes must not alter the published baseline"
     );
+    let body: serde_json::Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(body["error"]["code"], "client_version_too_old");
     assert_eq!(
         snapshots
             .acquire()

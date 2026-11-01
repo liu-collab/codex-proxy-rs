@@ -65,7 +65,7 @@ async function selectLocale(value: Locale, close: () => void) {
           :aria-pressed="option.value === locale"
           :disabled="pendingLocale === option.value"
           :aria-busy="pendingLocale === option.value || undefined"
-          class="aria-pressed:bg-cp-control-item-bg-active aria-pressed:text-cp-primary-text aria-pressed:hover:bg-cp-control-item-bg-active"
+          class="aria-pressed:bg-z-control-item-bg-active aria-pressed:text-z-primary-text aria-pressed:hover:bg-z-control-item-bg-active"
           @click="selectLocale(option.value, close)"
         >
           <template #icon>

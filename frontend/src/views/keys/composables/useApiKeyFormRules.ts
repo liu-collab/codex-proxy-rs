@@ -3,7 +3,7 @@ import type { ApiKeyFormValue } from './useApiKeyEditor'
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-export function useApiKeyFormRules() {
+export function useApiKeyFormRules(form: () => ApiKeyFormValue) {
   const { t } = useI18n({ useScope: 'global' })
 
   function amountRule(label: string): FormRule {
@@ -19,7 +19,9 @@ export function useApiKeyFormRules() {
     return {
       trigger: ['blur', 'change'],
       type: 'integer',
-      transform: Number,
+      transform: value => String(value ?? '').trim()
+        ? Number(value)
+        : undefined,
       min: 0,
       max: Number.MAX_SAFE_INTEGER,
       message: t('keys.editor.validation.integer', { label }),
@@ -27,6 +29,12 @@ export function useApiKeyFormRules() {
   }
 
   return computed<FormRules<ApiKeyFormValue>>(() => ({
+    groupIds: {
+      type: 'array',
+      validator: (_rule, value) => !form().peerSharing.enabled || (Array.isArray(value) && value.length > 0),
+      message: t('keys.editor.peerGroupRequired'),
+      trigger: ['change'],
+    },
     name: {
       required: true,
       whitespace: true,

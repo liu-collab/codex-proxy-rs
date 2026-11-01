@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ResolvedTheme, ThemeComponentOverrides, ThemeTokenName } from '@codex-proxy/ui/theme'
+import type { Theme, ThemeComponentOverrides, ThemeTokenName } from '@codex-proxy/ui/theme'
 
 import type { Component } from 'vue'
 import type {
@@ -25,7 +25,7 @@ import ThemeTextTokenField from './ThemeTextTokenField.vue'
 
 const props = defineProps<{
   draft: ThemeEditorDraft
-  resolved: ResolvedTheme
+  resolved: Theme
   query: string
 }>()
 
@@ -99,61 +99,61 @@ const components = computed<readonly ComponentOption[]>(() => ([
 const tokenCatalog = computed<Record<ThemeEditorComponent, readonly EditableToken[]>>(() => ({
   action: [
     {
-      name: '--cp-button-primary-color',
+      name: 'button-primary-color',
       label: t('appearance.componentTokens.mainButtonText'),
       kind: 'color',
       description: 'primaryColor',
     },
     {
-      name: '--cp-button-primary-bg',
+      name: 'button-primary-bg',
       label: t('appearance.componentTokens.mainButtonBackground'),
       kind: 'color',
       description: 'primaryBg',
     },
     {
-      name: '--cp-button-primary-hover-bg',
+      name: 'button-primary-hover-bg',
       label: t('appearance.componentTokens.mainButtonHover'),
       kind: 'color',
       description: 'primaryHoverBg',
     },
     {
-      name: '--cp-button-primary-active-bg',
+      name: 'button-primary-active-bg',
       label: t('appearance.componentTokens.mainButtonActive'),
       kind: 'color',
       description: 'primaryActiveBg',
     },
     {
-      name: '--cp-button-secondary-bg',
+      name: 'button-secondary-bg',
       label: t('appearance.componentTokens.secondaryButtonBackground'),
       kind: 'color',
       description: 'secondaryBg',
     },
     {
-      name: '--cp-button-secondary-hover-bg',
+      name: 'button-secondary-hover-bg',
       label: t('appearance.componentTokens.secondaryButtonHover'),
       kind: 'color',
       description: 'secondaryHoverBg',
     },
     {
-      name: '--cp-button-secondary-active-bg',
+      name: 'button-secondary-active-bg',
       label: t('appearance.componentTokens.secondaryButtonActive'),
       kind: 'color',
       description: 'secondaryActiveBg',
     },
     {
-      name: '--cp-icon-button-secondary-bg',
+      name: 'icon-button-secondary-bg',
       label: t('appearance.componentTokens.secondaryIconButtonBackground'),
       kind: 'color',
       description: 'secondaryBg',
     },
     {
-      name: '--cp-icon-button-secondary-hover-bg',
+      name: 'icon-button-secondary-hover-bg',
       label: t('appearance.componentTokens.secondaryIconButtonHover'),
       kind: 'color',
       description: 'secondaryHoverBg',
     },
     {
-      name: '--cp-icon-button-secondary-active-bg',
+      name: 'icon-button-secondary-active-bg',
       label: t('appearance.componentTokens.secondaryIconButtonActive'),
       kind: 'color',
       description: 'secondaryActiveBg',
@@ -161,37 +161,37 @@ const tokenCatalog = computed<Record<ThemeEditorComponent, readonly EditableToke
   ],
   form: [
     {
-      name: '--cp-input-bg',
+      name: 'input-bg',
       label: t('appearance.componentTokens.inputBoxBackground'),
       kind: 'color',
       description: 'controlBg',
     },
     {
-      name: '--cp-input-hover-bg',
+      name: 'input-hover-bg',
       label: t('appearance.componentTokens.inputBoxHover'),
       kind: 'color',
       description: 'hoverBg',
     },
     {
-      name: '--cp-input-active-bg',
+      name: 'input-active-bg',
       label: t('appearance.componentTokens.inputBoxActive'),
       kind: 'color',
       description: 'activeBg',
     },
     {
-      name: '--cp-input-shadow',
+      name: 'input-shadow',
       label: t('appearance.componentTokens.inputBoxShadow'),
       kind: 'shadow',
       description: 'shadow',
     },
     {
-      name: '--cp-input-hover-shadow',
+      name: 'input-hover-shadow',
       label: t('appearance.componentTokens.inputBoxHoverShadow'),
       kind: 'shadow',
       description: 'hoverShadow',
     },
     {
-      name: '--cp-input-active-shadow',
+      name: 'input-active-shadow',
       label: t('appearance.componentTokens.inputBoxFocusOuterCircle'),
       kind: 'shadow',
       description: 'activeShadow',
@@ -199,25 +199,25 @@ const tokenCatalog = computed<Record<ThemeEditorComponent, readonly EditableToke
   ],
   surface: [
     {
-      name: '--cp-card-bg',
+      name: 'card-bg',
       label: t('appearance.componentTokens.cardBackground'),
       kind: 'color',
       description: 'colorBgContainer',
     },
     {
-      name: '--cp-modal-bg',
+      name: 'modal-bg',
       label: t('appearance.componentTokens.popUpBackground'),
       kind: 'color',
       description: 'contentBg',
     },
     {
-      name: '--cp-popover-header-bg',
+      name: 'popover-header-bg',
       label: t('appearance.componentTokens.floatingTitleBackground'),
       kind: 'color',
       description: 'headerBg',
     },
     {
-      name: '--cp-card-border-radius',
+      name: 'card-border-radius',
       label: t('appearance.componentTokens.cardRoundedCorners'),
       kind: 'number',
       description: 'borderRadius',
@@ -226,7 +226,7 @@ const tokenCatalog = computed<Record<ThemeEditorComponent, readonly EditableToke
       max: 32,
     },
     {
-      name: '--cp-card-shadow',
+      name: 'card-shadow',
       label: t('appearance.componentTokens.cardShadow'),
       kind: 'shadow',
       description: 'cardShadow',
@@ -234,7 +234,7 @@ const tokenCatalog = computed<Record<ThemeEditorComponent, readonly EditableToke
   ],
   data: [
     {
-      name: '--cp-table-row-height',
+      name: 'table-row-height',
       label: t('appearance.componentTokens.tableRowHeight'),
       kind: 'number',
       description: 'rowHeight',
@@ -243,43 +243,43 @@ const tokenCatalog = computed<Record<ThemeEditorComponent, readonly EditableToke
       max: 84,
     },
     {
-      name: '--cp-table-header-bg',
+      name: 'table-header-bg',
       label: t('appearance.componentTokens.headerBackground'),
       kind: 'color',
       description: 'headerBg',
     },
     {
-      name: '--cp-table-row-bg',
+      name: 'table-row-bg',
       label: t('appearance.componentTokens.lineBackground'),
       kind: 'color',
       description: 'rowBg',
     },
     {
-      name: '--cp-table-row-stripe-bg',
+      name: 'table-row-stripe-bg',
       label: t('appearance.componentTokens.zebraPatternBackground'),
       kind: 'color',
       description: 'rowStripeBg',
     },
     {
-      name: '--cp-table-row-hover-bg',
+      name: 'table-row-hover-bg',
       label: t('appearance.componentTokens.rowHover'),
       kind: 'color',
       description: 'rowHoverBg',
     },
     {
-      name: '--cp-table-row-selected-bg',
+      name: 'table-row-selected-bg',
       label: t('appearance.componentTokens.selectedRowBackground'),
       kind: 'color',
       description: 'rowSelectedBg',
     },
     {
-      name: '--cp-table-row-selected-hover-bg',
+      name: 'table-row-selected-hover-bg',
       label: t('appearance.componentTokens.selectRowHover'),
       kind: 'color',
       description: 'rowSelectedHoverBg',
     },
     {
-      name: '--cp-progress-remaining-color',
+      name: 'progress-remaining-color',
       label: t('appearance.componentTokens.progressTrack'),
       kind: 'color',
       description: 'progressRemainingColor',
@@ -287,7 +287,7 @@ const tokenCatalog = computed<Record<ThemeEditorComponent, readonly EditableToke
   ],
   navigation: [
     {
-      name: '--cp-menu-item-selected-bg',
+      name: 'menu-item-selected-bg',
       label: t('appearance.componentTokens.menuSelectionBackground'),
       kind: 'color',
       description: 'itemSelectedBg',
@@ -295,25 +295,25 @@ const tokenCatalog = computed<Record<ThemeEditorComponent, readonly EditableToke
   ],
   layout: [
     {
-      name: '--cp-layout-sider-bg',
+      name: 'layout-sider-bg',
       label: t('appearance.componentTokens.sidebarBackground'),
       kind: 'color',
       description: 'siderBg',
     },
     {
-      name: '--cp-layout-sider-shadow',
+      name: 'layout-sider-shadow',
       label: t('appearance.componentTokens.sidebarShadow'),
       kind: 'shadow',
       description: 'siderShadow',
     },
     {
-      name: '--cp-scrollbar-thumb-bg',
+      name: 'scrollbar-thumb-bg',
       label: t('appearance.componentTokens.scrollBarSlider'),
       kind: 'color',
       description: 'scrollbarThumbBg',
     },
     {
-      name: '--cp-scrollbar-thumb-hover-bg',
+      name: 'scrollbar-thumb-hover-bg',
       label: t('appearance.componentTokens.scrollBarHover'),
       kind: 'color',
       description: 'scrollbarThumbHoverBg',
@@ -348,8 +348,8 @@ function numericTokenValue(name: ThemeTokenName) {
   <div class="grid gap-4">
     <section aria-labelledby="component-catalog-title">
       <div class="mb-2 flex items-center gap-2 px-1">
-        <AppWindow class="size-3.5 text-cp-primary-text" />
-        <h3 id="component-catalog-title" class="m-0 text-cp font-heavy text-cp-text">
+        <AppWindow class="size-3.5 text-z-primary-text" />
+        <h3 id="component-catalog-title" class="m-0 text-z font-heavy text-z-text">
           {{ t('appearance.componentTokens.kindLabel') }}
         </h3>
       </div>
@@ -359,23 +359,23 @@ function numericTokenValue(name: ThemeTokenName) {
           :key="option.id"
           type="button"
           role="option"
-          class="flex min-h-14 items-center gap-2.5 rounded-cp-lg bg-cp-fill-quaternary px-3 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-cp-bg-text-hover focus-visible:ring-2 focus-visible:ring-cp-control-outline"
-          :class="component === option.id ? 'bg-cp-control-item-bg-active shadow-cp-tertiary' : undefined"
+          class="flex min-h-14 items-center gap-2.5 rounded-z-lg bg-z-fill-quaternary px-3 text-left outline-none transition-[background-color,box-shadow] duration-150 hover:bg-z-bg-text-hover focus-visible:ring-2 focus-visible:ring-z-control-outline"
+          :class="component === option.id ? 'bg-z-control-item-bg-active shadow-z-tertiary' : undefined"
           :aria-selected="component === option.id"
           @click="component = option.id"
         >
-          <component :is="option.icon" class="size-4 shrink-0" :class="component === option.id ? 'text-cp-primary-text' : 'text-cp-text-tertiary'" />
+          <component :is="option.icon" class="size-4 shrink-0" :class="component === option.id ? 'text-z-primary-text' : 'text-z-text-tertiary'" />
           <span class="min-w-0">
-            <strong class="block truncate text-cp-xs font-bold text-cp-text">{{ option.label }}</strong>
-            <span class="mt-0.5 block text-[9px] font-emphasis text-cp-text-quaternary">{{ option.description }}</span>
+            <strong class="block truncate text-z-xs font-bold text-z-text">{{ option.label }}</strong>
+            <span class="mt-0.5 block text-[9px] font-emphasis text-z-text-quaternary">{{ option.description }}</span>
           </span>
         </button>
       </div>
     </section>
 
     <section class="grid gap-2" :aria-label="`${activeComponent.label} Component Token`">
-      <div class="rounded-cp-lg bg-cp-bg-container px-3 py-3 shadow-cp-tertiary">
-        <p class="m-0 text-[10px] leading-normal font-emphasis text-cp-text-secondary">
+      <div class="rounded-z-lg bg-z-bg-container px-3 py-3 shadow-z-tertiary">
+        <p class="m-0 text-[10px] leading-normal font-emphasis text-z-text-secondary">
           {{ t('appearance.componentTokens.description', { label: activeComponent.label }) }}
         </p>
       </div>
@@ -412,7 +412,7 @@ function numericTokenValue(name: ThemeTokenName) {
         />
       </template>
 
-      <div v-if="visibleTokens.length === 0" class="rounded-cp-lg bg-cp-fill-quaternary px-3 py-6 text-center text-cp-xs font-emphasis text-cp-text-quaternary">
+      <div v-if="visibleTokens.length === 0" class="rounded-z-lg bg-z-fill-quaternary px-3 py-6 text-center text-z-xs font-emphasis text-z-text-quaternary">
         {{ t('appearance.componentTokens.noMatchingComponentToken') }}
       </div>
     </section>

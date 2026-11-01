@@ -2,6 +2,7 @@
 import type { AccountQuotaWindow } from '@/api'
 
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { quotaWindowLabel, quotaWindowPresentation } from '@/components/account/account-usage-window/presenter'
 
 const props = withDefaults(defineProps<{
@@ -11,12 +12,14 @@ const props = withDefaults(defineProps<{
 }>(), {
   showPercentage: true,
 })
+const { t } = useI18n({ useScope: 'global' })
 
 const windowItems = computed(() => props.windows.map(window => ({
   key: window.key,
   labelTooltip: quotaWindowLabel(window),
   usedPercent: window.usedPercent,
   usedPercentDisplay: window.usedPercentDisplay,
+  stale: window.stale,
   presentation: quotaWindowPresentation(window, '2px'),
 })))
 const highestUsageWindow = computed(() => props.windows.reduce((highest, window) => {
@@ -29,7 +32,7 @@ const highestUsageWindow = computed(() => props.windows.reduce((highest, window)
 const highestUsageDisplay = computed(() => highestUsageWindow.value?.usedPercentDisplay ?? '—')
 const highestUsageTextClass = computed(() => highestUsageWindow.value
   ? quotaWindowPresentation(highestUsageWindow.value, '2px').percentTextClass
-  : 'text-cp-text-quaternary')
+  : 'text-z-text-quaternary')
 
 const trackGridStyle = computed(() => ({
   gridTemplateColumns: `repeat(${Math.max(windowItems.value.length, 1)}, minmax(0, 1fr))`,
@@ -39,7 +42,7 @@ const trackGridStyle = computed(() => ({
 <template>
   <div class="col-span-full grid min-w-0 grid-cols-subgrid gap-y-1.5">
     <div class="col-span-full grid min-w-0 grid-cols-subgrid items-baseline text-[10px] leading-3 font-bold">
-      <span class="min-w-0 truncate text-cp-text-quaternary" :title="label">
+      <span class="min-w-0 truncate text-z-text-quaternary">
         {{ label }}
       </span>
       <strong
@@ -55,13 +58,13 @@ const trackGridStyle = computed(() => ({
       <div
         v-for="item in windowItems"
         :key="item.key"
-        class="h-1 w-full overflow-hidden rounded-full bg-cp-border-secondary"
+        class="h-1 w-full overflow-hidden rounded-full bg-z-border-secondary"
         role="progressbar"
         :aria-label="item.labelTooltip"
         aria-valuemin="0"
         aria-valuemax="100"
-        :aria-valuenow="item.usedPercent ?? undefined"
-        :aria-valuetext="item.usedPercentDisplay"
+        :aria-valuenow="item.stale ? undefined : item.usedPercent ?? undefined"
+        :aria-valuetext="item.stale ? t('accounts.upstream.stale') : item.usedPercentDisplay"
       >
         <div
           class="h-full rounded-full transition-[width,background-color] duration-200 motion-reduce:transition-none"

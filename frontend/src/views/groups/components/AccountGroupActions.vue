@@ -28,7 +28,7 @@ const { t } = useI18n({ useScope: 'global' })
       :aria-label="t('groups.actions.editGroup')"
       @click.stop="emit('edit', group)"
     >
-      <Pencil class="size-3.5 text-cp-link" />
+      <Pencil class="size-3.5 text-z-link" />
     </ZIconButton>
     <ZIconButton
       size="small"
@@ -38,7 +38,7 @@ const { t } = useI18n({ useScope: 'global' })
     >
       <Power
         class="size-3.5"
-        :class="group.enabled ? 'text-cp-warning' : 'text-cp-success'"
+        :class="group.enabled ? 'text-z-warning' : 'text-z-success'"
       />
     </ZIconButton>
     <ZIconButton
@@ -47,7 +47,7 @@ const { t } = useI18n({ useScope: 'global' })
       :disabled="deleting"
       @click.stop="emit('delete', group)"
     >
-      <Trash2 class="size-3.5 text-cp-error" />
+      <Trash2 class="size-3.5 text-z-error" />
     </ZIconButton>
   </div>
 </template>

@@ -10,7 +10,7 @@ const { t } = useI18n({ useScope: 'global' })
   <div role="status" aria-busy="true">
     <span class="sr-only">{{ t('accounts.quotaForecast.loadingQuotaForecast') }}</span>
     <div aria-hidden="true">
-      <div class="flex flex-col gap-5 rounded-cp-card bg-cp-fill-tertiary/70 p-4 [html[data-theme=light]_&]:bg-cp-fill-quaternary/70">
+      <div class="flex flex-col gap-5 rounded-z-card bg-z-fill-tertiary/70 p-4 [html[data-theme=light]_&]:bg-z-fill-quaternary/70">
         <div>
           <div class="flex items-center justify-between gap-3">
             <ZSkeleton shape="text" class="w-16" />
@@ -28,7 +28,7 @@ const { t } = useI18n({ useScope: 'global' })
             <ZSkeleton shape="text" class="w-20" />
             <ZSkeleton shape="text" class="w-20" />
           </div>
-          <div v-for="metric in 2" :key="metric" class="rounded-cp bg-cp-bg-container px-3 py-3">
+          <div v-for="metric in 2" :key="metric" class="rounded-z bg-z-bg-container px-3 py-3">
             <ZSkeleton shape="text" class="w-20" />
             <div class="mt-3 grid grid-cols-[1fr_20px_1.2fr] items-center gap-2">
               <ZSkeleton shape="text" class="w-14" />

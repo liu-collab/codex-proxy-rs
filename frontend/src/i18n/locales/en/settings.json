@@ -582,6 +582,7 @@
       "fillInModelMappingCompletely": "Please fill in the model mapping completely",
       "duplicateClientModel": "Duplicate client model: {requested}",
       "requiredSettings": "Complete concurrency, queue, credential refresh, and scheduling settings",
+      "invalidRefreshSettings": "Credential refresh lead time and concurrency must be non-negative integers",
       "invalidAffinityDuration": "Affinity duration must be an integer from 1 to 720 hours",
       "invalidSwitchLimit": "Maximum account switches must be an integer from 0 to 31, set to 0 to disable switching",
       "invalidConcurrency": "Default account concurrency must be an integer from 0 to 4,294,967,295, set to 0 for unlimited",
@@ -591,13 +592,11 @@
       "invalidResetLeadTime": "Reset credit lead time must be an integer from 1 to 1,440 minutes",
       "invalidRetention": "History retention must be an integer from 1 to 31 days",
       "invalidQueueSettings": "Queue capacity must be an integer from 0 to 1,000 and timeout from 1 to 120 seconds",
-      "invalidClientVersion": "Enter a valid minimum client version",
       "invalidProbeModel": "The probe model must be at most 128 characters without control characters",
       "invalidWarmupTimes": "Use HH:MM for warmup times, for example 08:00 or 08:00,13:00",
       "warmupModelRequired": "Select a model to enable warmup",
       "invalidWarmupModel": "Warmup model name must not exceed 128 characters",
       "settingsSaved": "Settings saved",
-      "protectionSettingsRequired": "Complete the error protection settings",
       "invalidProtectionSettings": "Use a failure threshold of 2–1,000, count validity of 60–3,600 seconds, and a cooldown of 300–604,800 seconds"
     },
     "page": {

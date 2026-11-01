@@ -137,8 +137,8 @@ const columns = computed(() => (defineTableColumns<PrivacyRule>([
       </template>
       <template #name="{ row }">
         <div class="grid min-w-0 gap-0.5 py-1.5">
-          <span class="truncate font-emphasis text-cp-text">{{ row.name }}</span>
-          <span class="truncate font-mono text-cp-xs text-cp-text-quaternary" :title="row.steps.map(step => step.selector).join('、')">{{ row.steps.map(step => step.selector).join('、') }}</span>
+          <span class="truncate font-emphasis text-z-text">{{ row.name }}</span>
+          <span class="truncate font-mono text-z-xs text-z-text-quaternary" :title="row.steps.map(step => step.selector).join('、')">{{ row.steps.map(step => step.selector).join('、') }}</span>
         </div>
       </template>
       <template #scope="{ row }">

@@ -53,7 +53,7 @@ const providerOptions = computed(() => props.providers.map(value => ({
       </div>
       <ZSelect v-model="source" class="w-32" :aria-label="t('settings.pricing.priceSource')" :options="[{ label: t('settings.pricing.allSources'), value: 'all' }, { label: sourceLabels.custom, value: 'custom' }, { label: sourceLabels.synced, value: 'synced' }, { label: sourceLabels.builtin, value: 'builtin' }]" />
       <div v-if="selectedCount" class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto" role="group" :aria-label="t('settings.pricing.batchOperation')">
-        <span class="inline-flex h-cp-control w-full items-center gap-1 whitespace-nowrap text-cp text-cp-text-secondary sm:mr-1 sm:w-auto" aria-live="polite">
+        <span class="inline-flex h-z-control w-full items-center gap-1 whitespace-nowrap text-z text-z-text-secondary sm:mr-1 sm:w-auto" aria-live="polite">
           {{ t('settings.pricing.selectedCountLabel') }} <span class="font-mono tabular-nums">{{ selectedCount }}</span> {{ t('settings.pricing.item') }}
         </span>
         <ZButton :disabled="disabled || selectedCount > 500" @click="$emit('setMultiplier')">
@@ -76,15 +76,15 @@ const providerOptions = computed(() => props.providers.map(value => ({
         <div class="flex items-center gap-1">
           <ZPopover v-model="syncInfoOpen" placement="bottom-end" trigger="hover-click">
             <template #reference>
-              <ZIconButton :aria-label="t('settings.pricing.synchronizationInstructions')" size="small" :aria-expanded="syncInfoOpen" :aria-controls="syncInfoOpen ? syncInfoId : undefined">
+              <ZIconButton variant="link" :title="undefined" :aria-label="t('settings.pricing.synchronizationInstructions')" size="small" :aria-expanded="syncInfoOpen" :aria-controls="syncInfoOpen ? syncInfoId : undefined">
                 <CircleAlert class="size-3.5" />
               </ZIconButton>
             </template>
-            <div :id="syncInfoId" class="grid w-64 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
+            <div :id="syncInfoId" class="grid w-64 gap-2 p-3 text-z-xs leading-relaxed text-z-text-secondary">
               <p class="m-0">
                 {{ t('settings.pricing.sourceHelp') }}
               </p>
-              <p class="m-0 text-cp-text-tertiary">
+              <p class="m-0 text-z-text-tertiary">
                 {{ t('settings.pricing.lastSynced', { syncTime }) }}
               </p>
             </div>

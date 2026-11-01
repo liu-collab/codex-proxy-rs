@@ -1,8 +1,7 @@
 import type { ApiKeyAccountForm } from './upstreamApiKey'
 import type { AccountModelAccess } from '@/api'
 import { t } from '@/i18n'
-import { accountModelAccessError } from './modelAccess'
-import { parseAccountSchedulingForm } from './schedulingForm'
+import { accountSchedulingValues } from './schedulingForm'
 import { emptyApiKeyAccountForm } from './upstreamApiKey'
 
 export type AccountCreateSource = { kind: 'bundle' } | { kind: 'provider', id: string }
@@ -10,6 +9,7 @@ export type AccountImportMode = 'oauth' | 'api_key' | 'access_token' | 'refresh_
 type AccountImportInputMode = 'access_token' | 'refresh_token' | 'json'
 
 export interface AccountCreateForm {
+  name: string
   source: AccountCreateSource | null
   apiKey: ApiKeyAccountForm
   notes: string
@@ -27,6 +27,7 @@ export interface AccountCreateForm {
 
 export function emptyAccountCreateForm(): AccountCreateForm {
   return {
+    name: '',
     source: null,
     apiKey: emptyApiKeyAccountForm(),
     notes: '',
@@ -54,22 +55,12 @@ export function accountCreateSourceKey(form: AccountCreateForm) {
     : form.source?.kind ?? ''
 }
 
-export function accountProxyError(form: AccountCreateForm): string | undefined {
-  if (form.proxyMode !== 'proxy')
-    return undefined
-  if (!form.proxyId.trim())
-    return t('accounts.batchEdit.proxyRequired')
-  return undefined
-}
-
 export function accountImportSettings(form: AccountCreateForm) {
-  const scheduling = parseAccountSchedulingForm(form.concurrencyLimit, form.weight)
-  if (!scheduling.valid)
-    throw new Error(scheduling.message)
-  const modelError = accountModelAccessError(form.modelAccess)
-  if (modelError)
-    throw new Error(modelError)
+  const scheduling = accountSchedulingValues(form.concurrencyLimit, form.weight)
   return {
+    name: form.source?.kind === 'provider'
+      ? form.name.trim() || undefined
+      : undefined,
     modelAccess: form.modelAccess
       ? {
           ...form.modelAccess,
@@ -77,7 +68,7 @@ export function accountImportSettings(form: AccountCreateForm) {
         }
       : undefined,
     enabled: form.enabled,
-    ...scheduling.values,
+    ...scheduling,
     groupIds: [
       ...new Set(form.groupIds),
     ],

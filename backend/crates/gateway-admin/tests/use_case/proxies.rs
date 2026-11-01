@@ -203,6 +203,7 @@ async fn linked_accounts_share_plan_resolution_and_only_read_cached_quota() {
     ] {
         let provider = FakeProviderAdmin::new("openai", events());
         provider.set_quota(ProviderQuota {
+            upstream: None,
             credits: None,
             plan_type: cached.map(str::to_owned),
             observed_at: None,
@@ -215,6 +216,7 @@ async fn linked_accounts_share_plan_resolution_and_only_read_cached_quota() {
             .provider(provider.clone())
             .proxies(Arc::new(TestProxies {
                 accounts: Some(vec![ProxyAccountRef {
+                    upstream: None,
                     id: "acct_plan".to_owned(),
                     name: "套餐测试".to_owned(),
                     email: None,

@@ -148,7 +148,7 @@ pub trait ProviderAdmin: Send + Sync {
     > {
         Err(gateway_core::settings::privacy::PrivacyError {
             rule_index: 0,
-            reason: "Provider 不支持隐私策略",
+            reason: "该服务商不支持隐私策略",
         })
     }
 
@@ -161,7 +161,7 @@ pub trait ProviderAdmin: Send + Sync {
     > {
         Err(gateway_core::settings::privacy::PrivacyError {
             rule_index: 0,
-            reason: "Provider 不支持隐私策略",
+            reason: "该服务商不支持隐私策略",
         })
     }
 
@@ -179,6 +179,19 @@ pub trait ProviderAdmin: Send + Sync {
     }
 
     fn provider_kind(&self) -> &ProviderKind;
+    /// 与执行 Provider 共用的直连资格，未知实现默认不公开账号
+    fn is_direct_account(&self, _authentication_kind: &str) -> bool {
+        false
+    }
+
+    /// 仅依据本地账号事实判断通用模型资格；未知实现不能宣称完整覆盖
+    fn peer_model_eligible(
+        &self,
+        _account: &crate::model::accounts::AccountRecord,
+        _model: &str,
+    ) -> Option<bool> {
+        None
+    }
 
     /// 只读取原生 Provider 能力及账号类型，不执行网络或数据库查询
     fn account_capabilities(
@@ -309,6 +322,24 @@ pub trait ProviderAdmin: Send + Sync {
         .await
     }
 
+    /// 仅依据账号类型声明 CPR 连接能力，通用用例不解析 Provider 凭据
+    fn peer_authentication_kinds(&self) -> &[&str] {
+        &[]
+    }
+
+    fn supports_peer_connection(&self, authentication_kind: &str) -> bool {
+        self.peer_authentication_kinds()
+            .contains(&authentication_kind)
+    }
+
+    /// 从本轮加载的凭据提取连接材料，避免在校验连接版本后另读一份凭据
+    fn peer_connection(
+        &self,
+        _loaded: &gateway_core::account::LoadedCredential,
+    ) -> Result<Option<super::peer::PeerConnection>, ProviderAdminError> {
+        Ok(None)
+    }
+
     /// 历史观测的协议字段仅由具体 Provider 解释；不支持时保留累计估算
     fn quota_forecast_observation(
         &self,
@@ -385,6 +416,10 @@ pub struct ProviderAdminRegistry {
 }
 
 impl ProviderAdminRegistry {
+    pub(crate) fn registered(&self) -> BTreeMap<ProviderKind, Arc<dyn ProviderAdmin>> {
+        self.providers.as_ref().clone()
+    }
+
     pub fn pricing_catalog(&self) -> gateway_core::metering::PricingOverrides {
         self.providers
             .iter()

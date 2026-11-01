@@ -45,6 +45,32 @@ const OLD_RELEASE_MANIFEST: &str = r#"{"gateway_version":"1.0.0"}"#;
 const TARGET_VERSION: &str = "1.9.9";
 const CROSS_MAJOR_VERSION: &str = "2.0.0";
 
+#[derive(Default)]
+struct RecordingDiagnostics {
+    failures: std::sync::Mutex<Vec<gateway_core::diagnostics::OperationalFailure>>,
+    reject: bool,
+}
+
+#[async_trait::async_trait]
+impl gateway_core::diagnostics::OperationalDiagnostics for RecordingDiagnostics {
+    async fn record_failure(
+        &self,
+        failure: gateway_core::diagnostics::OperationalFailure,
+    ) -> Result<(), gateway_core::error::StoreError> {
+        self.failures
+            .lock()
+            .expect("diagnostic failures")
+            .push(failure);
+        if self.reject {
+            Err(gateway_core::error::StoreError::new(
+                gateway_core::error::StoreErrorKind::Unavailable,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 struct AllowingUpdatePreflight;
 #[async_trait::async_trait]
 impl gateway_admin::ports::system::SystemRestartPreflight for AllowingUpdatePreflight {

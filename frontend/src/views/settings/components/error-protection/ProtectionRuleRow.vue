@@ -26,7 +26,7 @@ function updateName(name: string) {
 </script>
 
 <template>
-  <div class="min-w-0 rounded-cp bg-cp-fill-quaternary">
+  <div class="min-w-0 rounded-z bg-z-fill-quaternary">
     <div class="flex min-w-0 items-center gap-2 p-3 sm:px-4">
       <ZIconButton
         :aria-label="t('settings.errorProtection.editRule', { name: rule.name || t('settings.errorProtection.unnamedRule') })"
@@ -46,9 +46,9 @@ function updateName(name: string) {
           class="max-w-lg"
           @update:model-value="updateName"
         />
-        <span v-else class="truncate text-cp-sm font-emphasis text-cp-text">{{ rule.name || t('settings.errorProtection.unnamedRule') }}</span>
-        <span v-if="!expanded" class="truncate text-cp-xs text-cp-text-tertiary" :title="summary">{{ summary }}</span>
-        <span v-if="error" role="alert" class="text-cp-sm text-cp-error-text">{{ error }}</span>
+        <span v-else class="truncate text-z-sm font-emphasis text-z-text">{{ rule.name || t('settings.errorProtection.unnamedRule') }}</span>
+        <span v-if="!expanded" class="truncate text-z-xs text-z-text-tertiary" :title="summary">{{ summary }}</span>
+        <span v-if="error" role="alert" class="text-z-sm text-z-error-text">{{ error }}</span>
       </div>
       <ZIconButton :disabled="disabled" :aria-label="t('settings.errorProtection.removeRule', { name: rule.name || t('settings.errorProtection.unnamedRule') })" @click="emit('remove')">
         <Trash2 class="size-4" />

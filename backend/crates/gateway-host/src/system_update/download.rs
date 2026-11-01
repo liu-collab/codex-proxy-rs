@@ -25,7 +25,7 @@ pub(crate) async fn download_file(
 ) -> Result<(), OperationError> {
     validate_download_url(url, api_base)?;
     if expected_size == 0 || expected_size > MAX_DOWNLOAD_SIZE {
-        return Err(invalid("release archive size is invalid"));
+        return Err(invalid("更新包大小无效或超出限制"));
     }
     let client = download_client(api_base, Duration::from_secs(120))?;
     let response = client
@@ -33,32 +33,32 @@ pub(crate) async fn download_file(
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
         .send()
         .await
-        .map_err(|error| upstream(format!("release download failed: {error}")))?;
+        .map_err(|error| super::error::http("更新包下载失败", error))?;
     if !response.status().is_success() {
         return Err(upstream(format!(
-            "release download failed with {}",
-            response.status()
+            "更新包下载失败（HTTP {}）",
+            response.status().as_u16()
         )));
     }
     if response
         .content_length()
         .is_some_and(|size| size != expected_size)
     {
-        return Err(upstream("downloaded size does not match release metadata"));
+        return Err(upstream("下载文件大小与发行信息不一致"));
     }
     let mut file = fs::File::create(destination)
-        .map_err(|error| super::internal(format!("failed to create download file: {error}")))?;
+        .map_err(|error| super::internal("无法创建下载文件").with_source(error))?;
     let mut stream = response.bytes_stream();
     let mut downloaded = 0_u64;
     let mut next_progress = 10_u8;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| upstream(format!("download stream failed: {error}")))?;
+        let chunk = chunk.map_err(|error| super::error::http("更新包下载中断", error))?;
         downloaded = downloaded.saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
         if downloaded > expected_size {
-            return Err(invalid("download exceeds declared release size"));
+            return Err(invalid("下载文件超过发行信息声明的大小，已停止更新"));
         }
         file.write_all(&chunk)
-            .map_err(|error| super::internal(format!("failed to write download: {error}")))?;
+            .map_err(|error| super::internal("无法保存下载内容").with_source(error))?;
         let percent = download_percent(downloaded, expected_size);
         if percent >= next_progress || downloaded == expected_size {
             events.emit_progress(
@@ -74,9 +74,9 @@ pub(crate) async fn download_file(
         }
     }
     file.sync_all()
-        .map_err(|error| super::internal(format!("failed to sync download: {error}")))?;
+        .map_err(|error| super::internal("无法完成下载文件写入").with_source(error))?;
     if downloaded != expected_size {
-        return Err(upstream("downloaded size does not match release metadata"));
+        return Err(upstream("下载文件大小与发行信息不一致"));
     }
     Ok(())
 }
@@ -90,7 +90,7 @@ pub(crate) async fn verify_checksum(
 ) -> Result<(), OperationError> {
     validate_download_url(checksum_url, api_base)?;
     if checksum_size == 0 || checksum_size > MAX_CHECKSUM_SIZE {
-        return Err(invalid("release checksum size is invalid"));
+        return Err(invalid("校验文件大小无效或超出限制"));
     }
     let client = download_client(api_base, Duration::from_secs(30))?;
     let response = client
@@ -98,27 +98,27 @@ pub(crate) async fn verify_checksum(
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
         .send()
         .await
-        .map_err(|error| upstream(format!("checksum download failed: {error}")))?;
+        .map_err(|error| super::error::http("校验文件下载失败", error))?;
     if !response.status().is_success() {
         return Err(upstream(format!(
-            "checksum download failed with {}",
-            response.status()
+            "校验文件下载失败（HTTP {}）",
+            response.status().as_u16()
         )));
     }
     let bytes = response
         .bytes()
         .await
-        .map_err(|error| upstream(format!("checksum read failed: {error}")))?;
+        .map_err(|error| super::error::http("校验文件读取失败", error))?;
     if bytes.len() > MAX_CHECKSUM_SIZE as usize || bytes.len() as u64 != checksum_size {
-        return Err(invalid("checksum document size is invalid"));
+        return Err(invalid("校验文件大小与发行信息不一致"));
     }
     let body =
-        std::str::from_utf8(&bytes).map_err(|_| invalid("checksum document is not UTF-8"))?;
+        std::str::from_utf8(&bytes).map_err(|_| invalid("校验文件编码无效，无法校验更新包"))?;
     let expected = checksum_for(body, file_name)
-        .ok_or_else(|| upstream("release checksum entry is missing"))?;
+        .ok_or_else(|| upstream("校验文件中缺少当前更新包的校验值"))?;
     let actual = sha256_file(file_path)?;
     if !expected.eq_ignore_ascii_case(&actual) {
-        return Err(upstream("release checksum mismatch"));
+        return Err(upstream("更新包校验失败，请重新下载"));
     }
     Ok(())
 }
@@ -137,13 +137,13 @@ fn checksum_for(body: &str, file_name: &str) -> Option<String> {
 
 fn sha256_file(path: &Path) -> Result<String, OperationError> {
     let mut file = fs::File::open(path)
-        .map_err(|error| super::internal(format!("failed to open checksum file: {error}")))?;
+        .map_err(|error| super::internal("无法打开待校验文件").with_source(error))?;
     let mut hasher = sha2::Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         let read = file
             .read(&mut buffer)
-            .map_err(|error| super::internal(format!("failed to read checksum file: {error}")))?;
+            .map_err(|error| super::internal("无法读取待校验文件").with_source(error))?;
         if read == 0 {
             break;
         }

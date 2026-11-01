@@ -60,7 +60,7 @@ impl ReleaseCache {
         let repository = config
             .update_repository
             .as_deref()
-            .ok_or_else(|| conflict("update repository is not configured"))?;
+            .ok_or_else(|| conflict("未配置更新仓库 CPR_UPDATE_REPOSITORY"))?;
         validate_repository(repository)?;
         validate_api_base(&config.github_api_base).map_err(conflict)?;
         let key = format!("{}|{}", config.release_cache_key(), channel.as_str());
@@ -127,12 +127,12 @@ pub(crate) async fn fetch_latest(
     validate_repository(repository)?;
     let base = api_base.trim_end_matches('/');
     let current = semver::Version::parse(&normalize_version(current_version))
-        .map_err(|_| invalid("current version is invalid"))?;
+        .map_err(|_| invalid("当前版本号无效，无法检查更新"))?;
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|error| upstream(format!("failed to create release client: {error}")))?;
+        .map_err(|error| super::error::http("无法初始化发行查询连接", error))?;
 
     // 所有发行线先过滤再排序，避免更高大版本或其他实验遮住仍可安装的更新
     let mut latest: Option<(semver::Version, GitHubRelease)> = None;
@@ -184,17 +184,17 @@ async fn fetch_release_json<T: serde::de::DeserializeOwned>(
         .header(reqwest::header::USER_AGENT, APP_BINARY_NAME)
         .send()
         .await
-        .map_err(|error| upstream(format!("GitHub release check failed: {error}")))?;
+        .map_err(|error| super::error::http("无法查询 GitHub 发行版本", error))?;
     if !response.status().is_success() {
         return Err(upstream(format!(
-            "GitHub release check failed with {}",
-            response.status()
+            "GitHub 发行查询失败（HTTP {}）",
+            response.status().as_u16()
         )));
     }
     response
         .json::<T>()
         .await
-        .map_err(|error| upstream(format!("invalid GitHub release response: {error}")))
+        .map_err(|error| super::error::http("GitHub 发行信息格式无效", error))
 }
 
 pub(crate) fn detail_from_release(
@@ -227,10 +227,10 @@ pub(crate) fn detail_from_release(
 }
 
 pub(crate) fn confirmed_target(target: Option<String>) -> Result<String, OperationError> {
-    let target = target.ok_or_else(|| conflict("target version must be confirmed"))?;
+    let target = target.ok_or_else(|| conflict("请先确认目标版本"))?;
     let target = normalize_version(&target);
     if target.is_empty() || semver::Version::parse(&target).is_err() {
-        return Err(invalid("target version is invalid"));
+        return Err(invalid("目标版本号格式无效"));
     }
     Ok(target)
 }
@@ -258,7 +258,7 @@ pub(crate) fn select_archive<'a>(
         })
         .ok_or_else(|| {
             conflict(format!(
-                "no compatible release archive for {}/{}",
+                "当前发行版本没有适用于 {}/{} 的更新包",
                 env::consts::OS,
                 env::consts::ARCH
             ))
@@ -268,20 +268,20 @@ pub(crate) fn select_archive<'a>(
 /// 校验 GitHub Release 资产 URL 及其重定向目标是否位于受信任边界内
 pub fn validate_download_url(raw: &str, api_base: &str) -> Result<(), OperationError> {
     let url = reqwest::Url::parse(raw)
-        .map_err(|error| invalid(format!("invalid download URL: {error}")))?;
+        .map_err(|error| invalid("更新文件下载地址格式无效").with_source(error))?;
     if local_download_allowed(&url, api_base) {
         return Ok(());
     }
     if url.scheme() != "https" {
-        return Err(invalid("only HTTPS release downloads are allowed"));
+        return Err(invalid("更新文件必须通过 HTTPS 下载"));
     }
     let host = url
         .host_str()
-        .ok_or_else(|| invalid("download URL is missing host"))?;
+        .ok_or_else(|| invalid("更新文件下载地址缺少主机名"))?;
     if github_download_host_allowed(host) {
         Ok(())
     } else {
-        Err(invalid("release download host is not trusted"))
+        Err(invalid("更新文件下载地址不在受信任的发行站点范围内"))
     }
 }
 
@@ -302,7 +302,7 @@ pub(crate) fn download_client(
             }
         }))
         .build()
-        .map_err(|error| upstream(format!("failed to create download client: {error}")))
+        .map_err(|error| super::error::http("无法初始化下载连接", error))
 }
 
 pub(crate) fn validate_repository(repository: &str) -> Result<(), OperationError> {
@@ -315,30 +315,30 @@ pub(crate) fn validate_repository(repository: &str) -> Result<(), OperationError
         || !owner.chars().all(repository_character)
         || !name.chars().all(repository_character)
     {
-        return Err(conflict("update repository must use owner/repository"));
+        return Err(conflict("更新仓库格式应为 owner/repository"));
     }
     Ok(())
 }
 
 pub(crate) fn validate_api_base(raw: &str) -> Result<(), String> {
-    let url = reqwest::Url::parse(raw).map_err(|error| format!("invalid API base: {error}"))?;
+    let url = reqwest::Url::parse(raw).map_err(|_| "发行查询地址格式无效".to_owned())?;
     if !url.username().is_empty()
         || url.password().is_some()
         || url.query().is_some()
         || url.fragment().is_some()
     {
-        return Err("API base must not include credentials, query, or fragment".to_owned());
+        return Err("发行查询地址不能包含认证信息、查询参数或片段".to_owned());
     }
     if url.path().trim_end_matches('/') != "/repos" {
-        return Err("API base path must be /repos".to_owned());
+        return Err("发行查询地址的路径必须为 /repos".to_owned());
     }
     if url_host_is_loopback(&url) {
         return matches!(url.scheme(), "http" | "https")
             .then_some(())
-            .ok_or_else(|| "loopback API base must use HTTP or HTTPS".to_owned());
+            .ok_or_else(|| "本地发行查询地址必须使用 HTTP 或 HTTPS".to_owned());
     }
     if url.scheme() != "https" || url.host_str() != Some("api.github.com") {
-        return Err("API base must be https://api.github.com/repos".to_owned());
+        return Err("发行查询地址必须为 https://api.github.com/repos".to_owned());
     }
     Ok(())
 }
@@ -409,7 +409,7 @@ pub(crate) fn validate_update_target(
     let current = semver::Version::parse(&normalize_version(current))
         .map_err(|_| conflict("当前版本格式无效"))?;
     let target = semver::Version::parse(&normalize_version(target))
-        .map_err(|_| invalid("target version is invalid"))?;
+        .map_err(|_| invalid("目标版本号格式无效"))?;
     if !update_target_allowed(&current, &target, channel) {
         return Err(conflict(
             "所选通道不允许此目标，或目标涉及跨实验线、跨大版本、降级",
@@ -494,13 +494,13 @@ impl SystemUpdateConfig {
             return Some("检查更新需要配置 CPR_UPDATE_REPOSITORY".to_owned());
         };
         if let Err(error) = validate_repository(repository) {
-            return Some(error.to_string());
+            return Some(error.message().to_owned());
         }
         if let Err(error) = validate_api_base(&self.github_api_base) {
             return Some(error);
         }
         if let Err(error) = self.web_dist_dir() {
-            return Some(error.to_string());
+            return Some(error.message().to_owned());
         }
         None
     }

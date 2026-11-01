@@ -25,7 +25,6 @@
       "reset": "重置：",
       "remainingQuota": "{label}剩餘額度",
       "accountLimit": "賬號額度",
-      "quota": "{provider} 額度",
       "lastRefreshed": "最近刷新: {refreshedAtDisplay}",
       "viewPersonalInformation": "查看個人信息",
       "forecastWeeklyMonthlyQuota": "預測周/月額度",
@@ -38,7 +37,6 @@
       "windowConsumption": "窗口消耗",
       "resetTime": "重置時間",
       "localTokens": "本地累計總 Token",
-      "unavailableHelp": "上游額度未提供，綠色條不表示剩餘額度",
       "totalTokensFor": "{windowLabelDisplay}總 Token",
       "usageRateHelp": "最近使用額度的當前已用比例",
       "usageRate": "使用率",
@@ -118,7 +116,6 @@
       "noModelsAvailable": "沒有可測試模型"
     },
     "credentials": {
-      "wsFirst": "WS 優先",
       "accountName": "賬號名稱",
       "enterUpstreamName": "輸入上游名稱",
       "baseUrlHelp": "填寫 API 前綴，接口路徑會自動追加",
@@ -126,7 +123,7 @@
       "apiKeyPlaceholder": "留空保留當前密鑰",
       "enterUpstreamKey": "輸入上游密鑰",
       "transportLabel": "傳輸方式",
-      "webSocketHelp": "WS 優先需要上游支持 Responses WebSocket",
+      "webSocketHelp": "WS 需要上游支持 Responses WebSocket",
       "nameRequired": "請輸入賬號名稱",
       "validation": {
         "urlLength": "上游 API 地址不能超過 2048 個字符",
@@ -161,9 +158,10 @@
       "elapsed": "佔用時長"
     },
     "editor": {
+      "namePlaceholder": "留空預設使用賬號郵箱",
+      "nameInvalid": "賬號名稱最多 512 位元組，不能包含換行或控制字元",
       "title": "編輯賬號",
       "transportLabel": "上游傳輸方式",
-      "upstreamConnection": "上游連接",
       "loadError": "上游設置讀取失敗",
       "notesHelp": "最多 500 字，留空可清除備註",
       "oauthUnavailable": "該賬號沒有 OAuth 上游設置",
@@ -188,9 +186,12 @@
       "reserve": "保留",
       "allowlist": "白名單",
       "blocklist": "黑名單",
-      "modelLimitations": "模型限制",
+      "modelCatalog": "模型目錄",
       "refreshModel": "刷新模型",
       "modelRestrictionMode": "模型限制模式",
+      "catalogHelpTitle": "模型目錄說明",
+      "catalogObservedAtHelp": "時間表示最近一次成功取得上游目錄的時間",
+      "catalogDescription": "目錄僅提供模型 ID，端點能力請透過實際請求確認，連線測試僅驗證測試所用端點",
       "searchOrAddModels": "搜索或添加模型",
       "searchOrEnterIdAndPressEnter": "搜索或輸入 ID，回車添加",
       "selectModel": "選擇模型",
@@ -229,6 +230,7 @@
       "outboundTunnel": "出站隧道"
     },
     "scheduling": {
+      "preserve": "保留",
       "scheduling": "調度",
       "switchAccountSchedule": "切換賬號調度",
       "concurrencyLimit": "併發限制",
@@ -290,6 +292,7 @@
       "totalCharges": "總計費：",
       "noModelUsageYet": "暫無模型用量",
       "windows": {
+        "daily": "日用量",
         "general": "累計用量",
         "weekly": "周用量",
         "monthly": "月用量",
@@ -311,6 +314,7 @@
       "selectAccountPlatform": "選擇賬號平臺",
       "accountPlatform": "賬號平臺",
       "maximumWordsOptional": "最多 500 字，可不填",
+      "namePlaceholder": "留空保留原名稱，僅單賬號導入生效",
       "copyAccount": "複製賬號",
       "accountCopied": "賬號已複製",
       "howToAddAccount": "賬號添加方式",
@@ -351,7 +355,6 @@
       "importTasksCreated": "已創建 {submitted} 個導入任務",
       "importTaskCreated": "導入任務已創建",
       "partialSubmission": "部分導入任務已創建，保持輸入不變重試可繼續提交",
-      "accountName": "{provider} 賬號",
       "failedToStartAuthorization": "啓動授權失敗"
     },
     "importTasks": {
@@ -609,6 +612,24 @@
       "pasteAtLeastOne": "請至少粘貼一個 {label}",
       "missingProvider": "批量導入文件不包含 {provider} 賬號文檔",
       "importFilesMustBeJsonObjects": "導入文件必須是 JSON 對象"
+    },
+    "upstream": {
+      "account": "帳號 {number}",
+      "poolChart": "共享池帳號額度",
+      "poolKeyboard": "左右鍵選擇帳號，加減鍵縮放，Home 鍵查看全池",
+      "startsOnNextUse": "下次使用時開啟",
+      "link": "CPR 互聯",
+      "observedAt": "{time}更新",
+      "stale": "資料已過期",
+      "unauthorized": "上游未授權",
+      "unsupported": "上游暫不支援互聯",
+      "rateLimited": "上游查詢受限",
+      "invalidResponse": "上游資料異常",
+      "unavailable": "上游暫不可用",
+      "pool": "共享池",
+      "ready": "可用",
+      "nodeQuota": "節點額度",
+      "quota": "上游額度"
     }
   }
 }

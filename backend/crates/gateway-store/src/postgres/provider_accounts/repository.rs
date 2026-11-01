@@ -266,7 +266,6 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
 
     async fn update_provider_account(&self, account: UpdateProviderAccount) -> StoreResult<bool> {
         require_nonempty(ENTITY, "id", &account.id)?;
-        require_nonempty(ENTITY, "name", &account.name)?;
         let result = sqlx::query(
             "update provider_accounts
              set name = $2, email = $3, plan_type = $4, updated_at = greatest(now(), updated_at)
@@ -297,7 +296,9 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         }
         let next = sqlx::query_scalar::<_, i64>(
             "update provider_accounts
-             set provider_credentials_json = $3,
+             set provider_quota_json = case when $7 then provider_quota_json else null end,
+                 quota_observed_at = case when $7 then quota_observed_at else null end,
+                 provider_credentials_json = $3,
                  credential_revision = credential_revision + 1,
                  has_refresh_token = $4,
                  access_token_expires_at = $5,
@@ -312,6 +313,7 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         .bind(update.has_refresh_token)
         .bind(update.access_token_expires_at)
         .bind(update.next_refresh_at)
+        .bind(update.preserve_profile)
         .fetch_optional(&self.pool)
         .await
         .map_err(|source| postgres_unavailable("compare and swap provider credentials", source))?
@@ -376,46 +378,16 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         state: QuotaState,
         plan_type: Option<&str>,
     ) -> StoreResult<bool> {
-        require_nonempty(ENTITY, "account_id", account_id)?;
-        validate_object_size("provider_quota_json", &quota, QUOTA_MAX_BYTES)?;
-        let access_observed_at = state.observed_at().map(DateTime::<Utc>::from);
-        let result = sqlx::query(
-            "update provider_accounts
-             set provider_quota_json = $3, quota_observed_at = $4,
-                 plan_type = coalesce($9, plan_type),
-                 quota_access_state = case
-                   when $7::timestamptz is not null
-                     and (quota_access_observed_at is null or quota_access_observed_at <= $7)
-                   then $5 else quota_access_state end,
-                 quota_evidence = case
-                   when $7::timestamptz is not null
-                     and (quota_access_observed_at is null or quota_access_observed_at <= $7)
-                   then $6 else quota_evidence end,
-                 quota_access_observed_at = case
-                   when $7::timestamptz is not null
-                     and (quota_access_observed_at is null or quota_access_observed_at <= $7)
-                   then $7 else quota_access_observed_at end,
-                 quota_reset_at = case
-                   when $7::timestamptz is not null
-                     and (quota_access_observed_at is null or quota_access_observed_at <= $7)
-                   then $8 else quota_reset_at end,
-                 updated_at = greatest(now(), updated_at, $4, $7)
-             where id = $1 and credential_revision = $2
-               and (quota_observed_at is null or quota_observed_at <= $4)",
+        write_quota(
+            &self.pool,
+            account_id,
+            expected_revision,
+            quota,
+            observed_at,
+            state,
+            plan_type,
         )
-        .bind(account_id)
-        .bind(to_i64(expected_revision.get())?)
-        .bind(quota.as_value())
-        .bind(observed_at)
-        .bind(state.access().as_str())
-        .bind(state.evidence().map(QuotaEvidence::as_str))
-        .bind(access_observed_at)
-        .bind(state.reset_at().map(DateTime::<Utc>::from))
-        .bind(plan_type)
-        .execute(&self.pool)
         .await
-        .map_err(|source| postgres_unavailable("compare and swap provider quota", source))?;
-        Ok(result.rows_affected() == 1)
     }
 
     async fn apply_provider_quota_access(
@@ -424,29 +396,7 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         expected_revision: Revision,
         state: QuotaState,
     ) -> StoreResult<bool> {
-        require_nonempty(ENTITY, "account_id", account_id)?;
-        let observed_at = state
-            .observed_at()
-            .map(DateTime::<Utc>::from)
-            .ok_or_else(|| invalid("quota access change requires observed_at"))?;
-        let result = sqlx::query(
-            "update provider_accounts
-             set quota_access_observed_at = $3, quota_access_state = $4,
-                 quota_evidence = $5, quota_reset_at = $6,
-                 updated_at = greatest(now(), updated_at, $3)
-             where id = $1 and credential_revision = $2
-               and (quota_access_observed_at is null or quota_access_observed_at <= $3)",
-        )
-        .bind(account_id)
-        .bind(to_i64(expected_revision.get())?)
-        .bind(observed_at)
-        .bind(state.access().as_str())
-        .bind(state.evidence().map(QuotaEvidence::as_str))
-        .bind(state.reset_at().map(DateTime::<Utc>::from))
-        .execute(&self.pool)
-        .await
-        .map_err(|source| postgres_unavailable("apply provider quota access", source))?;
-        Ok(result.rows_affected() == 1)
+        write_quota_access(&self.pool, account_id, expected_revision, state).await
     }
 
     async fn touch_provider_quota_observation(
@@ -596,6 +546,14 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
                 )
                 .await?;
             }
+            if let Some(name) = command.name.as_deref() {
+                update_provider_account_name_in_transaction(
+                    &mut transaction,
+                    &command.account_ids,
+                    name,
+                )
+                .await?;
+            }
             append_admin_audit_event_in_transaction(&mut transaction, command.audit, revision)
                 .await?;
             Ok(revision)
@@ -678,6 +636,20 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
         .await;
         finish_admin_transaction(transaction, result, "provider account admin deletion").await
     }
+}
+
+async fn update_provider_account_name_in_transaction(
+    transaction: &mut Transaction<'_, Postgres>,
+    account_ids: &[String],
+    name: &str,
+) -> StoreResult<()> {
+    sqlx::query("update provider_accounts set name = $2 where id = any($1::text[])")
+        .bind(account_ids)
+        .bind(name.trim())
+        .execute(&mut **transaction)
+        .await
+        .map_err(|source| postgres_unavailable("update provider account name", source))?;
+    Ok(())
 }
 
 async fn update_provider_account_notes_in_transaction(
@@ -861,6 +833,8 @@ pub(crate) async fn rotate_provider_account_in_transaction(
          set name = case when $14 then name else $4 end,
              email = case when $14 then email else $5 end,
              plan_type = case when $14 then plan_type else $6 end,
+             provider_quota_json = case when $14 then provider_quota_json else null end,
+             quota_observed_at = case when $14 then quota_observed_at else null end,
              provider_credentials_json = $7,
              credential_revision = credential_revision + 1,
              has_refresh_token = $8,
@@ -943,6 +917,8 @@ pub(crate) async fn update_provider_accounts_scheduling_in_transaction(
     let updated = sqlx::query_scalar::<_, String>(
         "update provider_accounts
          set enabled = coalesce($2, enabled), concurrency_limit = case when $9 then $3 else concurrency_limit end, weight = coalesce($4, weight), updated_at = greatest(now(), updated_at),
+             provider_quota_json = case when $5 and outbound_proxy_url is distinct from $6 then null else provider_quota_json end,
+             quota_observed_at = case when $5 and outbound_proxy_url is distinct from $6 then null else quota_observed_at end,
              outbound_proxy_url = case when $5 then $6 else outbound_proxy_url end,
              outbound_proxy_id = case when $5 then $7 else outbound_proxy_id end,
              model_access_json = coalesce($8, model_access_json)
@@ -1142,6 +1118,15 @@ pub(super) async fn import_provider_accounts_in_transaction(
         if let Some(notes) = settings.notes.as_deref() {
             update_provider_account_notes_in_transaction(transaction, &unique_ids, notes).await?;
         }
+        if command.accounts.len() == 1
+            && let Some(name) = settings
+                .name
+                .as_deref()
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+        {
+            update_provider_account_name_in_transaction(transaction, &unique_ids, name).await?;
+        }
     }
     append_admin_audit_event_in_transaction(transaction, command.audit, revision).await?;
     Ok(ProviderAccountAdminImport {
@@ -1157,7 +1142,6 @@ pub(super) async fn rotate_provider_account_admin_in_transaction(
 ) -> StoreResult<ProviderAccountAdminRotation> {
     command.scope.validate()?;
     require_nonempty(ENTITY, "account_id", &command.profile.id)?;
-    require_nonempty(ENTITY, "name", &command.profile.name)?;
     if let Some(identity) = &command.replacement_identity {
         require_nonempty(ENTITY, "upstream_user_id", identity.upstream_user_id())?;
         if let Some(account_id) = identity.upstream_account_id() {
@@ -1203,10 +1187,141 @@ pub(super) async fn rotate_provider_account_admin_in_transaction(
         if let Some(notes) = settings.notes.as_deref() {
             update_provider_account_notes_in_transaction(transaction, ids, notes).await?;
         }
+        if let Some(name) = settings.name.as_deref() {
+            update_provider_account_name_in_transaction(transaction, ids, name).await?;
+        }
     }
     append_admin_audit_event_in_transaction(transaction, command.audit, config_revision).await?;
     Ok(ProviderAccountAdminRotation {
         config_revision,
         credential_revision,
     })
+}
+
+impl PgProviderAccountRepository {
+    pub(super) async fn load_account_summaries_in_enabled_groups(
+        &self,
+        account_ids: &[String],
+        group_ids: &[AccountGroupId],
+    ) -> StoreResult<Vec<ProviderAccountSummary>> {
+        if account_ids.is_empty() || group_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let group_ids = group_ids
+            .iter()
+            .map(AccountGroupId::as_str)
+            .collect::<Vec<_>>();
+        let rows = sqlx::query(
+            "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
+                    upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
+                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
+                    credential_observed_at, quota_access_state, quota_evidence,
+                    quota_access_observed_at, quota_reset_at,
+                    quota_observed_at, last_error_reason, last_error_message, created_at, updated_at
+               from provider_accounts
+               left join (select id as location_proxy_id, enabled as proxy_enabled, max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone from outbound_proxies) proxy_location
+                 on outbound_proxy_id = location_proxy_id
+              where id = any($1::text[]) and exists (
+                select 1 from account_group_accounts membership
+                join account_groups account_group on account_group.id = membership.account_group_id
+                where membership.provider_account_id = provider_accounts.id
+                  and account_group.enabled and account_group.id = any($2::text[])
+              ) order by id",
+        )
+        .bind(account_ids)
+        .bind(group_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| postgres_unavailable("load account summaries", source))?;
+        rows.into_iter().map(account_summary_from_row).collect()
+    }
+}
+
+/// 真实请求反馈与互联同步共用额度事实写入，调用方可将其并入已有事务
+pub(super) async fn write_quota_access<'e, E>(
+    executor: E,
+    account_id: &str,
+    expected_revision: Revision,
+    state: QuotaState,
+) -> StoreResult<bool>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    require_nonempty(ENTITY, "account_id", account_id)?;
+    let observed_at = state
+        .observed_at()
+        .map(DateTime::<Utc>::from)
+        .ok_or_else(|| invalid("quota access change requires observed_at"))?;
+    let result = sqlx::query(
+        "update provider_accounts
+             set quota_access_observed_at = $3, quota_access_state = $4,
+                 quota_evidence = $5, quota_reset_at = $6,
+                 updated_at = greatest(now(), updated_at, $3)
+             where id = $1 and credential_revision = $2
+               and (quota_access_observed_at is null or quota_access_observed_at <= $3)",
+    )
+    .bind(account_id)
+    .bind(to_i64(expected_revision.get())?)
+    .bind(observed_at)
+    .bind(state.access().as_str())
+    .bind(state.evidence().map(QuotaEvidence::as_str))
+    .bind(state.reset_at().map(DateTime::<Utc>::from))
+    .execute(executor)
+    .await
+    .map_err(|source| postgres_unavailable("apply provider quota access", source))?;
+    Ok(result.rows_affected() == 1)
+}
+
+pub(super) async fn write_quota<'e, E>(
+    executor: E,
+    account_id: &str,
+    expected_revision: Revision,
+    quota: JsonObject,
+    observed_at: DateTime<Utc>,
+    state: QuotaState,
+    plan_type: Option<&str>,
+) -> StoreResult<bool>
+where
+    E: sqlx::Executor<'e, Database = Postgres>,
+{
+    require_nonempty(ENTITY, "account_id", account_id)?;
+    validate_object_size("provider_quota_json", &quota, QUOTA_MAX_BYTES)?;
+    let access_observed_at = state.observed_at().map(DateTime::<Utc>::from);
+    let result = sqlx::query(
+        "update provider_accounts
+             set provider_quota_json = $3, quota_observed_at = $4,
+                 plan_type = coalesce($9, plan_type),
+                 quota_access_state = case
+                   when $7::timestamptz is not null
+                     and (quota_access_observed_at is null or quota_access_observed_at <= $7)
+                   then $5 else quota_access_state end,
+                 quota_evidence = case
+                   when $7::timestamptz is not null
+                     and (quota_access_observed_at is null or quota_access_observed_at <= $7)
+                   then $6 else quota_evidence end,
+                 quota_access_observed_at = case
+                   when $7::timestamptz is not null
+                     and (quota_access_observed_at is null or quota_access_observed_at <= $7)
+                   then $7 else quota_access_observed_at end,
+                 quota_reset_at = case
+                   when $7::timestamptz is not null
+                     and (quota_access_observed_at is null or quota_access_observed_at <= $7)
+                   then $8 else quota_reset_at end,
+                 updated_at = greatest(now(), updated_at, $4, $7)
+             where id = $1 and credential_revision = $2
+               and (quota_observed_at is null or quota_observed_at <= $4)",
+    )
+    .bind(account_id)
+    .bind(to_i64(expected_revision.get())?)
+    .bind(quota.as_value())
+    .bind(observed_at)
+    .bind(state.access().as_str())
+    .bind(state.evidence().map(QuotaEvidence::as_str))
+    .bind(access_observed_at)
+    .bind(state.reset_at().map(DateTime::<Utc>::from))
+    .bind(plan_type)
+    .execute(executor)
+    .await
+    .map_err(|source| postgres_unavailable("compare and swap provider quota", source))?;
+    Ok(result.rows_affected() == 1)
 }

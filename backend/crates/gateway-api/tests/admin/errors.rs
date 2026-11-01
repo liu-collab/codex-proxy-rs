@@ -172,6 +172,70 @@ async fn malformed_admin_query_should_use_a_safe_bad_request_envelope() {
 }
 
 #[tokio::test]
+async fn client_key_validation_should_identify_the_invalid_field_without_echoing_values() {
+    let fixture = AdminTestFixture::new().await;
+    fixture.auth.insert_session("valid-session");
+    let secret = "private-key-must-not-leak\n";
+    for (field, value, message) in [
+        ("name", json!(" "), "API Key 名称不能为空"),
+        (
+            "customKey",
+            json!(secret),
+            "自定义 API Key 仅支持英文字母、数字和英文符号",
+        ),
+        (
+            "dailyLimitUsd",
+            json!("-1"),
+            "每日美元限额须非负，整数和小数各最多 10 位",
+        ),
+        (
+            "weeklyLimitUsd",
+            json!("0.00000000001"),
+            "每周美元限额须非负，整数和小数各最多 10 位",
+        ),
+        (
+            "maxConcurrency",
+            json!(u64::MAX),
+            "并发请求上限超出支持范围",
+        ),
+    ] {
+        for path in [
+            "/api/admin/client-keys/create",
+            "/api/admin/client-keys/update",
+        ] {
+            if path.ends_with("/update") && field == "customKey" {
+                continue;
+            }
+            let mut payload = json!({
+                "name": "key",
+                "groupIds": [],
+                "maxConcurrency": 0,
+                "requestsPerMinute": 0,
+            });
+            if path.ends_with("/update") {
+                payload["id"] = json!("key_existing");
+            }
+            payload[field] = value.clone();
+            let mut request = request(Method::POST, path, Body::from(payload.to_string()));
+            request
+                .headers_mut()
+                .insert(header::COOKIE, SESSION_COOKIE.parse().unwrap());
+            request
+                .headers_mut()
+                .insert(header::CONTENT_TYPE, "application/json".parse().unwrap());
+            let response = app(fixture.state()).oneshot(request).await.unwrap();
+            let (status, _, body) = response_json(response).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(
+                body,
+                json!({"code": 40001, "message": message, "data": null})
+            );
+            assert!(!body.to_string().contains(secret.trim()));
+        }
+    }
+}
+
+#[tokio::test]
 async fn invalid_time_range_should_use_its_published_business_code() {
     let fixture = AdminTestFixture::new().await;
     fixture.auth.insert_session("valid-session");
@@ -445,8 +509,10 @@ mod provider {
         let fixture = AdminTestFixture::new().await;
         fixture.auth.insert_session("valid-session");
         for (kind, status, code, message) in [
+            (Kind::Invalid, 400, 40001, "服务商请求参数不合法"),
+            (Kind::Unsupported, 400, 40001, "该服务商不支持此操作"),
             (Kind::BadGateway, 502, 50201, "上游服务请求失败"),
-            (Kind::Unavailable, 503, 50301, "Provider 服务暂不可用"),
+            (Kind::Unavailable, 503, 50301, "服务商暂不可用"),
             (
                 Kind::Ambiguous,
                 502,

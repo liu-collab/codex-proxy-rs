@@ -10,10 +10,10 @@ const { t } = useI18n({ useScope: 'global' })
 
 <template>
   <div class="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap">
-    <code class="font-mono text-cp-sm font-emphasis">{{ record.route || '—' }}</code>
+    <code class="font-mono text-z-sm font-emphasis">{{ record.route || '—' }}</code>
     <span
       v-if="record.compact"
-      class="inline-flex shrink-0 text-cp-orange-text"
+      class="inline-flex shrink-0 text-z-orange-text"
       :title="t('usage.route.compressionRequest')"
       :aria-label="t('usage.route.compressionRequest')"
     >

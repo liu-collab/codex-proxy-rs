@@ -884,7 +884,14 @@ pub(super) fn map_client_error(
                     ProviderErrorKind::InvalidRequest,
                     UpstreamSendState::NotSent,
                 )
-                .with_retry_prohibited(),
+                .with_retry_prohibited()
+                .with_client_visible_upstream_error(
+                    ClientVisibleUpstreamError::new(
+                        "A gateway privacy rule could not process this request.",
+                        Some("privacy_policy_rejected".to_owned()),
+                        Some("invalid_request_error".to_owned()),
+                    ),
+                ),
             )
         }
         CodexClientError::ConnectionBudgetExhausted => MappedProviderFailure::plain(
@@ -1061,7 +1068,7 @@ pub(super) fn map_client_error(
 }
 
 /// 在消费 transport 错误前提取可持久化事实，不能使用可能携带 URL/凭据的 Display
-fn client_diagnostic(error: &CodexClientError) -> Option<ProviderDiagnostic> {
+pub(super) fn client_diagnostic(error: &CodexClientError) -> Option<ProviderDiagnostic> {
     let (stage, code, message) = match error {
         CodexClientError::ConnectionBudgetExhausted => (
             "connect",
@@ -1390,9 +1397,13 @@ pub(super) fn websocket_client_visible_error(
         .map_or_else(
             || {
                 if message_too_big {
-                    "upstream websocket message too big".to_owned()
+                    "The upstream WebSocket message is too large.".to_owned()
+                } else if let Some(code) = close.code() {
+                    format!(
+                        "The upstream WebSocket closed before the response completed (code {code})."
+                    )
                 } else {
-                    close.to_string()
+                    "The upstream WebSocket closed before the response completed.".to_owned()
                 }
             },
             str::to_owned,

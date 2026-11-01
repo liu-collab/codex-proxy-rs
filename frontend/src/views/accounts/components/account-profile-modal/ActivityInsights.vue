@@ -77,7 +77,7 @@ function invocationView(invocation: AccountProfileInvocation) {
 <template>
   <section class="grid gap-8 sm:grid-cols-2 sm:gap-12" aria-labelledby="profile-activity-insights-title">
     <div>
-      <h3 id="profile-activity-insights-title" class="m-0 text-cp-lg font-heavy text-cp-text">
+      <h3 id="profile-activity-insights-title" class="m-0 text-z-lg font-heavy text-z-text">
         {{ t('accounts.profile.activity.activityInsights') }}
       </h3>
       <dl class="mt-4 mb-0 grid gap-3.5">
@@ -86,10 +86,10 @@ function invocationView(invocation: AccountProfileInvocation) {
           :key="row.label"
           class="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-4"
         >
-          <dt class="min-w-0 text-cp font-semibold text-cp-text-secondary">
+          <dt class="min-w-0 text-z font-semibold text-z-text-secondary">
             {{ row.label }}
           </dt>
-          <dd class="m-0 font-mono font-heavy tabular-nums text-cp-text">
+          <dd class="m-0 font-mono font-heavy tabular-nums text-z-text">
             {{ row.value }}
           </dd>
         </div>
@@ -97,7 +97,7 @@ function invocationView(invocation: AccountProfileInvocation) {
     </div>
 
     <div>
-      <h3 class="m-0 text-cp-lg font-heavy text-cp-text">
+      <h3 class="m-0 text-z-lg font-heavy text-z-text">
         {{ t('accounts.profile.activity.pluginsAndSkills') }}
       </h3>
       <ol v-if="invocations.length > 0" class="mt-3 mb-0 grid list-none gap-1.5 p-0">
@@ -106,16 +106,16 @@ function invocationView(invocation: AccountProfileInvocation) {
           :key="invocation.key"
           class="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2.5 py-1.5"
         >
-          <span class="grid size-6 place-items-center rounded-cp bg-cp-fill-quaternary text-cp-text-secondary">
+          <span class="grid size-6 place-items-center rounded-z bg-z-fill-quaternary text-z-text-secondary">
             <Package class="size-3.5" :stroke-width="2" />
           </span>
-          <span class="truncate text-cp font-bold text-cp-text">{{ invocation.name }}</span>
-          <span class="font-mono text-cp-sm font-semibold tabular-nums text-cp-text-secondary">
+          <span class="truncate text-z font-bold text-z-text">{{ invocation.name }}</span>
+          <span class="font-mono text-z-sm font-semibold tabular-nums text-z-text-secondary">
             {{ t('accounts.profile.activity.runs', { count: formatInteger(invocation.count) }) }}
           </span>
         </li>
       </ol>
-      <p v-else class="mt-4 mb-0 text-cp-sm font-semibold text-cp-text-quaternary">
+      <p v-else class="mt-4 mb-0 text-z-sm font-semibold text-z-text-quaternary">
         {{ t('accounts.profile.activity.noToolCalls') }}
       </p>
     </div>

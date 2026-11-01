@@ -32,5 +32,5 @@ const fullNames = computed(() =>
       :title="group.name"
     />
   </div>
-  <span v-else class="text-xs text-cp-text-quaternary">—</span>
+  <span v-else class="text-xs text-z-text-quaternary">—</span>
 </template>

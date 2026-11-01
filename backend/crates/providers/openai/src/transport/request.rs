@@ -13,7 +13,7 @@ use serde::Serialize as _;
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::transport::downstream::{is_non_codex_request_header, normalize_codex_request_body};
+use crate::compat::{is_non_codex_request_header, normalize_codex_request_body};
 use crate::transport::headers::is_managed_identity_header;
 use crate::transport::profile::CodexRequestLocation;
 use crate::transport::profile::identity::ClientEnvironment;
@@ -68,17 +68,6 @@ const ACCOUNT_BOUND_STATE_KEYS: &[&str] = &[
 ];
 
 const TURN_METADATA_KEYS: &[&str] = &["turnMetadata", "turn_metadata", "x-codex-turn-metadata"];
-
-/// 出站只输出网关重建的会话身份头；下游原值不再作为业务头透传。
-///
-/// API 层的 `passthrough_header_name` 与这里的 Provider 侧名单必须一致：只在一处拦截
-/// 会让真名从另一条路径漏出去。
-pub(crate) const SESSION_IDENTITY_HEADER_NAMES: &[&str] = &[
-    "session-id",
-    "thread-id",
-    "x-client-request-id",
-    "x-codex-window-id",
-];
 
 const INSTALLATION_ID_KEYS: &[&str] = &[
     "installation_id",
@@ -498,10 +487,8 @@ pub(crate) fn scope_request_to_account(
         .turn_metadata
         .as_deref()
         .and_then(|metadata| scope_turn_metadata(metadata, installation_id, reset_account_state));
-    let client_metadata_turn_metadata =
-        metadata_string(request, "x-codex-turn-metadata").and_then(|metadata| {
-            scope_turn_metadata(&metadata, installation_id, reset_account_state)
-        });
+    let client_metadata_turn_metadata = metadata_string(request, "x-codex-turn-metadata")
+        .and_then(|metadata| scope_turn_metadata(&metadata, installation_id, reset_account_state));
 
     if reset_account_state {
         request.passthrough_headers.remove("x-codex-turn-state");
@@ -538,11 +525,9 @@ pub(crate) fn scope_request_to_account(
         replace_existing_body_string(request, key, scoped.as_deref());
     }
 
-    // 原始会话头不再作为业务头透传：出站值只由 correlation 的账号内映射生成，
-    // 否则真名与映射值同时出站等于没脱敏。名单与 API 层的 `passthrough_header_name` 保持一致。
-    for name in SESSION_IDENTITY_HEADER_NAMES {
-        request.passthrough_headers.remove(*name);
-    }
+    // 原始会话头随透传保留，由 correlation 在出站前按账号身份映射为 scoped id：
+    // 只保留映射后的值，下游原值不会直接出站。名单与 API 层的
+    // `passthrough_header_name` 保持一致。
 
     let client_metadata = request
         .client_metadata()

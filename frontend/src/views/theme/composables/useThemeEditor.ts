@@ -4,20 +4,21 @@ import type {
   ThemeComponentOverrides,
   ThemeCustomization,
   ThemeMode,
-  ThemeName,
+  ThemeScheme,
   ThemeSeedOverrides,
   ThemeTokenName,
 } from '@codex-proxy/ui/theme'
 
 import { normalizeHexColor } from '@codex-proxy/ui'
 import {
-  DEFAULT_CUSTOM_THEME_COLOR,
-  DEFAULT_THEME_COLOR,
-  DEFAULT_THEME_MODE,
+  createTheme,
+  createThemeVars,
+  defaultThemeColorId,
+  defaultThemeMode,
+  defaultThemePrimaryColor,
   isThemeColorId,
   isThemeMode,
   normalizeThemeCustomization,
-  resolveTheme,
 } from '@codex-proxy/ui/theme'
 
 import { storeToRefs } from 'pinia'
@@ -61,18 +62,18 @@ export function useThemeEditor() {
   const scope = shallowRef<ThemeEditorScope>('global')
   const globalCategory = shallowRef<ThemeEditorGlobalCategory>('color')
   const preview = shallowRef<ThemeEditorPreview>('page')
-  const previewTheme = shallowRef<ThemeName>(effectiveTheme.value)
+  const previewTheme = shallowRef<ThemeScheme>(effectiveTheme.value)
   const component = shallowRef<ThemeEditorComponent>('action')
   const query = shallowRef('')
 
-  const resolvedPreview = computed(() => resolveTheme(
-    previewTheme.value,
-    draft.value.color,
-    draft.value.customColor,
-    draft.value.customization,
-  ))
+  const resolvedPreview = computed(() => createTheme({
+    scheme: previewTheme.value,
+    colorId: draft.value.color,
+    primaryColor: draft.value.customColor,
+    customization: draft.value.customization,
+  }))
   const previewStyle = computed<Record<string, string>>(() => ({
-    ...resolvedPreview.value.tokens,
+    ...createThemeVars(resolvedPreview.value.tokens),
     colorScheme: previewTheme.value,
   }))
   const modificationCount = computed(() => countDraftChanges(saved.value, draft.value))
@@ -216,9 +217,9 @@ export function useThemeEditor() {
 
   function restoreDefaults() {
     draft.value = {
-      mode: DEFAULT_THEME_MODE,
-      color: DEFAULT_THEME_COLOR,
-      customColor: DEFAULT_CUSTOM_THEME_COLOR,
+      mode: defaultThemeMode,
+      color: defaultThemeColorId,
+      customColor: defaultThemePrimaryColor,
       customization: {},
     }
     previewTheme.value = effectiveTheme.value
@@ -253,7 +254,7 @@ export function useThemeEditor() {
     }
   }
 
-  function resolvedDraftTheme(value: ThemeEditorDraft): ThemeName {
+  function resolvedDraftTheme(value: ThemeEditorDraft): ThemeScheme {
     return value.mode === 'system'
       ? effectiveTheme.value
       : value.mode

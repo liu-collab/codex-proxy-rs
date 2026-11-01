@@ -16,13 +16,14 @@ export default function installPluginBridge(initial: PluginBridgeInitial) {
   let previousHeight = 0
   let disposed = false
   let currentTheme = initial.theme.name
+  const themePrefix = document.querySelector<HTMLMetaElement>('meta[name="codex-proxy-ui-theme-prefix"]')?.content ?? 'z'
   const maximumBodyBytes = MAXIMUM_MANAGEMENT_BODY_BYTES
   const maximumQueryBytes = MAXIMUM_MANAGEMENT_QUERY_BYTES
   const maximumInFlight = MAXIMUM_MANAGEMENT_IN_FLIGHT
 
   function applyLayout(height: unknown) {
     if (typeof height === 'number' && Number.isSafeInteger(height) && height >= 0) {
-      document.documentElement.style.setProperty('--cp-plugin-viewport-height', `${height}px`)
+      document.documentElement.style.setProperty('--plugin-viewport-height', `${height}px`)
     }
   }
 
@@ -33,8 +34,8 @@ export default function installPluginBridge(initial: PluginBridgeInitial) {
     root.dataset.theme = theme.name
     root.style.colorScheme = theme.name
     for (const [name, value] of Object.entries(theme.tokens)) {
-      if (typeof name === 'string' && name.startsWith('--cp-') && typeof value === 'string')
-        root.style.setProperty(name, value)
+      if (/^[a-z][a-z0-9-]*$/.test(name) && typeof value === 'string')
+        root.style.setProperty(`--${themePrefix}-${name}`, value)
     }
     currentTheme = theme.name
     window.dispatchEvent(new CustomEvent('codex-proxy-themechange', {

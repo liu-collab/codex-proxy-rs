@@ -326,17 +326,15 @@ impl DefaultBackupService {
 /// 校验存储配置；空串视为非法，Secret 缺省表示保留旧值
 fn validate_storage(command: &UpdateBackupStorageCommand) -> Result<(), AdminError> {
     validate_endpoint(&command.endpoint)?;
-    validate_nonempty("region", &command.region)?;
-    validate_nonempty("bucket", &command.bucket)?;
-    validate_nonempty("accessKeyId", &command.access_key_id)?;
+    validate_nonempty("存储区域", &command.region)?;
+    validate_nonempty("存储桶名称", &command.bucket)?;
+    validate_nonempty("访问密钥 ID", &command.access_key_id)?;
     if let Some(secret) = command.secret_access_key.as_ref() {
         let value = secret.expose_secret();
         if value.is_empty() {
-            return Err(AdminError::bad_request(
-                "secretAccessKey 不能为空字符串；缺省表示保留旧值",
-            ));
+            return Err(AdminError::bad_request("访问密钥不能为空"));
         }
-        validate_length("secretAccessKey", value, 512)?;
+        validate_length("访问密钥", value, 512)?;
     }
     crate::model::backup::normalize_prefix(&command.prefix).map_err(map_backup_error)?;
     Ok(())
@@ -344,17 +342,15 @@ fn validate_storage(command: &UpdateBackupStorageCommand) -> Result<(), AdminErr
 
 fn validate_endpoint(value: &str) -> Result<(), AdminError> {
     if value.is_empty() {
-        return Err(AdminError::bad_request("endpoint 不能为空"));
+        return Err(AdminError::bad_request("备份存储地址不能为空"));
     }
     if !value.starts_with("https://") {
-        return Err(AdminError::bad_request(
-            "endpoint 必须使用 HTTPS；仅测试或显式开发配置允许 HTTP",
-        ));
+        return Err(AdminError::bad_request("备份存储地址必须使用 HTTPS"));
     }
     if value.contains('@') || value.bytes().any(|byte| byte.is_ascii_control()) {
-        return Err(AdminError::bad_request("endpoint 格式非法"));
+        return Err(AdminError::bad_request("备份存储地址格式不合法"));
     }
-    validate_length("endpoint", value, 2048)
+    validate_length("备份存储地址", value, 2048)
 }
 
 fn validate_nonempty(field: &str, value: &str) -> Result<(), AdminError> {

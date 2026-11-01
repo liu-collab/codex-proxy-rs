@@ -148,9 +148,9 @@ function clearSecrets() {
 <template>
   <ZDialog v-model="open" :title="versionChanged ? t('plugins.configuration.switchTo', { version: artifact?.metadata.version }) : t('plugins.configuration.pluginSettings')" :description="artifact ? `${artifact.metadata.displayName} · ${artifact.metadata.version}` : undefined" width="48rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving" @closed="clearSecrets">
     <div v-if="artifact && instance" class="grid gap-5">
-      <div v-if="error" role="alert" class="grid gap-1 text-cp-sm text-cp-warning-text">
+      <div v-if="error" role="alert" class="grid gap-1 text-z-sm text-z-warning-text">
         <span>{{ error }}</span>
-        <span class="text-cp-xs text-cp-text-secondary">{{ t('plugins.configuration.unchangedVersion') }}</span>
+        <span class="text-z-xs text-z-text-secondary">{{ t('plugins.configuration.unchangedVersion') }}</span>
       </div>
       <ZSegmented v-if="sections.length > 1" v-model="section" :options="sections" :aria-label="t('plugins.configuration.pluginSettingsPartition')" :disabled="saving" class="w-fit max-w-full" />
       <div v-show="section === 'general'" class="grid gap-5">

@@ -3,7 +3,7 @@
 use gateway_core::operation::{GenerateRequest, ProtocolPayload};
 use provider_openai::encode_generate_request;
 
-use super::super::*;
+use super::*;
 
 #[test]
 fn encoder_should_preserve_lite_input_without_top_level_instructions_or_tools() {

@@ -87,13 +87,13 @@ function formatDuration(value: number | null | undefined) {
   <section class="@container min-w-0 py-1" :aria-label="t('accounts.profile.metrics.cumulativeActivitySummary')" :aria-busy="loading">
     <dl class="grid grid-cols-2 gap-y-4 @[24rem]:grid-cols-3 @[34rem]:grid-cols-5">
       <div v-for="metric in metrics" :key="metric.label" class="min-w-0 px-2 text-center sm:px-3">
-        <dd class="m-0 font-mono text-cp-lg leading-tight font-heavy whitespace-nowrap tabular-nums text-cp-text" :title="metric.title">
+        <dd class="m-0 font-mono text-z-lg leading-tight font-heavy whitespace-nowrap tabular-nums text-z-text" :title="metric.title">
           <ZSkeleton v-if="loading && !profile" shape="text" class="mx-auto h-4 w-14" />
           <template v-else>
             {{ metric.value }}
           </template>
         </dd>
-        <dt class="mt-1.5 text-cp-xs font-semibold text-cp-text-secondary">
+        <dt class="mt-1.5 text-z-xs font-semibold text-z-text-secondary">
           {{ metric.label }}
         </dt>
       </div>

@@ -68,7 +68,7 @@ const groupOptions = computed(() => [
         class="col-span-2 min-w-0 sm:col-span-3 xl:w-80 xl:flex-none"
       >
         <template #prefix>
-          <Search class="size-4.5 text-cp-text-tertiary" />
+          <Search class="size-4.5 text-z-text-tertiary" />
         </template>
       </ZInput>
 
@@ -112,7 +112,7 @@ const groupOptions = computed(() => [
           <div class="w-32 p-1.5">
             <ZMenuItem @click="(close(), emit('editSelected'))">
               <template #icon>
-                <Pencil class="size-3.5 text-cp-text-quaternary" />
+                <Pencil class="size-3.5 text-z-text-quaternary" />
               </template>
               {{ t('accounts.filters.editSelected', { count: selectedCount }) }}
             </ZMenuItem>
@@ -124,7 +124,7 @@ const groupOptions = computed(() => [
               @click="(close(), emit('exportSelected'))"
             >
               <template #icon>
-                <Download class="size-3.5 text-cp-text-quaternary" />
+                <Download class="size-3.5 text-z-text-quaternary" />
               </template>
               {{ t('accounts.filters.exportSelected', { count: selectedCount }) }}
             </ZMenuItem>
@@ -143,7 +143,7 @@ const groupOptions = computed(() => [
       </ZPopover>
       <ZButton v-if="hasImportTasks" class="whitespace-nowrap" @click="emit('importTasks')">
         <ListTodo class="size-4" />
-        {{ t('accounts.filters.importTasks') }} <span v-if="activeImportCount" class="font-mono text-cp-link">{{ activeImportCount }}</span>
+        {{ t('accounts.filters.importTasks') }} <span v-if="activeImportCount" class="font-mono text-z-link">{{ activeImportCount }}</span>
       </ZButton>
       <slot name="actions" />
       <ZButton type="primary" class="whitespace-nowrap" @click="emit('create')">

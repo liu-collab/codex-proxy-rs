@@ -19,6 +19,18 @@ fn repository_rejects_identity_that_cannot_be_sent_as_official_header() {
 }
 
 #[tokio::test]
+async fn create_should_allow_an_empty_local_name() {
+    let store = MemoryProviderAccountStore::shared();
+    let mut input = create_input("unnamed", "subject-unnamed");
+    input.name.clear();
+    seed_input(&store, &input)
+        .await
+        .expect("seed unnamed account");
+    let account = store.get_account(&input.account_id).await.unwrap().unwrap();
+    assert_eq!(account.name(), "");
+}
+
+#[tokio::test]
 async fn lifecycle_projection_should_return_expiry_without_oauth_secrets() {
     let store = MemoryProviderAccountStore::shared();
     let account_store: Arc<dyn ProviderAccountStore> = store.clone();

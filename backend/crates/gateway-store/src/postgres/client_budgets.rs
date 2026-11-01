@@ -170,11 +170,11 @@ impl PgClientBudgetStore {
         )
         .bind(key_id.as_str()).bind(ids).fetch_optional(&self.pool).await
         .map_err(|source| unavailable().with_source(source))?
-        .ok_or_else(|| GatewayError::new(GatewayErrorKind::Unauthorized, "client API key no longer exists"))?;
+        .ok_or_else(|| GatewayError::new(GatewayErrorKind::Unauthorized, "Client API key no longer exists."))?;
         if !row.get::<bool, _>("enabled") {
             return Err(GatewayError::new(
                 GatewayErrorKind::PolicyDenied,
-                "client API key is disabled",
+                "Client API key is disabled.",
             ));
         }
         let parse = |field: &str| -> Result<Decimal, GatewayError> {
@@ -235,24 +235,26 @@ impl PgClientBudgetStore {
                         .ok_or_else(unavailable)?;
                 }
             }
-            let daily_exceeded = limits.daily_usd != Decimal::ZERO && daily >= limits.daily_usd;
-            let weekly_exceeded = limits.weekly_usd != Decimal::ZERO && weekly >= limits.weekly_usd;
-            if daily_exceeded || weekly_exceeded {
-                let reset = if weekly_exceeded {
-                    weekly_end
+            let access = limits.access(daily, weekly);
+            if !access.allowed() {
+                let (reset, code, message) = if access.weekly_limit_reached {
+                    (
+                        weekly_end,
+                        "key_weekly_budget_exceeded",
+                        "Weekly spending limit reached.",
+                    )
                 } else {
-                    daily_end
+                    (
+                        daily_end,
+                        "key_daily_budget_exceeded",
+                        "Daily spending limit reached.",
+                    )
                 };
-                return Err(GatewayError::new(
-                    GatewayErrorKind::RateLimited,
-                    "client API key budget is exhausted",
-                )
-                .with_client_code(if weekly_exceeded {
-                    "key_weekly_budget_exceeded"
-                } else {
-                    "key_daily_budget_exceeded"
-                })
-                .with_retry_after((reset - now).to_std().unwrap_or(Duration::from_secs(1))));
+                return Err(
+                    GatewayError::new(GatewayErrorKind::BudgetExhausted, message)
+                        .with_client_code(code)
+                        .with_retry_after((reset - now).to_std().unwrap_or(Duration::from_secs(1))),
+                );
             }
         }
         // 首次使用或窗口到期才写入；与重置、结算保持相同锁序
@@ -270,7 +272,7 @@ impl PgClientBudgetStore {
                 .ok_or_else(|| {
                     GatewayError::new(
                         GatewayErrorKind::Unauthorized,
-                        "client API key no longer exists",
+                        "Client API key no longer exists.",
                     )
                 })?;
             advance_windows(&mut tx, key_id.as_str(), now, now, self.timezone)
@@ -478,7 +480,7 @@ pub(super) async fn load_client_key_budgets(
 pub(super) fn unavailable() -> GatewayError {
     GatewayError::new(
         GatewayErrorKind::ProviderInfrastructureUnavailable,
-        "client budget service is temporarily unavailable",
+        "Client budget service is temporarily unavailable.",
     )
     .with_client_code("key_budget_unavailable")
 }

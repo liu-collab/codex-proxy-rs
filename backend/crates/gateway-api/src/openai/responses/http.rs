@@ -984,7 +984,7 @@ impl MiddlewareBody for StreamingExecutionBody {
                     MiddlewareError::Engine(error) => gateway_error_from_engine(&error),
                     _ => GatewayError::new(
                         GatewayErrorKind::Internal,
-                        "gateway response stream could not be delivered",
+                        "Gateway response stream could not be delivered.",
                     ),
                 };
                 self.push_stream_error(error);
@@ -1068,6 +1068,6 @@ fn done_frame() -> MiddlewareFrame {
 fn invalid_execution_stream() -> MiddlewareError {
     MiddlewareError::Gateway(GatewayError::new(
         GatewayErrorKind::Internal,
-        "gateway response stream violated its execution lifecycle",
+        "Gateway response stream violated its execution lifecycle.",
     ))
 }

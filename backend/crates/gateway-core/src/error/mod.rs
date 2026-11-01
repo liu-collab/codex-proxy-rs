@@ -1094,6 +1094,8 @@ pub enum GatewayErrorKind {
     ProviderInfrastructureUnavailable,
     /// 上游限流
     RateLimited,
+    /// 当前客户端 Key 的费用预算耗尽
+    BudgetExhausted,
     /// 上游暂不可用
     UpstreamUnavailable,
     /// 上游拒收当前请求：消息过大（如 WebSocket close 1009）
@@ -1124,6 +1126,7 @@ impl GatewayErrorKind {
             Self::ConcurrencyQueueTimeout => "concurrency_queue_timeout",
             Self::ProviderInfrastructureUnavailable => "provider_infrastructure_unavailable",
             Self::RateLimited => "rate_limited",
+            Self::BudgetExhausted => "budget_exhausted",
             Self::UpstreamUnavailable => "upstream_unavailable",
             Self::MessageTooBig => "message_too_big",
             Self::Timeout => "timeout",
@@ -1203,62 +1206,63 @@ impl GatewayError {
     #[must_use]
     pub fn from_provider(error: &ProviderError) -> Self {
         let gateway = match error.kind() {
-            ProviderErrorKind::InvalidRequest => {
-                Self::new(GatewayErrorKind::InvalidRequest, "invalid upstream request")
-            }
+            ProviderErrorKind::InvalidRequest => Self::new(
+                GatewayErrorKind::InvalidRequest,
+                "Invalid upstream request.",
+            ),
             ProviderErrorKind::SessionPolicyRestricted => Self::new(
                 GatewayErrorKind::InvalidRequest,
-                "session policy excludes all eligible accounts",
+                "No accounts are available under this conversation's restrictions.",
             ),
             ProviderErrorKind::ContinuationRecoveryRequired => Self::new(
                 GatewayErrorKind::InvalidRequest,
-                "conversation continuation must be rebuilt",
+                "Previous response unavailable. Resend the full conversation history.",
             ),
             ProviderErrorKind::Unsupported => Self::new(
                 GatewayErrorKind::Unsupported,
-                "requested capability is unsupported",
+                "Requested capability is unsupported.",
             ),
             ProviderErrorKind::Unauthorized | ProviderErrorKind::PermissionDenied => Self::new(
                 GatewayErrorKind::UpstreamUnavailable,
-                "upstream authentication resource is unavailable",
+                "The upstream account cannot access the service.",
             ),
             ProviderErrorKind::RequestPolicyDenied => Self::new(
                 GatewayErrorKind::PolicyDenied,
-                "request policy rejected the request",
+                "Request policy rejected the request.",
             ),
             ProviderErrorKind::RateLimited | ProviderErrorKind::QuotaExhausted => Self::new(
                 GatewayErrorKind::RateLimited,
-                "upstream capacity is temporarily unavailable",
+                "Upstream capacity is temporarily unavailable.",
             ),
             ProviderErrorKind::ConcurrencyQueueFull => Self::new(
                 GatewayErrorKind::ConcurrencyQueueFull,
-                "concurrency wait queue is full",
+                "Request queue is full.",
             ),
             ProviderErrorKind::ConcurrencyQueueTimeout => Self::new(
                 GatewayErrorKind::ConcurrencyQueueTimeout,
-                "concurrency wait deadline elapsed",
+                "Request queue wait timed out.",
             ),
             ProviderErrorKind::AccountCapacityUnavailable => Self::new(
                 GatewayErrorKind::AccountCapacityUnavailable,
-                "all eligible upstream accounts are temporarily busy",
+                "All eligible upstream accounts are temporarily busy.",
             ),
             ProviderErrorKind::NoEligibleAccount => Self::new(
                 GatewayErrorKind::NoAvailableProvider,
-                "no upstream provider is currently available for this request",
+                "No upstream provider is currently available for this request.",
             ),
             ProviderErrorKind::ProviderInfrastructureUnavailable => Self::new(
                 GatewayErrorKind::ProviderInfrastructureUnavailable,
-                "provider account infrastructure is temporarily unavailable",
+                "Upstream accounts are temporarily inaccessible.",
             ),
             ProviderErrorKind::Timeout => {
-                Self::new(GatewayErrorKind::Timeout, "upstream request timed out")
+                Self::new(GatewayErrorKind::Timeout, "Upstream request timed out.")
             }
             ProviderErrorKind::MessageTooBig => Self::new(
                 GatewayErrorKind::MessageTooBig,
-                "upstream rejected the request because the message is too large",
+                "Request too large. Reduce the input size.",
             ),
             ProviderErrorKind::Cancelled => {
-                Self::new(GatewayErrorKind::Cancelled, "request was cancelled")
+                Self::new(GatewayErrorKind::Cancelled, "Request was cancelled.")
             }
             ProviderErrorKind::Transport
             | ProviderErrorKind::Protocol
@@ -1266,7 +1270,7 @@ impl GatewayError {
             | ProviderErrorKind::UpstreamCapacityUnavailable
             | ProviderErrorKind::ProcessTerminated => Self::new(
                 GatewayErrorKind::UpstreamUnavailable,
-                "upstream service is unavailable",
+                "Upstream service is unavailable.",
             ),
         };
         let gateway = match error.diagnostic() {

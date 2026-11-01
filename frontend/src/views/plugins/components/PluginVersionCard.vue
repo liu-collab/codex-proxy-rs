@@ -32,9 +32,9 @@ const detailsId = useId()
 </script>
 
 <template>
-  <article class="min-w-0 rounded-cp bg-cp-fill-alter" :class="isCurrent ? 'grid min-h-36 content-between gap-3 p-4' : 'flex flex-wrap items-center gap-2 px-3 py-2 sm:gap-3'">
+  <article class="min-w-0 rounded-z bg-z-fill-alter" :class="isCurrent ? 'grid min-h-36 content-between gap-3 p-4' : 'flex flex-wrap items-center gap-2 px-3 py-2 sm:gap-3'">
     <div v-if="isCurrent && current" class="flex flex-wrap items-center gap-2">
-      <strong class="min-w-0 flex-1 wrap-break-word text-cp-sm">{{ t('plugins.catalog.currentVersion') }}</strong>
+      <strong class="min-w-0 flex-1 wrap-break-word text-z-sm">{{ t('plugins.catalog.currentVersion') }}</strong>
       <ZTag>{{ artifact.metadata.version }}</ZTag>
       <PluginStatusNotice :instance="current" />
       <ZTag v-if="!['failed', 'incompatible'].includes(configurationStatus(current))" :type="pluginStatusType(configurationStatus(current))">
@@ -43,14 +43,14 @@ const detailsId = useId()
     </div>
     <div class="flex min-w-0 items-center justify-between gap-3" :class="isCurrent ? 'flex-wrap py-1' : 'flex-1'">
       <div class="grid min-w-0 gap-1 sm:flex sm:flex-wrap sm:items-center sm:gap-x-3">
-        <strong v-if="!isCurrent" class="truncate text-cp-sm">{{ artifact.metadata.version }}</strong>
-        <span class="text-cp-xs text-cp-text-secondary">{{ sourceLabel(artifact.source) }}</span>
-        <span class="truncate font-mono text-cp-xs text-cp-text-quaternary">{{ shortDigest(artifact.metadata.sha256) }}</span>
+        <strong v-if="!isCurrent" class="truncate text-z-sm">{{ artifact.metadata.version }}</strong>
+        <span class="text-z-xs text-z-text-secondary">{{ sourceLabel(artifact.source) }}</span>
+        <span class="truncate font-mono text-z-xs text-z-text-quaternary">{{ shortDigest(artifact.metadata.sha256) }}</span>
       </div>
       <button
         v-if="isCurrent"
         type="button"
-        class="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-cp border-0 bg-transparent p-0 text-cp-xs text-cp-primary-text outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline"
+        class="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-z border-0 bg-transparent p-0 text-z-xs text-z-primary-text outline-none focus-visible:ring-2 focus-visible:ring-z-control-outline"
         :aria-expanded="detailsOpen"
         :aria-controls="detailsId"
         @click="detailsOpen = !detailsOpen"
@@ -65,9 +65,9 @@ const detailsId = useId()
     <ZTag v-else-if="!isCurrent && uses.length" size="small">
       {{ t('plugins.historicalConfiguration') }}
     </ZTag>
-    <dl v-show="detailsOpen" :id="detailsId" class="m-0 grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 text-cp-xs text-cp-text-secondary sm:grid-cols-2" :class="!isCurrent ? 'order-last w-full pt-2' : undefined">
+    <dl v-show="detailsOpen" :id="detailsId" class="m-0 grid min-w-0 grid-cols-1 gap-x-8 gap-y-4 text-z-xs text-z-text-secondary sm:grid-cols-2" :class="!isCurrent ? 'order-last w-full pt-2' : undefined">
       <div class="grid min-w-0 content-start gap-1">
-        <dt class="text-cp-sm font-emphasis text-cp-text">
+        <dt class="text-z-sm font-emphasis text-z-text">
           {{ sourceLabel(artifact.source) }}
         </dt>
         <dd class="m-0 break-all leading-relaxed">
@@ -75,7 +75,7 @@ const detailsId = useId()
         </dd>
       </div>
       <div v-if="uses.length" class="grid min-w-0 content-start gap-1">
-        <dt class="text-cp-sm font-emphasis text-cp-text">
+        <dt class="text-z-sm font-emphasis text-z-text">
           {{ t('plugins.referenceConfiguration') }}
         </dt>
         <dd class="m-0 wrap-anywhere leading-relaxed">
@@ -83,7 +83,7 @@ const detailsId = useId()
         </dd>
       </div>
       <div class="grid min-w-0 content-start gap-1 sm:col-span-2">
-        <dt class="text-cp-sm font-emphasis text-cp-text">
+        <dt class="text-z-sm font-emphasis text-z-text">
           SHA-256
         </dt>
         <dd class="m-0 break-all font-mono leading-relaxed">
@@ -102,7 +102,7 @@ const detailsId = useId()
         <Play class="size-4" />
       </ZIconButton>
       <ZIconButton v-if="artifact.acceptedAt" :aria-label="t('plugins.deleteVersion', { version: artifact.metadata.version })" size="small" variant="solid" class="group" :disabled="busy || uses.length > 0 || artifact.source.kind === 'builtin'" @click="$emit('deleteVersion', artifact)">
-        <Trash2 class="size-4 text-cp-error-text group-disabled:text-cp-text-disabled" />
+        <Trash2 class="size-4 text-z-error-text group-disabled:text-z-text-disabled" />
       </ZIconButton>
     </div>
   </article>

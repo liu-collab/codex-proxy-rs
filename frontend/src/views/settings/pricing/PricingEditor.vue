@@ -122,7 +122,7 @@ function submit() {
 <template>
   <ZDialog v-model="open" :title="row ? t('settings.pricing.editModelPricing') : t('settings.pricing.addModelPricing')" width="42rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving">
     <template #description>
-      <span class="inline-flex items-center gap-2 align-middle text-cp-sm font-normal">
+      <span class="inline-flex items-center gap-2 align-middle text-z-sm font-normal">
         <ProviderIconGroup :provider="provider" size="sm" />
         <span>{{ t('settings.pricing.unitLabel') }}</span>
       </span>
@@ -145,8 +145,8 @@ function submit() {
           <ZSelect :model-value="selectedBand" :options="bandOptions" :aria-label="t('settings.pricing.priceRange')" class="min-w-0 flex-1 sm:max-w-56" :disabled="saving" @update:model-value="selectedBand = $event as PriceBand" />
           <ZSegmented v-model="priceMode" :aria-label="t('settings.pricing.unitPriceSource')" :options="sourceOptions" :disabled="saving" />
         </div>
-        <PricingRateFields v-if="current || base" class="rounded-cp-lg bg-cp-fill-quaternary p-4" :base="base" :custom="current" :multiplier-bps="bps" :disabled="saving" @change="updatePrice" />
-        <div v-else class="grid justify-items-center gap-3 py-6 text-cp-sm text-cp-text-tertiary">
+        <PricingRateFields v-if="current || base" class="rounded-z-lg bg-z-fill-quaternary p-4" :base="base" :custom="current" :multiplier-bps="bps" :disabled="saving" @change="updatePrice" />
+        <div v-else class="grid justify-items-center gap-3 py-6 text-z-sm text-z-text-tertiary">
           <p class="m-0">
             {{ t('settings.pricing.tier.sourceUnavailable') }}
           </p>
@@ -155,21 +155,21 @@ function submit() {
           </ZButton>
         </div>
       </section>
-      <p v-if="validation" role="alert" class="m-0 rounded-cp bg-cp-error-container p-3 text-cp-sm text-cp-error-on-container">
+      <p v-if="validation" role="alert" class="m-0 rounded-z bg-z-error-container p-3 text-z-sm text-z-error-on-container">
         {{ validation }}
       </p>
     </div>
     <template #footer>
       <ZPopover v-model="helpOpen" class="mr-auto self-center" placement="top-start" trigger="hover-click">
         <template #reference>
-          <ZButton variant="text" :aria-expanded="helpOpen" :aria-controls="helpOpen ? helpId : undefined">
+          <ZButton variant="link" :aria-expanded="helpOpen" :aria-controls="helpOpen ? helpId : undefined">
             <template #icon>
               <Info class="size-3.5" aria-hidden="true" />
             </template>
             {{ t('settings.pricing.pricingInstructions') }}
           </ZButton>
         </template>
-        <div :id="helpId" class="grid w-72 gap-2 p-3 text-cp-xs leading-relaxed text-cp-text-secondary">
+        <div :id="helpId" class="grid w-72 gap-2 p-3 text-z-xs leading-relaxed text-z-text-secondary">
           <p class="m-0">
             {{ t('settings.pricing.modelIdUsesNameActuallySentTo') }}
           </p>

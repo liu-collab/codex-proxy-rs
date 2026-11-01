@@ -7,7 +7,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useIdSet } from '@/composables/useIdSet'
 import { usePagedQuery } from '@/composables/usePagedQuery'
 import { t } from '@/i18n'
-import { normalizeRequestLocation, requestLocationError } from '@/utils/location'
+import { normalizeRequestLocation } from '@/utils/location'
 import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage } from '@/utils/operation'
 import { proxyResultData } from '../utils/batch'
@@ -150,12 +150,6 @@ export function useProxies() {
       await checkProxy(editing.value)
       return
     }
-    if (!proxyUrl) {
-      ZNotification.warning({
-        message: t('proxies.actions.fillInProxyConnectionAddress'),
-      })
-      return
-    }
     await formTestAction.run(async () => {
       // 新地址只做探测，保存前不修改代理及关联账号的连接配置。
       const result = await probeProxy({ proxyUrl, proxyProtocol: form.proxyProtocol, detectLocation: false })
@@ -175,12 +169,6 @@ export function useProxies() {
     if (saving.value || testingForm.value)
       return
     const proxyUrl = form.proxyUrl.trim()
-    if (!proxyUrl && !editing.value) {
-      ZNotification.warning({
-        message: t('proxies.actions.fillInProxyConnectionAddress'),
-      })
-      return
-    }
     detectingLocation.value = true
     try {
       await formTestAction.run(async () => {
@@ -235,29 +223,10 @@ export function useProxies() {
       return
     const name = form.name.trim()
     const proxyUrl = form.proxyUrl.trim()
-    if (!name || (!editing.value && !proxyUrl)) {
-      ZNotification.warning({
-        message: t('proxies.actions.fieldsRequired'),
-      })
-      return
-    }
     const maxWebsocketConnections = Number(form.maxWebsocketConnections)
-    if (!Number.isInteger(maxWebsocketConnections) || maxWebsocketConnections < 0 || maxWebsocketConnections > 4294967295) {
-      ZNotification.warning({
-        message: t('proxies.actions.invalidConnectionLimit'),
-      })
-      return
-    }
     const location = form.customLocation
       ? normalizeRequestLocation(form.location)
       : null
-    const locationError = location
-      ? requestLocationError(location)
-      : ''
-    if (locationError) {
-      ZNotification.warning({ message: locationError })
-      return
-    }
     await saveAction.run(async () => {
       // 关闭自定义位置即跟随出口 IP（保存时解析一次）；开启时以手填位置为准。
       const autoLocation = !form.customLocation

@@ -27,17 +27,17 @@ function select() {
   >
     <div class="grid gap-2">
       <div
-        class="flex items-center gap-1 rounded-cp-sm pr-1 transition-colors hover:bg-cp-bg-text-hover has-[:focus-visible]:bg-cp-bg-text-hover motion-reduce:transition-none"
+        class="flex items-center gap-1 rounded-z-sm pr-1 transition-colors hover:bg-z-bg-text-hover has-[:focus-visible]:bg-z-bg-text-hover motion-reduce:transition-none"
       >
         <ZMenuItem class="min-h-18 min-w-0 py-3 hover:bg-transparent!" @click="select">
           <template #icon>
-            <span class="grid size-9 place-items-center rounded-cp bg-cp-fill-quaternary text-cp-text-secondary">
+            <span class="grid size-9 place-items-center rounded-z bg-z-fill-quaternary text-z-text-secondary">
               <AppWindow class="size-5" aria-hidden="true" />
             </span>
           </template>
           <span class="grid gap-1 whitespace-normal">
             <span>CC Switch</span>
-            <span class="text-xs leading-5 font-normal text-cp-text-secondary">{{ t('keys.configuration.ccSwitchDescription') }}</span>
+            <span class="text-xs leading-5 font-normal text-z-text-secondary">{{ t('keys.configuration.ccSwitchDescription') }}</span>
           </span>
         </ZMenuItem>
         <a
@@ -46,7 +46,7 @@ function select() {
           rel="noopener noreferrer"
           :aria-label="t('keys.configuration.viewOnGitHub', { name: 'CC Switch' })"
           :title="t('keys.configuration.viewOnGitHub', { name: 'CC Switch' })"
-          class="inline-grid size-9 shrink-0 place-items-center rounded-cp-sm text-cp-text-tertiary outline-none transition-colors hover:text-cp-text focus-visible:ring-2 focus-visible:ring-cp-control-outline focus-visible:ring-inset motion-reduce:transition-none"
+          class="inline-grid size-9 shrink-0 place-items-center rounded-z-sm text-z-text-tertiary outline-none transition-colors hover:text-z-text focus-visible:ring-2 focus-visible:ring-z-control-outline focus-visible:ring-inset motion-reduce:transition-none"
         >
           <Github class="size-6" aria-hidden="true" />
         </a>

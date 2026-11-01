@@ -141,23 +141,23 @@ const activeNavIndex = computed(() => {
   const index = navItems.value.findIndex(item => isActive(item.path))
   return Math.max(0, index)
 })
-const activeNavIndicatorStyle = computed(() => ({
-  transform: `translate3d(0, ${activeNavIndex.value * 58 + (activeNavIndex.value > pluginNavIndex
-    ? pluginChildrenHeight.value
-    : 0)}px, 0)`,
-  opacity: isActive('/plugins') && pluginMenuVisible.value
-    ? 0
-    : 1,
-}))
 const activePluginIndex = computed(() => route.name === 'plugins'
   ? 0
   : pluginPageViews.value.findIndex(isPluginViewActive) + 1)
-const activePluginIndicatorStyle = computed(() => ({
-  transform: `translate3d(0, ${activePluginIndex.value * 44}px, 0)`,
-  opacity: isActive('/plugins') && pluginMenuVisible.value
-    ? 1
-    : 0,
-}))
+const activeNavIndicatorStyle = computed(() => {
+  const inPluginMenu = isActive('/plugins') && pluginMenuVisible.value
+  const offset = inPluginMenu
+    ? 50 + activePluginIndex.value * 44
+    : activeNavIndex.value > pluginNavIndex
+      ? pluginChildrenHeight.value
+      : 0
+  // 主菜单与子菜单共享选中框，位置和尺寸在同一次过渡中变化
+  return {
+    transform: `translate3d(${inPluginMenu ? 24 : 0}px, ${activeNavIndex.value * 58 + offset}px, 0)`,
+    width: inPluginMenu ? 'calc(100% - 24px)' : '100%',
+    height: inPluginMenu ? '40px' : '46px',
+  }
+})
 const navFeedbackMuted = shallowRef(false)
 const { start: restoreNavFeedback, stop: stopNavFeedbackRestore } = useTimeoutFn(
   () => {
@@ -225,7 +225,6 @@ async function handleLogout() {
 const sidebarEl = ref<HTMLElement | null>(null)
 const brandLabelEl = ref<HTMLElement | null>(null)
 const navSignalEl = useTemplateRef<HTMLElement>('navSignal')
-const pluginNavSignalEls = useTemplateRef<HTMLElement[]>('pluginNavSignal')
 const collapsedSidebarWidth = 88
 const expandedSidebarWidth = 251
 const sidebarWidth = computed(() => (isCollapsed.value ? collapsedSidebarWidth : expandedSidebarWidth))
@@ -349,9 +348,7 @@ function animateSidebarWidth(collapsed: boolean) {
 }
 
 function animateNavSignal() {
-  const signal = isActive('/plugins') && pluginMenuVisible.value
-    ? pluginNavSignalEls.value?.[0]
-    : navSignalEl.value
+  const signal = navSignalEl.value
   if (!signal)
     return
 
@@ -431,7 +428,6 @@ onBeforeUnmount(() => {
     sidebarEl.value,
     brandLabelEl.value,
     navSignalEl.value,
-    ...(pluginNavSignalEls.value ?? []),
   ].filter((target): target is HTMLElement =>
     Boolean(target),
   )
@@ -447,7 +443,7 @@ onBeforeUnmount(() => {
 <template>
   <aside
     ref="sidebarEl"
-    class="z-20 h-dvh shrink-0 flex-col overflow-hidden bg-(--cp-layout-sider-bg) shadow-cp-layout-sider"
+    class="z-20 h-dvh shrink-0 flex-col overflow-hidden bg-(--z-layout-sider-bg) shadow-z-layout-sider"
     :class="[
       mobile ? 'flex' : 'hidden min-[961px]:flex',
       isCollapsed ? 'w-22 basis-22 items-center' : 'w-62.75 basis-62.75',
@@ -459,28 +455,28 @@ onBeforeUnmount(() => {
     >
       <ZMotionIcon
         variant="brand"
-        class="inline-flex size-11 items-center justify-center relative -top-0.5 rounded-cp"
+        class="inline-flex size-11 items-center justify-center relative -top-0.5 rounded-z"
       >
         <AppBrandMark class="block size-11 select-none" />
       </ZMotionIcon>
       <span v-show="brandLabelVisible" ref="brandLabelEl" class="grid min-w-33 content-center overflow-hidden">
-        <strong class="text-base leading-[1.1] font-heavy text-cp-text"> Codex Proxy </strong>
+        <strong class="text-base leading-[1.1] font-heavy text-z-text"> Codex Proxy </strong>
         <span class="mt-1.5 flex h-4.5 min-w-0 items-center gap-2">
-          <span class="shrink-0 text-xs leading-none font-emphasis text-cp-text-secondary"> Rust build </span>
+          <span class="shrink-0 text-xs leading-none font-emphasis text-z-text-secondary"> Rust build </span>
           <button
             v-if="hasVersionLabel"
             type="button"
-            class="inline-flex h-4.5 min-w-0 cursor-pointer items-center gap-1 rounded-cp-sm border-0 px-1.5 font-mono text-[10px] leading-none font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-cp-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-cp-bg-container"
+            class="inline-flex h-4.5 min-w-0 cursor-pointer items-center gap-1 rounded-z-sm border-0 px-1.5 font-mono text-[10px] leading-none font-bold transition-colors outline-none focus-visible:ring-2 focus-visible:ring-z-control-outline focus-visible:ring-offset-2 focus-visible:ring-offset-z-bg-container"
             :class="[
               hasUpdate
-                ? 'bg-cp-success-container text-cp-success-on-container hover:bg-cp-success-container-hover'
-                : 'bg-cp-fill-quaternary text-cp-text-quaternary hover:bg-cp-fill-tertiary hover:text-cp-text-secondary',
+                ? 'bg-z-success-container text-z-success-on-container hover:bg-z-success-container-hover'
+                : 'bg-z-fill-quaternary text-z-text-quaternary hover:bg-z-fill-tertiary hover:text-z-text-secondary',
             ]"
             :title="updateButtonLabel"
             @click="openSystemUpdate"
           >
             <span>{{ versionLabel }}</span>
-            <ArrowUpCircle v-if="hasUpdate" class="size-3 shrink-0 text-cp-success" />
+            <ArrowUpCircle v-if="hasUpdate" class="size-3 shrink-0 text-z-success" />
           </button>
         </span>
       </span>
@@ -491,12 +487,12 @@ onBeforeUnmount(() => {
         <!-- 焦点环绘制在按钮内侧，避免被滚动区和折叠菜单裁切 -->
         <nav class="relative grid gap-3" :class="isCollapsed ? 'mx-auto w-11.5' : 'w-full'" :aria-label="t('navigation.mainLabel')">
           <span
-            class="pointer-events-none absolute inset-x-0 top-0 h-11.5 overflow-hidden rounded-cp bg-cp-menu-item-selected-bg transition-[transform,opacity] duration-260 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
+            class="pointer-events-none absolute left-0 top-0 overflow-hidden rounded-z bg-z-menu-item-selected-bg transition-[transform,width,height] duration-260 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
             :style="activeNavIndicatorStyle"
           >
             <span
               ref="navSignal"
-              class="absolute inset-y-0 left-0 w-2/3 [background:linear-gradient(90deg,transparent,color-mix(in_srgb,var(--cp-color-info)_9%,transparent),transparent)]"
+              class="absolute inset-y-0 left-0 w-2/3 [background:linear-gradient(90deg,transparent,color-mix(in_srgb,var(--z-color-info)_9%,transparent),transparent)]"
             />
           </span>
           <template v-for="item in navItems" :key="item.label">
@@ -505,16 +501,16 @@ onBeforeUnmount(() => {
                 <template #reference="{ close }">
                   <button
                     type="button"
-                    class="inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 bg-transparent text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline"
+                    class="inline-flex h-11.5 cursor-pointer items-center rounded-z border-0 bg-transparent text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-z-control-outline"
                     :class="[
                       isCollapsed ? 'w-11.5 justify-center' : 'w-full gap-3 px-4',
                       isActive(item.path)
                         ? navFeedbackMuted
-                          ? 'font-bold text-cp-text transition-none'
-                          : 'font-bold text-cp-text transition-colors duration-200'
+                          ? 'font-bold text-z-text transition-none'
+                          : 'font-bold text-z-text transition-colors duration-200'
                         : navFeedbackMuted
-                          ? 'font-semibold text-cp-text-secondary transition-none'
-                          : 'font-semibold text-cp-text-secondary transition-colors duration-200 hover:bg-cp-fill-quaternary hover:text-cp-text',
+                          ? 'font-semibold text-z-text-secondary transition-none'
+                          : 'font-semibold text-z-text-secondary transition-colors duration-200 hover:bg-z-fill-quaternary hover:text-z-text',
                     ]"
                     :aria-expanded="isCollapsed ? undefined : pluginGroupExpanded"
                     :aria-controls="isCollapsed ? undefined : pluginMenuId"
@@ -540,7 +536,7 @@ onBeforeUnmount(() => {
                     </span>
                   </button>
                 </template>
-                <span class="block px-3 py-2 text-cp-sm whitespace-nowrap">{{ item.label }}</span>
+                <span class="block px-3 py-2 text-z-sm whitespace-nowrap">{{ item.label }}</span>
               </ZPopover>
 
               <div
@@ -552,19 +548,12 @@ onBeforeUnmount(() => {
               >
                 <div class="min-h-0 overflow-hidden">
                   <div class="relative ml-3 grid gap-1 pt-1 pl-3">
-                    <span
-                      aria-hidden="true"
-                      class="pointer-events-none absolute top-1 right-0 left-3 h-10 overflow-hidden rounded-cp bg-cp-menu-item-selected-bg transition-[transform,opacity] duration-260 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none"
-                      :style="activePluginIndicatorStyle"
-                    >
-                      <span ref="pluginNavSignal" class="absolute inset-y-0 left-0 w-2/3 opacity-0 [background:linear-gradient(90deg,transparent,color-mix(in_srgb,var(--cp-color-info)_9%,transparent),transparent)]" />
-                    </span>
                     <button
                       type="button"
-                      class="relative inline-flex h-10 min-w-0 cursor-pointer items-center gap-2 rounded-cp border-0 bg-transparent px-3 text-left text-cp-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline motion-reduce:transition-none"
+                      class="relative inline-flex h-10 min-w-0 cursor-pointer items-center gap-2 rounded-z border-0 bg-transparent px-3 text-left text-z-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-z-control-outline motion-reduce:transition-none"
                       :class="route.name === 'plugins'
-                        ? 'font-emphasis text-cp-text'
-                        : navFeedbackMuted ? 'font-semibold text-cp-text-secondary' : 'font-semibold text-cp-text-secondary hover:bg-cp-fill-quaternary hover:text-cp-text'"
+                        ? 'font-emphasis text-z-text'
+                        : navFeedbackMuted ? 'font-semibold text-z-text-secondary' : 'font-semibold text-z-text-secondary hover:bg-z-fill-quaternary hover:text-z-text'"
                       :aria-current="route.name === 'plugins' ? 'page' : undefined"
                       @click="navigate('/plugins')"
                     >
@@ -575,10 +564,10 @@ onBeforeUnmount(() => {
                       v-for="view in pluginPageViews"
                       :key="view.target.instanceId"
                       type="button"
-                      class="relative inline-flex h-10 min-w-0 cursor-pointer items-center gap-2 rounded-cp border-0 bg-transparent px-3 text-left text-cp-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline motion-reduce:transition-none"
+                      class="relative inline-flex h-10 min-w-0 cursor-pointer items-center gap-2 rounded-z border-0 bg-transparent px-3 text-left text-z-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-z-control-outline motion-reduce:transition-none"
                       :class="isPluginViewActive(view)
-                        ? 'font-emphasis text-cp-text'
-                        : navFeedbackMuted ? 'font-semibold text-cp-text-secondary' : 'font-semibold text-cp-text-secondary hover:bg-cp-fill-quaternary hover:text-cp-text'"
+                        ? 'font-emphasis text-z-text'
+                        : navFeedbackMuted ? 'font-semibold text-z-text-secondary' : 'font-semibold text-z-text-secondary hover:bg-z-fill-quaternary hover:text-z-text'"
                       :aria-current="isPluginViewActive(view) ? 'page' : undefined"
                       @click="navigatePluginView(view)"
                     >
@@ -594,16 +583,16 @@ onBeforeUnmount(() => {
               <template #reference="{ close }">
                 <button
                   type="button"
-                  class="relative z-10 inline-flex h-11.5 cursor-pointer items-center rounded-cp border-0 text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-cp-control-outline"
+                  class="relative z-10 inline-flex h-11.5 cursor-pointer items-center rounded-z border-0 text-sm leading-[1.15] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-z-control-outline"
                   :class="[
                     isCollapsed ? 'w-11.5 justify-center' : 'w-full gap-3 px-4',
                     isActive(item.path)
                       ? navFeedbackMuted
-                        ? 'bg-transparent font-bold text-cp-text transition-none'
-                        : 'bg-transparent font-bold text-cp-text transition-colors duration-200'
+                        ? 'bg-transparent font-bold text-z-text transition-none'
+                        : 'bg-transparent font-bold text-z-text transition-colors duration-200'
                       : navFeedbackMuted
-                        ? 'bg-transparent font-semibold text-cp-text-secondary transition-none'
-                        : 'bg-transparent font-semibold text-cp-text-secondary transition-colors duration-200 hover:bg-cp-fill-quaternary hover:text-cp-text',
+                        ? 'bg-transparent font-semibold text-z-text-secondary transition-none'
+                        : 'bg-transparent font-semibold text-z-text-secondary transition-colors duration-200 hover:bg-z-fill-quaternary hover:text-z-text',
                   ]"
                   :aria-label="isCollapsed ? item.label : undefined"
                   @click="close(); navigate(item.path)"
@@ -617,7 +606,7 @@ onBeforeUnmount(() => {
                   </span>
                 </button>
               </template>
-              <span class="block px-3 py-2 text-cp-sm whitespace-nowrap">{{ item.label }}</span>
+              <span class="block px-3 py-2 text-z-sm whitespace-nowrap">{{ item.label }}</span>
             </ZPopover>
           </template>
         </nav>
@@ -626,14 +615,14 @@ onBeforeUnmount(() => {
 
     <div class="mx-4 mb-6 shrink-0" :class="isCollapsed ? 'w-11' : 'self-stretch'">
       <div
-        class="bg-cp-fill-quaternary"
-        :class="isCollapsed ? 'grid gap-1 rounded-cp p-1' : 'grid h-11 grid-cols-[4.25rem_auto] items-center justify-between rounded-cp-lg px-2'"
+        class="bg-z-fill-quaternary"
+        :class="isCollapsed ? 'grid gap-1 rounded-z p-1' : 'grid h-11 grid-cols-[4.25rem_auto] items-center justify-between rounded-z-lg px-2'"
       >
         <span
           v-if="!isCollapsed"
-          class="inline-flex h-7 items-center justify-self-start gap-1.5 whitespace-nowrap rounded-lg bg-cp-success-container px-2 text-xs leading-none font-emphasis text-cp-success-on-container"
+          class="inline-flex h-7 items-center justify-self-start gap-1.5 whitespace-nowrap rounded-lg bg-z-success-container px-2 text-xs leading-none font-emphasis text-z-success-on-container"
         >
-          <i class="size-1.5 rounded-full bg-cp-success" />
+          <i class="size-1.5 rounded-full bg-z-success" />
           {{ t('navigation.online') }}
         </span>
 

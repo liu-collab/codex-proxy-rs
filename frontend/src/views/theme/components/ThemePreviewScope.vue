@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { ThemeName } from '@codex-proxy/ui/theme'
+import type { ThemeScheme } from '@codex-proxy/ui/theme'
 import type { CSSProperties } from 'vue'
 import type { ThemeColorTokens } from '@/composables/useThemeColor'
 
@@ -8,7 +8,7 @@ import { computed, onMounted, shallowRef, useTemplateRef } from 'vue'
 import { provideThemeColorTokens } from '@/composables/useThemeColor'
 
 const props = defineProps<{
-  theme: ThemeName
+  theme: ThemeScheme
   style: CSSProperties
 }>()
 
@@ -54,7 +54,7 @@ onMounted(() => {
   >
     <Teleport v-if="contentRoot" :to="contentRoot">
       <div
-        class="h-full min-h-0 w-full min-w-0 bg-cp-bg-layout font-sans text-cp-text"
+        class="h-full min-h-0 w-full min-w-0 bg-z-bg-layout font-sans text-z-text"
         :data-theme="theme"
         :style="style"
       >

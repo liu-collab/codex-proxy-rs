@@ -3316,7 +3316,7 @@ async fn selection_failures_carry_a_distinguishable_client_error_code() {
         assert_eq!(transport.calls.load(Ordering::SeqCst), 0);
         if expected_code == "account_cooling_down" {
             assert!(
-                detail.message().contains("retry in 13s"),
+                detail.message().contains("retry in 13 seconds."),
                 "{}",
                 detail.message()
             );
@@ -4178,7 +4178,7 @@ async fn provider_should_expose_safe_request_normalization_field_before_selectio
             detail.error_type()
         )),
         Some((
-            "Grok Build request field `tools` could not be normalized safely",
+            "The request field `tools` could not be converted to the Grok Build format.",
             Some("invalid_request_normalization"),
             Some("invalid_request_error"),
         )),
@@ -4207,6 +4207,7 @@ async fn provider_compiles_realtime_catalog_capabilities() {
         .presentation()
         .expect("Grok model presentation");
     assert_eq!(presentation.display_name(), Some("Grok 4.5"));
+    assert!(presentation.reasoning_summary());
     assert_eq!(
         presentation.supported_reasoning_efforts(),
         ["low", "medium", "high", "xhigh"]

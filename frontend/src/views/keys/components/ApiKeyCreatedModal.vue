@@ -30,17 +30,17 @@ const showImport = shallowRef(false)
     @closed="showImport = false; emit('afterLeave')"
   >
     <div class="flex flex-col gap-4">
-      <div class="rounded-cp bg-cp-warning-container px-4 py-3">
-        <p class="m-0 text-cp font-semibold text-cp-warning-on-container">
+      <div class="rounded-z bg-z-warning-container px-4 py-3">
+        <p class="m-0 text-z font-semibold text-z-warning-on-container">
           {{ t('keys.created.accessNotice') }}
         </p>
       </div>
       <div>
-        <p class="mb-2 text-cp font-medium text-cp-text-secondary">
+        <p class="mb-2 text-z font-medium text-z-text-secondary">
           {{ t('common.fields.apiKey') }}
         </p>
         <div class="flex items-center gap-2">
-          <code class="flex-1 rounded-cp bg-cp-fill-quaternary px-3 py-2.5 font-mono text-cp break-all text-cp-text">
+          <code class="flex-1 rounded-z bg-z-fill-quaternary px-3 py-2.5 font-mono text-z break-all text-z-text">
             {{ createdKey }}
           </code>
           <ZIconButton size="default" :aria-label="t('common.actions.copy')" @click="emit('copy', createdKey)">

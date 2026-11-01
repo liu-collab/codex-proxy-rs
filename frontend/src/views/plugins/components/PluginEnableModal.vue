@@ -40,20 +40,20 @@ const parameters = computed(() => {
 <template>
   <ZDialog v-model="open" :title="replacements.length ? t('plugins.enable.switchActiveConfiguration') : t('plugins.enable.enablePluginConfiguration')" :type="compatibilityWarning ? 'warning' : 'default'" width="36rem" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving" @closed="$emit('closed')">
     <div v-if="request" class="grid gap-4">
-      <div v-if="compatibilityWarning" role="alert" class="grid gap-2 rounded-cp bg-cp-fill-alter p-4 text-cp-sm">
-        <p class="m-0 font-emphasis text-cp-warning">
+      <div v-if="compatibilityWarning" role="alert" class="grid gap-2 rounded-z bg-z-fill-alter p-4 text-z-sm">
+        <p class="m-0 font-emphasis text-z-warning">
           {{ t('plugins.enable.incompatibleRisk') }}
         </p>
-        <p class="m-0 wrap-anywhere text-cp-text-secondary">
+        <p class="m-0 wrap-anywhere text-z-text-secondary">
           {{ compatibilityWarning }}
         </p>
-        <p class="m-0 text-cp-text-secondary">
+        <p class="m-0 text-z-text-secondary">
           {{ t('plugins.enable.confirmationScope') }}
         </p>
       </div>
-      <div class="grid gap-3 rounded-cp bg-cp-fill-alter p-4">
+      <div class="grid gap-3 rounded-z bg-z-fill-alter p-4">
         <div class="flex min-w-0 flex-wrap items-center gap-2">
-          <strong class="min-w-0 flex-1 wrap-anywhere text-cp-sm">{{ request.name }}</strong>
+          <strong class="min-w-0 flex-1 wrap-anywhere text-z-sm">{{ request.name }}</strong>
           <ZTag v-if="metadata">
             {{ metadata.version }}
           </ZTag>
@@ -61,9 +61,9 @@ const parameters = computed(() => {
             {{ t('plugins.enable.willBeEnabled') }}
           </ZTag>
         </div>
-        <dl v-if="parameters.length" class="m-0 grid grid-cols-1 gap-3 text-cp-sm sm:grid-cols-2">
+        <dl v-if="parameters.length" class="m-0 grid grid-cols-1 gap-3 text-z-sm sm:grid-cols-2">
           <div v-for="parameter in parameters" :key="parameter.key" class="grid min-w-0 gap-1">
-            <dt class="wrap-anywhere text-cp-text-secondary">
+            <dt class="wrap-anywhere text-z-text-secondary">
               {{ parameter.label }}
             </dt>
             <dd class="m-0 max-h-24 overflow-y-auto whitespace-pre-wrap wrap-anywhere">
@@ -74,15 +74,15 @@ const parameters = computed(() => {
         <PluginConfigurationSummary :instance="request" :metadata="metadata" :show-command="false" />
       </div>
       <div v-if="replacements.length" class="grid gap-2">
-        <div class="flex items-center gap-1.5 text-cp-xs text-cp-text-secondary">
+        <div class="flex items-center gap-1.5 text-z-xs text-z-text-secondary">
           <span>{{ t('plugins.enable.configurationsToDisable', { count: replacements.length }) }}</span>
           <PluginHelpPopover :label="t('plugins.enable.toggleEnablementInstructions')">
             {{ t('plugins.enable.disableDescription') }}
           </PluginHelpPopover>
         </div>
         <ul class="m-0 max-h-40 list-none space-y-2 overflow-y-auto p-0">
-          <li v-for="instance in replacements" :key="instance.id" class="flex items-center gap-3 rounded-cp bg-cp-fill-alter p-3">
-            <span class="min-w-0 flex-1 wrap-anywhere text-cp-sm font-emphasis">{{ instance.name }}</span>
+          <li v-for="instance in replacements" :key="instance.id" class="flex items-center gap-3 rounded-z bg-z-fill-alter p-3">
+            <span class="min-w-0 flex-1 wrap-anywhere text-z-sm font-emphasis">{{ instance.name }}</span>
             <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
               <ZTag v-if="instance.version">
                 {{ instance.version }}

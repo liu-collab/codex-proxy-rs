@@ -1241,7 +1241,7 @@ async fn official_core_version_gate_should_run_before_websocket_upgrade() {
             else {
                 panic!("expected an HTTP version rejection");
             };
-            assert_eq!(response.status(), StatusCode::UPGRADE_REQUIRED);
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
             let value: Value = serde_json::from_slice(response.body().as_deref().unwrap()).unwrap();
             assert_eq!(value["error"]["code"], "client_version_too_old");
             assert_eq!(value["error"]["current_version"], "0.158.0");

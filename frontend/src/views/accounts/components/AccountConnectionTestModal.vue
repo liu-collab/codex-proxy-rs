@@ -37,12 +37,12 @@ const selectedModel = defineModel<string>('selectedModel', { required: true })
 
 function connectionLogClass(tone: string) {
   if (tone === 'success')
-    return 'text-cp-success-text'
+    return 'text-z-success-text'
   if (tone === 'danger')
-    return 'text-cp-error-text'
+    return 'text-z-error-text'
   if (tone === 'info')
-    return 'text-cp-info-text'
-  return 'text-cp-text-secondary'
+    return 'text-z-info-text'
+  return 'text-z-text-secondary'
 }
 </script>
 
@@ -56,9 +56,9 @@ function connectionLogClass(tone: string) {
   >
     <div v-if="account" class="flex flex-col gap-4">
       <section
-        class="flex items-center justify-between gap-4 rounded-cp-card bg-cp-fill-quaternary px-4 py-3"
+        class="flex items-center justify-between gap-4 rounded-z-card bg-z-fill-quaternary px-4 py-3"
       >
-        <AccountIdentityCell :account="account" size="lg" show-plan />
+        <AccountIdentityCell :account="account" size="lg" show-plan show-notes />
         <AccountStatusBadge
           :status="account.status"
           :error-reason="account.errorReason"
@@ -73,10 +73,10 @@ function connectionLogClass(tone: string) {
         />
       </section>
 
-      <section class="rounded-cp-card bg-cp-fill-quaternary px-4 py-3">
+      <section class="rounded-z-card bg-z-fill-quaternary px-4 py-3">
         <div class="grid gap-2">
           <div class="flex min-h-8 items-center justify-between gap-3">
-            <span class="text-cp-sm font-heavy text-cp-text-quaternary">
+            <span class="text-z-sm font-heavy text-z-text-quaternary">
               {{ t('accounts.connectionTest.model') }}
             </span>
             <ZIconButton
@@ -103,7 +103,7 @@ function connectionLogClass(tone: string) {
         </div>
       </section>
 
-      <section class="rounded-cp-card bg-cp-fill-quaternary p-4">
+      <section class="rounded-z-card bg-z-fill-quaternary p-4">
         <div class="flex min-w-0 items-start gap-3">
           <span
             class="inline-flex size-10 shrink-0 items-center justify-center rounded-lg"
@@ -116,11 +116,11 @@ function connectionLogClass(tone: string) {
             />
           </span>
           <div class="min-w-0">
-            <p class="m-0 text-[16px] font-heavy text-cp-text">
+            <p class="m-0 text-[16px] font-heavy text-z-text">
               {{ statusView.label }}
             </p>
             <p
-              class="mt-1.5 mb-0 text-cp leading-normal font-emphasis text-cp-text-secondary"
+              class="mt-1.5 mb-0 text-z leading-normal font-emphasis text-z-text-secondary"
             >
               {{ statusView.description }}
             </p>
@@ -128,59 +128,59 @@ function connectionLogClass(tone: string) {
         </div>
 
         <div class="mt-4 grid gap-3 sm:grid-cols-3">
-          <div class="rounded-lg bg-cp-bg-container px-3 py-2.5">
-            <p class="m-0 text-cp-xs font-heavy text-cp-text-quaternary">
+          <div class="rounded-lg bg-z-bg-container px-3 py-2.5">
+            <p class="m-0 text-z-xs font-heavy text-z-text-quaternary">
               {{ t('accounts.concurrency.startTime') }}
             </p>
-            <p class="mt-1.5 mb-0 font-mono text-cp-sm font-emphasis text-cp-text">
+            <p class="mt-1.5 mb-0 font-mono text-z-sm font-emphasis text-z-text">
               {{ startedAt || '-' }}
             </p>
           </div>
-          <div class="rounded-lg bg-cp-bg-container px-3 py-2.5">
-            <p class="m-0 text-cp-xs font-heavy text-cp-text-quaternary">
+          <div class="rounded-lg bg-z-bg-container px-3 py-2.5">
+            <p class="m-0 text-z-xs font-heavy text-z-text-quaternary">
               {{ t('accounts.connectionTest.completedAt') }}
             </p>
-            <p class="mt-1.5 mb-0 font-mono text-cp-sm font-emphasis text-cp-text">
+            <p class="mt-1.5 mb-0 font-mono text-z-sm font-emphasis text-z-text">
               {{ finishedAt || '-' }}
             </p>
           </div>
-          <div class="rounded-lg bg-cp-bg-container px-3 py-2.5">
-            <p class="m-0 text-cp-xs font-heavy text-cp-text-quaternary">
+          <div class="rounded-lg bg-z-bg-container px-3 py-2.5">
+            <p class="m-0 text-z-xs font-heavy text-z-text-quaternary">
               {{ t('accounts.connectionTest.duration') }}
             </p>
-            <p class="mt-1.5 mb-0 font-mono text-cp-sm font-emphasis whitespace-nowrap text-cp-text">
+            <p class="mt-1.5 mb-0 font-mono text-z-sm font-emphasis whitespace-nowrap text-z-text">
               {{ durationMs !== null ? `${durationMs} ms` : '-' }}
             </p>
           </div>
         </div>
 
-        <div class="mt-3 rounded-lg bg-cp-bg-container px-3 py-2.5">
-          <p class="m-0 text-cp-xs font-heavy text-cp-text-quaternary">
+        <div class="mt-3 rounded-lg bg-z-bg-container px-3 py-2.5">
+          <p class="m-0 text-z-xs font-heavy text-z-text-quaternary">
             {{ t('accounts.connectionTest.model') }}
           </p>
           <p
-            class="mt-1.5 mb-0 truncate font-mono text-cp-sm font-emphasis text-cp-text"
+            class="mt-1.5 mb-0 truncate font-mono text-z-sm font-emphasis text-z-text"
             :title="model || '-'"
           >
             {{ model || '-' }}
           </p>
         </div>
 
-        <div class="mt-3 rounded-lg bg-cp-bg-container px-3 py-2.5">
-          <p class="m-0 text-cp-xs font-heavy text-cp-text-quaternary">
+        <div class="mt-3 rounded-lg bg-z-bg-container px-3 py-2.5">
+          <p class="m-0 text-z-xs font-heavy text-z-text-quaternary">
             {{ t('accounts.connectionTest.events.title') }}
           </p>
           <div class="pt-2">
-            <div v-if="logs.length === 0" class="text-cp-sm font-emphasis text-cp-text-quaternary">
+            <div v-if="logs.length === 0" class="text-z-sm font-emphasis text-z-text-quaternary">
               -
             </div>
             <div v-else class="flex flex-col gap-1.5">
               <div
                 v-for="item in logs"
                 :key="item.key"
-                class="grid grid-cols-[54px_minmax(0,1fr)] gap-2 text-cp-sm leading-[1.45] font-emphasis"
+                class="grid grid-cols-[54px_minmax(0,1fr)] gap-2 text-z-sm leading-[1.45] font-emphasis"
               >
-                <span class="font-mono text-cp-text-quaternary">{{ item.time }}</span>
+                <span class="font-mono text-z-text-quaternary">{{ item.time }}</span>
                 <div class="min-w-0">
                   <p
                     class="m-0 wrap-break-word"
@@ -188,15 +188,15 @@ function connectionLogClass(tone: string) {
                   >
                     {{ item.text }}
                   </p>
-                  <div v-if="item.detail" class="mt-2 rounded-lg bg-cp-fill-quaternary px-3 py-2">
+                  <div v-if="item.detail" class="mt-2 rounded-lg bg-z-fill-quaternary px-3 py-2">
                     <p
                       v-if="item.tone === 'danger'"
-                      class="mt-0 mb-2 text-cp-xs font-heavy text-cp-text-quaternary"
+                      class="mt-0 mb-2 text-z-xs font-heavy text-z-text-quaternary"
                     >
                       {{ t('accounts.connectionTest.diagnostics') }}
                     </p>
                     <pre
-                      class="m-0 whitespace-pre-wrap wrap-break-word font-mono text-cp-xs leading-[1.6] font-emphasis text-cp-text"
+                      class="m-0 whitespace-pre-wrap wrap-break-word font-mono text-z-xs leading-[1.6] font-emphasis text-z-text"
                       v-text="item.detail"
                     />
                   </div>

@@ -122,7 +122,7 @@ impl NestedExecutionGraph {
         {
             return Err(GatewayError::new(
                 GatewayErrorKind::ConcurrencyQueueFull,
-                "nested model execution concurrency is exhausted",
+                "Nested model execution concurrency is exhausted.",
             ));
         }
         if self
@@ -135,7 +135,7 @@ impl NestedExecutionGraph {
             self.active.fetch_sub(1, Ordering::AcqRel);
             return Err(GatewayError::new(
                 GatewayErrorKind::PolicyDenied,
-                "nested model execution budget is exhausted",
+                "Nested model execution budget is exhausted.",
             ));
         }
         Ok(NestedExecutionPermit {

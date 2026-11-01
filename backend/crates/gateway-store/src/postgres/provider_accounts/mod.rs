@@ -58,6 +58,7 @@ mod admin_queries;
 mod authorization;
 mod core_adapter;
 mod mapping;
+mod quota;
 mod quota_forecast;
 mod repository;
 mod reset_credit_automation;

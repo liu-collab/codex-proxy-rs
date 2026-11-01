@@ -29,7 +29,7 @@ const search = defineModel<string>('search', { required: true })
       :placeholder="t('groups.filters.searchGroupName')"
     >
       <template #prefix>
-        <Search class="size-4.5 text-cp-text-tertiary" />
+        <Search class="size-4.5 text-z-text-tertiary" />
       </template>
     </ZInput>
     <div class="flex max-w-full shrink-0 flex-wrap items-center justify-end gap-2 sm:ml-auto">

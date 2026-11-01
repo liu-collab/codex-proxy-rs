@@ -8,13 +8,16 @@ import { ChartNoAxesCombined, RefreshCw, UserRound } from '@lucide/vue'
 import { computed, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
-import { formatProviderLabel } from '@/utils/providers'
+import AccountUpstreamStatus from '@/components/account/AccountUpstreamStatus.vue'
+import { accountUpstreamPending } from '@/utils/account-upstream'
 import { formatRelativeTime } from '@/utils/relative-time'
+import { usePoolQuotaWindows } from '../../composables/usePoolQuotaWindows'
 import { groupedAccountQuotaWindows, orderedPanelQuotaWindows } from '../../constants'
 import AccountProfileModal from '../account-profile-modal/index.vue'
 import AccountQuotaForecastModal from '../account-quota-forecast-modal/index.vue'
 import AccountQuotaPanelEntry from './Entry.vue'
 import AccountResetCredits from './ResetCredits.vue'
+import AccountUpstreamPool from './UpstreamPool.vue'
 
 const props = defineProps<{
   account: Account
@@ -28,18 +31,35 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
+const poolWindows = usePoolQuotaWindows(() => props.account)
+const hasUpstreamPool = computed(() => props.account.upstream?.discovered && (
+  props.account.upstream.pool || poolWindows.value.some(window => window.sourceAccountId && !window.amount)
+))
 
 const quotaEntries = computed(() => groupedAccountQuotaWindows(
-  orderedPanelQuotaWindows(props.account.quota.windows),
+  orderedPanelQuotaWindows(props.account.upstream?.discovered
+    ? props.account.quota.windows.filter(window => window.amount)
+    : props.account.quota.windows),
 ))
 const profileOpen = shallowRef(false)
 const forecastOpen = shallowRef(false)
+const hasPlanBadge = computed(() => !accountUpstreamPending(props.account.upstream)
+  && (Boolean(props.account.planType) || props.account.authenticationKind === 'api_key'))
 const hasForecast = computed(() => props.account.authenticationKind !== 'api_key')
 const hasPersonalInfo = computed(() => props.account.capabilities.profile || props.account.capabilities.subscription)
-const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || props.account.capabilities.quotaRefresh || props.account.capabilities.resetCredits)
-const lastRefreshed = computed(() => t('accounts.quota.lastRefreshed', {
-  refreshedAtDisplay: formatRelativeTime(props.account.quota.refreshedAtRelative),
-}))
+const canRefresh = computed(() => props.account.capabilities.quotaRefresh || props.account.upstream?.discovered)
+const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || canRefresh.value || props.account.capabilities.resetCredits)
+const lastRefreshed = computed(() => props.account.upstream?.discovered && !props.account.upstream.observedAt
+  ? null
+  : t('accounts.quota.lastRefreshed', {
+      refreshedAtDisplay: formatRelativeTime(props.account.upstream?.discovered
+        ? props.account.upstream.observedAtRelative
+        : props.account.quota.refreshedAtRelative),
+    }))
+const showUpstreamStatus = computed(() => props.account.upstream?.discovered && (
+  (props.account.upstream.observedAt && props.account.upstream.stale)
+  || props.account.upstream.lastError
+))
 watch(hasPersonalInfo, (available) => {
   if (!available)
     profileOpen.value = false
@@ -47,22 +67,21 @@ watch(hasPersonalInfo, (available) => {
 </script>
 
 <template>
-  <section class="flex min-h-0 flex-col rounded-lg bg-cp-bg-container p-4 shadow-cp-tertiary">
+  <section class="flex min-h-0 min-w-0 flex-col rounded-lg bg-z-bg-container p-4 shadow-z-tertiary">
     <div class="mb-3 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1">
-      <h3 class="m-0 text-cp-lg font-heavy text-cp-text">
-        {{ t('accounts.quota.accountLimit') }}
+      <h3 class="m-0 text-z-lg font-heavy text-z-text">
+        {{ account.upstream?.discovered ? t('accounts.upstream.quota') : t('accounts.quota.accountLimit') }}
       </h3>
       <p
-        v-if="account.capabilities.quota || quotaEntries.length > 0"
-        class="col-span-2 row-start-2 m-0 flex min-w-0 items-center gap-1.5 text-cp-xs font-emphasis text-cp-text-secondary"
+        v-if="account.capabilities.quota || quotaEntries.length > 0 || account.upstream?.discovered"
+        class="col-span-2 row-start-2 m-0 flex min-w-0 items-center gap-1.5 text-z-xs font-emphasis text-z-text-secondary"
       >
-        <span class="shrink-0 whitespace-nowrap">{{ t('accounts.quota.quota', { provider: formatProviderLabel(account.provider) }) }}</span>
-        <template v-if="account.planType">
-          <span class="shrink-0">·</span>
-          <AccountPlanBadge :plan-type="account.planType" :plan-type-display="account.planTypeDisplay" size="sm" class="shrink-0" />
+        <AccountPlanBadge v-if="hasPlanBadge" :upstream="account.upstream" :authentication-kind="account.authenticationKind" :plan-type="account.planType" :plan-type-display="account.planTypeDisplay" size="sm" class="shrink-0" />
+        <template v-if="showUpstreamStatus || lastRefreshed">
+          <span v-if="hasPlanBadge" class="shrink-0">·</span>
+          <AccountUpstreamStatus v-if="showUpstreamStatus && account.upstream" :upstream="account.upstream" />
+          <span v-else-if="lastRefreshed" class="min-w-0 truncate" :title="lastRefreshed">{{ lastRefreshed }}</span>
         </template>
-        <span class="shrink-0">·</span>
-        <span class="min-w-0 truncate" :title="lastRefreshed">{{ lastRefreshed }}</span>
       </p>
       <div v-if="hasActions" class="col-start-2 row-start-1 flex items-center gap-0.5 [&_svg]:size-3.5 [&_svg]:stroke-2">
         <ZIconButton
@@ -90,7 +109,7 @@ watch(hasPersonalInfo, (available) => {
           <ChartNoAxesCombined class="size-3.5" />
         </ZIconButton>
         <ZIconButton
-          v-if="account.capabilities.quotaRefresh"
+          v-if="canRefresh"
           size="small"
           :aria-label="t('accounts.quotaForecast.refreshQuota')"
           :loading="refreshing"
@@ -105,8 +124,11 @@ watch(hasPersonalInfo, (available) => {
       </div>
     </div>
 
-    <div v-if="!account.capabilities.quota && quotaEntries.length === 0" class="grid flex-1 place-items-center">
-      <ZEmpty :title="t('accounts.quota.queryUnsupported')" surface="none" />
+    <div v-if="quotaEntries.length === 0 && !hasUpstreamPool" class="grid flex-1 place-items-center">
+      <ZEmpty
+        :title="!account.capabilities.quota && !account.upstream?.discovered ? t('accounts.quota.queryUnsupported') : t('accounts.quota.unobserved')"
+        surface="none"
+      />
     </div>
     <div v-else class="grid min-h-0 gap-3">
       <AccountQuotaPanelEntry
@@ -115,9 +137,7 @@ watch(hasPersonalInfo, (available) => {
         :label="entry.label"
         :windows="entry.windows"
       />
-      <p v-if="quotaEntries.length === 0" class="m-0 text-cp-sm font-emphasis text-cp-text-secondary">
-        {{ t('accounts.quota.unobserved') }}
-      </p>
+      <AccountUpstreamPool v-if="hasUpstreamPool" :pool="account.upstream?.pool" :windows="poolWindows" />
     </div>
   </section>
 

@@ -35,7 +35,7 @@ onScopeDispose(() => motion?.kill())
 
 <template>
   <div class="grid min-h-0 flex-1 place-items-center px-6 py-8" role="status" :aria-label="t('plugins.page.loadingPage')">
-    <span ref="icon" class="inline-flex size-16 items-center justify-center text-cp-text-secondary" aria-hidden="true">
+    <span ref="icon" class="inline-flex size-16 items-center justify-center text-z-text-secondary" aria-hidden="true">
       <Box :size="40" :stroke-width="1.5" />
     </span>
   </div>

@@ -15,6 +15,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useDownload } from '@/composables/useDownload'
 import { useIdSet } from '@/composables/useIdSet'
 import { t } from '@/i18n'
+import { accountUpstreamErrorMessage } from '@/utils/account-upstream'
 import { notification as ZNotification } from '@/utils/notification'
 import { errorMessage, withMinimumDuration } from '@/utils/operation'
 import { isSupportedProvider } from '@/utils/providers'
@@ -253,9 +254,16 @@ export function useAccountMutations(options: {
           selectedIds.delete(accountId)
           options.selectedIds.value = selectedIds
         }
-        ZNotification.success({
-          message: t('accounts.actions.quotaRefreshed'),
-        })
+        if (result.account.upstream?.lastError) {
+          ZNotification.warning({
+            message: accountUpstreamErrorMessage(result.account.upstream.lastError),
+          })
+        }
+        else {
+          ZNotification.success({
+            message: t('accounts.actions.quotaRefreshed'),
+          })
+        }
       }
       catch {}
     })

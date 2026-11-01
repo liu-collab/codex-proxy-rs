@@ -25,7 +25,7 @@ watch(open, (value) => {
 <template>
   <ZDialog v-model="open" :title="reset ? t('settings.pricing.clearOverrides') : t('settings.pricing.setMultipliers')" :description="t('settings.pricing.batch.description', { count: rows.length })" :show-close="!saving" :close-on-click-modal="!saving" :close-on-press-escape="!saving" type="warning">
     <div class="grid gap-4">
-      <p v-if="reset" class="m-0 text-cp leading-relaxed text-cp-text-secondary">
+      <p v-if="reset" class="m-0 text-z leading-relaxed text-z-text-secondary">
         {{ t('settings.pricing.batch.resetHelp') }}
       </p>
       <ZFormItem v-else :label="t('settings.pricing.targetMultiplier')" :description="t('settings.pricing.batch.multiplierHelp')">
@@ -35,15 +35,15 @@ watch(open, (value) => {
           </template>
         </ZInput>
       </ZFormItem>
-      <ZScrollbar max-height="16rem" class="rounded-cp bg-cp-fill-quaternary">
-        <ul class="m-0 list-none p-3 text-cp-sm">
+      <ZScrollbar max-height="16rem" class="rounded-z bg-z-fill-quaternary">
+        <ul class="m-0 list-none p-3 text-z-sm">
           <li v-for="row in rows" :key="row.model" class="flex items-start justify-between gap-3 py-2">
             <span class="min-w-0 break-all font-mono">{{ row.model }}</span>
-            <span class="shrink-0 font-mono text-cp-text-secondary">{{ multiplierText(row.effective.multiplierBps) }} → {{ reset ? '1×' : bps === undefined ? '—' : multiplierText(bps) }}</span>
+            <span class="shrink-0 font-mono text-z-text-secondary">{{ multiplierText(row.effective.multiplierBps) }} → {{ reset ? '1×' : bps === undefined ? '—' : multiplierText(bps) }}</span>
           </li>
         </ul>
       </ZScrollbar>
-      <p v-if="!reset && bps === undefined" role="alert" class="m-0 text-cp-sm text-cp-error">
+      <p v-if="!reset && bps === undefined" role="alert" class="m-0 text-z-sm text-z-error">
         {{ t('settings.pricing.enterLegalMultiplier') }}
       </p>
     </div>

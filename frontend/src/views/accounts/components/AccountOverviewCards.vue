@@ -47,15 +47,15 @@ const overviewItems = computed(() => [
 
 function overviewIconClass(tone: string) {
   if (tone === 'success') {
-    return 'bg-cp-green-container text-cp-green-on-container'
+    return 'bg-z-green-container text-z-green-on-container'
   }
   if (tone === 'warning') {
-    return 'bg-cp-orange-container text-cp-orange-on-container'
+    return 'bg-z-orange-container text-z-orange-on-container'
   }
   if (tone === 'danger') {
-    return 'bg-cp-error-container text-cp-error-on-container'
+    return 'bg-z-error-container text-z-error-on-container'
   }
-  return 'bg-cp-blue-container text-cp-blue-on-container'
+  return 'bg-z-blue-container text-z-blue-on-container'
 }
 </script>
 
@@ -64,13 +64,13 @@ function overviewIconClass(tone: string) {
     <ZCard v-for="item in overviewItems" :key="item.label" as="article" padding="compact">
       <div class="flex items-stretch justify-between gap-3">
         <div class="flex min-w-0 flex-col">
-          <p class="m-0 text-cp-sm leading-none font-heavy text-cp-text-secondary">
+          <p class="m-0 text-z-sm leading-none font-heavy text-z-text-secondary">
             {{ item.label }}
           </p>
-          <strong class="my-2 block font-mono text-[26px] leading-none font-extrabold text-cp-text">
+          <strong class="my-2 block font-mono text-[26px] leading-none font-extrabold text-z-text">
             {{ item.value }}
           </strong>
-          <p class="m-0 truncate text-cp-sm leading-none font-emphasis text-cp-text-quaternary">
+          <p class="m-0 truncate text-z-sm leading-none font-emphasis text-z-text-quaternary">
             {{ item.caption }}
           </p>
         </div>

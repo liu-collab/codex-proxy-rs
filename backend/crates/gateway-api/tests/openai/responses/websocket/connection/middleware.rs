@@ -66,6 +66,7 @@ async fn client_close_does_not_flush_a_retained_sender_with_an_inflight_write() 
         dropped: Arc::new(AtomicBool::new(false)),
     };
     let mut connection = spawn_connection(
+        tokio::sync::watch::channel(tokio::time::Instant::now()).0,
         socket,
         Arc::from("retained-writer"),
         CancellationToken::new(),

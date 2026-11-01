@@ -43,17 +43,17 @@ function openView(view: PluginManagementView) {
       <article
         v-for="view in pageViews"
         :key="view.target.instanceId"
-        class="flex min-w-0 flex-col gap-3 rounded-cp-card bg-cp-bg-container p-4 shadow-cp-card"
+        class="flex min-w-0 flex-col gap-3 rounded-z-card bg-z-bg-container p-4 shadow-z-card"
       >
         <div class="flex min-w-0 items-start gap-3">
-          <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-cp bg-cp-primary-container text-cp-primary-on-container">
+          <span class="inline-flex size-9 shrink-0 items-center justify-center rounded-z bg-z-primary-container text-z-primary-on-container">
             <Blocks class="size-4" />
           </span>
           <div class="min-w-0 flex-1">
-            <h2 class="m-0 truncate text-cp-lg font-heavy text-cp-text" :title="view.name">
+            <h2 class="m-0 truncate text-z-lg font-heavy text-z-text" :title="view.name">
               {{ view.name }}
             </h2>
-            <p class="mt-1 mb-0 truncate font-mono text-cp-xs text-cp-text-quaternary" :title="view.target.instanceId">
+            <p class="mt-1 mb-0 truncate font-mono text-z-xs text-z-text-quaternary" :title="view.target.instanceId">
               {{ t('plugins.extensions.configuration', { value: shortPluginInstanceId(view.target.instanceId) }) }}
             </p>
           </div>
@@ -62,7 +62,7 @@ function openView(view: PluginManagementView) {
           </ZTag>
         </div>
 
-        <p class="m-0 line-clamp-2 text-cp-sm leading-relaxed text-cp-text-secondary">
+        <p class="m-0 line-clamp-2 text-z-sm leading-relaxed text-z-text-secondary">
           {{ view.pages.map(page => page.title).join('、') }}
         </p>
 

@@ -149,7 +149,7 @@ fn upgrade_required_response() -> Response {
     let mut response = live_error_response(
         LiveErrorShape::Realtime,
         StatusCode::UPGRADE_REQUIRED,
-        "WebSocket upgrade required",
+        "WebSocket upgrade required.",
         "websocket_upgrade_required",
     );
     response.headers_mut().insert(

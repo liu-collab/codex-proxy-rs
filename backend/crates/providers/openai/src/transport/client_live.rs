@@ -10,13 +10,14 @@ use gateway_core::operation::ProviderHttpHeader;
 use gateway_protocol::openai::is_transport_managed_request_header;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
+use crate::compat::is_non_codex_request_header;
+
 use super::{
     client::{
         CodexBackendClient, CodexClientError, CodexClientResult, CodexRequestContext,
         CodexTransportMetrics, elapsed_duration_millis, http_version_name, retry_after_seconds,
     },
     diagnostics::CodexUpstreamDiagnostics,
-    downstream::is_non_codex_request_header,
     endpoints::endpoint_url,
     headers::is_managed_identity_header,
     response_meta,
