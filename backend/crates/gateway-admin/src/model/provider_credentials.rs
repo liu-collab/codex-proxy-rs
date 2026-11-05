@@ -875,6 +875,8 @@ pub struct ProviderSubscription {
 pub struct AccountPersonalInfo {
     pub profile: Result<ProviderProfileStatistics, AdminError>,
     pub subscription: Option<ProviderSubscription>,
+    /// 账号自账本建立起的累计消耗，按币种分组；与资料、订阅相互独立读取
+    pub cost_total: Vec<crate::model::accounts::AccountCost>,
 }
 
 /// Provider 官方个人资料中的累计摘要

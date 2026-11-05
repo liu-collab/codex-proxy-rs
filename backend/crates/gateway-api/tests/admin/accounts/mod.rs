@@ -8,10 +8,20 @@ mod personal_info {
     use chrono::{TimeZone as _, Utc};
     use gateway_admin::model::{
         AdminError,
+        accounts::AccountCost,
+        observability::DecimalAmount,
         provider_credentials::{AccountPersonalInfo, ProviderSubscription},
     };
     use gateway_api::admin::accounts::{AccountPersonalInfoData, AccountSubscriptionData};
     use serde_json::json;
+    use std::str::FromStr as _;
+
+    fn cost(currency: &str, amount: &str) -> AccountCost {
+        AccountCost {
+            currency: currency.to_owned(),
+            amount: DecimalAmount::from_str(amount).unwrap(),
+        }
+    }
 
     #[test]
     fn subscription_response_exposes_only_display_fields_and_preserves_unknowns() {
@@ -39,7 +49,7 @@ mod personal_info {
     }
 
     #[test]
-    fn personal_info_response_preserves_subscription_when_profile_fails() {
+    fn personal_info_response_preserves_subscription_and_cost_totals_when_profile_fails() {
         let observed = Utc.with_ymd_and_hms(2026, 9, 14, 0, 0, 0).unwrap();
         let response = AccountPersonalInfoData::from((
             AccountPersonalInfo {
@@ -52,6 +62,7 @@ mod personal_info {
                     billing_currency: None,
                     observed_at: observed,
                 }),
+                cost_total: vec![cost("USD", "8102.9013"), cost("EUR", "12.5")],
             },
             gateway_api::TimePresenter::new(Default::default()),
         ));
@@ -62,7 +73,15 @@ mod personal_info {
             value["subscription"]["expiresAt"],
             "2026-09-14T00:00:00+00:00"
         );
-        assert_eq!(value.as_object().unwrap().len(), 3);
+        // 精确金额用于计算，展示串沿用账号用量面板的币种格式化，非 USD 带币种前缀
+        assert_eq!(
+            value["costTotals"],
+            json!([
+                {"currency": "USD", "amount": "8102.9013", "amountDisplay": "$8102.9"},
+                {"currency": "EUR", "amount": "12.5", "amountDisplay": "EUR 12.5"},
+            ])
+        );
+        assert_eq!(value.as_object().unwrap().len(), 4);
     }
 
     #[test]
@@ -71,6 +90,7 @@ mod personal_info {
             AccountPersonalInfo {
                 profile: Err(AdminError::unavailable("服务商暂不可用")),
                 subscription: None,
+                cost_total: Vec::new(),
             },
             gateway_api::TimePresenter::new(Default::default()),
         ));
@@ -80,6 +100,7 @@ mod personal_info {
                 "profile": null,
                 "profileError": "服务商暂不可用",
                 "subscription": null,
+                "costTotals": [],
             })
         );
     }

@@ -329,10 +329,17 @@ export interface AccountProfileStatisticsResponse {
   activityInsights: AccountProfileActivityInsights
 }
 
+export interface AccountCostTotal {
+  currency: string
+  amount: string
+  amountDisplay: string
+}
+
 export interface AccountPersonalInfoResponse {
   profile: AccountProfileStatisticsResponse | null
   profileError: string | null
   subscription: AccountSubscription | null
+  costTotals: AccountCostTotal[]
 }
 
 export interface AccountResetCredit {

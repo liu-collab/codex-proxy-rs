@@ -185,6 +185,14 @@ pub trait AccountStore:
         window: &AccountUsageWindowQuery,
     ) -> AdminStoreResult<QuotaForecastHistory>;
 
+    /// 读取账号自账本建立起的累计消耗，按币种分组
+    ///
+    /// 账本独立于请求明细保留期，因此结果不随用量清理回退，也不等同于任意时间窗的用量聚合
+    async fn load_account_cost_total(
+        &self,
+        account_id: &str,
+    ) -> AdminStoreResult<Vec<crate::model::accounts::AccountCost>>;
+
     async fn credential_details(
         &self,
         provider_kind: &gateway_core::routing::ProviderKind,

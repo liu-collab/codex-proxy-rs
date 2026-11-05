@@ -21,7 +21,7 @@ const { t } = useI18n({ useScope: 'global' })
 
 const open = defineModel<boolean>({ required: true })
 const accountId = toRef(() => props.account.id)
-const { profile, subscription, loading, error, load } = useAccountPersonalInfo({
+const { profile, subscription, costTotals, loading, error, load } = useAccountPersonalInfo({
   accountId,
   open,
   capabilities: toRef(() => props.account.capabilities),
@@ -33,7 +33,7 @@ const { profile, subscription, loading, error, load } = useAccountPersonalInfo({
     <div class="flex min-h-0 min-w-0 flex-col gap-6 pb-2">
       <div class="grid min-w-0 grid-cols-1 gap-4 rounded-z-lg bg-z-fill-alter p-4 sm:p-5 lg:items-center" :class="account.capabilities.profile ? 'lg:grid-cols-[minmax(310px,1.05fr)_minmax(0,1.95fr)]' : undefined">
         <AccountProfileHero :account="account" :profile="profile" />
-        <AccountProfileMetrics v-if="account.capabilities.profile" :profile="profile" :loading="loading" />
+        <AccountProfileMetrics v-if="account.capabilities.profile" :profile="profile" :cost-totals="costTotals" :loading="loading" />
       </div>
 
       <section v-if="subscription" class="grid min-w-0 grid-cols-1 gap-4" aria-labelledby="profile-subscription-title">

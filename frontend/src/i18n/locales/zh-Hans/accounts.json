@@ -424,6 +424,7 @@
         "throughTokens": "截至{dateDisplay}：{value} Tokens"
       },
       "metrics": {
+        "cumulativeCost": "累计费用",
         "cumulativeNumberOfTokens": "累计 Token 数",
         "peakNumberOfTokens": "峰值 Token 数",
         "maximumChatDuration": "最长聊天时长",

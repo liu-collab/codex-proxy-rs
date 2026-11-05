@@ -989,10 +989,11 @@ impl AccountsService for DefaultAccountsService {
         account_id: &ProviderAccountId,
     ) -> Result<AccountPersonalInfo, AdminError> {
         let (initial, provider) = self.provider_for_account(account_id).await?;
-        // 两项读取相互独立；不因其中一项失败而取消另一项，也不触发凭据或额度刷新
-        let (profile, subscription) = futures::join!(
+        // 三项读取相互独立；不因其中一项失败而取消其余项，也不触发凭据或额度刷新
+        let (profile, subscription, cost_total) = futures::join!(
             provider.profile_statistics(account_id),
             provider.subscription(account_id),
+            self.accounts.load_account_cost_total(account_id.as_str()),
         );
         let profile =
             profile.map_err(|error| map_provider_error(error, "provider profile statistics"));
@@ -1000,6 +1001,15 @@ impl AccountsService for DefaultAccountsService {
             .map_err(|error| map_provider_error(error, "provider subscription"))
             .ok()
             .flatten();
+        // 累计消耗只用于展示；读取失败时保留其余两项，避免账本故障挡住个人信息
+        let cost_total = cost_total.unwrap_or_else(|error| {
+            tracing::warn!(
+                account_id = account_id.as_str(),
+                error = %error,
+                "failed to load account cost total; showing empty total"
+            );
+            Vec::new()
+        });
 
         // 汇聚等待期间发生重新授权、换绑或删除时，不返回混合身份的数据
         let current = self.load_account(account_id).await?;
@@ -1013,6 +1023,7 @@ impl AccountsService for DefaultAccountsService {
         Ok(AccountPersonalInfo {
             profile,
             subscription,
+            cost_total,
         })
     }
 

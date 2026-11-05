@@ -21,6 +21,8 @@ export function useAccountPersonalInfo({ accountId, open, capabilities }: {
   const subscription = computed(() => capabilities.value.subscription
     ? info.value?.subscription ?? null
     : null)
+  // 累计费用来自本地账本，不依赖 Provider 能力；读取失败时后端返回空数组
+  const costTotals = computed(() => info.value?.costTotals ?? [])
   const error = computed(() => request.error.value || (capabilities.value.profile ? info.value?.profileError : '') || '')
 
   async function load() {
@@ -67,6 +69,7 @@ export function useAccountPersonalInfo({ accountId, open, capabilities }: {
   return {
     profile,
     subscription,
+    costTotals,
     loading,
     error,
     load,

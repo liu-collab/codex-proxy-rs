@@ -4,6 +4,7 @@ mod reset_credit_automation;
 
 use std::{
     collections::BTreeMap,
+    str::FromStr as _,
     sync::{Arc, Mutex},
 };
 
@@ -30,10 +31,10 @@ use gateway_admin::{
     model::{
         AdminError, MutationContext, Revision,
         accounts::{
-            AccountConnectionTestEvent, AccountListQuery, AccountPage, AccountPageItem,
-            AccountRecord, AccountRuntimeSnapshot, AccountSummary, AccountUpdateResult,
-            AccountUsage, AccountUsageWindowQuery, AccountUsageWindowResult, AccountsUpdateResult,
-            BatchUpdateAccounts, DeleteAccounts, UpdateAccount,
+            AccountConnectionTestEvent, AccountCost, AccountListQuery, AccountPage,
+            AccountPageItem, AccountRecord, AccountRuntimeSnapshot, AccountSummary,
+            AccountUpdateResult, AccountUsage, AccountUsageWindowQuery, AccountUsageWindowResult,
+            AccountsUpdateResult, BatchUpdateAccounts, DeleteAccounts, UpdateAccount,
         },
         observability::TimeRange,
         provider_credentials::{
@@ -617,6 +618,8 @@ pub(super) struct FakeAccountStore {
     quota_window_usage: Mutex<Vec<AccountUsageWindowResult>>,
     quota_window_queries: Mutex<Vec<AccountUsageWindowQuery>>,
     quota_forecast_history: Mutex<QuotaForecastHistory>,
+    account_cost_total: Mutex<Vec<AccountCost>>,
+    account_cost_total_failure: Mutex<Option<AdminStoreErrorKind>>,
     update_commands: Mutex<Vec<UpdateAccount>>,
     automations: Mutex<
         BTreeMap<String, gateway_admin::model::reset_credit_automation::ResetCreditAutomation>,
@@ -640,6 +643,8 @@ impl FakeAccountStore {
             quota_window_usage: Mutex::new(Vec::new()),
             quota_window_queries: Mutex::new(Vec::new()),
             quota_forecast_history: Mutex::new(QuotaForecastHistory::default()),
+            account_cost_total: Mutex::new(Vec::new()),
+            account_cost_total_failure: Mutex::new(None),
             update_commands: Mutex::new(Vec::new()),
             automations: Mutex::default(),
         })
@@ -682,6 +687,14 @@ impl FakeAccountStore {
 
     pub(super) fn set_accounts(&self, accounts: Vec<AccountRecord>) {
         *self.accounts.lock().expect("accounts") = accounts;
+    }
+
+    pub(super) fn set_account_cost_total(&self, costs: Vec<AccountCost>) {
+        *self.account_cost_total.lock().expect("account cost total") = costs;
+    }
+
+    pub(super) fn fail_account_cost_total(&self, kind: AdminStoreErrorKind) {
+        *self.account_cost_total_failure.lock().unwrap() = Some(kind);
     }
 
     fn set_account_after_probe(&self, account: AccountRecord) {
@@ -851,6 +864,18 @@ impl AccountStore for FakeAccountStore {
             .unwrap()
             .push(window.clone());
         Ok(self.quota_forecast_history.lock().unwrap().clone())
+    }
+
+    async fn load_account_cost_total(&self, _: &str) -> AdminStoreResult<Vec<AccountCost>> {
+        self.record("store.load_account_cost_total");
+        match *self.account_cost_total_failure.lock().unwrap() {
+            Some(kind) => Err(AdminStoreError::new(
+                kind,
+                "account cost total",
+                "unavailable",
+            )),
+            None => Ok(self.account_cost_total.lock().unwrap().clone()),
+        }
     }
 
     async fn credential_details(
@@ -3522,6 +3547,11 @@ async fn personal_info_should_query_both_parts_concurrently_once_on_every_reques
     *provider.subscription_result.lock().unwrap() = Ok(Some(subscription.clone()));
     *provider.personal_info_barrier.lock().unwrap() = Some(Arc::new(tokio::sync::Barrier::new(2)));
     let store = FakeAccountStore::new("openai", events.clone());
+    let cost_total = vec![AccountCost {
+        currency: "USD".to_owned(),
+        amount: gateway_admin::model::observability::DecimalAmount::from_str("12.5").unwrap(),
+    }];
+    store.set_account_cost_total(cost_total.clone());
     let services = accounts_service(provider, store).await;
     let account_id = ProviderAccountId::new("acct_test").unwrap();
 
@@ -3531,10 +3561,11 @@ async fn personal_info_should_query_both_parts_concurrently_once_on_every_reques
             services.accounts().personal_info(&account_id),
         )
         .await
-        .expect("两项查询应并发执行")
+        .expect("三项查询应并发执行")
         .unwrap();
         assert_eq!(info.profile.unwrap(), empty_profile_statistics());
         assert_eq!(info.subscription, Some(subscription.clone()));
+        assert_eq!(info.cost_total, cost_total);
     }
     assert_eq!(
         recorded(&events),
@@ -3542,13 +3573,34 @@ async fn personal_info_should_query_both_parts_concurrently_once_on_every_reques
             "store.load_account",
             "provider.profile_statistics",
             "provider.subscription",
+            "store.load_account_cost_total",
             "store.load_account",
             "store.load_account",
             "provider.profile_statistics",
             "provider.subscription",
+            "store.load_account_cost_total",
             "store.load_account",
         ]
     );
+}
+
+#[tokio::test]
+async fn personal_info_should_keep_provider_parts_when_cost_total_fails() {
+    let provider = FakeProviderAdmin::new("openai", events());
+    let subscription = personal_info_subscription();
+    *provider.subscription_result.lock().unwrap() = Ok(Some(subscription.clone()));
+    let store = FakeAccountStore::new("openai", events());
+    store.fail_account_cost_total(AdminStoreErrorKind::Unavailable);
+    let services = accounts_service(provider, store).await;
+    let info = services
+        .accounts()
+        .personal_info(&ProviderAccountId::new("acct_test").unwrap())
+        .await
+        .unwrap();
+    assert_eq!(info.profile.unwrap(), empty_profile_statistics());
+    assert_eq!(info.subscription, Some(subscription));
+    // 账本读取失败只让累计消耗为空，不影响资料与订阅
+    assert!(info.cost_total.is_empty());
 }
 
 #[tokio::test]

@@ -9,12 +9,12 @@ use gateway_admin::{
         MutationContext, Revision as AdminRevision,
         account_groups::AccountGroupRef,
         accounts::{
-            AccountGroupFilter, AccountImportSettings, AccountListQuery as AdminAccountListQuery,
-            AccountPage, AccountPageItem, AccountRecord, AccountSort as AdminAccountSort,
-            AccountSortField as AdminAccountSortField, AccountSummary, AccountUpdateResult,
-            AccountUsage, AccountUsageWindowQuery, AccountUsageWindowResult, AccountsUpdateResult,
-            BatchUpdateAccounts, DeleteAccounts, SortDirection as AdminSortDirection,
-            UpdateAccount,
+            AccountCost, AccountGroupFilter, AccountImportSettings,
+            AccountListQuery as AdminAccountListQuery, AccountPage, AccountPageItem, AccountRecord,
+            AccountSort as AdminAccountSort, AccountSortField as AdminAccountSortField,
+            AccountSummary, AccountUpdateResult, AccountUsage, AccountUsageWindowQuery,
+            AccountUsageWindowResult, AccountsUpdateResult, BatchUpdateAccounts, DeleteAccounts,
+            SortDirection as AdminSortDirection, UpdateAccount,
         },
         observability::TimeRange,
         provider_credentials::{
@@ -57,6 +57,7 @@ mod admin_adapter;
 mod admin_queries;
 mod authorization;
 mod core_adapter;
+mod cost_totals;
 mod mapping;
 mod quota;
 mod quota_forecast;

@@ -1058,7 +1058,7 @@ config 返回 `{ name, plaintextKey }`，仅读取服务端会话绑定的当前
 | `GET` | `/api/admin/accounts/quota` | `accountId` | 读取当前额度，不强制访问上游；Provider 未提供额度能力时返回空额度投影 |
 | `GET` | `/api/admin/accounts/quota-forecast` | `accountId` | 按需读取周/月容量预测、源窗口剩余估算与采样依据，不刷新上游额度 |
 | `POST` | `/api/admin/accounts/quota/refresh` | `{ accountId }` | 访问 Provider 并刷新额度，同时同步额度所属状态 |
-| `GET` | `/api/admin/accounts/personal-info` | `accountId` | 按需汇聚 Provider 上游个人资料、累计活动与订阅信息，不更新额度或 credential |
+| `GET` | `/api/admin/accounts/personal-info` | `accountId` | 按需汇聚 Provider 上游个人资料、累计活动、订阅信息与本地累计费用，不更新额度或 credential |
 | `GET` | `/api/admin/accounts/profile-avatar` | `accountId`、可选 `version` | 返回支持头像能力的 Provider 字节流，需要管理员会话；`version` 仅区分浏览器缓存 |
 | `GET` | `/api/admin/accounts/reset-credits` | `accountId` | 查询支持该能力的 Provider 重置卡，不读取本地库存 |
 | `POST` | `/api/admin/accounts/reset-credits` | `{ accountId, creditId?, redeemRequestId }` | 使用 UUIDv4 幂等键消费一张 Provider 重置卡 |
@@ -1561,8 +1561,8 @@ OAuth 账号的额度、个人资料、订阅与重置卡请求先使用 `openai
 
 ### 账号个人信息
 
-`GET /api/admin/accounts/personal-info?accountId=...` 需要管理员会话，提供 Codex OAuth 账号的个人信息。后端并发读取资料统计与订阅，
-一次返回；每次请求均重新查询，不刷新 credential，不读取本地 usage/billing 记录，也不缓存或估算统计结果。
+`GET /api/admin/accounts/personal-info?accountId=...` 需要管理员会话，提供 Codex OAuth 账号的个人信息。后端并发读取资料统计、订阅与
+账号累计费用，一次返回；每次请求均重新查询，不刷新 credential，不按定价重算或缓存统计结果。
 查询沿用上述 OpenAI 404 路由回退
 
 响应 `data` 包含：
@@ -1572,9 +1572,20 @@ OAuth 账号的额度、个人资料、订阅与重置卡请求先使用 `openai
 | `profile` | object 或 null | 官方个人资料、累计统计与活动洞察；查询失败为 null |
 | `profileError` | string 或 null | 资料查询失败时的安全错误提示；成功为 null |
 | `subscription` | object 或 null | 当前绑定账号的订阅周期；无可用周期或查询失败为 null |
+| `costTotals` | array | 账号累计费用，按币种分组；无记账记录时为空数组 |
 
-两部分的查询结果独立：资料失败时仍返回可用订阅，订阅失败时仍返回资料。账号不存在、查询参数不合法或
-无管理员会话时，仍返回标准错误；请求期间账号身份或 credential revision 改变时拒绝整份结果
+三部分的查询结果独立：资料失败时仍返回可用订阅与累计费用，订阅失败时仍返回资料，累计费用读取失败时
+按空数组降级且不影响其余两项。账号不存在、查询参数不合法或无管理员会话时，仍返回标准错误；
+请求期间账号身份或 credential revision 改变时拒绝整份结果
+
+#### 累计费用
+
+`costTotals` 的元素包含 `currency`、`amount` 与 `amountDisplay`。`amount` 是账本中该币种的精确合计，
+`amountDisplay` 是同一金额的展示串，与账号用量面板共用币种格式化规则
+
+累计费用来自 `provider_account_cost_totals` 账本，由完成用量事实逐笔增减，因此不受
+[历史保留](#历史保留) 的用量清理影响，也不等同于任意时间窗的用量聚合。账本随请求完成记账，
+部署前已清理的明细无法追溯，早期数值可能低于真实累计
 
 #### 官方资料与累计统计
 
@@ -1875,7 +1886,7 @@ HTTP 返回 `429`，`error.code` 为 `key_daily_budget_exceeded` 或 `key_weekly
 `opsEventRetentionDays` 与 `auditRetentionDays` 分别控制独立运维事件和管理审计，默认 30、90，均须为正整数
 
 清理任务每轮读取已保存设置，按完成时间分批删除过期请求及关联事件，不删除运行中的请求；有界单轮结束后等待一分钟再检查。
-缩短保留期后，已有过期数据逐批清理，清理结果不可恢复；Client Key 结算账本不受影响
+缩短保留期后，已有过期数据逐批清理，清理结果不可恢复；Client Key 结算账本与账号累计费用账本不受影响
 
 统计在后台异步更新，清理期间可短暂包含已删除请求的统计贡献，投影完成后更新为剩余数据。
 查询范围无需随保留期缩短，超出保留期的已清理数据不再计入结果

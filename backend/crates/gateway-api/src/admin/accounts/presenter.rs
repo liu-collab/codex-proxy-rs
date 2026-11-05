@@ -507,6 +507,14 @@ pub(super) fn account_currency_cost_view(cost: &AccountCost) -> CurrencyCostView
     }
 }
 
+pub(super) fn account_cost_total_view(cost: &AccountCost) -> AccountCostTotalView {
+    AccountCostTotalView {
+        currency: cost.currency.clone(),
+        amount: cost.amount.as_str().to_owned(),
+        amount_display: format_decimal_currency(cost.amount.as_str(), &cost.currency),
+    }
+}
+
 pub(super) fn display_optional_tokens(value: Option<u64>) -> String {
     value.map_or_else(|| "—".to_owned(), format_compact_number)
 }

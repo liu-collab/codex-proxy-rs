@@ -424,6 +424,7 @@
         "throughTokens": "Through {dateDisplay}: {value} tokens"
       },
       "metrics": {
+        "cumulativeCost": "Total cost",
         "cumulativeNumberOfTokens": "Total tokens",
         "peakNumberOfTokens": "Peak tokens",
         "maximumChatDuration": "Longest chat",

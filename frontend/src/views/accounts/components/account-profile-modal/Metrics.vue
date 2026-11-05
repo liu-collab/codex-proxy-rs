@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { AccountProfileStatisticsResponse } from '@/api'
+import type { AccountCostTotal, AccountProfileStatisticsResponse } from '@/api'
 
 import { ZSkeleton } from '@codex-proxy/ui'
 import { computed } from 'vue'
@@ -8,12 +8,21 @@ import { formatCompactNumber, formatInteger } from '@/utils/format'
 
 const props = defineProps<{
   profile: AccountProfileStatisticsResponse | null
+  costTotals: AccountCostTotal[]
   loading: boolean
 }>()
 
 const { t } = useI18n({ useScope: 'global' })
 
+// 账本按币种分组；界面主口径为 USD，其他币种保留在提示中供核对
+const usdCost = computed(() => props.costTotals.find(cost => cost.currency.toUpperCase() === 'USD'))
+
 const metrics = computed(() => [
+  {
+    label: t('accounts.profile.metrics.cumulativeCost'),
+    value: usdCost.value?.amountDisplay ?? '—',
+    title: costTotalsTitle(props.costTotals),
+  },
   {
     label: t('accounts.profile.metrics.cumulativeNumberOfTokens'),
     value: formatMetric(props.profile?.summary.totalTextTokens),
@@ -37,6 +46,12 @@ const metrics = computed(() => [
     value: formatDays(props.profile?.summary.longestStreakDays),
   },
 ])
+
+function costTotalsTitle(costTotals: AccountCostTotal[]) {
+  return costTotals.length === 0
+    ? undefined
+    : costTotals.map(cost => `${cost.amount} ${cost.currency}`).join(' / ')
+}
 
 function formatMetric(value: number | null | undefined) {
   return value == null
@@ -85,7 +100,7 @@ function formatDuration(value: number | null | undefined) {
 
 <template>
   <section class="@container min-w-0 py-1" :aria-label="t('accounts.profile.metrics.cumulativeActivitySummary')" :aria-busy="loading">
-    <dl class="grid grid-cols-2 gap-y-4 @[24rem]:grid-cols-3 @[34rem]:grid-cols-5">
+    <dl class="grid grid-cols-2 gap-y-4 @[24rem]:grid-cols-3 @[34rem]:grid-cols-6">
       <div v-for="metric in metrics" :key="metric.label" class="min-w-0 px-2 text-center sm:px-3">
         <dd class="m-0 font-mono text-z-lg leading-tight font-heavy whitespace-nowrap tabular-nums text-z-text" :title="metric.title">
           <ZSkeleton v-if="loading && !profile" shape="text" class="mx-auto h-4 w-14" />

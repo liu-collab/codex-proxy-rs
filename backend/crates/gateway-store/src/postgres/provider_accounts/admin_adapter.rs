@@ -462,6 +462,13 @@ impl AccountStore for PgAdminAccountStore {
         super::quota_forecast::load_history(&self.pool, &self.query_budget, window).await
     }
 
+    async fn load_account_cost_total(
+        &self,
+        account_id: &str,
+    ) -> AdminStoreResult<Vec<AccountCost>> {
+        super::cost_totals::load_cost_total(&self.pool, account_id).await
+    }
+
     async fn credential_details(
         &self,
         provider_kind: &ProviderKind,

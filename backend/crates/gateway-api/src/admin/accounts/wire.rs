@@ -793,6 +793,8 @@ pub struct AccountPersonalInfoData {
     pub profile: Option<AccountProfileStatisticsData>,
     pub profile_error: Option<String>,
     pub subscription: Option<AccountSubscriptionData>,
+    /// 账本累计消耗，按币种分组；没有记录时为空数组
+    pub cost_totals: Vec<AccountCostTotalView>,
 }
 
 impl From<(AccountPersonalInfo, crate::time::TimePresenter)> for AccountPersonalInfoData {
@@ -810,8 +812,22 @@ impl From<(AccountPersonalInfo, crate::time::TimePresenter)> for AccountPersonal
             subscription: info
                 .subscription
                 .map(|value| AccountSubscriptionData::from((value, time))),
+            cost_totals: info
+                .cost_total
+                .iter()
+                .map(account_cost_total_view)
+                .collect(),
         }
     }
+}
+
+/// 账本累计消耗；金额是已记账事实的精确合计，不是按定价推算的估算值
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountCostTotalView {
+    pub currency: String,
+    pub amount: String,
+    pub amount_display: String,
 }
 
 /// 按需读取的订阅安全字段，不暴露原始上游响应

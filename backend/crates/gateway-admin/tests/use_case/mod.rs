@@ -553,6 +553,13 @@ impl AccountStore for UnavailableStore {
         Err(unavailable("quota forecast history"))
     }
 
+    async fn load_account_cost_total(
+        &self,
+        _: &str,
+    ) -> AdminStoreResult<Vec<gateway_admin::model::accounts::AccountCost>> {
+        Err(unavailable("account cost total"))
+    }
+
     async fn credential_details(
         &self,
         _: &ProviderKind,
