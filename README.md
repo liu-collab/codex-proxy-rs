@@ -40,6 +40,9 @@
 
 以下命令适用于 Linux amd64/arm64，需要 Docker Engine、Docker Compose Plugin、curl 和 OpenSSL
 
+macOS 从[发行页](https://github.com/zyycn/codex-proxy-rs/releases)下载对应的归档：Intel 机型选 `darwin_amd64`，Apple Silicon 机型选 `darwin_arm64`。
+Windows x64 / ARM64 的安装步骤见 [Windows 二进制部署](deploy/README.md#windows-二进制部署)
+
 已有部署请先看 [升级说明](deploy/README.md#镜像升级与源码构建)，不要覆盖原配置
 
 ### 一键安装
@@ -89,7 +92,7 @@ API Key 持有者可在登录页切换身份，查看自己的用量与额度，
 
 1. 在「账号」中添加账号，完成授权或导入
 2. 按需建立账号分组，再创建客户端密钥并选择可用分组，**不选分组表示可使用全部账号**
-3. 打开密钥的「使用密钥」，复制客户端配置
+3. [连接客户端](#客户端接入)
 
 ## 客户端接入
 

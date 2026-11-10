@@ -5,14 +5,44 @@ use std::fmt;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 
-use crate::error::{ClientVisibleUpstreamResponse, GatewayError, GatewayErrorKind};
+use crate::error::{
+    ClientVisibleUpstreamResponse, GatewayError, GatewayErrorKind, ProxyConnectionHint,
+};
 use crate::identity::ProviderKind;
 use crate::routing::UpstreamModelId;
-use crate::{account::ProviderAccountId, operation::Operation, upstream::UpstreamSendState};
+use crate::{
+    account::{AccountEligibilityPolicy, ProviderAccountId},
+    operation::Operation,
+    upstream::UpstreamSendState,
+};
+
+/// 探测始终固定账号，恢复探测的账号状态由解冻任务持有
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccountProbeTarget {
+    ConnectionTest(ProviderAccountId),
+    FreezeRecovery(ProviderAccountId),
+}
+
+impl AccountProbeTarget {
+    pub fn account_id(&self) -> &ProviderAccountId {
+        match self {
+            Self::ConnectionTest(account) | Self::FreezeRecovery(account) => account,
+        }
+    }
+
+    pub(super) fn into_selection(self) -> (ProviderAccountId, AccountEligibilityPolicy) {
+        match self {
+            Self::ConnectionTest(account) => {
+                (account, AccountEligibilityPolicy::BypassForDiagnostic)
+            }
+            Self::FreezeRecovery(account) => (account, AccountEligibilityPolicy::FreezeRecovery),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct AccountProbeRequest {
-    pub account_id: ProviderAccountId,
+    pub target: AccountProbeTarget,
     pub provider_kind: ProviderKind,
     pub upstream_model: UpstreamModelId,
     pub operation: Operation,
@@ -98,6 +128,7 @@ impl AccountProbeErrorSource {
 #[derive(Debug)]
 pub struct AccountProbeError {
     gateway: GatewayError,
+    pub(super) proxy_hint: Option<ProxyConnectionHint>,
     source: AccountProbeErrorSource,
     send_state: Option<UpstreamSendState>,
     upstream_response: Option<Box<AccountProbeUpstreamResponse>>,
@@ -113,6 +144,7 @@ impl AccountProbeError {
     ) -> Self {
         Self {
             gateway,
+            proxy_hint: None,
             source,
             send_state,
             upstream_response: upstream_response.map(Box::new),
@@ -132,6 +164,11 @@ impl AccountProbeError {
     #[must_use]
     pub const fn send_state(&self) -> Option<UpstreamSendState> {
         self.send_state
+    }
+
+    #[must_use]
+    pub const fn proxy_hint(&self) -> Option<ProxyConnectionHint> {
+        self.proxy_hint
     }
 
     #[must_use]

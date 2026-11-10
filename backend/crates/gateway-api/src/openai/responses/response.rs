@@ -10,7 +10,7 @@ use gateway_protocol::openai::sse::{
 use serde_json::Value;
 
 use super::error::ResponseEncodeError;
-use crate::openai::error::capacity_error_for_client;
+use crate::client_error::capacity_error_for_client;
 
 const OPENAI_PROTOCOL: &str = "openai";
 

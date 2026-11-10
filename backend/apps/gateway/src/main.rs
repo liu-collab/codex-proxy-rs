@@ -1,7 +1,6 @@
 //! 网关命令行入口，选择启动模式并创建异步运行时
 
 use std::{
-    env,
     error::Error,
     io::{self, Write},
     process::ExitCode,
@@ -21,7 +20,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode, Box<dyn Error + Send + Sync>> {
     ensure_rustls_provider();
-    let mut arguments = env::args_os().skip(1);
+    let mut arguments = gateway_host::system_update::startup_arguments()?;
     let command = arguments
         .next()
         .map(|value| {
@@ -92,7 +91,7 @@ fn runtime() -> Result<tokio::runtime::Runtime, io::Error> {
 
 fn reject_extra_arguments(mut arguments: impl Iterator) -> Result<(), io::Error> {
     if arguments.next().is_some() {
-        return Err(invalid_cli("unexpected extra command arguments"));
+        return Err(invalid_cli("too many arguments"));
     }
     Ok(())
 }

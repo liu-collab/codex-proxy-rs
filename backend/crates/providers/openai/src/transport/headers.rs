@@ -31,16 +31,15 @@ pub(super) fn is_managed_identity_header(name: &str) -> bool {
             | "chatgpt-project-id"
             | "openai-organization"
             | "openai-project"
-            // 工作区路由和合规属性属于认证账号，不能继承下游账号的值
-            | "x-openai-account-routing-override"
-            | "x-openai-fedramp"
-            // 安装身份由当前账号写入 client_metadata，不继承下游安装头
+            // 安装头与 client_metadata 共用本次请求的安装身份
             | "x-codex-installation-id"
             // 画像和设备证明须属于选定账号，不能由下游覆盖
             | "originator"
             | "user-agent"
             | "version"
+            // 地域和账号路由统一按部署配置生成
             | "x-openai-internal-codex-residency"
+            | "x-openai-account-routing-override"
             // 设备证明头只能由官方客户端或网关自身生成
             | "x-oai-attestation"
             // 会话标识由网关按入站语义重建，下游原值不作为身份头继承
@@ -132,6 +131,11 @@ impl CodexBackendClient {
         };
         let mut headers = build_codex_model_headers(profile, context.authorization, account_id)?;
         insert_optional_header(&mut headers, "cookie", cookie_header)?;
+        insert_optional_header(
+            &mut headers,
+            "x-codex-installation-id",
+            context.installation_id,
+        )?;
         Ok(headers)
     }
 

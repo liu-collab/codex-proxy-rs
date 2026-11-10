@@ -90,17 +90,12 @@ fn central_directory_rejects_duplicate_core_entries() {
 }
 
 #[test]
-fn central_directory_rejects_legacy_core_and_cli_launcher_paths() {
-    for name in [
-        b"ChatGPT.app/Contents/Resources/codex".as_slice(),
-        b"ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
-    ] {
-        let central = deflated_entry(name);
-        assert!(matches!(
-            find_core_entry(&central, 1),
-            Err(CodexDesktopArtifactError::MissingCore)
-        ));
-    }
+fn central_directory_with_only_cli_launcher_is_missing_core() {
+    let central = deflated_entry(b"ChatGPT.app/Contents/Resources/codex-cli/bin/codex");
+    assert!(matches!(
+        find_core_entry(&central, 1),
+        Err(CodexDesktopArtifactError::MissingCore)
+    ));
 }
 
 fn deflated_entry(name: &[u8]) -> Vec<u8> {

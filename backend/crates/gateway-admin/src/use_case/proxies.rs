@@ -23,10 +23,50 @@ use crate::{
     },
     ports::{
         provider::ProviderAdminRegistry,
-        proxy::{ProxyProbe, ProxyStore},
+        proxy::{PluginProxyAccess, ProxyProbe, ProxyStore},
         store::AdminStoreErrorKind,
     },
 };
+
+pub(crate) struct DefaultPluginProxyAccess {
+    pub(crate) store: Arc<dyn ProxyStore>,
+}
+
+#[async_trait]
+impl PluginProxyAccess for DefaultPluginProxyAccess {
+    async fn list(&self, query: ProxyListQuery) -> Result<ProxyPage, AdminError> {
+        list_proxies(self.store.as_ref(), query).await
+    }
+
+    async fn resolve(&self, id: &str) -> Result<OutboundProxy, AdminError> {
+        if id.is_empty() || id.len() > 128 || id.chars().any(char::is_control) {
+            return Err(AdminError::invalid("代理 ID 不合法"));
+        }
+        let record = self
+            .store
+            .get(id)
+            .await
+            .map_err(|error| map_store_error(error, "proxy"))?;
+        // 显式选择代理时必须有可用配置，不能沿用账号停用代理后直连的语义
+        if !record.enabled {
+            return Err(AdminError::invalid("代理已禁用，请启用后再选择"));
+        }
+        Ok(record.proxy)
+    }
+}
+
+async fn list_proxies(
+    store: &dyn ProxyStore,
+    query: ProxyListQuery,
+) -> Result<ProxyPage, AdminError> {
+    if query.page == 0 || query.search.len() > 256 || query.search.chars().any(char::is_control) {
+        return Err(AdminError::invalid("代理查询参数不合法"));
+    }
+    store
+        .list(query)
+        .await
+        .map_err(|error| map_store_error(error, "proxy"))
+}
 
 #[async_trait]
 pub trait ProxiesService: Send + Sync {
@@ -268,14 +308,7 @@ impl ProxiesService for DefaultProxiesService {
     }
 
     async fn list(&self, query: ProxyListQuery) -> Result<ProxyPage, AdminError> {
-        if query.page == 0 || query.search.len() > 256 || query.search.chars().any(char::is_control)
-        {
-            return Err(AdminError::invalid("代理查询参数不合法"));
-        }
-        self.store
-            .list(query)
-            .await
-            .map_err(|error| map_store_error(error, "proxy"))
+        list_proxies(self.store.as_ref(), query).await
     }
 
     async fn create(
@@ -370,9 +403,10 @@ impl ProxiesService for DefaultProxiesService {
         proxy: Option<&OutboundProxy>,
         detect_location: bool,
     ) -> Result<ProxyTestResult, AdminError> {
-        let _permit = self.test_slots.try_acquire().map_err(|_| {
-            AdminError::new(AdminErrorKind::RateLimited, "代理测试繁忙，请稍后重试")
-        })?;
+        let _permit = self
+            .test_slots
+            .try_acquire()
+            .map_err(|_| AdminError::new(AdminErrorKind::RateLimited, "代理测试已达并发上限"))?;
         Ok(self.probe.test(proxy, detect_location).await)
     }
 
@@ -383,9 +417,10 @@ impl ProxiesService for DefaultProxiesService {
         detect_location: bool,
         context: &MutationContext,
     ) -> Result<ProxyRecord, AdminError> {
-        let _permit = self.test_slots.try_acquire().map_err(|_| {
-            AdminError::new(AdminErrorKind::RateLimited, "代理测试繁忙，请稍后重试")
-        })?;
+        let _permit = self
+            .test_slots
+            .try_acquire()
+            .map_err(|_| AdminError::new(AdminErrorKind::RateLimited, "代理测试已达并发上限"))?;
         let record = self
             .store
             .get(id)

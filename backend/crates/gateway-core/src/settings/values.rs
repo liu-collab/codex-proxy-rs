@@ -20,7 +20,10 @@ pub struct SettingsValues {
     pub(crate) max_concurrent_per_account: u32,
     pub(crate) max_waiting_per_key: u32,
     pub(crate) max_waiting_per_account: u32,
-    pub(crate) concurrency_wait_timeout_seconds: u32,
+    pub(crate) key_queue_timeout_seconds: u32,
+    pub(crate) account_queue_timeout_seconds: u32,
+    pub(crate) switch_account_on_queue_failure: bool,
+    pub(crate) max_retry_after_seconds: u32,
     pub(crate) openai_guardian_reserved_concurrency: u32,
     pub(crate) openai_account_affinity: crate::account::AccountAffinity,
     pub(crate) max_account_rotations: u32,
@@ -81,6 +84,13 @@ impl SettingsValues {
         affinity: crate::account::AccountAffinity,
     ) -> Self {
         self.openai_account_affinity = affinity;
+        self
+    }
+
+    /// 网关接受的单次服务器建议等待上限，超过时交由既有换号或错误出口处理
+    #[must_use]
+    pub const fn with_max_retry_after_seconds(mut self, seconds: u32) -> Self {
+        self.max_retry_after_seconds = seconds;
         self
     }
 
@@ -150,11 +160,15 @@ impl SettingsValues {
         mut self,
         max_waiting_per_key: u32,
         max_waiting_per_account: u32,
-        timeout_seconds: u32,
+        key_timeout_seconds: u32,
+        account_timeout_seconds: u32,
+        switch_on_failure: bool,
     ) -> Self {
         self.max_waiting_per_key = max_waiting_per_key;
         self.max_waiting_per_account = max_waiting_per_account;
-        self.concurrency_wait_timeout_seconds = timeout_seconds;
+        self.key_queue_timeout_seconds = key_timeout_seconds;
+        self.account_queue_timeout_seconds = account_timeout_seconds;
+        self.switch_account_on_queue_failure = switch_on_failure;
         self
     }
 
@@ -177,7 +191,10 @@ impl SettingsValues {
             max_concurrent_per_account,
             max_waiting_per_key: 0,
             max_waiting_per_account: 0,
-            concurrency_wait_timeout_seconds: 30,
+            key_queue_timeout_seconds: 30,
+            account_queue_timeout_seconds: 30,
+            switch_account_on_queue_failure: false,
+            max_retry_after_seconds: 240,
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: crate::account::AccountAffinity::default(),
             max_account_rotations: 3,
@@ -212,7 +229,8 @@ impl SettingsValues {
 pub fn validate_request_limits(
     max_waiting_per_key: u32,
     max_waiting_per_account: u32,
-    timeout_seconds: u32,
+    key_timeout_seconds: u32,
+    account_timeout_seconds: u32,
     max_account_rotations: u32,
     affinity_ttl_hours: u32,
 ) -> Result<(), &'static str> {
@@ -220,8 +238,12 @@ pub fn validate_request_limits(
         (max_waiting_per_key <= 1_000, "max_waiting_per_key"),
         (max_waiting_per_account <= 1_000, "max_waiting_per_account"),
         (
-            (1..=120).contains(&timeout_seconds),
-            "concurrency_wait_timeout_seconds",
+            (1..=120).contains(&key_timeout_seconds),
+            "key_queue_timeout_seconds",
+        ),
+        (
+            (1..=120).contains(&account_timeout_seconds),
+            "account_queue_timeout_seconds",
         ),
         (
             max_account_rotations <= crate::account::MAX_ACCOUNT_ROTATIONS,

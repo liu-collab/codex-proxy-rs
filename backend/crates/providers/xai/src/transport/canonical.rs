@@ -20,7 +20,7 @@ use gateway_protocol::openai::sse::{SseEvent, SseEventDecoder};
 use serde_json::Value;
 
 use super::request::{GrokResponseTransform, GrokResponsesRequest};
-use super::{classify_grok_quota_failure, scrub_account_fingerprints};
+use super::upstream_error::{classify_grok_quota_failure, scrub_account_fingerprints};
 
 const CONTENTS_PER_OUTPUT: u32 = 1_024;
 const LONG_CONTEXT_THRESHOLD: u64 = 200_000;

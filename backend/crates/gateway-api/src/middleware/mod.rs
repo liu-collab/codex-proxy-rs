@@ -262,7 +262,7 @@ async fn handle(
         Err(MiddlewareError::Gateway(error))
             if error.kind() == GatewayErrorKind::MiddlewareCapacityUnavailable =>
         {
-            crate::openai::error::gateway_error_response(&error)
+            crate::client_error::gateway_error_response(&error)
         }
         Err(error) => {
             let status = if error.is_rejected() {

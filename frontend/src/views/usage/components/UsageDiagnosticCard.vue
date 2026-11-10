@@ -60,7 +60,7 @@ const resultDimensionLabel = computed(
 )
 
 const dimensionNameSizes: Record<string, TableColumnSize> = {
-  model: 'xl',
+  model: 'lg',
   account: '2xl',
   apiKey: 'md',
   provider: 'lg',
@@ -90,25 +90,26 @@ const diagnosticColumns = computed(() => defineTableColumns<DiagnosticDisplayIte
     key: 'requestCount',
     label: t('usage.diagnostics.request'),
     kind: 'numeric',
-    size: 'xs',
+    size: 'md',
   },
   {
     key: 'errorCount',
-    label: t('common.status.failed'),
+    label: t('usage.health.errors'),
     kind: 'numeric',
-    size: 'xs',
+    align: 'center',
+    size: 'md',
   },
   {
     key: 'firstTokenP95Ms',
     label: t('usage.diagnostics.performance'),
     kind: 'numeric',
-    size: 'lg',
+    size: 'md',
   },
   {
     key: 'estimatedCost',
     label: t('usage.fields.cost'),
     kind: 'numeric',
-    size: 'sm',
+    size: 'md',
   },
 ]))
 
@@ -200,8 +201,9 @@ function diagnosticNameDisplay(name: string) {
 
         <template #accountPlanType="{ row }">
           <AccountPlanBadge
-            v-if="row.authenticationKind === 'api_key' || row.accountPlanType"
+            v-if="row.accountUpstreamPeer || row.authenticationKind === 'api_key' || row.accountPlanType"
             :authentication-kind="row.authenticationKind ?? undefined"
+            :upstream-peer="row.accountUpstreamPeer"
             :plan-type="row.accountPlanType"
             :plan-type-display="row.accountPlanTypeDisplay || row.accountPlanType || ''"
             size="sm"
@@ -227,8 +229,8 @@ function diagnosticNameDisplay(name: string) {
           <strong
             class="font-mono font-bold tabular-nums"
             :class="row.errorCount > 0 ? 'text-z-error-text' : 'text-z-text-quaternary'"
-            :aria-label="t('usage.diagnostics.failed', { count: formatCompactNumber(row.errorCount) })"
-            :title="t('usage.diagnostics.failureRate', { rate: formatPercent(row.errorRate) })"
+            :aria-label="t('usage.diagnostics.errors', { count: formatCompactNumber(row.errorCount) })"
+            :title="t('usage.diagnostics.errorRate', { rate: formatPercent(row.errorRate) })"
           >
             {{ formatCompactNumber(row.errorCount) }}
           </strong>

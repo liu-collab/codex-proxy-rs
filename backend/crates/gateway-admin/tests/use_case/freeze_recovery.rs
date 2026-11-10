@@ -1,5 +1,6 @@
 //! 账号保护恢复编排：到期探测、快照参数与失败顺延
 
+use gateway_core::engine::probe::AccountProbeTarget;
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
@@ -40,7 +41,10 @@ fn runtime_settings(enabled: bool, probe_enabled: bool) -> RuntimeSettings {
             max_concurrent_per_account: 5,
             max_waiting_per_key: 0,
             max_waiting_per_account: 0,
-            concurrency_wait_timeout_seconds: 30,
+            key_queue_timeout_seconds: 30,
+            account_queue_timeout_seconds: 30,
+            switch_account_on_queue_failure: false,
+            max_retry_after_seconds: 240,
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
             max_account_rotations: 3,
@@ -241,6 +245,10 @@ impl AccountProbe for FailingProbe {
         request: AccountProbeRequest,
         _: Option<Arc<gateway_core::routing::RuntimeSnapshot>>,
     ) -> futures::future::BoxFuture<'_, Result<AccountProbeResult, AccountProbeError>> {
+        assert!(matches!(
+            request.target,
+            AccountProbeTarget::FreezeRecovery(_)
+        ));
         assert_eq!(request.upstream_model.as_str(), "snapshot-model");
         Box::pin(async {
             Err(AccountProbeError::new(

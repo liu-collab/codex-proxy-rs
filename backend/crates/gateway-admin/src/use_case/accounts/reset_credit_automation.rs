@@ -1,6 +1,12 @@
-//! 重置卡自动使用的账号锁、持久幂等键、查询缓存与重试编排
+//! 重置卡查询、消费与自动使用排程，统一账号锁、持久幂等键和重试编排
 
 use super::*;
+
+use crate::model::{MutationActor, reset_credit_automation::*};
+use chrono::{DateTime, Utc};
+use gateway_core::time::DeploymentTimeZone;
+use rand_core::{OsRng, RngCore as _};
+use sha2::{Digest as _, Sha256};
 
 impl DefaultAccountsService {
     pub(super) async fn reset_credits_upstream(
@@ -50,13 +56,6 @@ impl DefaultAccountsService {
         }
     }
 }
-
-use crate::{
-    model::{MutationActor, reset_credit_automation::*},
-    reset_credit_automation::{consume_at, next_consumption, next_discovery, reschedule},
-};
-use chrono::{DateTime, Utc};
-use rand_core::{OsRng, RngCore as _};
 
 impl DefaultAccountsService {
     async fn automation_settings(
@@ -510,4 +509,55 @@ impl DefaultAccountsService {
         }
         Ok(())
     }
+}
+
+/// 当地次日随机发现时间；随机数由调用者提供，结果持久化后不会因重启重抽
+fn next_discovery(
+    now: DateTime<Utc>,
+    timezone: DeploymentTimeZone,
+    random: u64,
+) -> Option<DateTime<Utc>> {
+    let start = timezone.days_after(now, 1)?;
+    let end = timezone.days_after(now, 2)?;
+    let seconds = u64::try_from((end - start).num_seconds()).ok()?;
+    if seconds == 0 {
+        return None;
+    }
+    start.checked_add_signed(chrono::Duration::seconds(
+        i64::try_from(random % seconds).ok()?,
+    ))
+}
+
+/// 提前窗口的前 10% 用于账号错峰，最多一分钟，其余时间保留给网络失败恢复
+fn consume_at(account_id: &str, credit: &PlannedResetCredit, lead_minutes: u32) -> DateTime<Utc> {
+    let lead_seconds = i64::from(lead_minutes) * 60;
+    let mut hash = Sha256::new();
+    hash.update(account_id.as_bytes());
+    hash.update([0]);
+    hash.update(credit.id.as_bytes());
+    let digest = hash.finalize();
+    let offset =
+        i64::from(u16::from_be_bytes([digest[0], digest[1]])) % (lead_seconds / 10).clamp(1, 60);
+    credit.expires_at - chrono::Duration::seconds(lead_seconds - offset)
+}
+
+fn next_consumption(record: &ResetCreditAutomation, lead_minutes: u32) -> Option<DateTime<Utc>> {
+    record
+        .state
+        .credits
+        .iter()
+        .map(|credit| consume_at(&record.account_id, credit, lead_minutes))
+        .min()
+}
+
+fn reschedule(record: &mut ResetCreditAutomation, lead_minutes: u32, now: DateTime<Utc>) {
+    record.next_run_at = if let Some(retry) = record.state.retry_at {
+        retry
+    } else if record.state.pending.is_some() {
+        now
+    } else {
+        next_consumption(record, lead_minutes).map_or(record.state.next_discovery_at, |due| {
+            due.min(record.state.next_discovery_at)
+        })
+    };
 }

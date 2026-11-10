@@ -6,6 +6,11 @@
       "globalConfiguration": "全局配置",
       "customConfiguration": "独立配置",
       "enterIntegerFromTo": "请输入 1～{version} 的正整数",
+      "installationSeed": "安装身份种子",
+      "generateInstallationSeed": "生成安装身份种子",
+      "installationSeedHelp": "按密钥和上游账号生成独立、稳定的安装身份，种子不会发送给上游，修改种子会切换身份",
+      "installationSeedPlaceholder": "留空使用上游账号的安装 ID",
+      "invalidInstallationSeed": "请输入带连字符的 UUID",
       "clientDefault": "客户端预设",
       "useCustomUserAgent": "使用自定义用户代理",
       "cliEntry": "CLI 入口",
@@ -175,7 +180,7 @@
         "preferred": "优先",
         "strict": "严格",
         "relaxedHelp": "宽松：会话内请求直接按调度策略选号，不优先主账号",
-        "preferredHelp": "优先：会话内请求优先沿用主账号，繁忙或不可用时临时分流，不改变会话绑定",
+        "preferredHelp": "优先：会话内请求优先沿用主账号，短时繁忙可临时分流，停用或长期不可用时迁移会话绑定",
         "strictHelp": "严格：同一会话共用账号，子线程等待当前账号，并跟随主线程换号"
       },
       "title": "亲和策略",
@@ -240,8 +245,12 @@
       "enterNewPasswordAgain": "再次输入新密码",
       "saveAndLogInAgain": "保存并重新登录"
     },
+    "units": {
+      "seconds": "秒",
+      "inSeconds": "{label}（秒）"
+    },
     "concurrency": {
-      "title": "并发策略",
+      "title": "并发与重试",
       "accountLimit": {
         "label": "默认账号并发",
         "help": "未单独设置时使用，0 不限"
@@ -250,15 +259,27 @@
       "keyQueueHelp": "每个密钥的等待上限，0 不排队",
       "accountQueueCapacity": "账号队列容量",
       "accountQueueHelp": "每个账号的等待上限，0 不排队",
-      "queueTimeoutLabel": "排队超时（秒）",
-      "queueTimeoutHelp": "两个队列共用，1–120 秒",
+      "keyTimeout": "密钥排队超时",
+      "keyTimeoutHelp": "等待密钥并发名额的时限，超时返回错误",
+      "accountTimeout": "账号排队超时",
+      "accountTimeoutHelp": "从首次进入账号队列起计时，重试不重置",
+      "queueFailure": "账号队满或超时后",
+      "queueFailureHelp": "尝试换号时，改用有空位的账号；无法换号则返回排队错误",
+      "queueFailureHelpTitle": "账号换号规则",
+      "queueFailureDetails": "只重新选择一次，不再排队。指定账号、需要用原账号续写，或必须跟随主会话的请求不能自行换号。",
+      "returnError": "返回错误",
+      "trySwitch": "尝试换号",
       "autoReview": {
         "label": "自动审批独立并发",
         "description": "每个 Codex 账号的额外名额，0 共用普通并发",
         "helpTitle": "自动审批独立并发说明"
       },
-      "queueTimeoutHelpTitle": "排队超时说明",
-      "queueTimeoutDetails": "密钥与账号队列共用此时限，从首次入队起计时"
+      "retryAfter": {
+        "label": "上游重试等待上限",
+        "help": "超限时尝试换号",
+        "helpTitle": "上游重试等待说明",
+        "details": "默认 240 秒，限制单次 Retry-After 等待，不是请求总时长。超限时尝试换号，无可用账号则返回错误。0 表示不接受正数等待。换号仍受最大换号次数和请求可重试条件限制。"
+      }
     },
     "modelMapping": "模型映射",
     "routing": {
@@ -322,7 +343,7 @@
     },
     "tokenRefresh": {
       "title": "凭据刷新",
-      "leadTimeLabel": "提前刷新（秒）",
+      "leadTimeLabel": "提前刷新",
       "leadTimeHelp": "在访问令牌到期前触发刷新",
       "concurrencyLabel": "刷新并发上限",
       "concurrencyHelp": "同时刷新的上限，调低可减少限流"
@@ -597,7 +618,8 @@
       "warmupModelRequired": "启用预激活时请选择模型",
       "invalidWarmupModel": "预激活模型名称不能超过 128 个字符",
       "settingsSaved": "设置已保存",
-      "invalidProtectionSettings": "失败阈值应为 2～1000，计数有效期为 60～3600 秒，冷却时长为 300～604800 秒"
+      "invalidProtectionSettings": "失败阈值应为 2～1000，计数有效期为 60～3600 秒，冷却时长为 300～604800 秒",
+      "invalidRetryAfterLimit": "上游重试等待上限应为 0～4294967295 的整数"
     },
     "page": {
       "tabs": {
@@ -607,7 +629,7 @@
         "access": "安全与访问",
         "backups": "数据备份"
       },
-      "description": "配置网关调度、上游与定价，管理访问安全、历史保留与备份",
+      "description": "管理调度、上游、定价、安全、数据留存与备份",
       "sectionsLabel": "设置分区",
       "undoAllBasicSettingsChanges": "撤销全部基础设置更改",
       "unsavedChanges": {
@@ -629,7 +651,6 @@
       "countValidity": "计数有效期",
       "windowHelp": "每次匹配失败后续期，普通调用成功后清零",
       "countValiditySeconds": "计数有效期秒数",
-      "seconds": "秒",
       "cooldownTime": "冷却时长",
       "cooldownHelp": "探测失败时，按此时长延后恢复",
       "cooldownTimeInSeconds": "冷却时长秒数",

@@ -16,7 +16,7 @@ import UsageRecordStatusFilter from '@/components/usage/UsageRecordStatusFilter.
 import UsageRouteCell from '@/components/usage/UsageRouteCell.vue'
 import UsageTimeCell from '@/components/usage/UsageTimeCell.vue'
 import UsageTokenCell from '@/components/usage/UsageTokenCell.vue'
-import UsageTransportBadge from '@/components/usage/UsageTransportBadge.vue'
+import UsageTransportCell from '@/components/usage/UsageTransportCell.vue'
 
 defineProps<{ rows: KeyUsageRecord[], pagination: Pagination, loading: boolean }>()
 
@@ -30,7 +30,7 @@ const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetCo
 </script>
 
 <template>
-  <ZCard :title="t('usage.records.requestLog')" :description="t('usage.records.currentRequestRecord')">
+  <ZCard :title="t('usage.records.requestLog')">
     <template #actions>
       <div class="flex items-center gap-2">
         <UsageRecordStatusFilter v-model="kind" />
@@ -48,11 +48,8 @@ const { visibleColumns, columnOptions, setColumnVisible, setColumnOrder, resetCo
         <template #route="{ row }">
           <UsageRouteCell :record="row" />
         </template>
-        <template #upstreamTransport="{ row }">
-          <UsageTransportBadge :transport="row.upstreamTransport" />
-        </template>
-        <template #clientTransport="{ row }">
-          <UsageTransportBadge :transport="row.clientTransport" />
+        <template #transport="{ row }">
+          <UsageTransportCell :upstream="row.upstreamTransport" :client="row.clientTransport" />
         </template>
         <template #tokenDetails="{ row }">
           <UsageTokenCell v-if="row.tokenDetails" :record="{ tokenDetails: row.tokenDetails }" />

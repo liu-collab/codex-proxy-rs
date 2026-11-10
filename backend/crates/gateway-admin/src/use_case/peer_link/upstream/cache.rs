@@ -5,7 +5,7 @@ use super::{
 };
 use crate::model::provider_credentials::ProviderQuota;
 use gateway_core::{
-    account::{QuotaObservation, UpstreamConnection},
+    account::{QuotaObservation, UpstreamConnection, UpstreamInfoFailure},
     error::StoreError,
 };
 use std::{collections::BTreeMap, sync::Arc, time::SystemTime};
@@ -56,6 +56,7 @@ impl PeerInfoService {
                             checked_at: now,
                             scheduling: None,
                             summary: None,
+                            stored_failure: None,
                         },
                     ));
                 }
@@ -85,22 +86,24 @@ impl PeerInfoService {
             connections
                 .iter()
                 .map(|connection| {
+                    let cached = observations
+                        .get(&connection.account_id)
+                        .filter(|cached| cached.connection == *connection);
                     (
                         connection.clone(),
-                        observations
-                            .get(&connection.account_id)
-                            .filter(|cached| cached.connection == *connection)
-                            .and_then(|cached| cached.summary.clone()),
+                        cached.and_then(|cached| cached.summary.clone()),
+                        cached.and_then(|cached| cached.stored_failure),
                     )
                 })
                 .collect::<Vec<_>>()
         };
         Ok(summaries
             .into_iter()
-            .map(|(connection, peer)| {
+            .map(|(connection, peer, stored_failure)| {
                 let quota = Self::project_peer(
                     &connection,
                     peer.as_deref(),
+                    stored_failure,
                     self.last_error(&connection),
                     now,
                 );
@@ -132,6 +135,8 @@ impl PeerInfoService {
             checked_at: now,
             scheduling,
             summary,
+            stored_failure: observation
+                .and_then(|value| snapshot::stored_failure(&value.quota, connection)),
         };
         let previous = self
             .observations
@@ -139,5 +144,16 @@ impl PeerInfoService {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(connection.account_id.clone(), cached);
         drop(previous);
+    }
+
+    pub(super) fn unsupported(&self, connection: &UpstreamConnection) -> bool {
+        self.observations
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(&connection.account_id)
+            .is_some_and(|cached| {
+                cached.connection == *connection
+                    && cached.stored_failure == Some(UpstreamInfoFailure::Unsupported)
+            })
     }
 }

@@ -69,9 +69,7 @@ impl HttpProxyProbe {
         mut self,
         build: impl Fn(reqwest::ClientBuilder) -> Result<reqwest::Client, E> + Send + Sync + 'static,
     ) -> Self {
-        self.build_client = Arc::new(move |builder| {
-            build(builder).map_err(|_| "无法创建代理连接，请检查证书信任配置")
-        });
+        self.build_client = Arc::new(move |builder| build(builder).map_err(|_| "无法创建代理连接"));
         self
     }
 
@@ -94,7 +92,7 @@ impl HttpProxyProbe {
             if error.is_timeout() {
                 "出口连接超时"
             } else {
-                "出口连接失败，请检查网络或代理配置"
+                "出口连接失败"
             }
         })?;
         if !response.status().is_success() {
@@ -125,6 +123,17 @@ impl HttpProxyProbe {
 }
 
 impl HttpProxyProbe {
+    async fn timed_exit_ip_at(
+        &self,
+        proxy: Option<&OutboundProxy>,
+        endpoint: &str,
+    ) -> (Result<IpAddr, &'static str>, u64) {
+        let started = Instant::now();
+        let result = self.exit_ip_at(proxy, endpoint).await;
+        let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        (result, latency_ms)
+    }
+
     async fn test_connection(&self, proxy: Option<&OutboundProxy>) -> ProxyTestResult {
         let started = Instant::now();
         let timeout_limit = Duration::from_secs(15);
@@ -169,15 +178,15 @@ impl HttpProxyProbe {
             } => {
                 let probe_dual = async {
                     tokio::join!(
-                        self.exit_ip_at(proxy, ipv4_endpoint),
-                        self.exit_ip_at(proxy, ipv6_endpoint),
+                        self.timed_exit_ip_at(proxy, ipv4_endpoint),
+                        self.timed_exit_ip_at(proxy, ipv6_endpoint),
                     )
                 };
                 let result = tokio::time::timeout(timeout_limit, probe_dual).await;
                 let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
 
                 match result {
-                    Ok((res_v4, res_v6)) => {
+                    Ok(((res_v4, latency_v4), (res_v6, latency_v6))) => {
                         let exit_ipv4: Option<Ipv4Addr> = match res_v4 {
                             Ok(IpAddr::V4(v4)) => Some(v4),
                             _ => None,
@@ -185,6 +194,14 @@ impl HttpProxyProbe {
                         let exit_ipv6: Option<Ipv6Addr> = match res_v6 {
                             Ok(IpAddr::V6(v6)) => Some(v6),
                             _ => None,
+                        };
+                        // 延迟对应首选的可用出口，另一地址族失败等待不代表该出口延迟
+                        let latency_ms = if exit_ipv4.is_some() {
+                            latency_v4
+                        } else if exit_ipv6.is_some() {
+                            latency_v6
+                        } else {
+                            latency_ms
                         };
 
                         if exit_ipv4.is_some() && exit_ipv6.is_some() {
@@ -300,7 +317,7 @@ impl HttpProxyProbe {
             .query(&[("fields", "ip,success,country_code,region,city,timezone.id")])
             .send()
             .await
-            .map_err(|_| "位置查询失败，请手动重试")?;
+            .map_err(|_| "位置查询失败")?;
         if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
             return Err("位置查询服务限流，请稍后手动重试");
         }

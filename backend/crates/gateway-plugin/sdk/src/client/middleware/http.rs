@@ -13,7 +13,7 @@ use crate::{
         HANDLE_METHOD, MiddlewareBodyClose, MiddlewareBodyRead, MiddlewareHeader, NEXT_METHOD,
         http as wire,
     },
-    client::{HostReply, read::PendingRead},
+    client::{HostReply, pending_read::PendingRead},
 };
 
 /// HTTP 数据帧与 trailers 分开表达；结束由流完成表示，不插入协议正文

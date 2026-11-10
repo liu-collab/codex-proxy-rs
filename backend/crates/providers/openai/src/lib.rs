@@ -39,13 +39,14 @@ pub use jitter::{
     catalog_refresh_jitter, quota_failure_refresh_delay, server_error_retry_jitter, uniform_delay,
 };
 pub use provider::{
-    CodexProvider, CodexProviderConfigError, CodexProviderTransport, OFFICIAL_CODEX_BASE_PATH,
-    OFFICIAL_CODEX_BASE_URL, context_length_exceeded_error, openai_failure_affects_account_score,
+    CodexProvider, CodexProviderConfigError, CodexProviderTransport, context_length_exceeded_error,
+    openai_failure_affects_account_score,
 };
 
 pub mod credential;
 pub mod transport;
 
+pub use transport::endpoints::{OFFICIAL_CODEX_BASE_PATH, OFFICIAL_CODEX_BASE_URL};
 pub use transport::tls::{build_reqwest_client_with_custom_ca, ensure_rustls_provider};
 pub use transport::{
     CodexCanonicalDecoder, CodexCanonicalError, CodexRequestEncodeError, OpenAiBillingUsage,
@@ -174,6 +175,8 @@ pub async fn initialize(
             session_affinity,
             session_exclusions,
             Arc::clone(&quota),
+            Arc::clone(&catalog),
+            ports.cooldowns(),
             Arc::clone(&account_feedback),
             CodexCookiePolicy::official().map_err(|_| OpenAiInitializeError::CookiePolicy)?,
         )

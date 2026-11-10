@@ -12,7 +12,7 @@ use futures::{StreamExt as _, stream};
 use gateway_core::{
     account::{
         LoadedCredential, ProviderAccount, ProviderAccountId, ProviderAccountStore,
-        UpstreamConnection, UpstreamInfoSource, UpstreamSchedulingSignal,
+        UpstreamConnection, UpstreamInfoFailure, UpstreamInfoSource, UpstreamSchedulingSignal,
     },
     error::{StoreError, StoreErrorKind},
     routing::ProviderKind,
@@ -34,6 +34,7 @@ pub(super) struct CachedObservation {
     pub checked_at: SystemTime,
     pub scheduling: Option<Arc<SchedulingObservation>>,
     pub summary: Option<Arc<PeerLink>>,
+    pub stored_failure: Option<UpstreamInfoFailure>,
 }
 
 pub(crate) struct PeerInfoService {
@@ -171,12 +172,16 @@ impl PeerInfoService {
         let peer = observation
             .as_ref()
             .and_then(|value| snapshot::decode(&value.quota));
+        let stored_failure = observation
+            .as_ref()
+            .and_then(|value| snapshot::stored_failure(&value.quota, &connection));
         if self.current_connection(id).await?.as_ref() != Some(&connection) {
             return Ok(None);
         }
         Ok(Some(Self::project_peer(
             &connection,
             peer.as_ref(),
+            stored_failure,
             self.last_error(&connection),
             SystemTime::now(),
         )))
@@ -280,7 +285,7 @@ impl UpstreamInfoSource for PeerInfoService {
     fn signal(
         &self,
         account: &ProviderAccount,
-        model: &str,
+        model: Option<&str>,
         now: SystemTime,
     ) -> Option<UpstreamSchedulingSignal> {
         if !account.enabled() {

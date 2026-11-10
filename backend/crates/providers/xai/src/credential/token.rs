@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::credential::discovery::MAX_OAUTH_RESPONSE_BYTES;
+use crate::oauth_http::MAX_OAUTH_RESPONSE_BYTES;
 use crate::{
     ConfigError, OAuthError, OAuthErrorCode, OAuthHttpResponse, OAuthOperation, ProtocolViolation,
     SecretValue, VerificationEvidence,

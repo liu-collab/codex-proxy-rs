@@ -2,26 +2,22 @@
 //!
 //! 本 crate 不包含 HTTP wire、数据库实现或具体 Provider 实现
 
-use std::{fmt, path::Path, sync::Arc, time::Duration};
+use std::{fmt, path::Path, sync::Arc};
 
 use gateway_core::{
-    engine::execution::ClientKeyVerifier,
-    engine::probe::AccountProbe,
-    runtime::SnapshotControl,
-    task::{
-        DaemonRestartPolicy, WorkerContribution, WorkerId, WorkerKind, WorkerLeaseRequest,
-        WorkerRegistration, WorkerRunnable, WorkerSchedule,
-    },
+    engine::execution::ClientKeyVerifier, engine::probe::AccountProbe, runtime::SnapshotControl,
+    task::WorkerContribution,
 };
 use secrecy::{ExposeSecret as _, SecretString};
 use serde::Deserialize;
 
 pub mod backup;
+mod bootstrap;
 pub mod freeze_recovery;
 pub mod model;
 pub mod ports;
 pub mod public_service;
-mod reset_credit_automation;
+mod reset_credit_worker;
 mod use_case;
 pub use use_case::plugins::{PluginDistributionPorts, PluginManagementService, PluginsService};
 
@@ -44,18 +40,15 @@ pub use use_case::{
     usage_data::UsageDataService,
 };
 
-use model::AdminError;
+pub use bootstrap::{
+    initialize, initialize_accounts, initialize_plugin_accounts, initialize_plugin_client_keys,
+    initialize_plugin_proxies, initialize_plugin_resources, initialize_settings,
+    initialize_usage_data, initialize_with_plugin_accounts,
+};
+
 use ports::{
     client_distribution::ClientDistributionResolver, plugin_accounts::PluginAccountAccess,
-    plugin_client_keys::PluginClientKeyAccess, provider::ProviderAdminRegistry,
-    store::AdminStorePorts, system::SystemOperations,
-};
-use use_case::{
-    account_groups::DefaultAccountGroupService, accounts::DefaultAccountsService,
-    auth::DefaultAuthService, backup::DefaultBackupService,
-    client_distribution::DefaultClientDistributionService, client_keys::DefaultClientKeyService,
-    observability::DefaultObservabilityService, settings::DefaultSettingsService,
-    system::DefaultSystemService,
+    provider::ProviderAdminRegistry, system::SystemOperations,
 };
 
 const MINIMUM_INITIAL_PASSWORD_BYTES: usize = 12;
@@ -70,7 +63,6 @@ const WEAK_ADMIN_PASSWORDS: &[&str] = &[
     "codex-proxy-rs",
 ];
 
-const BACKUP_WORKER_OWNER: &str = "backup";
 const DEFAULT_CLIENT_SESSION_TTL_MINUTES: u64 = 24 * 60;
 
 /// 只用于首次幂等创建默认管理员的启动密码
@@ -296,8 +288,8 @@ impl AdminServices {
     }
 
     #[must_use]
-    pub fn usage_data(&self) -> &dyn UsageDataService {
-        self.usage_data.as_ref()
+    pub fn usage_data(&self) -> Arc<dyn UsageDataService> {
+        self.usage_data.clone()
     }
 
     #[must_use]
@@ -365,396 +357,4 @@ pub struct AdminRuntimePorts {
     pub client_distribution: Arc<dyn ClientDistributionResolver>,
     pub system: Arc<dyn SystemOperations>,
     pub client_key_verifier: Arc<dyn ClientKeyVerifier>,
-}
-
-/// 校验配置、接入已组装的 Provider 注册表并完成默认管理员幂等初始化
-///
-/// # Errors
-///
-/// 配置非法或默认管理员初始化失败时返回错误
-pub async fn initialize(
-    config: AdminConfig,
-    client_config: ClientConfig,
-    store: AdminStorePorts,
-    runtime: AdminRuntimePorts,
-) -> Result<AdminBundle, AdminError> {
-    initialize_inner(config, client_config, store, runtime, None).await
-}
-
-/// 使用组合根已绑定给 Runtime 的同一账号窄端口，避免为完整 Admin 重建第二实例
-pub async fn initialize_with_plugin_accounts(
-    config: AdminConfig,
-    client_config: ClientConfig,
-    store: AdminStorePorts,
-    runtime: AdminRuntimePorts,
-    plugin_accounts: Arc<dyn PluginAccountAccess>,
-) -> Result<AdminBundle, AdminError> {
-    initialize_inner(config, client_config, store, runtime, Some(plugin_accounts)).await
-}
-
-async fn initialize_inner(
-    mut config: AdminConfig,
-    mut client_config: ClientConfig,
-    store: AdminStorePorts,
-    runtime: AdminRuntimePorts,
-    plugin_accounts: Option<Arc<dyn PluginAccountAccess>>,
-) -> Result<AdminBundle, AdminError> {
-    let AdminRuntimePorts {
-        upstream_info,
-        timezone,
-        service_middleware,
-        plugin_preparation,
-        plugin_management,
-        published_snapshot,
-        plugin_distribution,
-        plugin_inspector,
-        pricing_source,
-        providers,
-        snapshot,
-        account_probe: probe,
-        proxy_probe,
-        client_distribution,
-        system,
-        client_key_verifier,
-    } = runtime;
-    config
-        .resolve_and_validate(Path::new("."))
-        .map_err(|error| AdminError::invalid(error.to_string()))?;
-    client_config
-        .resolve_and_validate(Path::new("."))
-        .map_err(|error| AdminError::invalid(error.to_string()))?;
-    let registry = providers;
-
-    let auth = Arc::new(DefaultAuthService::new(
-        &config,
-        client_config.session_ttl_minutes,
-        store.auth(),
-        client_key_verifier.clone(),
-    ));
-    auth.ensure_default_admin(config.default_password.expose())
-        .await?;
-
-    let accounts = initialize_accounts(
-        store.accounts(),
-        store.account_runtime(),
-        store.settings(),
-        timezone,
-        registry.clone(),
-        snapshot.clone(),
-        probe.clone(),
-        upstream_info.clone(),
-    );
-    let backup_ports = store.backup();
-    let backups = Arc::new(DefaultBackupService::new(
-        backup_ports.repository(),
-        backup_ports.object_store(),
-        store.auth(),
-        snapshot.clone(),
-        timezone,
-    ));
-    let backup_task = backup::task::BackupTask::new(
-        backup_ports.repository(),
-        backup_ports.dump(),
-        backup_ports.object_store(),
-    )
-    .with_timezone(timezone);
-    let system_preflight = Arc::new(use_case::plugin_update::PluginSystemUpdatePreflight::new(
-        store.plugins(),
-        plugin_inspector.clone(),
-    ));
-    let system = Arc::new(DefaultSystemService::new(system, system_preflight));
-    let observations: Arc<dyn ports::store::ObservabilityStore> = Arc::new(
-        use_case::observability::CachedObservabilityStore::new(store.observability()),
-    );
-    let key_usage = Arc::new(use_case::key_usage::DefaultKeyUsageService::new(
-        auth.clone(),
-        client_key_verifier,
-        store.client_keys(),
-        observations.clone(),
-        system.clone(),
-        timezone,
-    ));
-    let credentials = Arc::new(CredentialsService::new(
-        registry.clone(),
-        store.accounts(),
-        store.proxies(),
-        snapshot.clone(),
-        upstream_info.clone(),
-    ));
-    let plugin_accounts = plugin_accounts.unwrap_or_else(|| {
-        initialize_plugin_accounts(
-            registry.clone(),
-            store.accounts(),
-            snapshot.clone(),
-            upstream_info.clone(),
-        )
-    });
-    let import_tasks = use_case::import_tasks::DefaultImportTasksService::new(credentials.clone());
-    let import_task = use_case::import_tasks::ImportTaskWorker(import_tasks.clone());
-    let settings = initialize_settings(
-        store.settings(),
-        snapshot.clone(),
-        registry.clone(),
-        pricing_source,
-    );
-    let usage_data = initialize_usage_data(store.usage_data(), store.settings(), registry.clone());
-    let mut public_services = public_service::Registry::new(service_middleware);
-    public_services.register_settings(&settings)?;
-    public_services.register_accounts(&accounts)?;
-    public_services.register_usage_data(&usage_data)?;
-    let services = AdminServices {
-        peer_link: Arc::new(use_case::peer_link::DefaultPeerLinkService::new(
-            store.client_keys(),
-            store.accounts(),
-            store.account_runtime(),
-            registry.clone(),
-        )),
-        timezone,
-        public_services: Arc::new(public_services),
-        plugin_management: Arc::new(PluginManagementService::new(
-            plugin_management,
-            store.plugins(),
-            published_snapshot.clone(),
-        )),
-        plugins: Arc::new(PluginsService::new(
-            store.plugins(),
-            plugin_inspector,
-            PluginDistributionPorts::new(plugin_distribution, store.proxies()),
-            snapshot.clone(),
-            plugin_preparation,
-            published_snapshot,
-            store.plugin_state(),
-        )),
-        key_usage,
-        proxies: Arc::new(use_case::proxies::DefaultProxiesService::new(
-            store.proxies(),
-            proxy_probe,
-            snapshot.clone(),
-            registry.clone(),
-            upstream_info.clone(),
-        )),
-        auth,
-        accounts: accounts.clone(),
-        account_groups: Arc::new(DefaultAccountGroupService::new(
-            store.account_groups(),
-            store.account_runtime(),
-            snapshot.clone(),
-        )),
-        client_keys: Arc::new(DefaultClientKeyService::new(
-            store.client_keys(),
-            snapshot.clone(),
-            registry.clone(),
-        )),
-        client_distribution: Arc::new(DefaultClientDistributionService::new(client_distribution)),
-        observability: Arc::new(DefaultObservabilityService::new(
-            observations.clone(),
-            store.accounts(),
-            store.settings(),
-            registry.clone(),
-            timezone,
-            system.clone(),
-            upstream_info,
-        )),
-        settings,
-        usage_data,
-        system,
-        credentials,
-        _plugin_accounts: plugin_accounts,
-        import_tasks,
-        backups,
-    };
-    let freeze_recovery =
-        freeze_recovery::FreezeRecoveryTask::new(freeze_recovery::FreezeRecoveryDeps {
-            accounts: Arc::clone(&accounts) as Arc<dyn AccountsService>,
-            store: store.accounts(),
-            runtime: store.account_runtime(),
-            settings: store.settings(),
-        });
-    let mut worker_contributions = backup_worker_contribution(backup_task)?;
-    let id = WorkerId::try_new(WorkerKind::AccountImport, "admin")
-        .map_err(|_| AdminError::internal("导入 Worker ID 不合法"))?;
-    let restart = DaemonRestartPolicy::try_new(Duration::from_secs(1), Duration::from_secs(60))
-        .map_err(|_| AdminError::internal("导入 Worker 重启策略不合法"))?;
-    let registration = WorkerRegistration::try_new(
-        id,
-        WorkerRunnable::Daemon {
-            restart,
-            task: Box::new(import_task),
-        },
-    )
-    .map_err(|_| AdminError::internal("导入 Worker 注册信息不合法"))?;
-    worker_contributions.push(WorkerContribution::Registration(registration));
-    worker_contributions.extend(freeze_recovery_worker_contribution(freeze_recovery)?);
-    let id = WorkerId::try_new(WorkerKind::ResetCreditAutomation, "admin")
-        .map_err(|_| AdminError::internal("重置卡 Worker ID 不合法"))?;
-    let schedule = WorkerSchedule::try_new(
-        Duration::from_secs(5),
-        Duration::from_secs(5),
-        Duration::from_secs(60),
-        Duration::from_secs(90),
-        Duration::from_secs(30),
-    )
-    .map_err(|_| AdminError::internal("重置卡 Worker 调度配置不合法"))?;
-    let lease = WorkerLeaseRequest::try_new(id.clone(), Duration::from_secs(90))
-        .map_err(|_| AdminError::internal("重置卡 Worker 租约配置不合法"))?;
-    worker_contributions.push(WorkerContribution::Registration(
-        WorkerRegistration::try_new(
-            id,
-            WorkerRunnable::Scheduled {
-                schedule,
-                lease: Some(lease),
-                task: Box::new(reset_credit_automation::ResetCreditAutomationTask {
-                    accounts,
-                    store: store.accounts(),
-                    settings: store.settings(),
-                }),
-            },
-        )
-        .map_err(|_| AdminError::internal("重置卡 Worker 注册失败"))?,
-    ));
-    Ok(AdminBundle {
-        services,
-        worker_contributions,
-    })
-}
-
-/// CLI 只组合账号用例，不初始化管理员、管理服务或后台任务；写入仍复用同一事务与审计
-pub fn initialize_plugin_accounts(
-    providers: ports::provider::ProviderAdminRegistry,
-    accounts: Arc<dyn ports::store::AccountStore>,
-    snapshot: Arc<dyn gateway_core::runtime::SnapshotControl>,
-    upstream_info: Option<Arc<dyn ports::peer::PeerUpstreamService>>,
-) -> Arc<dyn PluginAccountAccess> {
-    Arc::new(use_case::plugin_accounts::DefaultPluginAccountAccess::new(
-        providers,
-        accounts,
-        snapshot,
-        upstream_info,
-    ))
-}
-
-/// 为 Runtime 创建非秘密 Client Key 目录与预算重置的窄端口
-#[must_use]
-pub fn initialize_plugin_client_keys(
-    providers: ports::provider::ProviderAdminRegistry,
-    store: Arc<dyn ports::store::ClientKeyStore>,
-    snapshot: Arc<dyn SnapshotControl>,
-) -> Arc<dyn PluginClientKeyAccess> {
-    let service: Arc<dyn ClientKeyService> =
-        Arc::new(DefaultClientKeyService::new(store, snapshot, providers));
-    Arc::new(use_case::plugin_client_keys::DefaultPluginClientKeyAccess::new(service))
-}
-
-/// 为 Runtime 组合实例自有资源写入；权限和归属在同一存储事务复核
-#[must_use]
-pub fn initialize_plugin_resources(
-    store: Arc<dyn ports::plugin_resources::PluginResourceStore>,
-    snapshot: Arc<dyn SnapshotControl>,
-) -> Arc<dyn ports::plugin_resources::PluginResourceAccess> {
-    Arc::new(use_case::plugin_resources::DefaultPluginResourceAccess { store, snapshot })
-}
-
-/// Backup Worker 注册：单个可取消 Daemon，owner 固定为 `backup`
-fn backup_worker_contribution(
-    task: backup::task::BackupTask,
-) -> Result<Vec<WorkerContribution>, AdminError> {
-    let id = WorkerId::try_new(WorkerKind::Backup, BACKUP_WORKER_OWNER)
-        .map_err(|_| AdminError::internal("备份 Worker ID 不合法"))?;
-    let restart = DaemonRestartPolicy::try_new(Duration::from_secs(1), Duration::from_secs(60))
-        .map_err(|_| AdminError::internal("备份 Worker 重启策略不合法"))?;
-    let registration = WorkerRegistration::try_new(
-        id,
-        WorkerRunnable::Daemon {
-            restart,
-            task: Box::new(task),
-        },
-    )
-    .map_err(|_| AdminError::internal("备份 Worker 注册信息不合法"))?;
-    Ok(vec![WorkerContribution::Registration(registration)])
-}
-
-/// 冻结恢复 Worker 注册：按固定周期扫描活跃冻结，owner 固定
-fn freeze_recovery_worker_contribution(
-    task: freeze_recovery::FreezeRecoveryTask,
-) -> Result<Vec<WorkerContribution>, AdminError> {
-    let id = WorkerId::try_new(
-        WorkerKind::AccountFreezeRecovery,
-        freeze_recovery::FREEZE_RECOVERY_WORKER_OWNER,
-    )
-    .map_err(|_| AdminError::internal("冻结恢复 Worker ID 不合法"))?;
-    let schedule = WorkerSchedule::try_new(
-        freeze_recovery::FREEZE_RECOVERY_INTERVAL,
-        freeze_recovery::WORKER_INITIAL_BACKOFF,
-        freeze_recovery::WORKER_MAXIMUM_BACKOFF,
-        freeze_recovery::WORKER_LEASE_TTL,
-        freeze_recovery::WORKER_LEASE_RENEWAL,
-    )
-    .map_err(|_| AdminError::internal("冻结恢复 Worker 调度配置不合法"))?;
-    let lease = WorkerLeaseRequest::try_new(id.clone(), freeze_recovery::WORKER_LEASE_TTL)
-        .map_err(|_| AdminError::internal("冻结恢复 Worker 租约配置不合法"))?;
-    let registration = WorkerRegistration::try_new(
-        id,
-        WorkerRunnable::Scheduled {
-            schedule,
-            lease: Some(lease),
-            task: Box::new(task),
-        },
-    )
-    .map_err(|_| AdminError::internal("冻结恢复 Worker 注册信息不合法"))?;
-    Ok(vec![WorkerContribution::Registration(registration)])
-}
-
-/// 服务端与 CLI 复用账号用例，不随命令启动后台调度
-#[must_use]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "账号存储、发布、探测与互联分别通过独立端口注入"
-)]
-pub fn initialize_accounts(
-    accounts: Arc<dyn ports::store::AccountStore>,
-    account_runtime: Arc<dyn ports::store::AccountRuntimeStore>,
-    settings: Arc<dyn ports::store::SettingsStore>,
-    timezone: gateway_core::time::DeploymentTimeZone,
-    providers: ProviderAdminRegistry,
-    snapshot: Arc<dyn SnapshotControl>,
-    probe: Arc<dyn AccountProbe>,
-    upstream_info: Option<Arc<dyn ports::peer::PeerUpstreamService>>,
-) -> Arc<dyn AccountsService> {
-    Arc::new(DefaultAccountsService::new(
-        accounts,
-        account_runtime,
-        settings,
-        timezone,
-        providers,
-        snapshot,
-        probe,
-        upstream_info,
-    ))
-}
-
-/// 设置服务不依赖 Web 管理会话，CLI 与服务器通过同一用例执行事务和发布
-pub fn initialize_settings(
-    store: Arc<dyn ports::store::SettingsStore>,
-    snapshot: Arc<dyn SnapshotControl>,
-    providers: ProviderAdminRegistry,
-    pricing_source: Arc<dyn ports::pricing::PricingSource>,
-) -> Arc<dyn SettingsService> {
-    Arc::new(DefaultSettingsService::new(
-        store,
-        snapshot,
-        providers,
-        pricing_source,
-    ))
-}
-
-/// HTTP、插件及 CLI 共用的用量领域用例，宿主提供已验证的调用主体
-#[must_use]
-pub fn initialize_usage_data(
-    store: Arc<dyn ports::usage_data::UsageDataStore>,
-    settings: Arc<dyn ports::store::SettingsStore>,
-    providers: ProviderAdminRegistry,
-) -> Arc<dyn UsageDataService> {
-    Arc::new(use_case::usage_data::DefaultUsageDataService::new(
-        store, settings, providers,
-    ))
 }

@@ -105,6 +105,7 @@ pub(crate) fn store_worker_contributions(
     client_key_usage_writer: postgres::PgClientApiKeyUsageWriter,
     admission_release_writer: redis::ClientAdmissionReleaseWriter,
     budget_writer: postgres::ClientBudgetWriter,
+    lease_cleanup: impl DaemonTask + 'static,
 ) -> StoreResult<Vec<WorkerContribution>> {
     let stale_id = WorkerId::try_new(WorkerKind::StaleModelRequestRecovery, "postgres")
         .map_err(worker_definition_error)?;
@@ -117,10 +118,22 @@ pub(crate) fn store_worker_contributions(
         .map_err(worker_definition_error)?;
     let budget_flush_id = WorkerId::try_new(WorkerKind::OpsFlush, "postgres_client_budget")
         .map_err(worker_definition_error)?;
+    let lease_cleanup_id = WorkerId::try_new(WorkerKind::OpsFlush, "redis_account_leases")
+        .map_err(worker_definition_error)?;
     let ops_flush_restart =
         DaemonRestartPolicy::try_new(Duration::from_secs(1), Duration::from_secs(60))
             .map_err(worker_definition_error)?;
     Ok(vec![
+        WorkerContribution::Registration(
+            WorkerRegistration::try_new(
+                lease_cleanup_id,
+                WorkerRunnable::Daemon {
+                    restart: ops_flush_restart,
+                    task: Box::new(lease_cleanup),
+                },
+            )
+            .map_err(worker_definition_error)?,
+        ),
         WorkerContribution::Registration(
             WorkerRegistration::try_new(
                 budget_flush_id,
@@ -276,6 +289,10 @@ impl HealthProbe for PostgresHealthProbe {
         "postgres"
     }
 
+    fn required_for_readiness(&self) -> bool {
+        true
+    }
+
     fn check(&self) -> futures::future::BoxFuture<'_, HealthState> {
         Box::pin(health_state_with_one_retry(
             || self.check_once(),
@@ -317,6 +334,10 @@ pub(crate) struct RedisHealthProbe {
 impl HealthProbe for RedisHealthProbe {
     fn name(&self) -> &'static str {
         "redis"
+    }
+
+    fn required_for_readiness(&self) -> bool {
+        true
     }
 
     fn check(&self) -> futures::future::BoxFuture<'_, HealthState> {

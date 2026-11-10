@@ -1,4 +1,4 @@
-//! Codex HTTP/SSE 上游客户端、请求头构造、TLS 与自定义 CA
+//! Codex 上游客户端的共享状态、连接配置、请求头与传输合同
 
 use std::{
     collections::HashMap,
@@ -490,7 +490,7 @@ pub struct CodexRequestContext<'a> {
     pub parent_thread_id: Option<&'a str>,
     /// cookie 头
     pub cookie_header: Option<&'a str>,
-    /// 当前账号稳定派生的 installation ID
+    /// 本次请求生效的安装 ID
     pub installation_id: Option<&'a str>,
     /// 客户端 session ID
     pub session_id: Option<&'a str>,
@@ -720,6 +720,67 @@ pub struct CodexBackendClient {
 }
 
 impl CodexBackendClient {
+    pub(crate) const fn profile_state(&self) -> &CodexWireProfileState {
+        &self.profile
+    }
+
+    /// 请求只持有自己的画像副本；连接池和 HTTP client 继续共享既有资源
+    pub fn with_request_profile(mut self, profile: super::profile::CodexWireProfile) -> Self {
+        self.profile = CodexWireProfileState::new(profile);
+        self
+    }
+
+    /// 构造客户端
+    pub fn new(
+        client: Client,
+        base_url: impl Into<String>,
+        profile: CodexWireProfileState,
+    ) -> Self {
+        let base_url = base_url.into().trim_end_matches('/').to_string();
+        Self {
+            routing_affinity: None,
+            privacy: None,
+            timezone: Default::default(),
+            connection_budget: None,
+            direct_client: client.clone(),
+            client,
+            websocket_origin_key: websocket_origin_key(&base_url),
+            outbound_proxy: None,
+            egress_key: String::new(),
+            middleware_headers: Vec::new(),
+            outbound_middleware: None,
+            base_url,
+            official_base_url: super::endpoints::OFFICIAL_CODEX_BASE_URL.to_owned(),
+            protocol: OpenAiUpstreamProtocol::Codex,
+            profile,
+            websocket_pool: None,
+            websocket_origin_breaker: WebSocketOriginBreaker::default(),
+        }
+    }
+
+    /// 为 Responses WebSocket 请求启用连接池
+    pub fn with_websocket_pool(mut self, pool: Arc<CodexWebSocketPool>) -> Self {
+        self.websocket_pool = Some(pool);
+        self
+    }
+
+    /// 附加当前 attempt 经 Core 复核的业务请求头
+    #[must_use]
+    pub(crate) fn with_middleware_headers(
+        mut self,
+        middleware_headers: Vec<gateway_core::engine::middleware::MiddlewareHeader>,
+    ) -> Self {
+        self.middleware_headers = middleware_headers;
+        self
+    }
+
+    /// 驱逐指定账号的 Responses WebSocket 池连接
+    pub async fn evict_websocket_account(&self, account_id: &str) {
+        if let Some(pool) = &self.websocket_pool {
+            pool.evict_account(account_id).await;
+        }
+    }
+
     pub(crate) fn with_routing_affinity(
         mut self,
         affinity: Option<super::routing_affinity::ChatGptRoutingAffinity>,
@@ -824,6 +885,10 @@ impl CodexBackendClient {
             client
                 .egress_key
                 .push_str(&format!(":revision:{}", account.revision().get()));
+        } else {
+            client
+                .egress_key
+                .push_str(&crate::credential::oauth_identity_key(account));
         }
         client.websocket_origin_key = format!(
             "{}:{}",

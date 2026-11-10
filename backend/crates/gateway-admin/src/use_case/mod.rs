@@ -14,11 +14,11 @@ pub mod peer_link;
 pub mod plugin_accounts;
 pub mod plugin_client_keys;
 pub mod plugin_resources;
-pub(crate) mod plugin_update;
 pub mod plugins;
 pub mod proxies;
 pub mod settings;
 pub mod system;
+pub(crate) mod system_preflight;
 pub mod usage_data;
 
 mod credential_mutation;

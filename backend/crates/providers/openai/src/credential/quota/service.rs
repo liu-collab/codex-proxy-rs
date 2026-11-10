@@ -116,15 +116,15 @@ impl CodexCredentialQuotaService {
         Ok(())
     }
 
-    /// 成功推理是额度可访问的权威证据，同时解除账号级 429 冷却
+    /// 成功推理解除账号级 429 冷却；OAuth 额度由额度观测维护
     pub async fn record_successful_inference(
         &self,
         account: &ProviderAccount,
         observed_at: SystemTime,
     ) -> Result<(), CodexCredentialQuotaError> {
-        // 已经发出的并发请求可能晚于耗尽事实成功返回；真实成功仍是独立的
-        // Allowed 权威证据，但调度不会为了试探恢复而放行耗尽账号
-        if account.quota().access() == QuotaAccessState::Exhausted {
+        if account.authentication_kind() != crate::credential::CODEX_AUTHENTICATION_KIND_OAUTH
+            && account.quota().is_exhausted()
+        {
             let outcome = self
                 .store
                 .apply_quota_access(QuotaAccessChange {
@@ -304,6 +304,7 @@ impl CodexCredentialQuotaService {
         };
         let state = reconcile_refresh(
             account.quota(),
+            account.auto_use_quota_credits(),
             &mut snapshot,
             previous.as_ref(),
             &mut object,
@@ -358,23 +359,6 @@ impl CodexCredentialQuotaService {
                 detail: error.to_string(),
             })?;
         Ok(())
-    }
-
-    /// 读取有效的账号冷却事实；等待恢复探测的冻结到期后仍有效
-    pub async fn cooldown(
-        &self,
-        account_id: &ProviderAccountId,
-    ) -> Result<Option<gateway_core::account::AccountCooldown>, CodexCredentialQuotaError> {
-        let Some(cooldown) = self.cooldowns.read(account_id).await.map_err(|error| {
-            CodexCredentialQuotaError::Store {
-                detail: error.to_string(),
-            }
-        })?
-        else {
-            return Ok(None);
-        };
-        let state = cooldown.scheduling_state();
-        Ok(state.is_active(SystemTime::now()).then_some(state))
     }
 
     /// 读取单账号最后一次落库的 Provider quota，并由 Codex 域解析展示窗口
@@ -520,8 +504,8 @@ impl CodexCredentialQuotaService {
             None
         };
         // 失败后回读只允许明确可用的点数恢复访问，套餐 allowed 仍可能滞后
-        let observe_access =
-            matches!(authority, QuotaRefreshAuthority::ObserveAccess) || snapshot.credits_usable();
+        let observe_access = matches!(authority, QuotaRefreshAuthority::ObserveAccess)
+            || (account.auto_use_quota_credits() && snapshot.credits_usable());
         if account.quota().is_exhausted() && !observe_access {
             if self
                 .store
@@ -546,15 +530,16 @@ impl CodexCredentialQuotaService {
                     .with_observed_at(observed_at),
             });
         }
-        let state = if observe_access {
+        let state = if matches!(authority, QuotaRefreshAuthority::PreserveAccess) {
+            snapshot.access_with_credits(account.quota(), account.auto_use_quota_credits())
+        } else {
             reconcile_refresh(
                 account.quota(),
+                account.auto_use_quota_credits(),
                 &mut snapshot,
                 previous.as_ref(),
                 &mut object,
             )?
-        } else {
-            account.quota()
         };
         let snapshot = snapshot.with_quota_state(state);
         if self

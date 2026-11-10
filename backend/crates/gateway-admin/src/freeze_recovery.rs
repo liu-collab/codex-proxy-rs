@@ -7,10 +7,15 @@ use std::time::{Duration, SystemTime};
 use chrono::{DateTime, Utc};
 use futures::StreamExt as _;
 use gateway_core::account::{AccountErrorProtection, ProviderAccountId};
+use gateway_core::engine::probe::AccountProbeTarget;
 use gateway_core::routing::UpstreamModelId;
-use gateway_core::task::{ScheduledTask, WorkerCycleContext, WorkerTaskError};
+use gateway_core::task::{
+    ScheduledTask, WorkerContribution, WorkerCycleContext, WorkerId, WorkerKind,
+    WorkerLeaseRequest, WorkerRegistration, WorkerRunnable, WorkerSchedule, WorkerTaskError,
+};
 use tracing::warn;
 
+use crate::model::AdminError;
 use crate::model::accounts::{
     AccountConnectionTestEvent, AccountFreeze, AccountPageItem, AccountRuntimeSnapshot,
 };
@@ -40,6 +45,34 @@ pub struct FreezeRecoveryTask {
 impl FreezeRecoveryTask {
     pub fn new(deps: FreezeRecoveryDeps) -> Self {
         Self { deps }
+    }
+
+    pub(crate) fn into_worker(self) -> Result<WorkerContribution, AdminError> {
+        let id = WorkerId::try_new(
+            WorkerKind::AccountFreezeRecovery,
+            FREEZE_RECOVERY_WORKER_OWNER,
+        )
+        .map_err(|_| AdminError::internal("冻结恢复 Worker ID 不合法"))?;
+        let schedule = WorkerSchedule::try_new(
+            FREEZE_RECOVERY_INTERVAL,
+            WORKER_INITIAL_BACKOFF,
+            WORKER_MAXIMUM_BACKOFF,
+            WORKER_LEASE_TTL,
+            WORKER_LEASE_RENEWAL,
+        )
+        .map_err(|_| AdminError::internal("冻结恢复 Worker 调度配置不合法"))?;
+        let lease = WorkerLeaseRequest::try_new(id.clone(), WORKER_LEASE_TTL)
+            .map_err(|_| AdminError::internal("冻结恢复 Worker 租约配置不合法"))?;
+        let registration = WorkerRegistration::try_new(
+            id,
+            WorkerRunnable::Scheduled {
+                schedule,
+                lease: Some(lease),
+                task: Box::new(self),
+            },
+        )
+        .map_err(|_| AdminError::internal("冻结恢复 Worker 注册信息不合法"))?;
+        Ok(WorkerContribution::Registration(registration))
     }
 
     /// 无法读取或校验配置时跳过本轮，不能把未知状态当作允许解冻
@@ -129,7 +162,7 @@ impl FreezeRecoveryTask {
         let probe_succeeded = match self
             .deps
             .accounts
-            .test_connection(account.clone(), model)
+            .test_connection(AccountProbeTarget::FreezeRecovery(account.clone()), model)
             .await
         {
             Ok(events) => drain_probe(events).await,

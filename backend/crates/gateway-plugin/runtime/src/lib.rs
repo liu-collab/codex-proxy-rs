@@ -2,17 +2,15 @@
 
 mod adapter;
 mod callback;
-mod compatibility;
 mod contribution;
+mod deprecation;
 mod generation;
 mod package;
 mod rpc;
-mod stream;
 
 pub use adapter::command_line::{PluginCommandError, PluginCommandOutput, PluginCommandSession};
 pub use generation::{PluginRestartCircuitConfig, PluginRuntime, PluginRuntimeConfig};
 pub use package::{
     PackageError, PackageInspector, PackageLimits, PreparedPackage, ValidatedPackage,
 };
-pub use rpc::{CallbackHandler, RpcError, RpcLimits, RpcReply, RpcSession};
-pub use stream::RpcStream;
+pub use rpc::{CallbackHandler, RpcError, RpcLimits, RpcReply, RpcSession, RpcStream};

@@ -128,8 +128,8 @@ defineExpose({ focusField })
     <ZForm v-if="showJson">
       <ZFormItem :label="t('common.form.inputPlaceholder')" :error="error">
         <template #extra>
-          <ZIconButton v-if="fields !== null" :aria-label="t('common.form.useForm')" size="small" variant="solid" :disabled="disabled || Boolean(error) || hasExtra || incompatibleValue" @click="jsonMode = false">
-            <List class="size-4" />
+          <ZIconButton v-if="fields !== null" :aria-label="t('common.form.useForm')" class="size-4!" variant="link" :disabled="disabled || Boolean(error) || hasExtra || incompatibleValue" @click="jsonMode = false">
+            <List class="size-3.5" />
           </ZIconButton>
         </template>
         <ZTextarea v-model="text" :rows="8" :disabled="disabled" spellcheck="false" autocomplete="off" data-schema-json-control />
@@ -146,7 +146,7 @@ defineExpose({ focusField })
         <template v-if="field.description" #label-extra>
           <ZPopover trigger="hover-click" placement="top-start">
             <template #reference>
-              <ZIconButton variant="link" :aria-label="t('common.form.fieldHelp', { label: field.label })" class="size-3.5!" :title="undefined">
+              <ZIconButton variant="link" :aria-label="t('common.form.fieldHelp', { label: field.label })" class="size-3.5!">
                 <Info class="size-3.5" />
               </ZIconButton>
             </template>
@@ -156,8 +156,8 @@ defineExpose({ focusField })
           </ZPopover>
         </template>
         <template v-if="index === 0" #extra>
-          <ZIconButton :aria-label="t('common.form.editJson')" size="small" variant="solid" :disabled="disabled" @click="jsonMode = true">
-            <Braces class="size-4" />
+          <ZIconButton :aria-label="t('common.form.editJson')" class="size-4!" variant="link" :disabled="disabled" @click="jsonMode = true">
+            <Braces class="size-3.5" />
           </ZIconButton>
         </template>
         <ZSelect

@@ -101,8 +101,7 @@ impl PackageInspector {
                     .collect::<Result<_, _>>()?,
                 configuration_schema: manifest.configuration_schema.clone(),
                 secret_fields: manifest.secret_fields.iter().cloned().collect(),
-                state_namespaces: crate::callback::private_state::configuration(manifest)?
-                    .namespaces,
+                state_namespaces: super::state_configuration(manifest)?.namespaces,
             };
             let requirements = super::compatibility::requirements(manifest)?;
             Ok((
@@ -138,7 +137,7 @@ impl PluginPackageInspector for PackageInspector {
         metadata: &PluginArtifactMetadata,
     ) -> Result<Vec<gateway_admin::model::plugins::instances::PluginApiDeprecation>, AdminError>
     {
-        crate::compatibility::warnings(
+        crate::deprecation::warnings(
             metadata
                 .contributes
                 .iter()

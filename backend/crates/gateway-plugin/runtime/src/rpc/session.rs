@@ -15,9 +15,9 @@ use tokio::sync::{Mutex as AsyncMutex, OwnedSemaphorePermit, Semaphore, mpsc};
 
 use super::{
     CallbackHandler, RpcError, RpcLimits, RpcReply, RpcSessionDiagnostic, RpcSessionLifecycle,
-    RpcSessionLoad, Shared, dispatch,
+    RpcSessionLoad, RpcStream, Shared, dispatch, stream::StreamIngress,
 };
-use crate::{PreparedPackage, RpcStream, stream::StreamIngress};
+use crate::PreparedPackage;
 
 pub struct RpcSession {
     shared: Arc<Shared>,

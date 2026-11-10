@@ -70,6 +70,7 @@ fn gateway_core_depends_on_no_http_db_redis_or_provider_crate() {
 #[test]
 fn core_value_owners_do_not_depend_on_execution_or_routing() {
     let root = backend_root().join("crates/gateway-core/src");
+    let reexports = read_root_reexport_owners(&root);
     for relative in super::rust_files(&root) {
         let allowed: Option<&[&str]> = match relative.to_str().expect("source path") {
             "validation.rs" => Some(&[]),
@@ -96,7 +97,7 @@ fn core_value_owners_do_not_depend_on_execution_or_routing() {
         let Some(allowed) = allowed else { continue };
         let source = fs::read_to_string(root.join(&relative)).expect("read core source");
         let syntax = syn::parse_file(&source).expect("parse core source");
-        let mut references = CrateReferences::in_module(&relative);
+        let mut references = CrateReferences::in_module(&relative).with_root_reexports(&reexports);
         references.visit_file(&syntax);
         // 相对路径中的 self 指向当前 owner，不是跨 owner 依赖
         references.owners.remove(&references.module_path[0]);
@@ -111,17 +112,24 @@ fn core_value_owners_do_not_depend_on_execution_or_routing() {
 }
 
 #[test]
-fn core_owner_paths_form_a_dag() {
-    let root = backend_root().join("crates/gateway-core/src");
+fn domain_owner_paths_form_a_dag() {
+    for member in ["crates/gateway-core", "crates/gateway-admin"] {
+        assert_owner_paths_form_a_dag(member);
+    }
+}
+
+fn assert_owner_paths_form_a_dag(member: &str) {
+    let root = backend_root().join(member).join("src");
+    let reexports = read_root_reexport_owners(&root);
     let mut graph = BTreeMap::<String, BTreeSet<String>>::new();
     for relative in super::rust_files(&root) {
         if relative == Path::new("lib.rs") {
             continue;
         }
-        let mut references = CrateReferences::in_module(&relative);
+        let mut references = CrateReferences::in_module(&relative).with_root_reexports(&reexports);
         let owner = references.module_path[0].clone();
-        let source = fs::read_to_string(root.join(&relative)).expect("read core source");
-        references.visit_file(&syn::parse_file(&source).expect("parse core source"));
+        let source = fs::read_to_string(root.join(&relative)).expect("read owner source");
+        references.visit_file(&syn::parse_file(&source).expect("parse owner source"));
         references.owners.remove(&owner);
         graph.entry(owner).or_default().extend(references.owners);
     }
@@ -131,7 +139,7 @@ fn core_owner_paths_form_a_dag() {
         while let Some(dependency) = pending.pop() {
             assert_ne!(
                 &dependency, owner,
-                "Core owner dependency cycle reaches {owner}"
+                "{member} owner dependency cycle reaches {owner}"
             );
             if visited.insert(dependency.clone())
                 && let Some(next) = graph.get(&dependency)
@@ -143,7 +151,44 @@ fn core_owner_paths_form_a_dag() {
 }
 
 #[test]
-fn core_reference_scan_resolves_groups_reexports_and_relative_paths() {
+fn shared_owners_do_not_depend_on_their_callers() {
+    let boundaries: &[(&str, &str, &[&str])] = &[
+        ("crates/providers/xai", "transport", &["credential"]),
+        ("crates/providers/openai", "transport", &["provider"]),
+        ("crates/gateway-api", "time", &["admin"]),
+        (
+            "crates/gateway-api",
+            "client_error",
+            &["admin", "openai", "middleware"],
+        ),
+        ("crates/gateway-api", "middleware", &["openai"]),
+        ("crates/gateway-host", "system_update", &["config"]),
+        ("crates/gateway-plugin/runtime", "package", &["callback"]),
+    ];
+    for &(member, owner, forbidden) in boundaries {
+        let root = backend_root().join(member).join("src");
+        let reexports = read_root_reexport_owners(&root);
+        for relative in super::rust_files(&root) {
+            let mut references =
+                CrateReferences::in_module(&relative).with_root_reexports(&reexports);
+            if references.module_path.first().map(String::as_str) != Some(owner) {
+                continue;
+            }
+            let source = fs::read_to_string(root.join(&relative)).expect("read owner source");
+            references.visit_file(&syn::parse_file(&source).expect("parse owner source"));
+            for dependency in forbidden {
+                assert!(
+                    !references.owners.contains(*dependency),
+                    "{member}/src/{} must not depend on crate::{dependency}",
+                    relative.display()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn owner_reference_scan_resolves_groups_reexports_and_relative_paths() {
     let syntax = syn::parse_file(
         r#"
         pub use crate::{engine::AttemptContext, settings::SettingsValues as Values};
@@ -167,13 +212,86 @@ fn core_reference_scan_resolves_groups_reexports_and_relative_paths() {
     );
 }
 
-#[derive(Default)]
-struct CrateReferences {
-    owners: BTreeSet<String>,
-    module_path: Vec<String>,
+#[test]
+fn owner_reference_scan_resolves_crate_root_reexports() {
+    let root = syn::parse_file(
+        r#"
+        mod provider;
+        mod transport;
+        mod secret;
+        pub use provider::{OFFICIAL_URL, Options as ProviderOptions};
+        pub use self::transport::{self as network, Request};
+        pub use crate::secret::SecretValue;
+        pub use external::Unrelated;
+        "#,
+    )
+    .expect("parse root reexport fixture");
+    let syntax = syn::parse_file(
+        r#"
+        use crate::{OFFICIAL_URL, ProviderOptions, network::Client};
+        use super::super::SecretValue;
+        fn request() -> crate::Request { unimplemented!() }
+        "#,
+    )
+    .expect("parse reexport consumer fixture");
+    let reexports = root_reexport_owners(&root);
+    assert!(!reexports.contains_key("Unrelated"));
+    let mut references = CrateReferences::in_module(Path::new("consumer/request.rs"))
+        .with_root_reexports(&reexports);
+    references.visit_file(&syntax);
+    assert_eq!(
+        references.owners,
+        BTreeSet::from([
+            "provider".to_owned(),
+            "transport".to_owned(),
+            "secret".to_owned(),
+        ])
+    );
 }
 
-impl<'ast> Visit<'ast> for CrateReferences {
+fn read_root_reexport_owners(root: &Path) -> BTreeMap<String, String> {
+    let source = fs::read_to_string(root.join("lib.rs")).expect("read crate root");
+    root_reexport_owners(&syn::parse_file(&source).expect("parse crate root"))
+}
+
+// 只解析根模块的显式重导出，不推断 glob、宏展开或完整 Rust 名称解析
+fn root_reexport_owners(syntax: &syn::File) -> BTreeMap<String, String> {
+    let modules = syntax
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Mod(module) => Some(module.ident.to_string()),
+            _ => None,
+        })
+        .collect::<BTreeSet<_>>();
+    let mut reexports = BTreeMap::new();
+    for item in &syntax.items {
+        if let Item::Use(item) = item
+            && !matches!(item.vis, syn::Visibility::Inherited)
+        {
+            visit_use_leaves(&item.tree, &mut Vec::new(), &mut |path, name| {
+                let owner = path
+                    .iter()
+                    .find(|segment| !matches!(segment.as_str(), "crate" | "self"));
+                if let (Some(owner), Some(name)) = (owner, name)
+                    && modules.contains(owner)
+                {
+                    reexports.insert(name.to_owned(), owner.clone());
+                }
+            });
+        }
+    }
+    reexports
+}
+
+#[derive(Default)]
+struct CrateReferences<'a> {
+    owners: BTreeSet<String>,
+    module_path: Vec<String>,
+    root_reexports: Option<&'a BTreeMap<String, String>>,
+}
+
+impl<'ast> Visit<'ast> for CrateReferences<'_> {
     fn visit_path(&mut self, path: &'ast syn::Path) {
         self.record(
             &path
@@ -186,11 +304,13 @@ impl<'ast> Visit<'ast> for CrateReferences {
     }
 
     fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
-        self.use_tree(&item.tree, &mut Vec::new());
+        visit_use_leaves(&item.tree, &mut Vec::new(), &mut |path, _| {
+            self.record(path);
+        });
     }
 }
 
-impl CrateReferences {
+impl<'a> CrateReferences<'a> {
     fn in_module(relative: &Path) -> Self {
         let mut module = relative
             .with_extension("")
@@ -208,13 +328,26 @@ impl CrateReferences {
         Self {
             owners: BTreeSet::new(),
             module_path: module,
+            root_reexports: None,
         }
+    }
+
+    fn with_root_reexports(mut self, reexports: &'a BTreeMap<String, String>) -> Self {
+        self.root_reexports = Some(reexports);
+        self
+    }
+
+    fn root_owner(&self, name: &str) -> String {
+        self.root_reexports
+            .and_then(|reexports| reexports.get(name))
+            .cloned()
+            .unwrap_or_else(|| name.to_owned())
     }
 
     fn record(&mut self, path: &[String]) {
         let Some(first) = path.first() else { return };
         let owner = if first == "crate" {
-            path.get(1).cloned()
+            path.get(1).map(|name| self.root_owner(name))
         } else if first == "self" || first == "super" {
             let mut module = self.module_path.clone();
             let mut rest = path;
@@ -227,7 +360,10 @@ impl CrateReferences {
                 }
                 rest = &rest[1..];
             }
-            module.first().or_else(|| rest.first()).cloned()
+            module
+                .first()
+                .cloned()
+                .or_else(|| rest.first().map(|name| self.root_owner(name)))
         } else {
             None
         };
@@ -235,31 +371,41 @@ impl CrateReferences {
             self.owners.insert(owner);
         }
     }
+}
 
-    fn use_tree(&mut self, tree: &syn::UseTree, prefix: &mut Vec<String>) {
-        match tree {
-            syn::UseTree::Path(path) => {
-                prefix.push(path.ident.to_string());
-                self.use_tree(&path.tree, prefix);
-                prefix.pop();
-            }
-            syn::UseTree::Name(name) => {
-                prefix.push(name.ident.to_string());
-                self.record(prefix);
-                prefix.pop();
-            }
-            syn::UseTree::Rename(rename) => {
-                prefix.push(rename.ident.to_string());
-                self.record(prefix);
-                prefix.pop();
-            }
-            syn::UseTree::Group(group) => {
-                for item in &group.items {
-                    self.use_tree(item, prefix);
-                }
-            }
-            syn::UseTree::Glob(_) => self.record(prefix),
+fn visit_use_leaves(
+    tree: &syn::UseTree,
+    prefix: &mut Vec<String>,
+    visit: &mut impl FnMut(&[String], Option<&str>),
+) {
+    match tree {
+        syn::UseTree::Path(path) => {
+            prefix.push(path.ident.to_string());
+            visit_use_leaves(&path.tree, prefix, visit);
+            prefix.pop();
         }
+        syn::UseTree::Name(name) => {
+            let name = name.ident.to_string();
+            let export = if name == "self" {
+                prefix.last().cloned()
+            } else {
+                Some(name.clone())
+            };
+            prefix.push(name);
+            visit(prefix, export.as_deref());
+            prefix.pop();
+        }
+        syn::UseTree::Rename(rename) => {
+            prefix.push(rename.ident.to_string());
+            visit(prefix, Some(&rename.rename.to_string()));
+            prefix.pop();
+        }
+        syn::UseTree::Group(group) => {
+            for item in &group.items {
+                visit_use_leaves(item, prefix, visit);
+            }
+        }
+        syn::UseTree::Glob(_) => visit(prefix, None),
     }
 }
 

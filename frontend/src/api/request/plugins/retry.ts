@@ -1,4 +1,4 @@
-import type { RequestContext, RequestNext } from './index'
+import type { RequestContext, RequestNext } from '../types'
 import { t } from '@/i18n'
 import { ApiError, isTransientApiError } from './error'
 

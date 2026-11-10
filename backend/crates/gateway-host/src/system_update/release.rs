@@ -1,19 +1,19 @@
-//! GitHub Release 发现、缓存、版本比较与下载信任边界
+//! Release 详情、版本比较与下载信任边界
 
 use std::env;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use gateway_admin::model::system::{
     SystemUpdateChannel as UpdateChannel, SystemUpdateDetail, SystemUpdatePolicy,
 };
 use serde::Deserialize;
-use tokio::sync::Mutex;
 
-use super::{OperationError, SystemUpdateConfig, conflict, invalid, upstream};
+use super::{OperationError, SystemUpdateConfig, conflict, invalid};
+
+pub(super) const MAX_DOWNLOAD_SIZE: u64 = 500 * 1024 * 1024;
+pub(super) const MAX_CHECKSUM_SIZE: u64 = 1024 * 1024;
 
 const APP_BINARY_NAME: &str = "codex-proxy-rs";
-const CACHE_TTL: Duration = Duration::from_secs(20 * 60);
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct GitHubRelease {
@@ -22,7 +22,6 @@ pub(crate) struct GitHubRelease {
     pub(crate) body: Option<String>,
     pub(crate) html_url: Option<String>,
     pub(crate) prerelease: bool,
-    #[serde(default)]
     pub(crate) draft: bool,
     #[serde(default)]
     pub(crate) assets: Vec<GitHubAsset>,
@@ -35,166 +34,42 @@ pub(crate) struct GitHubAsset {
     pub(crate) size: u64,
 }
 
-struct CachedRelease {
-    key: String,
-    detail: SystemUpdateDetail,
-    cached_at: Instant,
-}
-
-#[derive(Default)]
-pub(crate) struct ReleaseCache {
-    entry: Mutex<Option<CachedRelease>>,
-    request_sequence: AtomicU64,
-}
-
-impl ReleaseCache {
-    pub(crate) async fn detail(
+impl GitHubRelease {
+    pub(super) fn install_assets(
         &self,
-        config: &SystemUpdateConfig,
-        refresh: bool,
-        channel: UpdateChannel,
-    ) -> Result<SystemUpdateDetail, OperationError> {
-        if let Some(reason) = config.update_support_error() {
-            return Ok(base_update_detail(config, channel, Some(reason), None));
+        version: &str,
+        api_base: &str,
+    ) -> Result<(&GitHubAsset, &GitHubAsset), OperationError> {
+        let os = match env::consts::OS {
+            "macos" => "darwin",
+            os => os,
+        };
+        let arch = match env::consts::ARCH {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            arch => arch,
+        };
+        let name = format!("{APP_BINARY_NAME}_{version}_{os}_{arch}.tar.gz");
+        let archive = self
+            .assets
+            .iter()
+            .find(|a| a.name == name)
+            .ok_or_else(|| conflict(format!("当前发行版本没有适用于 {os}/{arch} 的更新包")))?;
+        if !(1..=MAX_DOWNLOAD_SIZE).contains(&archive.size) {
+            return Err(invalid("更新包大小无效或超出限制"));
         }
-        let repository = config
-            .update_repository
-            .as_deref()
-            .ok_or_else(|| conflict("未配置更新仓库 CPR_UPDATE_REPOSITORY"))?;
-        validate_repository(repository)?;
-        validate_api_base(&config.github_api_base).map_err(conflict)?;
-        let key = format!("{}|{}", config.release_cache_key(), channel.as_str());
-        if !refresh && let Some(detail) = self.cached(&key).await {
-            return Ok(detail);
+        let checksum = self
+            .assets
+            .iter()
+            .find(|a| a.name == "checksums.txt")
+            .ok_or_else(|| super::upstream("发行版本缺少 checksums.txt 校验文件，无法安全更新"))?;
+        if !(1..=MAX_CHECKSUM_SIZE).contains(&checksum.size) {
+            return Err(invalid("校验文件大小无效或超出限制"));
         }
-        let sequence = self.request_sequence.fetch_add(1, Ordering::Relaxed) + 1;
-        match fetch_latest(
-            &config.github_api_base,
-            repository,
-            &config.version,
-            channel,
-        )
-        .await
-        {
-            Ok(release) => {
-                let detail = release.as_ref().map_or_else(
-                    || base_update_detail(config, channel, config.update_support_error(), None),
-                    |release| detail_from_release(config, release, channel),
-                );
-                let mut entry = self.entry.lock().await;
-                // 较慢的旧请求不能覆盖或清除新检查的结果，包括切走再切回同一通道
-                if self.request_sequence.load(Ordering::Relaxed) == sequence {
-                    *entry = Some(CachedRelease {
-                        key,
-                        detail: detail.clone(),
-                        cached_at: Instant::now(),
-                    });
-                }
-                Ok(detail)
-            }
-            Err(error) => {
-                // 强制检查失败后清掉旧结果，避免后续版本查询再次显示旧的更新标记
-                let mut entry = self.entry.lock().await;
-                if self.request_sequence.load(Ordering::Relaxed) == sequence
-                    && entry.as_ref().is_some_and(|cached| cached.key == key)
-                {
-                    *entry = None;
-                }
-                Err(error)
-            }
-        }
+        validate_download_url(&archive.browser_download_url, api_base)?;
+        validate_download_url(&checksum.browser_download_url, api_base)?;
+        Ok((archive, checksum))
     }
-
-    async fn cached(&self, key: &str) -> Option<SystemUpdateDetail> {
-        let entry = self.entry.lock().await;
-        let cached = entry.as_ref()?;
-        (cached.key == key && cached.cached_at.elapsed() <= CACHE_TTL).then(|| {
-            let mut detail = cached.detail.clone();
-            detail.cached = true;
-            detail
-        })
-    }
-}
-
-/// 优先返回可升级的最高版本，没有候选时保留当前版本的发布信息
-pub(crate) async fn fetch_latest(
-    api_base: &str,
-    repository: &str,
-    current_version: &str,
-    channel: UpdateChannel,
-) -> Result<Option<GitHubRelease>, OperationError> {
-    validate_api_base(api_base).map_err(conflict)?;
-    validate_repository(repository)?;
-    let base = api_base.trim_end_matches('/');
-    let current = semver::Version::parse(&normalize_version(current_version))
-        .map_err(|_| invalid("当前版本号无效，无法检查更新"))?;
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .map_err(|error| super::error::http("无法初始化发行查询连接", error))?;
-
-    // 所有发行线先过滤再排序，避免更高大版本或其他实验遮住仍可安装的更新
-    let mut latest: Option<(semver::Version, GitHubRelease)> = None;
-    let mut page = 1;
-    loop {
-        let releases: Vec<GitHubRelease> = fetch_release_json(
-            &client,
-            &format!("{base}/{repository}/releases?per_page=100&page={page}"),
-        )
-        .await?;
-        let last_page = releases.len() < 100;
-        for release in releases {
-            let Some(version) = eligible_release_version(&release, &current, channel) else {
-                continue;
-            };
-            if latest
-                .as_ref()
-                .is_none_or(|(previous, _)| version.cmp_precedence(previous).is_gt())
-            {
-                latest = Some((version, release));
-            }
-        }
-        if last_page {
-            return Ok(latest.map(|(_, release)| release));
-        }
-        page += 1;
-    }
-}
-
-fn eligible_release_version(
-    release: &GitHubRelease,
-    current: &semver::Version,
-    channel: UpdateChannel,
-) -> Option<semver::Version> {
-    let version = semver::Version::parse(&normalize_version(&release.tag_name)).ok()?;
-    (!release.draft
-        && release.prerelease != version.pre.is_empty()
-        && (version == *current || update_target_allowed(current, &version, channel)))
-    .then_some(version)
-}
-
-async fn fetch_release_json<T: serde::de::DeserializeOwned>(
-    client: &reqwest::Client,
-    url: &str,
-) -> Result<T, OperationError> {
-    let response = client
-        .get(url)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .header(reqwest::header::USER_AGENT, APP_BINARY_NAME)
-        .send()
-        .await
-        .map_err(|error| super::error::http("无法查询 GitHub 发行版本", error))?;
-    if !response.status().is_success() {
-        return Err(upstream(format!(
-            "GitHub 发行查询失败（HTTP {}）",
-            response.status().as_u16()
-        )));
-    }
-    response
-        .json::<T>()
-        .await
-        .map_err(|error| super::error::http("GitHub 发行信息格式无效", error))
 }
 
 pub(crate) fn detail_from_release(
@@ -223,6 +98,7 @@ pub(crate) fn detail_from_release(
         update_supported: true,
         unsupported_reason: None,
         warning: None,
+        retry_at: None,
     }
 }
 
@@ -233,36 +109,6 @@ pub(crate) fn confirmed_target(target: Option<String>) -> Result<String, Operati
         return Err(invalid("目标版本号格式无效"));
     }
     Ok(target)
-}
-
-pub(crate) fn select_archive<'a>(
-    release: &'a GitHubRelease,
-    version: &str,
-) -> Result<&'a GitHubAsset, OperationError> {
-    let os = platform_os_aliases();
-    let arch = platform_arch_aliases();
-    let normalized = normalize_version(version);
-    release
-        .assets
-        .iter()
-        .find(|asset| {
-            asset.name.contains(APP_BINARY_NAME)
-                && asset.name.contains(&normalized)
-                && asset_matches_platform(&asset.name, os, arch)
-                && !asset.name.ends_with(".txt")
-        })
-        .or_else(|| {
-            release.assets.iter().find(|asset| {
-                asset_matches_platform(&asset.name, os, arch) && !asset.name.ends_with(".txt")
-            })
-        })
-        .ok_or_else(|| {
-            conflict(format!(
-                "当前发行版本没有适用于 {}/{} 的更新包",
-                env::consts::OS,
-                env::consts::ARCH
-            ))
-        })
 }
 
 /// 校验 GitHub Release 资产 URL 及其重定向目标是否位于受信任边界内
@@ -293,7 +139,7 @@ pub(crate) fn download_client(
     reqwest::Client::builder()
         .timeout(timeout)
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
-            if download_url_allowed(attempt.url(), &api_base) {
+            if attempt.previous().len() < 5 && download_url_allowed(attempt.url(), &api_base) {
                 attempt.follow()
             } else {
                 attempt.error(std::io::Error::other(
@@ -310,6 +156,8 @@ pub(crate) fn validate_repository(repository: &str) -> Result<(), OperationError
     let owner = segments.next().unwrap_or_default();
     let name = segments.next().unwrap_or_default();
     if owner.is_empty()
+        || matches!(owner, "." | "..")
+        || matches!(name, "." | "..")
         || name.is_empty()
         || segments.next().is_some()
         || !owner.chars().all(repository_character)
@@ -337,7 +185,7 @@ pub(crate) fn validate_api_base(raw: &str) -> Result<(), String> {
             .then_some(())
             .ok_or_else(|| "本地发行查询地址必须使用 HTTP 或 HTTPS".to_owned());
     }
-    if url.scheme() != "https" || url.host_str() != Some("api.github.com") {
+    if url.scheme() != "https" || url.host_str() != Some("api.github.com") || url.port().is_some() {
         return Err("发行查询地址必须为 https://api.github.com/repos".to_owned());
     }
     Ok(())
@@ -347,7 +195,7 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches('v').to_owned()
 }
 
-fn channel_for_version(version: &semver::Version) -> Option<UpdateChannel> {
+pub(super) fn channel_for_version(version: &semver::Version) -> Option<UpdateChannel> {
     if version.pre.is_empty() {
         return Some(UpdateChannel::Stable);
     }
@@ -371,12 +219,12 @@ pub(crate) fn version_channel(version: &str) -> Option<UpdateChannel> {
 }
 
 /// 检查更新与执行更新共用同一规则；构建元数据不构成更新
-fn update_target_allowed(
+pub(super) fn update_target_allowed(
     current: &semver::Version,
     target: &semver::Version,
     selected: UpdateChannel,
 ) -> bool {
-    use UpdateChannel::{Alpha, Beta, Experimental, Rc, Stable};
+    use UpdateChannel::Experimental;
     if current.major != target.major || !target.cmp_precedence(current).is_gt() {
         return false;
     }
@@ -392,6 +240,11 @@ fn update_target_allowed(
             && target_channel == Experimental
             && (current.minor, current.patch) == (target.minor, target.patch);
     }
+    channel_accepts(selected, target_channel)
+}
+
+pub(super) fn channel_accepts(selected: UpdateChannel, target_channel: UpdateChannel) -> bool {
+    use UpdateChannel::{Alpha, Beta, Rc, Stable};
     matches!(
         (selected, target_channel),
         (Stable, Stable)
@@ -420,26 +273,6 @@ pub(crate) fn validate_update_target(
 
 fn repository_character(character: char) -> bool {
     character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
-}
-
-fn platform_os_aliases() -> &'static [&'static str] {
-    match env::consts::OS {
-        "macos" => &["macos", "darwin"],
-        "linux" => &["linux"],
-        _ => &[env::consts::OS],
-    }
-}
-
-fn platform_arch_aliases() -> &'static [&'static str] {
-    match env::consts::ARCH {
-        "x86_64" => &["x86_64", "amd64"],
-        "aarch64" => &["aarch64", "arm64"],
-        _ => &[env::consts::ARCH],
-    }
-}
-
-fn asset_matches_platform(name: &str, os: &[&str], arch: &[&str]) -> bool {
-    os.iter().any(|alias| name.contains(alias)) && arch.iter().any(|alias| name.contains(alias))
 }
 
 fn github_download_host_allowed(host: &str) -> bool {
@@ -504,17 +337,6 @@ impl SystemUpdateConfig {
         }
         None
     }
-
-    fn release_cache_key(&self) -> String {
-        format!(
-            "{}|{}|{}|{}|{}",
-            self.update_repository.as_deref().unwrap_or_default(),
-            self.github_api_base,
-            self.version,
-            self.deployment_mode,
-            self.build_type,
-        )
-    }
 }
 
 pub(super) fn update_policy(
@@ -536,7 +358,7 @@ pub(super) fn base_update_detail(
     config: &SystemUpdateConfig,
     channel: UpdateChannel,
     unsupported_reason: Option<String>,
-    warning: Option<String>,
+    warning: Option<&OperationError>,
 ) -> SystemUpdateDetail {
     SystemUpdateDetail {
         policy: update_policy(config, channel),
@@ -550,6 +372,7 @@ pub(super) fn base_update_detail(
         cached: false,
         update_supported: unsupported_reason.is_none() && warning.is_none(),
         unsupported_reason,
-        warning,
+        warning: warning.map(|error| error.message().to_owned()),
+        retry_at: warning.and_then(OperationError::retry_at),
     }
 }

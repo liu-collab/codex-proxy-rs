@@ -656,7 +656,10 @@ impl SettingsStore for MemorySettingsStore {
                 max_concurrent_per_account: command.values.max_concurrent_per_account,
                 max_waiting_per_key: command.values.max_waiting_per_key,
                 max_waiting_per_account: command.values.max_waiting_per_account,
-                concurrency_wait_timeout_seconds: command.values.concurrency_wait_timeout_seconds,
+                key_queue_timeout_seconds: command.values.key_queue_timeout_seconds,
+                account_queue_timeout_seconds: command.values.account_queue_timeout_seconds,
+                switch_account_on_queue_failure: command.values.switch_account_on_queue_failure,
+                max_retry_after_seconds: command.values.max_retry_after_seconds,
                 openai_guardian_reserved_concurrency: command
                     .values
                     .openai_guardian_reserved_concurrency,
@@ -889,6 +892,7 @@ impl AccountGroupStore for MemoryAccountGroupStore {
         }
         Ok(vec![
             AccountGroupMemberFact {
+                inherited_version: None,
                 group_id: group_id(PRIMARY_GROUP_ID),
                 account_id: "acct_group_ready".to_owned(),
                 status: AccountStatusFacts {
@@ -903,6 +907,7 @@ impl AccountGroupStore for MemoryAccountGroupStore {
                 total_slots: Some(1),
             },
             AccountGroupMemberFact {
+                inherited_version: None,
                 group_id: group_id(PRIMARY_GROUP_ID),
                 account_id: "acct_group_disabled".to_owned(),
                 status: AccountStatusFacts {
@@ -1841,7 +1846,7 @@ impl SystemOperations for UnusedSystem {
 
     async fn update_detail(
         &self,
-        _: bool,
+        _: gateway_admin::model::system::SystemUpdateCheck,
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
     ) -> Result<SystemUpdateDetail, SystemOperationError> {
         Err(unavailable_system())
@@ -1905,7 +1910,10 @@ fn test_runtime_settings() -> RuntimeSettings {
             max_concurrent_per_account: 3,
             max_waiting_per_key: 0,
             max_waiting_per_account: 0,
-            concurrency_wait_timeout_seconds: 30,
+            key_queue_timeout_seconds: 30,
+            account_queue_timeout_seconds: 30,
+            switch_account_on_queue_failure: false,
+            max_retry_after_seconds: 240,
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
             max_account_rotations: 3,

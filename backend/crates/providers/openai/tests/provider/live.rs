@@ -428,6 +428,10 @@ fn live_protocol_headers() -> Vec<gateway_core::operation::ProviderHttpHeader> {
         ("traceparent", "client-trace"),
         ("tracestate", "client-state"),
         ("ws_request_header_traceparent", "client-ws-trace"),
+        ("x-codex-installation-id", "foreign-installation"),
+        ("X-OpenAI-Account-Routing-Override", "first-route"),
+        ("x-openai-account-routing-override", "second-route"),
+        ("x-openai-fedramp", "true"),
         ("x-codex-turn-state", "foreign-turn-state"),
         ("x-codex-routing-hint", "foreign-route"),
         ("openai-alpha", "live-test"),
@@ -452,6 +456,7 @@ fn assert_live_correlation(headers: &reqwest::header::HeaderMap) {
     uuid::Uuid::parse_str(session).unwrap();
     assert_eq!(headers["thread-id"], session);
     assert_eq!(headers["openai-alpha"], "live-test");
+    assert_eq!(headers["x-openai-fedramp"], "true");
     assert_eq!(
         headers
             .get_all("x-test-business")
@@ -465,9 +470,7 @@ fn assert_live_correlation(headers: &reqwest::header::HeaderMap) {
         "x-oai-attestation",
         "x-forwarded-for",
         "x-stainless-runtime",
-        "traceparent",
-        "tracestate",
-        "ws_request_header_traceparent",
+        "x-openai-account-routing-override",
         "x-codex-turn-state",
         "x-codex-routing-hint",
     ] {
@@ -479,7 +482,14 @@ fn assert_live_correlation(headers: &reqwest::header::HeaderMap) {
     assert_eq!(metadata["future"], true);
     assert_ne!(metadata["installation_id"], "foreign-installation");
     assert!(metadata.get("account_id").is_none());
-    assert!(metadata.get("traceparent").is_none());
+    assert_eq!(metadata["traceparent"], "client-trace");
+    assert_eq!(headers["traceparent"], "client-trace");
+    assert_eq!(headers["tracestate"], "client-state");
+    assert_eq!(headers["ws_request_header_traceparent"], "client-ws-trace");
+    assert_eq!(
+        headers["x-codex-installation-id"].to_str().unwrap(),
+        metadata["installation_id"]
+    );
 }
 
 #[tokio::test]
@@ -676,6 +686,7 @@ async fn verify_live_call_identity() {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
     let profile = CodexWireProfile {
+        installation_seed: Some("3b11bc82-c666-417d-b9ff-2a34fd040385".to_owned()),
         originator: "codex_cli_rs".to_owned(),
         exact_user_agent: Some("codex_cli_rs/0.160.0 (Linux; x86_64) live-test".to_owned()),
         codex_version: "0.160.0".to_owned(),
@@ -735,11 +746,17 @@ async fn verify_live_call_identity() {
 
     assert_live_correlation(&creation.headers);
     let scoped_session = creation.headers["session-id"].clone();
+    let installation_id = creation.headers["x-codex-installation-id"].clone();
+    assert_ne!(
+        installation_id.to_str().unwrap(),
+        profile.installation_seed.as_deref().unwrap()
+    );
 
     let mut changed_profile = profile.clone();
     changed_profile.exact_user_agent = Some("changed-key-profile".to_owned());
     changed_profile.originator = "changed-originator".to_owned();
     changed_profile.residency = None;
+    changed_profile.installation_seed = Some("a3146f84-64b3-4759-9cf1-a8a001448930".to_owned());
     let current_scope = Arc::new(
         (*scope(AccountModelAccess::default()))
             .clone()
@@ -806,6 +823,7 @@ async fn verify_live_call_identity() {
         );
         let expected = profile.clone();
         let expected_session = scoped_session.clone();
+        let expected_installation_id = installation_id.clone();
         let server = tokio::spawn(async move {
             let mut tls = accept_live_proxy(listener).await;
             if iteration < 2 {
@@ -814,6 +832,10 @@ async fn verify_live_call_identity() {
                     |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
                      _response| {
                         assert_eq!(request.uri().path(), format!("/v1/live/{CALL}"));
+                        assert_eq!(
+                            request.headers()["x-codex-installation-id"],
+                            expected_installation_id
+                        );
                         assert_live_profile(
                             request.headers(),
                             &expected,
@@ -846,6 +868,7 @@ async fn verify_live_call_identity() {
                 );
                 assert_live_correlation(&headers);
                 assert_eq!(headers["session-id"], expected_session);
+                assert_eq!(headers["x-codex-installation-id"], expected_installation_id);
                 tls.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nX-Test-Response: first\r\nX-Test-Response: \x80second\r\nSet-Cookie: private=1\r\nConnection: close\r\n\r\n")
                     .await
                     .unwrap();

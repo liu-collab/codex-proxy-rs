@@ -103,7 +103,7 @@ pub(super) fn validate(
     }
     Ok((
         configuration,
-        crate::callback::private_state::configuration(manifest)?,
+        crate::package::state_configuration(manifest)?,
     ))
 }
 

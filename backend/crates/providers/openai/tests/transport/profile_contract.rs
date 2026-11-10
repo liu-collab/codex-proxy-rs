@@ -143,7 +143,7 @@ fn deployment_routing_survives_artifact_updates_and_profile_selection() {
 }
 
 #[tokio::test]
-async fn model_transports_apply_configured_routing_and_discard_downstream_values() {
+async fn model_transports_apply_deployment_routing_with_or_without_client_headers() {
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use gateway_core::operation::{GenerateRequest, ProtocolPayload};
 
@@ -178,7 +178,9 @@ async fn model_transports_apply_configured_routing_and_discard_downstream_values
             [None, Some("NO_CONSTRAINT")],
         ),
     ] {
-        for websocket in [false, true] {
+        for (websocket, has_downstream_headers) in
+            [(false, false), (false, true), (true, false), (true, true)]
+        {
             let (base_url, capture): (
                 String,
                 futures::future::BoxFuture<'static, reqwest::header::HeaderMap>,
@@ -237,6 +239,7 @@ async fn model_transports_apply_configured_routing_and_discard_downstream_values
             );
             let downstream_headers = HEADERS
                 .into_iter()
+                .filter(|_| has_downstream_headers)
                 .flat_map(|name| {
                     ["downstream-first", "downstream-second"]
                         .map(|value| json!([name, STANDARD.encode(value)]))
@@ -270,7 +273,7 @@ async fn model_transports_apply_configured_routing_and_discard_downstream_values
                         .map(|value| value.to_str().unwrap())
                         .collect::<Vec<_>>(),
                     value.into_iter().collect::<Vec<_>>(),
-                    "{document}, websocket={websocket}, {name}",
+                    "{document}, websocket={websocket}, downstream={has_downstream_headers}, {name}",
                 );
             }
         }

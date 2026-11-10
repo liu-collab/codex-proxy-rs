@@ -30,7 +30,10 @@ pub(super) fn settings_with_margin(refresh_margin_seconds: u64) -> RuntimeSettin
             max_concurrent_per_account: 3,
             max_waiting_per_key: 0,
             max_waiting_per_account: 0,
-            concurrency_wait_timeout_seconds: 30,
+            key_queue_timeout_seconds: 30,
+            account_queue_timeout_seconds: 30,
+            switch_account_on_queue_failure: false,
+            max_retry_after_seconds: 240,
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
             max_account_rotations: 3,
@@ -505,6 +508,56 @@ fn timestamp_micros(value: DateTime<Utc>) -> DateTime<Utc> {
 }
 
 #[tokio::test]
+async fn retry_after_limit_defaults_and_updates_reach_the_runtime_snapshot() {
+    use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
+    let Some(database) = TestDatabase::create("retry_after_limit").await else {
+        return;
+    };
+    let repository = PgRuntimeSettingsRepository::new(database.pool.clone());
+    assert_eq!(
+        repository
+            .load_runtime_settings()
+            .await
+            .unwrap()
+            .values
+            .max_retry_after_seconds,
+        240
+    );
+    for limit in [60, 0, u32::MAX] {
+        let mut update = settings_with_margin(300);
+        update.values.max_retry_after_seconds = limit;
+        repository.update_runtime_settings(update).await.unwrap();
+        assert_eq!(
+            repository
+                .load_runtime_settings()
+                .await
+                .unwrap()
+                .values
+                .max_retry_after_seconds,
+            limit
+        );
+        let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
+            .load_runtime_snapshot()
+            .await
+            .unwrap();
+        assert_eq!(
+            serde_json::to_value(snapshot.settings).unwrap()["max_retry_after_seconds"],
+            limit
+        );
+    }
+    for invalid in [-1_i64, i64::from(u32::MAX) + 1] {
+        assert!(
+            sqlx::query("update runtime_settings set max_retry_after_seconds = $1 where id = 1")
+                .bind(invalid)
+                .execute(&database.pool)
+                .await
+                .is_err()
+        );
+    }
+    database.close().await;
+}
+
+#[tokio::test]
 async fn concurrency_queue_settings_round_trip_into_the_runtime_snapshot() {
     use gateway_store::postgres::{PgRuntimeSnapshotRepository, RuntimeSnapshotRepository};
     let Some(database) = TestDatabase::create("queue_settings").await else {
@@ -517,17 +570,21 @@ async fn concurrency_queue_settings_round_trip_into_the_runtime_snapshot() {
             before.values.max_concurrent_per_account,
             before.values.max_waiting_per_key,
             before.values.max_waiting_per_account,
-            before.values.concurrency_wait_timeout_seconds,
+            before.values.key_queue_timeout_seconds,
+            before.values.account_queue_timeout_seconds,
+            before.values.switch_account_on_queue_failure,
             before.values.openai_guardian_reserved_concurrency,
         ),
-        (3, 10, 10, 30, 5)
+        (3, 10, 10, 30, 30, false, 5)
     );
     let mut update = settings_with_margin(1234);
     update.values.max_concurrent_per_account = 7;
     update.values.refresh_concurrency = 12;
     update.values.max_waiting_per_key = 5;
     update.values.max_waiting_per_account = 7;
-    update.values.concurrency_wait_timeout_seconds = 12;
+    update.values.key_queue_timeout_seconds = 12;
+    update.values.account_queue_timeout_seconds = 5;
+    update.values.switch_account_on_queue_failure = true;
     update.values.openai_guardian_reserved_concurrency = 1;
     repository.update_runtime_settings(update).await.unwrap();
     let settings = repository.load_runtime_settings().await.unwrap();
@@ -538,10 +595,12 @@ async fn concurrency_queue_settings_round_trip_into_the_runtime_snapshot() {
             settings.values.refresh_margin_seconds,
             settings.values.max_waiting_per_key,
             settings.values.max_waiting_per_account,
-            settings.values.concurrency_wait_timeout_seconds,
+            settings.values.key_queue_timeout_seconds,
+            settings.values.account_queue_timeout_seconds,
+            settings.values.switch_account_on_queue_failure,
             settings.values.openai_guardian_reserved_concurrency,
         ),
-        (7, 12, 1234, 5, 7, 12, 1)
+        (7, 12, 1234, 5, 7, 12, 5, true, 1)
     );
     let snapshot = PgRuntimeSnapshotRepository::new(database.pool.clone())
         .load_runtime_snapshot()
@@ -555,14 +614,20 @@ async fn concurrency_queue_settings_round_trip_into_the_runtime_snapshot() {
                 .unwrap(),
             snapshot_values["max_waiting_per_key"].as_u64().unwrap(),
             snapshot_values["max_waiting_per_account"].as_u64().unwrap(),
-            snapshot_values["concurrency_wait_timeout_seconds"]
+            snapshot_values["key_queue_timeout_seconds"]
+                .as_u64()
+                .unwrap(),
+            snapshot_values["switch_account_on_queue_failure"]
+                .as_bool()
+                .unwrap(),
+            snapshot_values["account_queue_timeout_seconds"]
                 .as_u64()
                 .unwrap(),
             snapshot_values["openai_guardian_reserved_concurrency"]
                 .as_u64()
                 .unwrap(),
         ),
-        (7, 5, 7, 12, 1)
+        (7, 5, 7, 12, true, 5, 1)
     );
     assert!(snapshot.config_revision > before.config_revision);
     database.close().await;

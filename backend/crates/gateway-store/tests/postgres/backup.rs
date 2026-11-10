@@ -235,8 +235,10 @@ async fn backup_lifecycle_transitions_through_deleting_and_hard_delete() {
     assert_eq!(record.status, BackupStatus::Queued);
     assert_eq!(record.attempt_count, 0);
 
+    // 生命周期时间统一从数据库创建时间推导，避免测试进程与数据库的时钟偏差
+    let started_at = record.created_at + chrono::Duration::seconds(1);
     let claimed = repository
-        .claim_next_queued(Utc::now())
+        .claim_next_queued(started_at)
         .await
         .expect("claim")
         .expect("claimed one task");
@@ -254,7 +256,7 @@ async fn backup_lifecycle_transitions_through_deleting_and_hard_delete() {
             &record.id,
             transition(BackupStatus::Dumping, BackupStatus::Uploading),
             update,
-            Utc::now(),
+            started_at + chrono::Duration::seconds(1),
         )
         .await
         .expect("dump complete")
@@ -267,7 +269,7 @@ async fn backup_lifecycle_transitions_through_deleting_and_hard_delete() {
             &record.id,
             transition(BackupStatus::Uploading, BackupStatus::Completed),
             StatusTransitionUpdate::default(),
-            Utc::now(),
+            started_at + chrono::Duration::seconds(2),
         )
         .await
         .expect("upload verified")
@@ -276,7 +278,11 @@ async fn backup_lifecycle_transitions_through_deleting_and_hard_delete() {
     assert!(completed.completed_at.is_some());
 
     let deleting = repository
-        .transition_to_deleting(&record.id, Utc::now(), Some(&context()))
+        .transition_to_deleting(
+            &record.id,
+            started_at + chrono::Duration::seconds(3),
+            Some(&context()),
+        )
         .await
         .expect("to deleting")
         .expect("transition matched");
@@ -304,7 +310,7 @@ async fn active_task_unique_index_blocks_second_queued() {
     };
     let repository = PgBackupRepository::new(db.pool.clone());
 
-    repository
+    let record = repository
         .insert_backup_record(
             seed(&"a".repeat(32), BackupTriggerKind::Manual, None),
             &context(),
@@ -321,8 +327,10 @@ async fn active_task_unique_index_blocks_second_queued() {
     assert_eq!(error.kind(), AdminStoreErrorKind::Conflict);
 
     // 第一个任务完成释放名额后，第二个可以插入
+    let started_at = record.created_at + chrono::Duration::seconds(1);
+    let completed_at = started_at + chrono::Duration::seconds(1);
     let claimed = repository
-        .claim_next_queued(Utc::now())
+        .claim_next_queued(started_at)
         .await
         .expect("claim")
         .expect("claimed");
@@ -333,10 +341,10 @@ async fn active_task_unique_index_blocks_second_queued() {
             StatusTransitionUpdate {
                 error_code: Some("backup.pg_dump_failed".to_owned()),
                 error_message: Some("boom".to_owned()),
-                completed_at: Some(Utc::now()),
+                completed_at: Some(completed_at),
                 ..Default::default()
             },
-            Utc::now(),
+            completed_at,
         )
         .await
         .expect("fail task");
@@ -605,12 +613,13 @@ async fn manual_backup_mutations_roll_back_when_their_audit_cannot_be_written() 
         .execute(&db.pool)
         .await
         .expect("restore audit writes");
-    repository
+    let record = repository
         .insert_backup_record(seed, &context())
         .await
         .expect("create with audit");
+    let started_at = record.created_at + chrono::Duration::seconds(1);
     repository
-        .claim_next_queued(Utc::now())
+        .claim_next_queued(started_at)
         .await
         .expect("claim backup fixture")
         .expect("queued backup is claimed");
@@ -623,7 +632,7 @@ async fn manual_backup_mutations_roll_back_when_their_audit_cannot_be_written() 
                 error_message: Some("synthetic fixture failure".to_owned()),
                 ..Default::default()
             },
-            Utc::now(),
+            started_at + chrono::Duration::seconds(1),
         )
         .await
         .expect("finish backup fixture")
@@ -632,7 +641,11 @@ async fn manual_backup_mutations_roll_back_when_their_audit_cannot_be_written() 
         .execute(&db.pool).await.expect("reject deletion audit");
     assert!(
         repository
-            .transition_to_deleting(&backup_id, Utc::now(), Some(&context()))
+            .transition_to_deleting(
+                &backup_id,
+                started_at + chrono::Duration::seconds(2),
+                Some(&context()),
+            )
             .await
             .is_err()
     );
@@ -651,14 +664,22 @@ async fn manual_backup_mutations_roll_back_when_their_audit_cannot_be_written() 
         .expect("restore deletion audit");
     assert!(
         repository
-            .transition_to_deleting(&backup_id, Utc::now(), Some(&context()))
+            .transition_to_deleting(
+                &backup_id,
+                started_at + chrono::Duration::seconds(3),
+                Some(&context()),
+            )
             .await
             .unwrap()
             .is_some()
     );
     assert!(
         repository
-            .transition_to_deleting(&backup_id, Utc::now(), Some(&context()))
+            .transition_to_deleting(
+                &backup_id,
+                started_at + chrono::Duration::seconds(4),
+                Some(&context()),
+            )
             .await
             .unwrap()
             .is_none()

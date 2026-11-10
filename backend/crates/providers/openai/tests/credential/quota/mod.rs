@@ -44,6 +44,7 @@ fn wire_profile() -> CodexWireProfileState {
         arch: "x86_64".to_owned(),
         terminal: "quota-contract".to_owned(),
         exact_user_agent: None,
+        installation_seed: None,
         residency: None,
         account_routing_override: None,
         verified_at: Utc
@@ -154,7 +155,7 @@ fn exhausted_quota(reset_at: Option<SystemTime>) -> QuotaState {
 }
 
 #[tokio::test]
-async fn successful_inference_headers_are_authoritative_even_at_full_display_usage() {
+async fn successful_inference_at_the_subscription_limit_stops_further_scheduling() {
     let store = Arc::new(MemoryAccountStore::default());
     let account_id = "acct_passive_allowed";
     create_account(&store, account_id).await;
@@ -181,11 +182,11 @@ async fn successful_inference_headers_are_authoritative_even_at_full_display_usa
         .expect("quota snapshot");
 
     assert_eq!(snapshot.fact().remaining_percent(), Some(0));
-    assert_eq!(snapshot.quota().access(), QuotaAccessState::Allowed);
-    assert_eq!(current.quota().access(), QuotaAccessState::Allowed);
+    assert_eq!(snapshot.quota().access(), QuotaAccessState::Exhausted);
+    assert_eq!(current.quota().access(), QuotaAccessState::Exhausted);
     assert_eq!(
         current.status_projection(SystemTime::now(), None).status,
-        AccountStatus::Normal
+        AccountStatus::QuotaExhausted
     );
 }
 
@@ -275,7 +276,8 @@ async fn passive_quota_updates_keep_core_and_model_specific_buckets_independent(
     assert_eq!(spark.used_percent(), Some(1.0));
 
     let core_headers = vec![
-        ("x-codex-active-limit".to_owned(), "codex".to_owned()),
+        // 文本响应的活动标记不是独立额度头，通用周窗口仍应更新原来的账号额度
+        ("x-codex-active-limit".to_owned(), "premium".to_owned()),
         ("x-codex-primary-used-percent".to_owned(), "82".to_owned()),
         (
             "x-codex-primary-window-minutes".to_owned(),
@@ -410,42 +412,43 @@ async fn websocket_additional_rate_limit_resolves_by_name_without_touching_core(
 #[tokio::test]
 async fn quota_refresh_synchronizes_plan_changes_without_losing_subtypes() {
     for (current_plan, observed_plan, expected) in [
-        ("plus", Some("pro"), "pro"),
-        ("pro", Some("plus"), "plus"),
-        ("plus", Some("free"), "free"),
-        ("unknown", Some("pro"), "pro"),
-        ("plus", Some("  PRO  "), "pro"),
-        ("pro", None, "pro"),
-        ("pro", Some("unknown"), "pro"),
-        ("pro", Some("  "), "pro"),
+        (None, Some("free"), "free"),
+        (Some("plus"), Some("pro"), "pro"),
+        (Some("pro"), Some("plus"), "plus"),
+        (Some("plus"), Some("free"), "free"),
+        (Some("unknown"), Some("pro"), "pro"),
+        (Some("plus"), Some("  PRO  "), "pro"),
+        (Some("pro"), None, "pro"),
+        (Some("pro"), Some("unknown"), "pro"),
+        (Some("pro"), Some("  "), "pro"),
         (
-            "self_serve_business_prolite",
+            Some("self_serve_business_prolite"),
             Some("team"),
             "self_serve_business_prolite",
         ),
         (
-            "self_serve_business_usage_based",
+            Some("self_serve_business_usage_based"),
             Some("team"),
             "self_serve_business_usage_based",
         ),
         (
-            "enterprise_cbp_usage_based",
+            Some("enterprise_cbp_usage_based"),
             Some("business"),
             "enterprise_cbp_usage_based",
         ),
-        ("edu_plus", Some("edu"), "edu_plus"),
-        ("self_serve_business_prolite", Some("pro"), "pro"),
+        (Some("edu_plus"), Some("edu"), "edu_plus"),
+        (Some("self_serve_business_prolite"), Some("pro"), "pro"),
         (
-            "team",
+            Some("team"),
             Some("self_serve_business_prolite"),
             "self_serve_business_prolite",
         ),
-        ("plus", Some("future_plan"), "future_plan"),
+        (Some("plus"), Some("future_plan"), "future_plan"),
     ] {
         let store = Arc::new(MemoryAccountStore::default());
         let account_id = "acct_plan_refresh";
         let mut verified_account = profile("chatgpt-plan-refresh");
-        verified_account.plan_type = Some(current_plan.to_owned());
+        verified_account.plan_type = current_plan.map(str::to_owned);
         store
             .seed_oauth_credential(ImportCodexOAuthCredential {
                 account_id: account_id.to_owned(),
@@ -480,7 +483,7 @@ async fn quota_refresh_synchronizes_plan_changes_without_losing_subtypes() {
         assert_eq!(
             after.plan_type(),
             Some(expected),
-            "{current_plan} -> {observed_plan:?}"
+            "{current_plan:?} -> {observed_plan:?}"
         );
         assert_eq!(after.revision(), before.revision());
         assert_eq!(after.email(), before.email());

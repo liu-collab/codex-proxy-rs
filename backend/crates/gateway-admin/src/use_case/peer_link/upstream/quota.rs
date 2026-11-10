@@ -13,24 +13,26 @@ pub(super) fn observe(
     started_at: SystemTime,
     now: SystemTime,
 ) -> Option<QuotaState> {
+    let usage = peer.usage.as_ref()?;
     if !fresh(&peer.observed_at, now)
         || !component_fresh(Some(&peer.observed_at), Some(&peer.expires_at), now)
-        || peer.usage.status != PeerComponentStatus::Available
-        || !component_fresh(peer.usage.observed_at.as_deref(), None, now)
+        || usage.status != PeerComponentStatus::Available
+        || !component_fresh(usage.observed_at.as_deref(), None, now)
     {
         return None;
     }
     let observed_at = started_at
         .min(timestamp(&peer.observed_at)?)
-        .min(timestamp(peer.usage.observed_at.as_deref()?)?);
-    let usage = peer.usage.data.as_ref()?;
+        .min(timestamp(usage.observed_at.as_deref()?)?);
+    let usage = usage.data.as_ref()?;
     match access(usage, now) {
         QuotaAccessState::Allowed => Some(QuotaState::allowed(observed_at)),
         QuotaAccessState::Exhausted => {
-            let reset_at = [&usage.daily, &usage.weekly]
-                .into_iter()
+            let reset_at = usage
+                .windows
+                .iter()
                 .filter(|window| window_access(window, now) == QuotaAccessState::Exhausted)
-                .filter_map(|window| window.resets_at.as_deref().and_then(timestamp))
+                .filter_map(|window| window.reset_at.as_deref().and_then(timestamp))
                 .min();
             Some(QuotaState::exhausted(
                 if usage.allowed == Some(false) {
@@ -51,8 +53,9 @@ pub(super) fn access(usage: &PeerKeyUsage, now: SystemTime) -> QuotaAccessState 
     match usage.allowed {
         Some(true) => QuotaAccessState::Allowed,
         Some(false) => QuotaAccessState::Exhausted,
-        None if [&usage.daily, &usage.weekly]
-            .into_iter()
+        None if usage
+            .windows
+            .iter()
             .any(|window| window_access(window, now) == QuotaAccessState::Exhausted) =>
         {
             QuotaAccessState::Exhausted
@@ -64,7 +67,7 @@ pub(super) fn access(usage: &PeerKeyUsage, now: SystemTime) -> QuotaAccessState 
 /// 过期窗口保持未知，不从重置时间或金额推断恢复
 pub(super) fn window_access(window: &PeerBudgetWindow, now: SystemTime) -> QuotaAccessState {
     if window
-        .resets_at
+        .reset_at
         .as_deref()
         .and_then(timestamp)
         .is_some_and(|reset| reset <= now)

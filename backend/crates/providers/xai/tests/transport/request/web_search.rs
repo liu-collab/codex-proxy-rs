@@ -71,7 +71,7 @@ fn web_search_filters_keep_empty_lists_unbounded() {
 }
 
 #[test]
-fn web_search_filters_reject_retired_top_level_allowed_domains() {
+fn web_search_filters_reject_top_level_allowed_domains() {
     for tool in [
         json!({"type": "web_search_preview", "allowed_domains": ["example.com"]}),
         json!({"type": "web_search", "allowed_domains": ["example.com"],

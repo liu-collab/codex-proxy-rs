@@ -5,7 +5,7 @@ import { ZButton, ZCard, ZCheckbox, ZFormItem, ZIconButton, ZInput, ZPopover, ZS
 
 import { Activity, CircleAlert, Gauge, Plus, Snowflake, Timer } from '@lucide/vue'
 
-import { computed, shallowRef, useId } from 'vue'
+import { computed, shallowRef, useId, useTemplateRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { generateRequestId } from '@/utils/operation'
 import { createProtectionCondition, protectionLimits } from './form'
@@ -16,6 +16,9 @@ const props = defineProps<{ disabled: boolean }>()
 const { t } = useI18n({ useScope: 'global' })
 
 const policy = defineModel<ProtectionDraft>({ required: true })
+const rulesItem = useTemplateRef<InstanceType<typeof ZFormItem>>('rulesItem')
+const showErrors = computed(() => Boolean(rulesItem.value?.validateState))
+watch(() => policy.value.rules, () => rulesItem.value?.clearValidate())
 const expandedId = shallowRef<string | null>(null)
 const probeModelId = useId()
 const helpId = useId()
@@ -91,7 +94,7 @@ function removeRule(id: string) {
         @update:model-value="update({ enabled: $event })"
       />
 
-      <ZFormItem prop="accountErrorProtection.rules" class="col-span-full">
+      <ZFormItem ref="rulesItem" prop="accountErrorProtection.rules" class="col-span-full">
         <section class="grid min-w-0 gap-3" :aria-label="t('settings.errorProtection.rules')">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div class="flex min-w-0 items-center gap-1">
@@ -100,7 +103,6 @@ function removeRule(id: string) {
                 <template #reference="{ open }">
                   <ZIconButton
                     variant="link"
-                    :title="undefined"
                     size="small"
                     :aria-label="t('settings.errorProtection.matchingHelpTitle')"
                     :aria-expanded="open"
@@ -138,6 +140,7 @@ function removeRule(id: string) {
               <ProtectionRuleRow
                 :rule="rule"
                 :expanded="expandedId === rule.id"
+                :show-errors="showErrors"
                 :disabled="disabled"
                 @toggle="expandedId = expandedId === rule.id ? null : rule.id"
                 @remove="removeRule(rule.id)"
@@ -189,7 +192,7 @@ function removeRule(id: string) {
             <Timer class="size-4" />
           </template>
           <template #suffix>
-            <span class="text-z-sm">{{ t('settings.errorProtection.seconds') }}</span>
+            <span class="text-z-sm">{{ t('settings.units.seconds') }}</span>
           </template>
         </ZInput>
       </ZFormItem>
@@ -212,7 +215,7 @@ function removeRule(id: string) {
             <Snowflake class="size-4" />
           </template>
           <template #suffix>
-            <span class="text-z-sm">{{ t('settings.errorProtection.seconds') }}</span>
+            <span class="text-z-sm">{{ t('settings.units.seconds') }}</span>
           </template>
         </ZInput>
       </ZFormItem>

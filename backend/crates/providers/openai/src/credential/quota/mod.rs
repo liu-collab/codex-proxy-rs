@@ -55,8 +55,8 @@ use crate::transport::{
     CodexRateLimitResetCredits, CodexRateLimitResetCreditsConsumeResult, CodexRequestContext,
 };
 
+use super::codec::CodexRuntimeCredential;
 use super::repository::{CodexCredentialRepository, CredentialRepositoryError};
-use super::security::CodexRuntimeCredential;
 use document::{
     DEFAULT_CODEX_LIMIT_ID, RateLimitSnapshotsByLimitId, normalize_quota_window_placeholders,
     observed_account_plan,

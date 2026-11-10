@@ -4,6 +4,7 @@ mod cache;
 mod compatibility;
 mod icon;
 mod inspection;
+mod state_schema;
 mod validation;
 
 pub use cache::PreparedPackage;
@@ -13,4 +14,7 @@ pub(crate) use compatibility::{
 };
 pub use inspection::PackageInspector;
 pub(crate) use inspection::inspection_error;
+pub(crate) use state_schema::{
+    configuration as state_configuration, validators as state_validators,
+};
 pub use validation::{PackageError, PackageLimits, ValidatedPackage};

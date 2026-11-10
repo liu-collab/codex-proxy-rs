@@ -2,7 +2,7 @@
 
 use super::super::session::{CallCancellation, CallReply, HostClient, PluginCall, SessionError};
 use super::{MiddlewareInput, MiddlewareOutput, invalid_input};
-use crate::client::{HostReply, read::PendingRead};
+use crate::client::{HostReply, pending_read::PendingRead};
 use crate::{
     CallContext, ErrorCode, PluginFault, Stage,
     call::middleware::{

@@ -53,6 +53,7 @@ type CredentialLoadHook = dyn for<'a> Fn(
 pub(crate) struct MemoryAccountStore {
     accounts: Mutex<BTreeMap<ProviderAccountId, StoredAccount>>,
     account_reads: AtomicUsize,
+    provider_list_reads: AtomicUsize,
     quota_reads: AtomicUsize,
     largest_quota_read: AtomicUsize,
     fail_provider_listing: AtomicBool,
@@ -149,6 +150,14 @@ impl MemoryAccountStore {
             .map(|stored| stored.account.clone())
     }
 
+    pub(crate) fn enable_quota_credits(&self, id: &str) {
+        let mut accounts = self.accounts.lock().unwrap();
+        let stored = accounts
+            .get_mut(&ProviderAccountId::new(id).unwrap())
+            .unwrap();
+        stored.account = stored.account.clone().with_auto_use_quota_credits(true);
+    }
+
     pub(crate) fn set_model_access(
         &self,
         id: &str,
@@ -202,6 +211,10 @@ impl MemoryAccountStore {
 
     pub(crate) fn account_reads(&self) -> usize {
         self.account_reads.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn provider_list_reads(&self) -> usize {
+        self.provider_list_reads.load(Ordering::SeqCst)
     }
 
     pub(crate) fn has_quota(&self, id: &str) -> bool {
@@ -292,6 +305,7 @@ impl ProviderAccountStore for MemoryAccountStore {
         &self,
         provider: &ProviderKind,
     ) -> Result<Vec<ProviderAccount>, StoreError> {
+        self.provider_list_reads.fetch_add(1, Ordering::SeqCst);
         if self.fail_provider_listing.load(Ordering::SeqCst) {
             return Err(StoreError::caused_by(
                 StoreErrorKind::Unavailable,
@@ -308,6 +322,36 @@ impl ProviderAccountStore for MemoryAccountStore {
             .expect("account store lock")
             .values()
             .filter(|stored| stored.account.provider() == provider && stored.account.enabled())
+            .map(|stored| stored.account.clone())
+            .collect())
+    }
+
+    async fn list_for_provider_accounts(
+        &self,
+        provider: &ProviderKind,
+        account_ids: &[ProviderAccountId],
+    ) -> Result<Vec<ProviderAccount>, StoreError> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.provider_list_reads.fetch_add(1, Ordering::SeqCst);
+        if self.fail_provider_listing.load(Ordering::SeqCst) {
+            return Err(StoreError::caused_by(
+                StoreErrorKind::Unavailable,
+                std::io::Error::new(
+                    std::io::ErrorKind::ConnectionRefused,
+                    "PRIVATE_DATABASE_CAUSE",
+                ),
+            ));
+        }
+        // 与 Postgres 实现的调度列表语义一致：停用账号不进入常规候选
+        Ok(self
+            .accounts
+            .lock()
+            .expect("account store lock")
+            .values()
+            .filter(|stored| stored.account.provider() == provider && stored.account.enabled())
+            .filter(|stored| account_ids.contains(stored.account.id()))
             .map(|stored| stored.account.clone())
             .collect())
     }
@@ -728,6 +772,7 @@ fn rebuild_account(current: &ProviderAccount, rebuild: AccountRebuild) -> Provid
         rebuild.last_error_message,
     )
     .with_scheduling(current.concurrency_limit(), current.weight())
+    .with_auto_use_quota_credits(current.auto_use_quota_credits())
     .with_refresh_schedule(rebuild.has_refresh_token, rebuild.next_refresh_at)
     .with_outbound_proxy(current.outbound_proxy().cloned())
     .with_request_location(current.request_location().cloned())
@@ -1187,13 +1232,14 @@ pub(crate) fn account_policy() -> gateway_core::account::AccountSelectionPolicy 
 type CooldownReadHook =
     dyn Fn(ProviderAccountId) -> BoxFuture<'static, Result<(), ProviderStoreError>> + Send + Sync;
 
-/// 内存 `ProviderCooldownPort`：实现 `read`/`put_if_later` 与容量失败计数
-/// 证据（openai selector 429 冷却与容量熔断路径用），scope 变体测试不涉及，
-/// 返回占位
+/// 内存账号与模型冷却端口，保留版本和到期时间供选号行为测试
 #[derive(Clone, Default)]
 pub(crate) struct MemoryCooldownPort {
     pub(crate) cooldowns: Arc<Mutex<BTreeMap<ProviderAccountId, ProviderCooldown>>>,
+    pub(crate) scoped:
+        Arc<Mutex<BTreeMap<(ProviderAccountId, ProviderCooldownScope), ProviderScopedCooldown>>>,
     before_read: Option<Arc<CooldownReadHook>>,
+    before_scoped_read: Option<Arc<CooldownReadHook>>,
 }
 
 impl MemoryCooldownPort {
@@ -1206,9 +1252,45 @@ impl MemoryCooldownPort {
         self.before_read = Some(hook);
         self
     }
+
+    pub(crate) fn with_scoped_read_hook(mut self, hook: Arc<CooldownReadHook>) -> Self {
+        self.before_scoped_read = Some(hook);
+        self
+    }
 }
 
 impl ProviderCooldownPort for MemoryCooldownPort {
+    fn read_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderCooldown>, ProviderStoreError>>> {
+        Box::pin(async move {
+            let mut results = Vec::with_capacity(account_ids.len());
+            for batch in account_ids.chunks(128) {
+                results
+                    .extend(futures::future::join_all(batch.iter().map(|id| self.read(id))).await);
+            }
+            results
+        })
+    }
+
+    fn read_scoped_many<'a>(
+        &'a self,
+        account_ids: &'a [ProviderAccountId],
+        scope: &'a ProviderCooldownScope,
+    ) -> BoxFuture<'a, Vec<Result<Option<ProviderScopedCooldown>, ProviderStoreError>>> {
+        Box::pin(async move {
+            let mut results = Vec::with_capacity(account_ids.len());
+            for batch in account_ids.chunks(128) {
+                results.extend(
+                    futures::future::join_all(batch.iter().map(|id| self.read_scoped(id, scope)))
+                        .await,
+                );
+            }
+            results
+        })
+    }
+
     fn put_if_later(
         &self,
         cooldown: ProviderCooldown,
@@ -1254,17 +1336,39 @@ impl ProviderCooldownPort for MemoryCooldownPort {
 
     fn put_scoped_if_later(
         &self,
-        _cooldown: ProviderScopedCooldown,
+        cooldown: ProviderScopedCooldown,
     ) -> BoxFuture<'_, Result<bool, ProviderStoreError>> {
-        Box::pin(async { Ok(false) })
+        Box::pin(async move {
+            let mut scoped = self.scoped.lock().unwrap();
+            let key = (cooldown.account_id().clone(), cooldown.scope().clone());
+            let should_write = scoped.get(&key).is_none_or(|current| {
+                current.credential_revision() < cooldown.credential_revision()
+                    || (current.credential_revision() == cooldown.credential_revision()
+                        && current.until() < cooldown.until())
+            });
+            if should_write {
+                scoped.insert(key, cooldown);
+            }
+            Ok(should_write)
+        })
     }
 
     fn read_scoped<'a>(
         &'a self,
-        _account_id: &'a ProviderAccountId,
-        _scope: &'a ProviderCooldownScope,
+        account_id: &'a ProviderAccountId,
+        scope: &'a ProviderCooldownScope,
     ) -> BoxFuture<'a, Result<Option<ProviderScopedCooldown>, ProviderStoreError>> {
-        Box::pin(async { Ok(None) })
+        Box::pin(async move {
+            if let Some(hook) = &self.before_scoped_read {
+                hook(account_id.clone()).await?;
+            }
+            Ok(self
+                .scoped
+                .lock()
+                .unwrap()
+                .get(&(account_id.clone(), scope.clone()))
+                .cloned())
+        })
     }
 
     fn clear_scoped<'a>(

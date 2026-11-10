@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use tracing_subscriber::EnvFilter;
 
-use crate::system_update::SystemUpdateConfig;
+use crate::{ConfigError, system_update::SystemUpdateConfig};
 
 const CONFIG_RELATIVE_PATH: &str = "deploy/config.yaml";
 const SERVER_HOST_ENV: &str = "CPR_SERVER_HOST";
@@ -53,7 +53,7 @@ pub fn load_config<T: LoadableConfig>() -> Result<T, ConfigError> {
     // 此时日志尚未初始化；只报告字段路径，不回显可能包含凭据的配置值
     for field in unused {
         if !T::EXTERNAL_SECTIONS.contains(&field.as_str()) {
-            eprintln!("[警告] 配置字段 {field:?} 未使用，已忽略");
+            eprintln!("[警告] 已忽略未知配置字段 {field:?}");
         }
     }
     value.resolve_and_validate(source_dir)?;
@@ -214,26 +214,6 @@ pub struct FileLoggingConfig {
     #[serde(default = "default_file_retention_days")]
     pub retention_days: usize,
     pub max_file_size_mb: u64,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ConfigError {
-    #[error("配置文件 {path} 的字段 {field:?} 不合法")]
-    InvalidValue { path: PathBuf, field: String },
-    #[error("current directory is unavailable")]
-    CurrentDirectory,
-    #[error("deploy/config.yaml was not found")]
-    ConfigFileNotFound,
-    #[error("configuration path is invalid")]
-    InvalidConfigPath,
-    #[error("configuration document is invalid: {path}")]
-    InvalidDocument { path: PathBuf },
-    #[error("配置文件 {path} 缺少必填字段 {field:?}")]
-    MissingField { path: PathBuf, field: String },
-    #[error("configuration field is invalid: {0}")]
-    InvalidField(&'static str),
-    #[error("environment variable is invalid: {0}")]
-    InvalidEnvironment(&'static str),
 }
 
 fn optional_environment_value(name: &'static str) -> Result<Option<String>, ConfigError> {

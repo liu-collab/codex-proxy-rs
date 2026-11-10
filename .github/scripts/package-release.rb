@@ -1,10 +1,10 @@
 require 'digest'
 require 'fileutils'
-require 'json'
+require_relative 'release-metadata'
 
 # 归档与镜像消费相同二进制和封口清单，不在打包时重新解释插件分发策略
 module ReleasePackage
-  APP_NAME = 'codex-proxy-rs'
+  APP_NAME = ReleaseMetadata::APP_NAME
   MANIFEST = 'dist/plugin-release-assets/plugin-release-manifest.json'
 
   def self.install_manifest(directory)
@@ -34,7 +34,6 @@ module ReleasePackage
     default_image = "${CPR_IMAGE:-#{image}:latest}"
     raise 'Expected exactly one default application image in deploy/compose.yaml' unless compose.scan(default_image).length == 1
     File.write("#{release_dir}/compose.yaml", compose.sub(default_image, "${CPR_IMAGE:-#{image}:#{ENV.fetch('DOCKER_VERSION')}}"))
-    FileUtils.cp(MANIFEST, release_dir)
 
     platforms.each do |platform|
       raise "Unsupported archive format: #{platform['archive']}" unless platform['archive'] == 'tar.gz'
@@ -47,7 +46,7 @@ module ReleasePackage
       FileUtils.cp_r('dist/frontend/.', "#{root}/web/dist")
       FileUtils.cp(config, "#{root}/deploy")
       install_manifest("#{root}/plugins/official")
-      archive = "#{release_dir}/#{APP_NAME}_#{ENV.fetch('VERSION')}_#{platform['os']}_#{platform['arch']}.tar.gz"
+      archive = File.join(release_dir, ReleaseMetadata.archive_name(ENV.fetch('VERSION'), platform))
       raise "Failed to create #{archive}" unless system('tar', '-czf', archive, '-C', File.dirname(root), APP_NAME)
     end
 

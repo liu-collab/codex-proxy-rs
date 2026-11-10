@@ -1,15 +1,13 @@
 <script setup lang="ts">
 import type { Account } from '@/api'
 
-import { ZEmpty, ZIconButton } from '@codex-proxy/ui'
+import { ZEmpty, ZIconButton, ZScrollbar } from '@codex-proxy/ui'
 
 import { ChartNoAxesCombined, RefreshCw, UserRound } from '@lucide/vue'
 
 import { computed, shallowRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AccountPlanBadge from '@/components/account/AccountPlanBadge.vue'
-import AccountUpstreamStatus from '@/components/account/AccountUpstreamStatus.vue'
-import { accountUpstreamPending } from '@/utils/account-upstream'
 import { formatRelativeTime } from '@/utils/relative-time'
 import { usePoolQuotaWindows } from '../../composables/usePoolQuotaWindows'
 import { groupedAccountQuotaWindows, orderedPanelQuotaWindows } from '../../constants'
@@ -33,7 +31,8 @@ const emit = defineEmits<{
 const { t } = useI18n({ useScope: 'global' })
 const poolWindows = usePoolQuotaWindows(() => props.account)
 const hasUpstreamPool = computed(() => props.account.upstream?.discovered && (
-  props.account.upstream.pool || poolWindows.value.some(window => window.sourceAccountId && !window.amount)
+  props.account.upstream.pool || props.account.upstream.maxConcurrency != null || props.account.upstream.requestsPerMinute != null
+  || poolWindows.value.some(window => window.sourceAccountId && !window.amount)
 ))
 
 const quotaEntries = computed(() => groupedAccountQuotaWindows(
@@ -43,23 +42,25 @@ const quotaEntries = computed(() => groupedAccountQuotaWindows(
 ))
 const profileOpen = shallowRef(false)
 const forecastOpen = shallowRef(false)
-const hasPlanBadge = computed(() => !accountUpstreamPending(props.account.upstream)
-  && (Boolean(props.account.planType) || props.account.authenticationKind === 'api_key'))
+const hasPlanBadge = computed(() => Boolean(props.account.planType) || props.account.authenticationKind === 'api_key')
 const hasForecast = computed(() => props.account.authenticationKind !== 'api_key')
 const hasPersonalInfo = computed(() => props.account.capabilities.profile || props.account.capabilities.subscription)
-const canRefresh = computed(() => props.account.capabilities.quotaRefresh || props.account.upstream?.discovered)
+const canRefresh = computed(() => props.account.capabilities.quotaRefresh || props.account.upstream != null)
 const hasActions = computed(() => hasPersonalInfo.value || hasForecast.value || canRefresh.value || props.account.capabilities.resetCredits)
-const lastRefreshed = computed(() => props.account.upstream?.discovered && !props.account.upstream.observedAt
-  ? null
-  : t('accounts.quota.lastRefreshed', {
-      refreshedAtDisplay: formatRelativeTime(props.account.upstream?.discovered
-        ? props.account.upstream.observedAtRelative
-        : props.account.quota.refreshedAtRelative),
-    }))
-const showUpstreamStatus = computed(() => props.account.upstream?.discovered && (
-  (props.account.upstream.observedAt && props.account.upstream.stale)
-  || props.account.upstream.lastError
-))
+const lastRefreshed = computed(() => {
+  const { upstream, quota } = props.account
+  if (upstream?.discovered && !upstream.observedAt)
+    return undefined
+  const refreshedAt = upstream?.discovered ? upstream.observedAtRelative : quota.refreshedAtRelative
+  return refreshedAt
+    ? t('accounts.quota.lastRefreshed', {
+        refreshedAtDisplay: formatRelativeTime(refreshedAt),
+      })
+    : undefined
+})
+const refreshTitle = computed(() => props.account.upstream?.stale && props.account.upstream.observedAt
+  ? `${props.account.upstream.observedAtDisplay} · ${t('accounts.upstream.stale')}`
+  : lastRefreshed.value)
 watch(hasPersonalInfo, (available) => {
   if (!available)
     profileOpen.value = false
@@ -67,21 +68,17 @@ watch(hasPersonalInfo, (available) => {
 </script>
 
 <template>
-  <section class="flex min-h-0 min-w-0 flex-col rounded-lg bg-z-bg-container p-4 shadow-z-tertiary">
+  <section class="flex max-h-72 min-h-0 min-w-0 flex-col rounded-lg bg-z-bg-container p-4 shadow-z-tertiary">
     <div class="mb-3 grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1">
       <h3 class="m-0 text-z-lg font-heavy text-z-text">
         {{ account.upstream?.discovered ? t('accounts.upstream.quota') : t('accounts.quota.accountLimit') }}
       </h3>
       <p
-        v-if="account.capabilities.quota || quotaEntries.length > 0 || account.upstream?.discovered"
+        v-if="(account.capabilities.quota || quotaEntries.length > 0 || account.upstream?.discovered) && (hasPlanBadge || lastRefreshed)"
         class="col-span-2 row-start-2 m-0 flex min-w-0 items-center gap-1.5 text-z-xs font-emphasis text-z-text-secondary"
       >
         <AccountPlanBadge v-if="hasPlanBadge" :upstream="account.upstream" :authentication-kind="account.authenticationKind" :plan-type="account.planType" :plan-type-display="account.planTypeDisplay" size="sm" class="shrink-0" />
-        <template v-if="showUpstreamStatus || lastRefreshed">
-          <span v-if="hasPlanBadge" class="shrink-0">·</span>
-          <AccountUpstreamStatus v-if="showUpstreamStatus && account.upstream" :upstream="account.upstream" />
-          <span v-else-if="lastRefreshed" class="min-w-0 truncate" :title="lastRefreshed">{{ lastRefreshed }}</span>
-        </template>
+        <span v-if="lastRefreshed" class="min-w-0 truncate" :title="refreshTitle">{{ lastRefreshed }}</span>
       </p>
       <div v-if="hasActions" class="col-start-2 row-start-1 flex items-center gap-0.5 [&_svg]:size-3.5 [&_svg]:stroke-2">
         <ZIconButton
@@ -96,6 +93,7 @@ watch(hasPersonalInfo, (available) => {
         <AccountResetCredits
           v-if="account.capabilities.resetCredits"
           :account="account"
+          @account-updated="emit('accountUpdated', $event)"
           @consumed="emit('quotaReset', $event)"
         />
         <ZIconButton
@@ -130,14 +128,18 @@ watch(hasPersonalInfo, (available) => {
         surface="none"
       />
     </div>
-    <div v-else class="grid min-h-0 gap-3">
-      <AccountQuotaPanelEntry
-        v-for="entry in quotaEntries"
-        :key="entry.key"
-        :label="entry.label"
-        :windows="entry.windows"
-      />
-      <AccountUpstreamPool v-if="hasUpstreamPool" :pool="account.upstream?.pool" :windows="poolWindows" />
+    <div v-else class="flex min-h-0 flex-1 flex-col gap-3">
+      <ZScrollbar v-if="quotaEntries.length" height="100%" class="-mr-3 [--z-scrollbar-track-inset-block-start:0px]">
+        <div class="grid gap-3 pr-3">
+          <AccountQuotaPanelEntry
+            v-for="entry in quotaEntries"
+            :key="entry.key"
+            :label="entry.label"
+            :windows="entry.windows"
+          />
+        </div>
+      </ZScrollbar>
+      <AccountUpstreamPool v-if="hasUpstreamPool" class="mt-auto" :upstream="account.upstream" :windows="poolWindows" />
     </div>
   </section>
 

@@ -92,8 +92,14 @@ pub(super) async fn fixture() -> AdminTestFixture {
 
 fn usage_record() -> UsageListRecord {
     UsageListRecord {
+        provider_account_upstream_peer: None,
         error_code: None,
         error_message: None,
+        error_kind: None,
+        websocket_close_code: None,
+        continuation_unavailable_reason: None,
+        upstream_connection_exit_reason: None,
+        recovered: false,
         client_status_code: None,
         outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
         client_api_key_name: Some("Production".to_owned()),

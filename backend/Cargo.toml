@@ -49,6 +49,10 @@ opt-level = 2
 [profile.dev.package."miniz_oxide@0.9.1"]
 opt-level = 2
 
+# workspace 的 WebSocket deflate 特性会让 flate2 选用 zlib-rs
+[profile.dev.package.zlib-rs]
+opt-level = 2
+
 [profile.release]
 debug = false
 strip = "symbols"

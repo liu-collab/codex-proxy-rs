@@ -614,7 +614,10 @@ async fn reset_credit_automation_persists_pending_checks_cas_and_follows_account
         .await
         .unwrap();
     let store = admin_account_store(&database.pool);
-    let now = Utc::now();
+    let now: chrono::DateTime<Utc> = sqlx::query_scalar("select now()")
+        .fetch_one(&database.pool)
+        .await
+        .unwrap();
     let mut record = ResetCreditAutomation {
         account_id: "acct_automation".into(),
         enabled: true,
@@ -676,6 +679,11 @@ async fn reset_credit_automation_persists_pending_checks_cas_and_follows_account
     );
     update.values.reset_credit_lead_minutes = 20;
     settings.update_runtime_settings(update).await.unwrap();
+    // 重规划使用数据库时钟，立即到期的断言与后续查询保持相同时间源
+    let replanned_at: chrono::DateTime<Utc> = sqlx::query_scalar("select now()")
+        .fetch_one(&database.pool)
+        .await
+        .unwrap();
     let replanned = store
         .reset_credit_automation(&record.account_id)
         .await
@@ -686,12 +694,12 @@ async fn reset_credit_automation_persists_pending_checks_cas_and_follows_account
         "replan preserves pending idempotency key"
     );
     assert!(replanned.revision > record.revision);
-    assert!(replanned.next_run_at <= Utc::now());
+    assert!(replanned.next_run_at <= replanned_at);
     record = replanned;
 
     assert_eq!(
         store
-            .due_reset_credit_automations(now + TimeDelta::seconds(1), 1)
+            .due_reset_credit_automations(replanned_at, 1)
             .await
             .unwrap(),
         [record.account_id.clone()]
@@ -715,7 +723,7 @@ async fn reset_credit_automation_persists_pending_checks_cas_and_follows_account
     );
     assert!(
         store
-            .due_reset_credit_automations(now + TimeDelta::seconds(1), 10)
+            .due_reset_credit_automations(replanned_at, 10)
             .await
             .unwrap()
             .is_empty()
@@ -740,7 +748,7 @@ async fn reset_credit_automation_persists_pending_checks_cas_and_follows_account
     );
     assert!(
         store
-            .due_reset_credit_automations(now + TimeDelta::seconds(1), 10)
+            .due_reset_credit_automations(replanned_at, 10)
             .await
             .unwrap()
             .is_empty()

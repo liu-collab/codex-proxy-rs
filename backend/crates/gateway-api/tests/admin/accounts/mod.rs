@@ -872,35 +872,21 @@ mod actions {
             }))
             .is_err()
         );
-        assert!(
-            serde_json::from_value::<AccountImportRequest>(json!({
-                "provider": "openai",
-                "data": {},
-                "groupIds": []
-            }))
-            .is_err()
-        );
     }
 
     #[test]
-    fn oauth_complete_should_not_accept_group_assignment() {
+    fn oauth_complete_rejects_unknown_fields() {
         let flow_id = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode([7_u8; 32]);
-        let request: CompleteAccountAuthorizationRequest = serde_json::from_value(json!({
+        let mut payload = json!({
             "provider": "openai",
             "flowId": flow_id,
             "callbackUrl": "http://localhost/callback?code=ok"
-        }))
-        .expect("decode OAuth completion");
+        });
+        let request: CompleteAccountAuthorizationRequest =
+            serde_json::from_value(payload.clone()).expect("decode OAuth completion");
         assert!(request.validate().is_ok());
-        assert!(
-            serde_json::from_value::<CompleteAccountAuthorizationRequest>(json!({
-                "provider": "xai",
-                "flowId": "flow_test",
-                "callbackUrl": "http://localhost/callback?code=ok",
-                "groupIds": []
-            }))
-            .is_err()
-        );
+        payload["unknownField"] = json!(true);
+        assert!(serde_json::from_value::<CompleteAccountAuthorizationRequest>(payload).is_err());
     }
 
     #[test]
@@ -979,6 +965,7 @@ mod actions {
             DomainConnectionTestEvent::Failed {
                 source: AccountProbeErrorSource::Upstream,
                 gateway_error_code: GatewayErrorKind::RateLimited,
+                proxy_hint: None,
                 send_state: Some(UpstreamSendState::Sent),
                 message: "upstream unavailable".to_owned(),
                 provider_error_code: Some("usage_exhausted".to_owned()),
@@ -1040,6 +1027,7 @@ mod actions {
                     "type": "error",
                     "source": "upstream",
                     "gatewayErrorCode": "rate_limited",
+                    "proxyHint": null,
                     "sendState": "sent",
                     "error": "upstream unavailable",
                     "providerErrorCode": "usage_exhausted",

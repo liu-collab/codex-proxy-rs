@@ -1,5 +1,7 @@
 //! 公共互联按 Provider 声明发现连接，不将认证种类或调度观测绑在 OpenAI 上
 
+mod refresh;
+
 use super::super::UnavailableProvider;
 use async_trait::async_trait;
 use chrono::Utc;
@@ -239,7 +241,7 @@ async fn discovery_uses_provider_capabilities_and_publishes_neutral_signals() {
         let reader = UpstreamInfoReader::default();
         assert!(
             reader
-                .signal(&initial_accounts[0], "model", SystemTime::now())
+                .signal(&initial_accounts[0], Some("model"), SystemTime::now())
                 .is_none()
         );
         let source = bundle.scheduling_source();
@@ -271,7 +273,11 @@ async fn discovery_uses_provider_capabilities_and_publishes_neutral_signals() {
         );
         for account in &initial_accounts[..2] {
             if Some(account.provider().as_str()) == failed_provider {
-                assert!(reader.signal(account, "model", SystemTime::now()).is_none());
+                assert!(
+                    reader
+                        .signal(account, Some("model"), SystemTime::now())
+                        .is_none()
+                );
                 continue;
             }
             let observed = bundle
@@ -286,21 +292,21 @@ async fn discovery_uses_provider_capabilities_and_publishes_neutral_signals() {
             );
             assert!(
                 reader
-                    .signal(account, "model", SystemTime::now())
+                    .signal(account, Some("model"), SystemTime::now())
                     .unwrap()
                     .exhausted
             );
         }
         assert!(
             reader
-                .signal(&initial_accounts[2], "model", SystemTime::now())
+                .signal(&initial_accounts[2], Some("model"), SystemTime::now())
                 .is_none()
         );
         drop(worker);
         drop(bundle);
         assert!(
             reader
-                .signal(&initial_accounts[0], "model", SystemTime::now())
+                .signal(&initial_accounts[0], Some("model"), SystemTime::now())
                 .is_none()
         );
     }
@@ -330,7 +336,7 @@ async fn account_edits_preserve_observation_and_refresh_budget_until_connection_
     assert!(
         bundle
             .scheduling_source()
-            .signal(&edited, "model", SystemTime::now())
+            .signal(&edited, Some("model"), SystemTime::now())
             .is_some()
     );
     let after = service.refresh_quota(edited.id()).await.unwrap();
@@ -345,7 +351,7 @@ async fn account_edits_preserve_observation_and_refresh_budget_until_connection_
     assert!(
         bundle
             .scheduling_source()
-            .signal(&reconnected, "model", SystemTime::now())
+            .signal(&reconnected, Some("model"), SystemTime::now())
             .is_none()
     );
     service.refresh_quota(reconnected.id()).await.unwrap();
@@ -390,14 +396,13 @@ impl PeerTransport for TestTransport {
             .push(account.id().as_str().to_owned());
         let now = Utc::now();
         Ok(serde_json::to_vec(&serde_json::json!({
-            "object":"cpr.peer", "schema_version":1,
+            "object":"cpr.peer", "schema_version":3,
             "observed_at":now.to_rfc3339(),
             "expires_at":(now + chrono::Duration::minutes(5)).to_rfc3339(),
             "capabilities":["key_usage"],
             "usage":{"status":"available","observed_at":now.to_rfc3339(),"data":{"unit":"USD","allowed":false,
-                "daily":{"total":"1","used":"1","remaining":"0","resetsAt":(now + chrono::Duration::days(1)).to_rfc3339()},
-                "weekly":{"total":"0","used":"0","remaining":"0"}}},
-            "pool":{"disclosure":"none"}, "quota":{"disclosure":"none"}, "models":[]
+                "windows":[{"key":"daily","total":"1","used":"1","remaining":"0","reset_at":(now + chrono::Duration::days(1)).to_rfc3339()}]}},
+            "models":[]
         })).unwrap())
     }
 }
@@ -448,6 +453,31 @@ impl ProviderAccountStore for TestAccounts {
             .unwrap()
             .iter()
             .filter(|account| account.provider() == provider)
+            .cloned()
+            .collect())
+    }
+
+    async fn list_for_provider_accounts(
+        &self,
+        provider: &ProviderKind,
+        account_ids: &[ProviderAccountId],
+    ) -> Result<Vec<ProviderAccount>, StoreError> {
+        if account_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        if Some(provider.as_str()) == self.failed_provider {
+            return Err(StoreError::new(StoreErrorKind::Unavailable));
+        }
+        Ok(self
+            .accounts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|account| {
+                account.provider() == provider
+                    && account.enabled()
+                    && account_ids.contains(account.id())
+            })
             .cloned()
             .collect())
     }

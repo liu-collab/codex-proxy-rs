@@ -46,7 +46,7 @@ pub enum LogError {
     #[error("logging size limit is too large")]
     SizeOverflow,
     #[error(transparent)]
-    InvalidConfig(#[from] crate::config::ConfigError),
+    InvalidConfig(#[from] crate::ConfigError),
 }
 
 /// 初始化日志；按各通道的保留窗口清理，不以分片数量淘汰记录

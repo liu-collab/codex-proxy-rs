@@ -1,5 +1,8 @@
 //! Codex 上游端点常量、基础地址校验与请求 URL 构造
 
+pub const OFFICIAL_CODEX_BASE_PATH: &str = "/backend-api";
+pub const OFFICIAL_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
+
 /// `/codex/responses`
 pub const CODEX_RESPONSES_PATH: &str = "/codex/responses";
 /// `/codex/images/generations`

@@ -1,5 +1,5 @@
 import type { AxiosError, AxiosResponse, AxiosResponseHeaders, RawAxiosResponseHeaders } from 'axios'
-import type { RequestContext, RequestNext } from './index'
+import type { RequestContext, RequestNext } from '../types'
 import { isAxiosError } from 'axios'
 import { t } from '@/i18n'
 

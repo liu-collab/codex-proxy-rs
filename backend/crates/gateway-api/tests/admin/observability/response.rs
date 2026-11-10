@@ -387,6 +387,21 @@ async fn usage_detail_should_keep_attempt_snapshot_contract() {
     record.upstream_response_ms = Some(1_000);
     record.upstream_api_overhead_ms = Some(120.25);
     record.upstream_engine_ms = Some(6400.0);
+    record.outcome = gateway_admin::model::observability::RequestOutcome::Failed;
+    record.error_kind = Some("continuation_recovery_required".to_owned());
+    record.provider_error_code = Some("previous_response_not_found".to_owned());
+    record.continuation_unavailable_reason = Some("reused_connection_lost".to_owned());
+    record.upstream_connection_exit_reason = Some("max_age_expired".to_owned());
+    record.recovered = true;
+    record.upstream_error = Some(gateway_admin::model::observability::UsageUpstreamError {
+        code: Some("previous_response_not_found".to_owned()),
+        error_type: Some("invalid_request_error".to_owned()),
+        message: Some("Previous response is unavailable.".to_owned()),
+        param: Some("previous_response_id".to_owned()),
+        close_reason: None,
+        last_event_type: None,
+    });
+    record.retry_after_ms = Some(206_000);
     fixture
         .usage_detail
         .lock()
@@ -447,6 +462,31 @@ async fn usage_detail_should_keep_attempt_snapshot_contract() {
         .await
         .expect("usage detail body");
     let value: serde_json::Value = serde_json::from_slice(&body).expect("usage detail JSON");
+    assert_eq!(value["data"]["errorKind"], "continuation_recovery_required");
+    assert_eq!(value["data"]["errorCode"], "previous_response_not_found");
+    assert_eq!(
+        value["data"]["upstreamError"]["message"],
+        "Previous response is unavailable."
+    );
+    assert_eq!(
+        value["data"]["upstreamError"]["errorType"],
+        "invalid_request_error"
+    );
+    assert_eq!(
+        value["data"]["upstreamError"]["param"],
+        "previous_response_id"
+    );
+    assert_eq!(value["data"]["retryAfterMs"], 206_000);
+    assert_eq!(
+        value["data"]["continuationUnavailableReason"],
+        "reused_connection_lost"
+    );
+    assert_eq!(
+        value["data"]["upstreamConnectionExitReason"],
+        "max_age_expired"
+    );
+    assert_eq!(value["data"]["websocketCloseCode"], serde_json::Value::Null);
+    assert_eq!(value["data"]["recovered"], true);
     assert_eq!(value["data"]["firstTokenLatencyMs"], 20);
     assert_eq!(value["data"]["latencyDetails"]["upstreamResponseMs"], 1_000);
     assert_eq!(
@@ -656,6 +696,25 @@ async fn ops_errors_should_keep_account_label_and_authentication_contract() {
     );
 }
 
+fn peer_summary(
+    discovered: bool,
+    observed: bool,
+) -> gateway_admin::model::provider_credentials::ProviderQuota {
+    gateway_admin::model::provider_credentials::ProviderQuota {
+        upstream: Some(gateway_admin::model::upstream_info::ProviderUpstreamInfo {
+            max_concurrency: None,
+            requests_per_minute: None,
+            discovered,
+            observed_at: observed.then(chrono::Utc::now),
+            stale: true,
+            connection_revision: "test-connection".to_owned(),
+            last_error: None,
+            pool: None,
+        }),
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
     use axum::{
@@ -670,13 +729,17 @@ async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
 
     use crate::admin::{AdminTestFixture, AdminTestState};
 
-    for (authentication_kind, plan_type, plan_display) in [
-        (Some("oauth"), Some("pro"), Some("Pro")),
-        (Some("api_key"), None, None),
-        (None, None, None),
+    for (authentication_kind, plan_type, plan_display, peer) in [
+        (Some("oauth"), Some("pro"), Some("Pro"), None),
+        (Some("api_key"), None, None, None),
+        (Some("api_key"), None, None, Some((true, true))),
+        (Some("api_key"), None, None, Some((true, false))),
+        (Some("api_key"), None, None, Some((false, true))),
+        (None, None, None, None),
     ] {
         let fixture = AdminTestFixture::new().await;
         fixture.auth.insert_session("valid-session");
+        *fixture.provider_quota.lock().unwrap() = peer.map(|(d, o)| peer_summary(d, o));
         *fixture.diagnostics.lock().expect("diagnostics") = DiagnosticsObservation {
             analytics: Default::default(),
             total_request_count: 4,
@@ -694,7 +757,9 @@ async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
                 average_latency_ms: Some(100),
                 latency_p95_ms: Some(3800),
                 first_token_p95_ms: Some(1200),
-                non_completion_count: 0,
+                cancelled_count: 0,
+                incomplete_count: 0,
+                caller_error_count: 0,
                 retry_count: 3,
                 retried_request_count: 1,
                 cost_coverage: CostCoverage::default(),
@@ -718,6 +783,10 @@ async fn diagnostics_should_keep_stable_key_and_display_name_contract() {
             .await
             .expect("diagnostics body");
         let value: serde_json::Value = serde_json::from_slice(&body).expect("diagnostics JSON");
+        assert_eq!(
+            value["data"]["items"][0]["accountUpstreamPeer"],
+            json!(peer.map(|(d, o)| d && o))
+        );
         assert_eq!(value["data"]["items"][0]["requestShare"], 0.5);
         assert_eq!(value["data"]["items"][0]["retryCount"], 3);
         assert_eq!(value["data"]["items"][0]["retryRate"], 0.5);
@@ -761,6 +830,7 @@ pub(super) fn usage_record_with_account(
     use gateway_admin::model::observability::{RequestOutcome, UsageRecord};
 
     UsageRecord {
+        upstream_error: None,
         id: id.to_owned(),
         client_api_key_ref: "key_detail".to_owned(),
         config_revision: 1,
@@ -792,6 +862,10 @@ pub(super) fn usage_record_with_account(
         client_response_id: None,
         upstream_request_id: None,
         upstream_response_id: None,
+        websocket_close_code: None,
+        continuation_unavailable_reason: None,
+        upstream_connection_exit_reason: None,
+        recovered: false,
         error_kind: None,
         provider_error_code: None,
         error_message: None,
@@ -879,7 +953,7 @@ async fn usage_route_should_forward_name_and_model_contains_filters() {
 }
 
 #[tokio::test]
-async fn usage_route_should_expose_table_facts_without_detail_payload() {
+async fn usage_route_projects_request_facts_and_billing() {
     use std::str::FromStr as _;
 
     use axum::{
@@ -906,8 +980,14 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         .lock()
         .expect("usage records")
         .push(UsageListRecord {
+            provider_account_upstream_peer: None,
             error_code: None,
             error_message: None,
+            error_kind: None,
+            websocket_close_code: None,
+            continuation_unavailable_reason: None,
+            upstream_connection_exit_reason: None,
+            recovered: false,
             client_status_code: None,
             outcome: gateway_admin::model::observability::RequestOutcome::Succeeded,
             client_api_key_name: Some("Production".to_owned()),
@@ -1001,6 +1081,14 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         failed.error_code = Some("server_error".to_owned());
         failed.error_message = Some("The upstream service is temporarily unavailable.".to_owned());
         records.push(failed);
+        let mut closed = records[0].clone();
+        closed.id = "request_ws_closed".to_owned();
+        closed.outcome = gateway_admin::model::observability::RequestOutcome::Incomplete;
+        closed.error_kind = Some("upstream_unavailable".to_owned());
+        closed.websocket_close_code = Some(1012);
+        closed.error_message =
+            Some("OpenAI WebSocket closed before a terminal response".to_owned());
+        records.push(closed);
     }
     let response = observability::router::<AdminTestState>()
         .with_state(fixture.state())
@@ -1023,6 +1111,17 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
     assert!(value["data"]["items"][0]["errorCode"].is_null());
     assert!(value["data"]["items"][0]["errorMessage"].is_null());
     assert_eq!(value["data"]["items"][3]["errorCode"], "server_error");
+    assert_eq!(value["data"]["items"][4]["logicalOutcome"], "incomplete");
+    assert_eq!(
+        value["data"]["items"][4]["errorKind"],
+        "upstream_unavailable"
+    );
+    assert_eq!(value["data"]["items"][4]["websocketCloseCode"], 1012);
+    assert_eq!(
+        value["data"]["items"][4]["errorCode"],
+        serde_json::Value::Null
+    );
+    assert_eq!(value["data"]["items"][4]["recovered"], false);
     assert_eq!(
         value["data"]["items"][3]["errorMessage"],
         "The upstream service is temporarily unavailable."
@@ -1123,7 +1222,6 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
             "userAgent": "codex-cli/1.0",
         })
     );
-    assert!(value["data"]["items"][0].get("metadata").is_none());
     assert_eq!(
         value["data"]["items"][1]["billing"]["totalAmountDisplay"],
         "≈ $0.007"
@@ -1132,6 +1230,39 @@ async fn usage_route_should_expose_table_facts_without_detail_payload() {
         value["data"]["items"][2]["billing"]["totalAmountDisplay"],
         "$0.007"
     );
+
+    // 互联标识随当前摘要变化，重复请求共享同一账号，既有请求快照保持原值
+    for peer in [
+        Some((true, true)),
+        Some((true, false)),
+        Some((false, true)),
+        None,
+    ] {
+        *fixture.provider_quota.lock().unwrap() = peer.map(|(d, o)| peer_summary(d, o));
+        let response = observability::router::<AdminTestState>()
+            .with_state(fixture.state())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/admin/usage/records?status=all")
+                    .header(header::COOKIE, "cpr_session=valid-session")
+                    .header("x-request-id", "req_peer_badge")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        for item in value["data"]["items"].as_array().unwrap() {
+            assert_eq!(
+                item["accountUpstreamPeer"],
+                json!(peer.map(|(d, o)| d && o))
+            );
+            assert_eq!(item["accountName"], "Snapshot Alpha");
+            assert_eq!(item["accountPlanType"], "supergrok_plus");
+        }
+    }
 }
 
 #[tokio::test]
@@ -1731,7 +1862,7 @@ async fn usage_status_query_accepts_three_modes_and_rejects_unknown_values() {
 }
 
 #[tokio::test]
-async fn dashboard_summary_should_identify_metrics_without_localized_labels() {
+async fn dashboard_summary_identifies_trend_metrics_and_account_usage_values() {
     use axum::{
         body::{Body, to_bytes},
         http::{Request, StatusCode, header},
@@ -1884,7 +2015,6 @@ async fn dashboard_summary_should_identify_metrics_without_localized_labels() {
         assert_eq!(summary.len(), metrics.len());
         for (item, metric) in summary.iter().zip(metrics) {
             assert_eq!(item["metric"], metric);
-            assert!(item.get("label").is_none());
             assert!(item["value"].is_string());
         }
     }

@@ -18,6 +18,7 @@ use crate::engine::continuation::{
     ContinuationBinding, NativeContinuationPin, NativeContinuationScope, PreviousResponseId,
 };
 
+use crate::engine::probe::AccountProbeTarget;
 use crate::engine::provider::{Provider, ProviderCallMetadata, ProviderRequest, ProviderStream};
 use crate::engine::{
     AccountAttemptContext, AttemptContext, AttemptRecord, AttemptTransport, AttemptTrigger,
@@ -49,7 +50,7 @@ pub struct AttemptCoordinator<S: ?Sized> {
 #[derive(Debug, Clone)]
 enum AccountSelection {
     Scheduled(Option<crate::account::ProviderAccountId>),
-    Diagnostic(crate::account::ProviderAccountId),
+    Diagnostic(AccountProbeTarget),
 }
 
 pub(super) struct CoordinationExtensions {
@@ -153,7 +154,7 @@ impl AccountSelection {
     fn required_account(&self) -> Option<&crate::account::ProviderAccountId> {
         match self {
             Self::Scheduled(account) => account.as_ref(),
-            Self::Diagnostic(account) => Some(account),
+            Self::Diagnostic(target) => Some(target.account_id()),
         }
     }
 
@@ -226,7 +227,7 @@ where
         request: NewModelRequest,
         operation: Operation,
         plan: RoutingPlan,
-        required_account: crate::account::ProviderAccountId,
+        target: AccountProbeTarget,
         continuation: Option<ContinuationBinding>,
         cancellation: CancellationToken,
     ) -> Result<ResponseExecutionSession<S>, EngineError> {
@@ -234,7 +235,7 @@ where
             request,
             operation,
             plan,
-            AccountSelection::Diagnostic(required_account),
+            AccountSelection::Diagnostic(target),
             CoordinationExtensions::new(continuation, None),
             cancellation,
         )
@@ -599,12 +600,6 @@ impl<S: ?Sized> ResponseExecutionSession<S>
 where
     S: ExecutionStore + 'static,
 {
-    /// 首次驱动前接入密钥准入使用的预算，所有账号尝试随后共享它
-    pub(crate) fn with_concurrency_wait_budget(mut self, budget: ConcurrencyWaitBudget) -> Self {
-        self.concurrency_wait_budget = budget;
-        self
-    }
-
     /// 传输首字节事实可在 next_event 等待期间由协议层提交
     pub fn response_commit(&self) -> super::execution::ResponseCommit {
         self.response_commit.clone()
@@ -1086,8 +1081,8 @@ where
             (Some(recovery.account), recovery.transport)
         } else {
             match &self.account_selection {
-                AccountSelection::Diagnostic(account) => {
-                    (Some(account.clone()), AttemptTransport::Default)
+                AccountSelection::Diagnostic(target) => {
+                    (Some(target.account_id().clone()), AttemptTransport::Default)
                 }
                 AccountSelection::Scheduled(_) => (
                     self.recovery_account
@@ -1100,9 +1095,9 @@ where
             }
         };
         let account_context = match &self.account_selection {
-            AccountSelection::Diagnostic(account) => AccountAttemptContext::diagnostic(
+            AccountSelection::Diagnostic(target) => AccountAttemptContext::diagnostic(
                 self.excluded_accounts.clone(),
-                account.clone(),
+                target.clone(),
                 self.account_state_owner.clone(),
             ),
             AccountSelection::Scheduled(_) => AccountAttemptContext::new(
@@ -1677,6 +1672,10 @@ where
                 error.pre_delivery_retry(),
                 Some(crate::error::PreDeliveryRetry::SameAccountConnectionRetry { .. })
             );
+        // 服务器建议不可截短；超出请求冻结的上限后沿用安全换号或原错误出口
+        let retry_after_exceeds_limit = error
+            .retry_after()
+            .is_some_and(|delay| delay > self.plan.max_retry_after());
         // Provider 的有界同账号传输恢复是尽力重试策略，不要求把 Sent/Ambiguous
         // 改写成安全证明；外部副作用、取消、预算与下游提交仍由 Core 拦截
         let transport_recovery = match error.pre_delivery_retry() {
@@ -1699,7 +1698,8 @@ where
             Some(crate::error::PreDeliveryRetry::SameAccountTransportRetry {
                 retry_index,
                 delay,
-            }) if !execution_effect_observed
+            }) if !retry_after_exceeds_limit
+                && !execution_effect_observed
                 && !self.connection_budget.exhausted()
                 && !self.replay_barrier_reached
                 && !self.delivery_pending =>
@@ -1707,7 +1707,8 @@ where
                 Some((AttemptTransport::Retry(retry_index), delay))
             }
             Some(crate::error::PreDeliveryRetry::SameAccountTransportFallback)
-                if !execution_effect_observed
+                if !retry_after_exceeds_limit
+                    && !execution_effect_observed
                     && !self.connection_budget.exhausted()
                     && !self.replay_barrier_reached
                     && !self.delivery_pending =>
@@ -1753,7 +1754,7 @@ where
                 max_delay,
                 jitter,
                 ..
-            }) if ordinary_retry && !suppress_transient_retry => {
+            }) if ordinary_retry && !suppress_transient_retry && !retry_after_exceeds_limit => {
                 let retries = self
                     .transient_retry_counts
                     .entry(current.metadata.provider_account_id().clone())
@@ -1832,6 +1833,8 @@ where
             "connectionRotation": connection_rotation.is_some(),
             "reserveConnectionRotation": reserve_connection_rotation,
             "transientRetry": transient_retry.is_some(),
+            "retryAfterExceeded": retry_after_exceeds_limit,
+            "maxRetryAfterSeconds": self.plan.max_retry_after().as_secs(),
             "clientRetrySuppressed": suppress_transient_retry,
             "rotationRetry": rotation_retry, "accountRotations": self.account_rotations,
             "connectionRetry": connection_retry_requested,

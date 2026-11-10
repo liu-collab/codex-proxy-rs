@@ -948,6 +948,58 @@ async fn explicit_catalog_non_membership_excludes_only_unsupported_account() {
 }
 
 #[tokio::test]
+async fn catalog_rejects_unlisted_models_but_does_not_share_unknown_plan_entitlements() {
+    let fixture = SelectorFixture::new(&["catalog-account"]).await;
+    let id = account_id("catalog-account");
+    let account = fixture.store.account(&id).unwrap();
+    let seed = GrokCredentialCatalogSeed::new(["grok-4.5"], None).unwrap();
+    fixture
+        .cache
+        .replace(GrokPlanCatalog::new(
+            GrokCatalogScope::for_account(&account).unwrap(),
+            Utc::now(),
+            seed.clone(),
+        ))
+        .await
+        .unwrap();
+    let request = || {
+        fixture.request_for_model_with_policy(
+            "grok-unlisted",
+            BTreeSet::new(),
+            None,
+            RotationStrategy::Smart,
+        )
+    };
+    assert!(matches!(
+        fixture.selector.select(request()).await,
+        Err(GrokSessionSelectorError::NoEligibleSession)
+    ));
+    assert!(fixture.coordinator.requests.lock().unwrap().is_empty());
+    fixture
+        .store
+        .update_account(ProviderAccountUpdate {
+            account_id: id.clone(),
+            name: account.name().to_owned(),
+            email: account.email().map(str::to_owned),
+            plan_type: None,
+        })
+        .await
+        .unwrap();
+    let account = fixture.store.account(&id).unwrap();
+    fixture
+        .cache
+        .replace(GrokPlanCatalog::new(
+            GrokCatalogScope::for_account(&account).unwrap(),
+            Utc::now(),
+            seed,
+        ))
+        .await
+        .unwrap();
+    let session = fixture.selector.select(request()).await.unwrap();
+    assert_eq!(session.account_id(), &id);
+}
+
+#[tokio::test]
 async fn smart_strategy_uses_fresh_provider_quota_after_load_ties() {
     let fixture = SelectorFixture::new(&["aaa-low-quota", "zzz-high-quota"]).await;
     fixture
@@ -1272,6 +1324,50 @@ async fn saturated_account_snapshot_queues_and_rechecks_live_capacity() {
         .in_flight = 0;
     let selected = first.await.unwrap();
     assert_eq!(selected.account_id(), &id);
+}
+
+#[tokio::test]
+async fn account_queue_timeout_reselects_only_if_enabled_and_not_pinned() {
+    use futures::FutureExt;
+    let fixture = SelectorFixture::new(&["first", "spare"]).await;
+    let first = account_id("first");
+    let spare = account_id("spare");
+    for (enabled, pinned) in [(true, false), (true, true), (false, false)] {
+        let base = queue_request(&fixture, Duration::from_millis(30));
+        let req = GrokSessionSelection::new(
+            base.upstream_model().clone(),
+            BTreeSet::new(),
+            pinned.then_some(first.clone()),
+            base.account_selection_policy()
+                .with_switch_account_on_queue_failure(enabled),
+            base.deadline(),
+            base.account_scope().clone(),
+            base.client_api_key_id().clone(),
+        );
+        for signal in fixture.coordinator.signals.lock().unwrap().values_mut() {
+            signal.in_flight = 2;
+        }
+        let mut pending = fixture.selector.select(req);
+        assert!(pending.as_mut().now_or_never().is_none());
+        fixture
+            .coordinator
+            .signals
+            .lock()
+            .unwrap()
+            .get_mut(&spare)
+            .unwrap()
+            .in_flight = 0;
+        if enabled && !pinned {
+            assert_eq!(pending.await.unwrap().account_id(), &spare);
+        } else {
+            assert!(matches!(
+                pending.await,
+                Err(GrokSessionSelectorError::QueueRejected(
+                    gateway_core::concurrency::QueueRejection::Timeout
+                ))
+            ));
+        }
+    }
 }
 
 #[tokio::test]

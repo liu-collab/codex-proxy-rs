@@ -16,14 +16,14 @@
       "serviceSuccessRate": "服務成功率",
       "notCompleted": "未完成",
       "requestVolume": "請求量",
-      "noServiceResult": "無服務結果",
       "title": "請求健康",
       "description": "請求狀態分佈",
       "descriptionWithGranularity": "請求狀態分佈 · {granularityText}",
-      "completionRate": "完成率",
-      "abnormalEnd": "非正常結束",
       "loading": "正在加載請求數據",
-      "empty": "當前範圍暫無請求"
+      "empty": "當前範圍暫無請求",
+      "errors": "錯誤",
+      "noSamples": "無樣本",
+      "completionRate": "完成率"
     },
     "billing": {
       "serviceLevel": "服務檔位",
@@ -111,13 +111,13 @@
       "reasoningEffort": "推理強度",
       "endpoint": "端點",
       "upstream": "上游",
-      "access": "接入",
       "cost": "費用",
       "latency": "延遲",
       "time": "時間",
       "keyName": "密鑰名稱",
       "subscription": "訂閱",
-      "platformType": "平臺"
+      "platformType": "平臺",
+      "transport": "傳輸"
     },
     "outputThroughput": "速率",
     "noValidSample": "無有效樣本",
@@ -184,7 +184,6 @@
     },
     "records": {
       "requestLog": "請求日誌",
-      "currentRequestRecord": "當前請求記錄",
       "noRecordsMatchTheseFilters": "所選條件下暫無記錄"
     },
     "page": {
@@ -192,7 +191,6 @@
       "loadingUsage": "正在加載用量",
       "usageSummaryLoading": "用量彙總加載中",
       "usageTrends": "使用趨勢",
-      "changesInUsageOverTime": "用量隨時間的變化",
       "requestHealthTimeline": "請求健康時間線",
       "updated": "更新於 {asOfDisplay}",
       "description": "查看請求用量、性能趨勢與調用錯誤記錄",
@@ -215,9 +213,6 @@
       "cacheHit": "緩存命中",
       "empty": "所選時間內暫無請求"
     },
-    "configuration": {
-      "copiedToClipboard": "已複製到剪貼板"
-    },
     "metrics": {
       "notPriced": "未定價",
       "newInput": "普通輸入",
@@ -238,13 +233,13 @@
       "diagnosticDimension": "診斷維度",
       "noDiagnosticDataYet": "暫無診斷數據",
       "successful": "成功 {count}",
-      "failed": "失敗 {count} 次",
-      "failureRate": "失敗率 {rate}",
       "retryRate": "重試率 {rate}",
       "retries": "重試 {count}",
       "loading": "正在加載診斷數據",
       "empty": "當前範圍暫無診斷數據",
-      "download": "下載"
+      "download": "下載",
+      "errors": "錯誤 {count} 次",
+      "errorRate": "錯誤率 {rate}"
     },
     "cost": {
       "savings": "節省",
@@ -295,7 +290,27 @@
       "attempt": "嘗試 {index}",
       "diagnosticData": "診斷數據",
       "responseContent": "響應內容",
-      "metadata": "元數據"
+      "metadata": "元數據",
+      "recovered": "後續已恢復",
+      "summary": {
+        "upstreamRestart": "上游關閉連接（服務重啟）",
+        "upstreamBusy": "上游關閉連接（稍後重試）",
+        "messageTooLarge": "上游因消息過大關閉連接",
+        "upstreamClosed": "上游在響應完成前關閉連接",
+        "processInterrupted": "請求執行中斷，未記錄到最終結果",
+        "continuationExpired": "續接連接已到期，需要完整重發",
+        "continuationUnavailable": "續接狀態不可用，需要完整重發",
+        "connectionLimit": "上游連接已到時限，需要重新連接",
+        "contextTooLong": "上下文超過模型限制",
+        "quotaExceeded": "上游可用額度不足",
+        "rateLimited": "上游請求頻率受限",
+        "serverOverloaded": "上游服務負載過高"
+      },
+      "websocketCloseCode": "WS 關閉碼",
+      "lastEventType": "最後事件",
+      "retryAfter": "重試等待",
+      "closeReason": "關閉原因",
+      "gatewayMessage": "閘道摘要"
     },
     "insights": {
       "useStatisticalObservations": "使用統計觀測"
@@ -332,7 +347,8 @@
       "incompleteDetails": "明細不完整",
       "total": "總計",
       "requestContent": "請求內容",
-      "inProgress": "進行中"
+      "inProgress": "進行中",
+      "loadingDetails": "正在加載請求詳情"
     },
     "successfulRequest": "成功請求",
     "withinFilterRange": "篩選範圍內",
@@ -342,6 +358,7 @@
     "averageTimeTaken": "平均耗時",
     "successfulRequestAverage": "成功請求平均值",
     "usageOverview": "使用概覽",
-    "noUsageRecords": "暫無使用記錄"
+    "noUsageRecords": "暫無使用記錄",
+    "transportDirection": "上游 {upstream} · 接入 {client}"
   }
 }

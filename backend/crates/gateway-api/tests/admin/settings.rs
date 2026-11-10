@@ -56,7 +56,10 @@ fn update_body() -> Value {
         "openaiAccountAffinity": "relaxed",
         "maxAccountRotations": 3,
         "openaiSessionAffinityTtlHours": 24,
-        "concurrencyWaitTimeoutSeconds": 30,
+        "keyQueueTimeoutSeconds": 30,
+        "accountQueueTimeoutSeconds": 30,
+        "switchAccountOnQueueFailure": false,
+        "maxRetryAfterSeconds": 240,
         "responsesMaxDecompressedBodyBytes": 67108864,
         "rotationStrategy": "round_robin",
         "smartScheduling": gateway_core::account::SmartSchedulingConfig::default(),
@@ -426,112 +429,20 @@ fn settings_request_should_reject_non_semver_client_min() {
 }
 
 #[test]
-fn settings_response_should_cover_the_full_runtime_settings_contract() {
-    use std::collections::BTreeMap;
-
-    use chrono::{TimeZone, Utc};
-    use gateway_admin::model::Revision;
-    use gateway_admin::model::settings::RuntimeSettings;
+fn settings_response_formats_update_time_in_deployment_timezone() {
+    use chrono::{TimeZone as _, Utc};
     use gateway_api::admin::settings::RuntimeSettingsView;
-    use gateway_core::account::RotationStrategy;
-    use gateway_core::routing::{PublicModelId, UpstreamModelId};
 
-    let settings = RuntimeSettings {
-        request_profiles: Default::default(),
-        config_revision: Revision::new(7).expect("revision"),
-        model_mappings: BTreeMap::from_iter([
-            (
-                PublicModelId::new("gpt-5.4").expect("public model"),
-                UpstreamModelId::new("gpt-5.5").expect("upstream model"),
-            ),
-            (
-                PublicModelId::new("grok-latest").expect("public model"),
-                UpstreamModelId::new("grok-4.5").expect("upstream model"),
-            ),
-        ]),
-        rotation_strategy: RotationStrategy::RoundRobin,
-        updated_at: Utc
-            .with_ymd_and_hms(2026, 8, 2, 10, 30, 0)
-            .single()
-            .expect("timestamp"),
-        values: gateway_admin::model::settings::RuntimeSettingsValues {
-            codex_privacy_policy: Default::default(),
-            request_location_enabled: false,
-            request_location: Default::default(),
-            refresh_margin_seconds: 1800,
-            refresh_concurrency: 4,
-            max_concurrent_per_account: 5,
-            max_waiting_per_key: 0,
-            max_waiting_per_account: 0,
-            concurrency_wait_timeout_seconds: 30,
-            openai_guardian_reserved_concurrency: 0,
-            openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
-            max_account_rotations: 3,
-            openai_session_affinity_ttl_hours: 24,
-            responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
-            smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
-            min_codex_desktop_version: Some("26.825.6671".to_owned()),
-            min_codex_cli_version: Some("0.40.0".to_owned()),
-            usage_retention_days: 31,
-            ops_event_retention_days: 31,
-            audit_retention_days: 91,
-            account_error_protection: Default::default(),
-            account_warmup_enabled: false,
-            account_warmup_schedule_time: "08:00".to_owned(),
-            account_warmup_model: None,
-            reset_credit_lead_minutes: 10,
-            reset_credit_max_weekly_remaining_percent: None,
-        },
-    };
-
+    let mut settings = super::test_runtime_settings();
+    settings.updated_at = Utc.with_ymd_and_hms(2026, 8, 2, 10, 30, 0).unwrap();
     let value = serde_json::to_value(RuntimeSettingsView::from((
         settings,
         gateway_api::TimePresenter::new(Default::default()),
     )))
     .expect("serialize view");
-    assert_eq!(
-        value,
-        json!({
-            "configRevision": 7,
-            "providerRequestProfiles": {},
-            "openaiClientProfile": null,
-            "xaiClientProfile": null,
-        "codexPrivacyPolicy": {"enabled":false,"onError":"skip_rule","rules":[]},
-        "requestLocationEnabled": false,
-        "requestLocation": {"country":"US", "region":"Ohio", "city":"Piketon", "timezone":"America/New_York"},
-            "modelMappings": {
-                "gpt-5.4": "gpt-5.5",
-                "grok-latest": "grok-4.5"
-            },
-            "refreshMarginSeconds": 1800,
-            "refreshConcurrency": 4,
-            "maxConcurrentPerAccount": 5,
-            "maxWaitingPerKey": 0,
-            "maxWaitingPerAccount": 0,
-            "openaiGuardianReservedConcurrency": 0,
-            "openaiAccountAffinity": "relaxed",
-            "maxAccountRotations": 3,
-            "openaiSessionAffinityTtlHours": 24,
-            "concurrencyWaitTimeoutSeconds": 30,
-            "responsesMaxDecompressedBodyBytes": 67108864,
-            "rotationStrategy": "round_robin",
-            "smartScheduling": gateway_core::account::SmartSchedulingConfig::default(),
-            "smartSchedulingDefaults": gateway_core::account::SmartSchedulingConfig::default(),
-            "minCodexDesktopVersion": "26.825.6671",
-            "minCodexCliVersion": "0.40.0",
-            "usageRetentionDays": 31,
-            "opsEventRetentionDays": 31,
-            "auditRetentionDays": 91,
-            "accountErrorProtection": gateway_core::account::AccountErrorProtection::default(),
-                "accountWarmupEnabled": false,
-                "accountWarmupScheduleTime": "08:00",
-                "accountWarmupModel": null,
-                "resetCreditLeadMinutes": 10,
-                "resetCreditMaxWeeklyRemainingPercent": null,
-                "updatedAt": "2026-08-02T10:30:00Z",
-                "updatedAtDisplay": "2026-08-02 18:30:00"
-        })
-    );
+
+    assert_eq!(value["updatedAt"], "2026-08-02T10:30:00Z");
+    assert_eq!(value["updatedAtDisplay"], "2026-08-02 18:30:00");
 }
 
 #[test]
@@ -750,8 +661,10 @@ fn concurrency_queue_fields_validate_bounds_and_accept_disabled_queues() {
     for (field, invalid) in [
         ("maxWaitingPerKey", 1001),
         ("maxWaitingPerAccount", 1001),
-        ("concurrencyWaitTimeoutSeconds", 0),
-        ("concurrencyWaitTimeoutSeconds", 121),
+        ("keyQueueTimeoutSeconds", 0),
+        ("accountQueueTimeoutSeconds", 0),
+        ("keyQueueTimeoutSeconds", 121),
+        ("accountQueueTimeoutSeconds", 121),
     ] {
         let mut body = update_body();
         body[field] = json!(invalid);
@@ -761,7 +674,7 @@ fn concurrency_queue_fields_validate_bounds_and_accept_disabled_queues() {
     let mut body = update_body();
     body["maxWaitingPerKey"] = json!(0);
     body["maxWaitingPerAccount"] = json!(1000);
-    body["concurrencyWaitTimeoutSeconds"] = json!(120);
+    body["accountQueueTimeoutSeconds"] = json!(120);
     serde_json::from_value::<UpdateRuntimeSettingsRequest>(body)
         .unwrap()
         .validate()

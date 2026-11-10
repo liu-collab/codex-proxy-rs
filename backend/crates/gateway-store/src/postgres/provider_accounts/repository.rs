@@ -108,6 +108,45 @@ impl PgProviderAccountRepository {
         self
     }
 
+    pub(super) async fn list_provider_account_summaries(
+        &self,
+        provider_kind: Option<&str>,
+        include_disabled: bool,
+        account_ids: Option<&[&str]>,
+    ) -> StoreResult<Vec<ProviderAccountSummary>> {
+        let mut query = sqlx::QueryBuilder::<Postgres>::new(
+            "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
+                    upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
+                    access_token_expires_at, next_refresh_at, enabled, auto_use_quota_credits, concurrency_limit, weight, model_access_json, credential_state,
+                    credential_observed_at, quota_access_state, quota_evidence,
+                    quota_access_observed_at, quota_reset_at,
+                    quota_observed_at, last_error_reason, last_error_message, created_at, updated_at
+             from provider_accounts
+             left join (select id as location_proxy_id, enabled as proxy_enabled, max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone from outbound_proxies) proxy_location
+               on outbound_proxy_id = location_proxy_id
+             where true",
+        );
+        if let Some(provider_kind) = provider_kind {
+            query.push(" and provider_kind = ").push_bind(provider_kind);
+        }
+        if !include_disabled {
+            query.push(" and enabled");
+        }
+        if let Some(account_ids) = account_ids {
+            query
+                .push(" and id = any(")
+                .push_bind(account_ids)
+                .push("::text[])");
+        }
+        query.push(" order by provider_kind, name, id");
+        let rows = query
+            .build()
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|source| postgres_unavailable("list provider accounts", source))?;
+        rows.into_iter().map(account_summary_from_row).collect()
+    }
+
     /// PostgreSQL 已提交的凭据结果不能因可丢失运行态失败而回报未提交
     pub(super) async fn advance_protection_revision(&self, account: &str, revision: Revision) {
         let Some(protection) = &self.protection else {
@@ -159,7 +198,7 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         let rows = sqlx::query(
             "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
-                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
+                    access_token_expires_at, next_refresh_at, enabled, auto_use_quota_credits, concurrency_limit, weight, model_access_json, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
                     quota_access_observed_at, quota_reset_at,
                     quota_observed_at, last_error_reason, last_error_message, created_at, updated_at
@@ -185,25 +224,8 @@ impl ProviderAccountRepository for PgProviderAccountRepository {
         provider_kind: Option<&str>,
         include_disabled: bool,
     ) -> StoreResult<Vec<ProviderAccountSummary>> {
-        let rows = sqlx::query(
-            "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
-                    upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
-                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
-                    credential_observed_at, quota_access_state, quota_evidence,
-                    quota_access_observed_at, quota_reset_at,
-                    quota_observed_at, last_error_reason, last_error_message, created_at, updated_at
-             from provider_accounts
-             left join (select id as location_proxy_id, enabled as proxy_enabled, max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone from outbound_proxies) proxy_location
-               on outbound_proxy_id = location_proxy_id
-             where ($1::text is null or provider_kind = $1) and ($2 or enabled)
-             order by provider_kind, name, id",
-        )
-        .bind(provider_kind)
-        .bind(include_disabled)
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|source| postgres_unavailable("list provider accounts", source))?;
-        rows.into_iter().map(account_summary_from_row).collect()
+        self.list_provider_account_summaries(provider_kind, include_disabled, None)
+            .await
     }
 
     async fn insert_provider_account(&self, account: NewProviderAccount) -> StoreResult<()> {
@@ -498,7 +520,8 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
             postgres_unavailable("begin provider account admin rotation", source)
         })?;
         let account_id = command.credential.account_id.clone();
-        let result = rotate_provider_account_admin_in_transaction(&mut transaction, command).await;
+        let result =
+            rotate_provider_account_admin_in_transaction(&mut transaction, command, false).await;
         let rotation =
             finish_admin_transaction(transaction, result, "provider account admin rotation")
                 .await?;
@@ -530,6 +553,11 @@ impl ProviderAccountAdminRepository for PgProviderAccountRepository {
                 command.outbound_proxy.as_ref(),
             )
             .await?;
+            if let Some(enabled) = command.auto_use_quota_credits {
+                sqlx::query("update provider_accounts set auto_use_quota_credits = $2 where id = any($1) and auto_use_quota_credits <> $2")
+                    .bind(&command.account_ids).bind(enabled).execute(&mut *transaction).await
+                    .map_err(|source| postgres_unavailable("set account quota credits policy", source))?;
+            }
             if let Some(group_ids) = &command.group_ids {
                 replace_account_group_assignments_in_transaction(
                     &mut transaction,
@@ -822,6 +850,7 @@ pub(crate) async fn rotate_provider_account_in_transaction(
     profile: &UpdateProviderAccount,
     replacement_identity: Option<&ProviderAccountIdentity>,
     update: &ProviderCredentialUpdate,
+    preserve_name: bool,
 ) -> StoreResult<Revision> {
     let replace_identity = replacement_identity.is_some();
     let upstream_user_id = replacement_identity.map(ProviderAccountIdentity::upstream_user_id);
@@ -830,11 +859,15 @@ pub(crate) async fn rotate_provider_account_in_transaction(
     // 事务时间可能早于应用写入的额度观测，保留既有时间下界，避免轮换破坏时间约束
     let next = sqlx::query_scalar::<_, i64>(
         "update provider_accounts
-         set name = case when $14 then name else $4 end,
+         set name = case when $14 or $16 then name else $4 end,
              email = case when $14 then email else $5 end,
              plan_type = case when $14 then plan_type else $6 end,
              provider_quota_json = case when $14 then provider_quota_json else null end,
              quota_observed_at = case when $14 then quota_observed_at else null end,
+             quota_access_state = case when $11 then 'unknown' else quota_access_state end,
+             quota_evidence = case when $11 then null else quota_evidence end,
+             quota_access_observed_at = case when $11 then null else quota_access_observed_at end,
+             quota_reset_at = case when $11 then null else quota_reset_at end,
              provider_credentials_json = $7,
              credential_revision = credential_revision + 1,
              has_refresh_token = $8,
@@ -873,6 +906,7 @@ pub(crate) async fn rotate_provider_account_in_transaction(
     .bind(upstream_account_id)
     .bind(update.preserve_profile)
     .bind(update.preserve_credential_state)
+    .bind(preserve_name)
     .fetch_optional(&mut **transaction)
     .await
     .map_err(|error| {
@@ -1139,6 +1173,7 @@ pub(super) async fn import_provider_accounts_in_transaction(
 pub(super) async fn rotate_provider_account_admin_in_transaction(
     transaction: &mut Transaction<'_, Postgres>,
     command: RotateProviderAccount,
+    preserve_name: bool,
 ) -> StoreResult<ProviderAccountAdminRotation> {
     command.scope.validate()?;
     require_nonempty(ENTITY, "account_id", &command.profile.id)?;
@@ -1167,6 +1202,7 @@ pub(super) async fn rotate_provider_account_admin_in_transaction(
         &command.profile,
         command.replacement_identity.as_ref(),
         &command.credential,
+        preserve_name,
     )
     .await?;
     // 凭据 CAS、普通设置和审计共享事务，任何设置失败都回滚凭据更新
@@ -1214,7 +1250,7 @@ impl PgProviderAccountRepository {
         let rows = sqlx::query(
             "select coalesce(proxy_enabled, true) as outbound_proxy_enabled, coalesce(max_websocket_connections, 0) as outbound_proxy_max_websocket_connections, auto_location, detected_location_json, location_country, location_region, location_city, location_timezone, outbound_proxy_id, outbound_proxy_url, id, provider_kind, name, notes, email, upstream_user_id,
                     upstream_account_id, plan_type, authentication_kind, credential_revision, has_refresh_token,
-                    access_token_expires_at, next_refresh_at, enabled, concurrency_limit, weight, model_access_json, credential_state,
+                    access_token_expires_at, next_refresh_at, enabled, auto_use_quota_credits, concurrency_limit, weight, model_access_json, credential_state,
                     credential_observed_at, quota_access_state, quota_evidence,
                     quota_access_observed_at, quota_reset_at,
                     quota_observed_at, last_error_reason, last_error_message, created_at, updated_at

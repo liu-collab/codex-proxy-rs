@@ -28,7 +28,7 @@ async fn preserves_ordered_roles_images_and_modern_tool_round_trip() {
             {"type":"image_url","image_url":{"url":"data:image/png;base64,aGVsbG8=","detail":"high"}}]},
         {"role":"assistant","content":"checking","tool_calls":[
             {"id":"call-weather","type":"function","function":{"name":"weather","arguments":arguments}}]},
-        {"role":"tool","tool_call_id":"call-weather","content":"{\"temperature\":25}"},
+        {"role":"tool","tool_call_id":"call-weather","name":"weather","content":"{\"temperature\":25}"},
         {"role":"user","content":"continue"}
     ]})).await;
     let input = converted["input"].as_array().unwrap();
@@ -53,9 +53,76 @@ async fn preserves_ordered_roles_images_and_modern_tool_round_trip() {
     );
     assert_eq!(
         input[5],
-        json!({"type":"function_call_output","call_id":"call-weather","output":"{\"temperature\":25}"})
+        json!({"type":"function_call_output","call_id":"call-weather","name":"weather","output":"{\"temperature\":25}"})
     );
     assert!(converted.get("previous_response_id").is_none());
+}
+
+#[tokio::test]
+async fn web_search_options_require_a_hosted_search_and_flatten_location() {
+    for (options, expected) in [
+        (json!({}), json!({"type":"web_search"})),
+        (
+            json!({"search_context_size":"low","user_location":{"type":"approximate",
+                "approximate":{"country":"US","city":"Seattle","region":"WA","timezone":"America/Los_Angeles"}}}),
+            json!({"type":"web_search","search_context_size":"low","user_location":{"type":"approximate",
+                "country":"US","city":"Seattle","region":"WA","timezone":"America/Los_Angeles"}}),
+        ),
+    ] {
+        let mut request = chat_request(false);
+        request["web_search_options"] = options;
+        let body = convert(request).await;
+        assert_eq!(body["tools"], json!([expected]));
+        assert_eq!(body["tool_choice"], json!({"type":"web_search"}));
+    }
+}
+
+#[tokio::test]
+async fn invalid_search_options_and_conflicting_tool_policies_report_the_field() {
+    for (fields, param) in [
+        (
+            json!({"web_search_options":{"search_context_size":7}}),
+            "web_search_options.search_context_size",
+        ),
+        (
+            json!({"web_search_options":{"user_location":{"type":"approximate"}}}),
+            "web_search_options.user_location.approximate",
+        ),
+        (
+            json!({"web_search_options":{}, "tool_choice":"none"}),
+            "tool_choice",
+        ),
+        (
+            json!({"web_search_options":{},"tools":[{"type":"function","function":{"name":"lookup"}}]}),
+            "tools",
+        ),
+    ] {
+        let mut request = chat_request(false);
+        request
+            .as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        let fixture = Fixture::new(Session::new(Vec::new())).await;
+        let response = fixture.post(request).await;
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(json_body(response).await["error"]["param"], param);
+        assert!(fixture.execution.captured.lock().unwrap().is_none());
+    }
+}
+
+#[tokio::test]
+async fn maps_inline_user_pdf_without_reencoding_its_data() {
+    let data = "data:application/pdf;base64,JVBERi0xLjQ=";
+    let converted = convert(json!({"model":"model-a","messages":[
+        {"role":"user","content":[{"type":"text","text":"Read the attachment"},
+            {"type":"file","file":{"filename":"document.pdf","file_data":data}}]}
+    ]}))
+    .await;
+    assert_eq!(
+        converted["input"][0]["content"],
+        json!([{"type":"input_text","text":"Read the attachment"},
+            {"type":"input_file","filename":"document.pdf","file_data":data}])
+    );
 }
 
 #[tokio::test]
@@ -162,19 +229,11 @@ async fn refuses_known_unrepresentable_features_before_starting_execution() {
     for (name, value) in [
         ("n", json!(2)),
         ("store", json!(true)),
-        ("stop", json!(["stop"])),
-        ("seed", json!(7)),
-        ("frequency_penalty", json!(0.3)),
-        ("logprobs", json!(true)),
         ("functions", json!([{"name":"old"}])),
         ("function_call", json!("auto")),
         ("input", json!("not chat")),
         ("previous_response_id", json!("resp_previous")),
         ("audio", json!({"voice":"alloy","format":"wav"})),
-        (
-            "prediction",
-            json!({"type":"content","content":"predicted"}),
-        ),
     ] {
         let fixture = Fixture::new(Session::new(Vec::new())).await;
         let mut body = chat_request(false);
@@ -193,9 +252,8 @@ async fn refuses_known_unrepresentable_features_before_starting_execution() {
 #[tokio::test]
 async fn rejects_unmapped_message_content_and_identity_fields() {
     for message in [
-        json!({"role":"user","name":"speaker","content":"hello"}),
-        json!({"role":"user","content":[{"type":"file","file":{"file_id":"file-example"}}]}),
-        json!({"role":"assistant","content":"hello","reasoning_content":"private"}),
+        json!({"role":"tool","tool_call_id":"call-lookup","name":42,"content":"result"}),
+        json!({"role":"assistant","content":[{"type":"file","file":{"filename":"a.pdf","file_data":"data:application/pdf;base64,JVBERg=="}}]}),
         json!({"role":"assistant","content":[{"type":"text","text":"history","prompt_cache_breakpoint":{"type":"default"}}]}),
         json!({"role":"tool","content":"unassociated output"}),
     ] {
@@ -232,12 +290,130 @@ async fn assistant_tool_history_keeps_arguments_opaque_and_cache_annotations_str
     );
     assert_eq!(converted["input"][1]["arguments"], arguments);
     assert_eq!(
-        converted["input"][2]["output"],
-        json!([{"type":"input_text","text":"result"}])
+        converted["input"][2],
+        json!({"type":"function_call_output","call_id":"call-raw","output":[{"type":"input_text","text":"result"}]})
     );
     assert_eq!(
         converted["prompt_cache_options"],
         json!({"future":{"keep":true}})
     );
     assert_eq!(converted["moderation"], json!({"future":{"keep":true}}));
+}
+
+#[tokio::test]
+async fn optional_chat_controls_degrade_without_blocking_upstream_execution() {
+    for stop in [json!("end"), json!(["end", "stop"]), json!([])] {
+        let converted = convert(json!({"model":"model-a", "messages":[
+            {"role":"user", "name":"speaker", "content":"hello"},
+            {"role":"assistant", "reasoning_content":"display-only", "content":"previous"}
+        ], "stop":stop, "seed":7, "frequency_penalty":0.3, "presence_penalty":0.5,
+            "logit_bias":{"10":-10}, "prediction":{"type":"content", "content":"hint"}}))
+        .await;
+        assert_eq!(converted["input"][0]["content"][0]["text"], "hello");
+        assert_eq!(converted["input"][1]["content"][0]["text"], "previous");
+        for field in [
+            "stop",
+            "seed",
+            "frequency_penalty",
+            "presence_penalty",
+            "logit_bias",
+            "prediction",
+        ] {
+            assert!(converted.get(field).is_none(), "{field}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn shared_options_and_native_extensions_reach_upstream_without_model_prejudgment() {
+    let mut request = chat_request(false);
+    request.as_object_mut().unwrap().extend(json!({
+        "max_output_tokens":10, "temperature":3.0, "top_p":1.5,
+        "reasoning":{"effort":"low", "summary":"auto", "future":true}, "reasoning_effort":"high",
+        "text":{"verbosity":"low", "future":true}, "verbosity":"high",
+        "response_format":{"type":"future_format", "future":true},
+        "tools":[{"type":"file_search", "vector_store_ids":["vs_test"]}],
+        "tool_choice":"future_choice", "logprobs":true, "top_logprobs":3,
+        "include":["reasoning.encrypted_content"], "truncation":"auto", "max_tool_calls":5
+    }).as_object().unwrap().clone());
+    let converted = convert(request).await;
+    assert_eq!(converted["max_output_tokens"], 10);
+    assert_eq!(converted["temperature"], 3.0);
+    assert_eq!(converted["top_p"], 1.5);
+    assert_eq!(
+        converted["reasoning"],
+        json!({"effort":"high", "summary":"auto", "future":true})
+    );
+    assert_eq!(
+        converted["text"],
+        json!({"verbosity":"high", "future":true, "format":{"type":"future_format", "future":true}})
+    );
+    assert_eq!(converted["tool_choice"], "future_choice");
+    assert_eq!(
+        converted["include"],
+        json!([
+            "reasoning.encrypted_content",
+            "message.output_text.logprobs"
+        ])
+    );
+    assert_eq!(
+        converted["tools"][0]["vector_store_ids"],
+        json!(["vs_test"])
+    );
+    assert_eq!(converted["top_logprobs"], 3);
+}
+
+#[tokio::test]
+async fn custom_tools_keep_native_input_and_mixed_call_families_through_history() {
+    let schema = json!({"type":"grammar", "grammar":{"syntax":"lark", "definition":"start: /.+/"}});
+    let converted = convert(json!({"model":"model-a", "tools":[
+        {"type":"custom", "custom":{"name":"patch", "format":schema}},
+        {"type":"function", "function":{"name":"lookup"}}
+    ], "tool_choice":{"type":"allowed_tools", "allowed_tools":{"mode":"auto", "tools":[
+        {"type":"custom", "custom":{"name":"patch"}}, {"type":"function", "function":{"name":"lookup"}}
+    ]}}, "messages":[
+        {"role":"assistant", "tool_calls":[
+            {"id":"call_patch", "type":"custom", "custom":{"name":"patch", "input":"raw\ninput"}},
+            {"id":"call_lookup", "type":"function", "function":{"name":"lookup", "arguments":"{}"}}
+        ]},
+        {"role":"tool", "tool_call_id":"call_patch", "content":"done"},
+        {"role":"tool", "tool_call_id":"call_lookup", "content":[{"type":"image_url", "image_url":{"url":"https://example.com/result.png"}}]},
+        {"role":"assistant", "tool_calls":[{"id":"call_patch", "type":"function", "function":{"name":"lookup", "arguments":"{}"}}]},
+        {"role":"tool", "tool_call_id":"call_patch", "content":"reused id"}
+    ]})).await;
+    assert_eq!(
+        converted["tools"][0],
+        json!({"type":"custom", "name":"patch", "format":schema})
+    );
+    assert_eq!(
+        converted["tool_choice"],
+        json!({"type":"allowed_tools", "mode":"auto", "tools":[{"type":"custom","name":"patch"},{"type":"function","name":"lookup"}]})
+    );
+    assert_eq!(
+        converted["input"][0],
+        json!({"type":"custom_tool_call","call_id":"call_patch","name":"patch","input":"raw\ninput"})
+    );
+    assert_eq!(converted["input"][2]["type"], "custom_tool_call_output");
+    assert_eq!(converted["input"][3]["output"][0]["type"], "input_image");
+    assert_eq!(converted["input"][5]["type"], "function_call_output");
+}
+
+#[tokio::test]
+async fn files_and_audio_are_preserved_as_inputs_instead_of_losing_the_user_turn() {
+    for file in [
+        json!({"file_id":"file_test"}),
+        json!({"file_url":"https://example.com/report.txt"}),
+        json!({"file_data":"data:text/plain;base64,aGk=", "filename":"report.txt", "detail":"high"}),
+    ] {
+        let converted = convert(json!({"model":"model-a", "messages":[{"role":"user", "content":[
+            {"type":"file", "file":file}, {"type":"input_audio", "input_audio":{"data":"aGk=", "format":"mp3"}}
+        ]}]})).await;
+        let mut expected = file;
+        expected["type"] = json!("input_file");
+        assert_eq!(converted["input"][0]["content"][0], expected);
+        assert_eq!(
+            converted["input"][0]["content"][1],
+            json!({"type":"input_audio","audio_url":"data:audio/mpeg;base64,aGk="})
+        );
+    }
 }

@@ -3,7 +3,7 @@
 use super::*;
 use crate::transport::local_compaction::LocalCompactionError;
 use crate::transport::protocol::responses::is_replaceable_response_prelude;
-use gateway_core::error::TransientRetryPolicy;
+use gateway_core::error::{ProxyConnectionHint, TransientRetryPolicy};
 
 /// OpenAI 失败对 Smart 账号分数的结构化 reason 闭集
 ///
@@ -47,6 +47,7 @@ pub(super) struct MappedProviderFailure {
     /// 原始上游错误描述，仅在凭据错误状态下持久化
     pub(super) error_message: Option<String>,
     pub(super) cyber_policy_failure: bool,
+    pub(super) model_unsupported: bool,
     pub(super) set_cookie_headers: Vec<String>,
     pub(super) response_origin: Option<Url>,
     pub(super) rate_limit_headers: Vec<(String, String)>,
@@ -62,6 +63,7 @@ impl MappedProviderFailure {
             account_failure: None,
             error_message: None,
             cyber_policy_failure: false,
+            model_unsupported: false,
             set_cookie_headers: Vec::new(),
             response_origin: None,
             rate_limit_headers: Vec::new(),
@@ -160,6 +162,8 @@ pub(super) struct OpenAiFailureContext<'a> {
     pub(super) response_origin: &'a Url,
     pub(super) cyber_policy_scope: Option<&'a CodexCyberPolicyScope>,
     pub(super) allows_account_state_mutation: bool,
+    pub(super) image_endpoint: bool,
+    pub(super) upstream_model: Option<&'a UpstreamModelId>,
 }
 
 #[derive(Clone, Copy)]
@@ -308,7 +312,23 @@ pub(super) async fn apply_failure(
     if !context.allows_account_state_mutation {
         return;
     }
-    synchronize_passive_quota_headers(context.quota, account, &failure.rate_limit_headers).await;
+    synchronize_passive_quota_headers(
+        context.quota,
+        account,
+        &failure.rate_limit_headers,
+        context.image_endpoint,
+    )
+    .await;
+    if failure.model_unsupported
+        && let Some(model) = context.upstream_model
+        && let Err(error) = context
+            .selector
+            .record_model_unsupported(account, model)
+            .await
+    {
+        tracing::warn!(account_id = %account.id(), error = %error,
+            "Failed to persist OpenAI model availability cooldown");
+    }
     let needs_authoritative_quota_refresh = matches!(
         failure.account_failure,
         Some(CodexAccountFailure::QuotaExhausted | CodexAccountFailure::UsageLimitExhausted { .. })
@@ -353,12 +373,24 @@ pub(super) async fn apply_failure(
             )
             .await
     {
-        tracing::warn!(
-            account_id = %account.id(),
-            credential_revision = account.revision().get(),
-            error = %error,
-            "Failed to persist OpenAI response cookies"
-        );
+        match error {
+            // 失败响应同样受版本保护，不能重放旧 Cookie 覆盖较新的凭据
+            CredentialSelectionError::RevisionConflict(_) => {
+                tracing::debug!(
+                    account_id = %account.id(),
+                    credential_revision = account.revision().get(),
+                    "Skipped OpenAI response cookies after credential revision changed"
+                );
+            }
+            error => {
+                tracing::warn!(
+                    account_id = %account.id(),
+                    credential_revision = account.revision().get(),
+                    error = %error,
+                    "Failed to persist OpenAI response cookies"
+                );
+            }
+        }
     }
     // 探测只验证恢复，不能把探测自身的单请求并发当作业务负载证据
 }
@@ -367,8 +399,11 @@ pub(super) fn schedule_authoritative_quota_refresh_after_failure(
     quota: &Arc<CodexCredentialQuotaService>,
     account: &ProviderAccount,
 ) {
+    if !account.auto_use_quota_credits() {
+        return;
+    }
     // 限额错误可以确认账号状态，但 Responses 事件中的 used_percent 可能仍停在上一结算点
-    // usage 快照在后台补齐展示基线，不得撤销同一轮真实失败，也不能阻塞原始响应
+    // 后台查询可为后续请求确认点数，但不阻塞或重放原始请求
     // 随机等待 1–3 秒让上游结算再查询，避免多账号同时受限时补查完全同步；
     // 仍保持单次语义（一次 sleep + 一次查询），5 秒仅限制实际查询自身
     let quota = Arc::clone(quota);
@@ -401,10 +436,6 @@ pub(super) fn schedule_authoritative_quota_refresh_after_failure(
             }
         }
     }));
-}
-
-pub(super) fn map_handshake_error(error: CodexClientError) -> MappedProviderFailure {
-    map_client_error(error, UpstreamSendState::Ambiguous, true)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -462,12 +493,13 @@ pub(super) fn apply_websocket_recovery_policy(
         return;
     }
     // 明确账号拒绝走已有换号路径，业务瞬态失败走请求内退避，不消耗 WS 传输预算
-    if failure.error.replay_is_safe()
-        && (failure.account_failure.is_some()
-            || matches!(
-                failure.error.pre_delivery_retry(),
-                Some(gateway_core::error::PreDeliveryRetry::SameAccountTransientRetry { .. })
-            ))
+    if failure.model_unsupported
+        || (failure.error.replay_is_safe()
+            && (failure.account_failure.is_some()
+                || matches!(
+                    failure.error.pre_delivery_retry(),
+                    Some(gateway_core::error::PreDeliveryRetry::SameAccountTransientRetry { .. })
+                )))
     {
         tracing::warn!(
             request_id = context.request_id,
@@ -772,7 +804,7 @@ pub(super) fn unsupported_storage_error(field: &str) -> ProviderError {
 pub(super) fn map_stream_error(error: CodexClientError) -> MappedProviderFailure {
     let allows_pre_delivery_retry = stream_transport_allows_pre_delivery_retry(&error);
     let websocket_failure = error.transport() == Some(CodexBackendTransport::WebSocket);
-    let mut failure = map_client_error(error, UpstreamSendState::Sent, false);
+    let mut failure = map_client_error(error, UpstreamSendState::Sent, None);
     failure.websocket_transport_retryable = allows_pre_delivery_retry && websocket_failure;
     if allows_pre_delivery_retry && !websocket_failure {
         failure.error = failure.error.with_pre_delivery_retry();
@@ -822,7 +854,7 @@ pub(super) fn map_canonical_error(
 pub(super) fn map_client_error(
     error: CodexClientError,
     uncertain_state: UpstreamSendState,
-    observe_transport: bool,
+    handshake_account: Option<&ProviderAccount>,
 ) -> MappedProviderFailure {
     if let CodexClientError::Outbound(error) = error {
         return MappedProviderFailure::plain(*error);
@@ -834,7 +866,10 @@ pub(super) fn map_client_error(
                 .with_classification("admission", "local_connection_capacity"),
         )
     } else {
-        client_diagnostic(&error)
+        client_diagnostic(
+            &error,
+            handshake_account.is_some_and(|account| account.outbound_proxy().is_some()),
+        )
     };
     let raw_upstream_error = match &error {
         CodexClientError::WebSocket(error) => websocket_raw_error(error),
@@ -869,9 +904,7 @@ pub(super) fn map_client_error(
         }),
         _ => None,
     };
-    let observation = observe_transport
-        .then(|| codex_error_observation(&error))
-        .flatten();
+    let observation = handshake_account.and_then(|_| codex_error_observation(&error));
     if let Some(failure) = error.upstream_failure() {
         return map_upstream_failure(failure, observation, ReplayBoundary::BeforeSemanticOutput);
     }
@@ -1068,7 +1101,10 @@ pub(super) fn map_client_error(
 }
 
 /// 在消费 transport 错误前提取可持久化事实，不能使用可能携带 URL/凭据的 Display
-pub(super) fn client_diagnostic(error: &CodexClientError) -> Option<ProviderDiagnostic> {
+pub(super) fn client_diagnostic(
+    error: &CodexClientError,
+    uses_account_proxy: bool,
+) -> Option<ProviderDiagnostic> {
     let (stage, code, message) = match error {
         CodexClientError::ConnectionBudgetExhausted => (
             "connect",
@@ -1101,13 +1137,16 @@ pub(super) fn client_diagnostic(error: &CodexClientError) -> Option<ProviderDiag
             } else {
                 ("exchange", "http_transport_failed")
             };
-            return Some(
-                ProviderDiagnostic::new(format!(
-                    "OpenAI HTTP failure: stage={stage}, cause={code}"
-                ))
-                .with_classification(stage, code)
-                .with_io_cause(error),
-            );
+            let diagnostic = ProviderDiagnostic::new(format!(
+                "OpenAI HTTP failure: stage={stage}, cause={code}"
+            ))
+            .with_classification(stage, code)
+            .with_io_cause(error);
+            return Some(if uses_account_proxy && error.is_connect() {
+                diagnostic.with_proxy_hint(ProxyConnectionHint::CheckProxy)
+            } else {
+                diagnostic
+            });
         }
         CodexClientError::StreamIdleTimeout { timeout } => (
             "receive",
@@ -1162,6 +1201,7 @@ pub(super) fn profile_diagnostic(
     use crate::transport::profile::selection::ClientProfileError;
     let code = match error {
         ClientProfileError::Invalid => "request_profile_invalid",
+        ClientProfileError::InvalidInstallationSeed => "request_profile_installation_seed_invalid",
         ClientProfileError::InvalidUserAgent => "request_profile_user_agent_invalid",
         ClientProfileError::CompanionHeadersRequired => "request_profile_headers_required",
         ClientProfileError::CompanionHeadersConflict => "request_profile_headers_conflict",
@@ -1174,10 +1214,11 @@ pub(super) fn profile_diagnostic(
 fn custom_ca_diagnostic(error: &crate::transport::tls::CustomCaError) -> ProviderDiagnostic {
     use crate::transport::tls::CustomCaError;
     let (code, message) = match error {
-        CustomCaError::ProxyConfiguration => (
-            "account_proxy_invalid",
-            "OpenAI account proxy configuration is invalid".to_owned(),
-        ),
+        CustomCaError::ProxyConfiguration => {
+            return ProviderDiagnostic::new("OpenAI account proxy configuration is invalid")
+                .with_classification("prepare", "account_proxy_invalid")
+                .with_proxy_hint(ProxyConnectionHint::InvalidConfiguration);
+        }
         CustomCaError::ReadCaFile { source_env, .. } => (
             "custom_ca_read_failed",
             format!("OpenAI CA certificate file selected by {source_env} could not be read"),
@@ -1215,7 +1256,7 @@ fn custom_ca_diagnostic(error: &crate::transport::tls::CustomCaError) -> Provide
 
 fn websocket_diagnostic(error: &CodexWebSocketExchangeError) -> ProviderDiagnostic {
     let (stage, code) = match error.diagnostic_cause() {
-        CodexWebSocketExchangeError::Connect(_) => (
+        CodexWebSocketExchangeError::Connect { .. } => (
             "connect",
             error
                 .transport_failure_reason()
@@ -1251,7 +1292,18 @@ fn websocket_diagnostic(error: &CodexWebSocketExchangeError) -> ProviderDiagnost
                 .unwrap_or("websocket_transport_failed"),
         ),
     };
-    websocket_diagnostic_message(error).with_classification(stage, code)
+    let diagnostic = websocket_diagnostic_message(error).with_classification(stage, code);
+    match error.classified() {
+        CodexWebSocketExchangeError::Connect {
+            proxy_hint: Some(hint),
+            ..
+        }
+        | CodexWebSocketExchangeError::ConnectTimeout {
+            proxy_hint: Some(hint),
+            ..
+        } => diagnostic.with_proxy_hint(*hint),
+        _ => diagnostic,
+    }
 }
 
 fn websocket_diagnostic_message(error: &CodexWebSocketExchangeError) -> ProviderDiagnostic {
@@ -1272,7 +1324,7 @@ fn websocket_diagnostic_message(error: &CodexWebSocketExchangeError) -> Provider
     if let Some(reason) = error.transport_failure_reason() {
         if matches!(
             error.diagnostic_cause(),
-            CodexWebSocketExchangeError::Connect(_)
+            CodexWebSocketExchangeError::Connect { .. }
         ) {
             return ProviderDiagnostic::new(format!(
                 "OpenAI WebSocket connection failed before payload send ({reason})"
@@ -1295,10 +1347,10 @@ fn websocket_diagnostic_message(error: &CodexWebSocketExchangeError) -> Provider
         | CodexWebSocketExchangeError::PostSendAmbiguous { .. } => {
             "OpenAI WebSocket transport failed after payload send; result is ambiguous".to_owned()
         }
-        CodexWebSocketExchangeError::Connect(_) => {
+        CodexWebSocketExchangeError::Connect { .. } => {
             "OpenAI WebSocket connection failed before payload send".to_owned()
         }
-        CodexWebSocketExchangeError::ConnectTimeout { timeout } => {
+        CodexWebSocketExchangeError::ConnectTimeout { timeout, .. } => {
             format!("OpenAI WebSocket connection timed out after {timeout:?}")
         }
         CodexWebSocketExchangeError::OriginCircuitOpen => {
@@ -1568,6 +1620,7 @@ pub(super) fn map_upstream_failure(
         ),
         error_message: failure.client_message,
         cyber_policy_failure,
+        model_unsupported: category == CodexFailureCategory::ModelUnsupported,
         // 普通 5xx 与未知流内错误不足以证明容量拒绝，不能用于冻结账号
         set_cookie_headers: failure.set_cookie_headers,
         response_origin: failure.response_origin,
@@ -1674,7 +1727,7 @@ pub(super) fn account_failure(
 pub(super) fn websocket_send_state(error: &CodexWebSocketExchangeError) -> UpstreamSendState {
     match error.classified() {
         CodexWebSocketExchangeError::InvalidRequest(_)
-        | CodexWebSocketExchangeError::Connect(_)
+        | CodexWebSocketExchangeError::Connect { .. }
         | CodexWebSocketExchangeError::ConnectTimeout { .. }
         | CodexWebSocketExchangeError::OriginCircuitOpen
         | CodexWebSocketExchangeError::OriginHalfOpenBusy
@@ -1718,7 +1771,7 @@ pub(super) fn websocket_error_kind(error: &CodexWebSocketExchangeError) -> Provi
         CodexWebSocketExchangeError::ConnectionLimitReached(_) => ProviderErrorKind::RateLimited,
         CodexWebSocketExchangeError::Transport(_)
         | CodexWebSocketExchangeError::SendNotStarted
-        | CodexWebSocketExchangeError::Connect(_)
+        | CodexWebSocketExchangeError::Connect { .. }
         | CodexWebSocketExchangeError::StreamEndedBeforeTerminal { .. }
         | CodexWebSocketExchangeError::ReusedConnectionDiedBeforeFirstEvent { .. } => {
             ProviderErrorKind::Transport

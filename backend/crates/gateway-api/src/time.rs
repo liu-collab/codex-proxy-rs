@@ -1,7 +1,19 @@
-//! 管理与自助页面共用的时间展示投影
+//! 管理与自助页面共用的时间查询解析与展示投影
 
 use chrono::{DateTime, Utc};
 use gateway_core::time::DeploymentTimeZone;
+
+use crate::WireValidationError;
+
+/// 解析 RFC3339 时间；错误不回显原始值
+pub fn parse_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>, WireValidationError> {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(None);
+    };
+    DateTime::parse_from_rfc3339(value)
+        .map(|value| Some(value.with_timezone(&Utc)))
+        .map_err(|_| WireValidationError::new("timeRange"))
+}
 
 pub(crate) fn query_range(
     start: Option<&str>,
@@ -10,8 +22,7 @@ pub(crate) fn query_range(
     as_of: Option<i64>,
     timezone: DeploymentTimeZone,
     default_period: &str,
-) -> Result<gateway_admin::model::observability::TimeRange, crate::admin::WireValidationError> {
-    use crate::admin::{WireValidationError, observability::parse_datetime};
+) -> Result<gateway_admin::model::observability::TimeRange, WireValidationError> {
     use gateway_admin::model::observability::{CalendarPeriod, TimeRange};
     if start.is_some() || end.is_some() {
         if period.is_some() || as_of.is_some() {

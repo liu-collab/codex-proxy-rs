@@ -5,7 +5,7 @@ use tokio::sync::{Mutex, OnceCell};
 use super::{
     HostClient, HostReply, SessionError,
     http::{callback, empty_callback, invalid},
-    read::PendingRead,
+    pending_read::PendingRead,
 };
 use crate::{
     ErrorCode, PluginFault,

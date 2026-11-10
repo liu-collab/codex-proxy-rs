@@ -5,7 +5,7 @@ use std::{fs, path::Path, sync::Arc, time::Duration};
 use async_trait::async_trait;
 use gateway_admin::model::system::{
     SystemOperationAccepted, SystemOperationKind, SystemUpdateChannel as UpdateChannel,
-    SystemUpdateDetail, SystemUpdateStatus, SystemVersion,
+    SystemUpdateCheck, SystemUpdateDetail, SystemUpdateStatus, SystemVersion,
 };
 use gateway_admin::ports::system::{
     SystemOperationErrorKind, SystemOperations, SystemRestartPreflight, SystemUpdateCandidate,
@@ -16,22 +16,21 @@ use serde::Deserialize;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, broadcast};
 
 use super::archive::extract_release;
-use super::download::{
-    MAX_CHECKSUM_SIZE, MAX_DOWNLOAD_SIZE, download_file, format_bytes, verify_checksum,
-};
+use super::discovery::ReleaseCache;
+use super::download::{download_file, fetch_expected_checksum, format_bytes, verify_checksum};
 use super::events::UpdateEvents;
 use super::installation::{OFFICIAL_PLUGIN_MANIFEST, ReleaseFiles};
 use super::process::spawn_replacement;
 use super::release::{
-    GitHubRelease, ReleaseCache, base_update_detail, confirmed_target, detail_from_release,
-    fetch_latest, select_archive, update_policy, validate_update_target, version_channel,
+    GitHubRelease, base_update_detail, confirmed_target, update_policy, validate_update_target,
+    version_channel,
 };
 use super::state::{
     OperationFileLock, UpdateOperation, UpdateTempDir, finish, operation_id, read_status,
     reconcile_installation, recover_interrupted, set_running,
 };
 use super::swap::{replace_release_files, rollback_official_plugins_dir, rollback_release};
-use super::{OperationError, SystemUpdateConfig, conflict, internal, invalid, upstream};
+use super::{OperationError, SystemUpdateConfig, conflict, internal, invalid};
 
 const MAX_OFFICIAL_PLUGIN_MANIFEST_SIZE: u64 = 256 * 1024;
 
@@ -41,10 +40,16 @@ pub struct ProcessSystemOperations {
     cancellation: CancellationToken,
     events: Arc<UpdateEvents>,
     config: Arc<SystemUpdateConfig>,
-    operation_lock: Arc<AsyncMutex<Option<OperationFileLock>>>,
+    operation_lock: Arc<AsyncMutex<Option<RestartGuard>>>,
     release_cache: Arc<ReleaseCache>,
     running_files: Arc<Result<ReleaseFiles, OperationError>>,
     diagnostics: super::diagnostics::Diagnostics,
+}
+
+struct RestartGuard {
+    // 字段按声明顺序释放，先移除更新锁，再通知替换进程开始启动
+    _file_lock: OperationFileLock,
+    _replacement_input: Option<std::process::ChildStdin>,
 }
 
 impl ProcessSystemOperations {
@@ -75,7 +80,7 @@ impl ProcessSystemOperations {
         self.diagnostics.bind(diagnostics);
     }
 
-    fn lock_operation(&self) -> Result<OwnedMutexGuard<Option<OperationFileLock>>, OperationError> {
+    fn lock_operation(&self) -> Result<OwnedMutexGuard<Option<RestartGuard>>, OperationError> {
         let operation = Arc::clone(&self.operation_lock)
             .try_lock_owned()
             .map_err(|_| conflict("已有系统操作正在执行"))?;
@@ -174,31 +179,15 @@ impl ProcessSystemOperations {
         operation_id: &str,
         preflight: &dyn SystemUpdatePreflight,
     ) -> Result<ReleaseFiles, OperationError> {
-        let repository = self
-            .config
-            .update_repository
-            .as_deref()
-            .ok_or_else(|| conflict("未配置更新仓库 CPR_UPDATE_REPOSITORY"))?;
         self.events.info(
             Some(operation_id),
             Some("release"),
             "正在获取最新 Release 信息",
         );
-        let release = fetch_latest(
-            &self.config.github_api_base,
-            repository,
-            &self.config.version,
-            channel,
-        )
-        .await?
-        .ok_or_else(|| conflict("当前发行通道没有可用更新"))?;
-        let detail = detail_from_release(&self.config, &release, channel);
-        if detail.latest_version != target {
-            return Err(conflict("远端最新版本已变化，请重新确认"));
-        }
-        if !detail.has_update {
-            return Err(conflict("当前没有可用更新"));
-        }
+        let release = self
+            .release_cache
+            .install(&self.config, channel, target, &self.diagnostics)
+            .await?;
         self.events.info(
             Some(operation_id),
             Some("prepare"),
@@ -220,7 +209,7 @@ impl ProcessSystemOperations {
             Some("asset"),
             "正在选择匹配当前平台的更新包",
         );
-        let archive = select_archive(release, version)?;
+        let (archive, checksum) = release.install_assets(version, &self.config.github_api_base)?;
         self.events.info(
             Some(operation_id),
             Some("asset"),
@@ -232,25 +221,24 @@ impl ProcessSystemOperations {
         );
         self.events
             .info(Some(operation_id), Some("verify"), "正在校验更新资源");
-        if archive.size == 0 || archive.size > MAX_DOWNLOAD_SIZE {
-            return Err(invalid("更新包大小无效或超出限制"));
-        }
-        let checksum = release
-            .assets
-            .iter()
-            .find(|asset| asset.name == "checksums.txt")
-            .ok_or_else(|| upstream("发行版本缺少 checksums.txt 校验文件，无法安全更新"))?;
-        if checksum.size == 0 || checksum.size > MAX_CHECKSUM_SIZE {
-            return Err(invalid("校验文件大小无效或超出限制"));
-        }
-        self.events
-            .info(Some(operation_id), Some("prepare"), "正在创建临时更新目录");
+        self.events.info(
+            Some(operation_id),
+            Some("prepare"),
+            "正在获取更新包的 SHA-256 校验值",
+        );
+        let expected_checksum = fetch_expected_checksum(
+            &archive.name,
+            &checksum.browser_download_url,
+            checksum.size,
+            &self.config.github_api_base,
+        )
+        .await?;
         fs::create_dir_all(&self.config.update_temp_dir)
             .map_err(|error| internal("无法创建更新临时目录").with_source(error))?;
         let temp_root = fs::canonicalize(&self.config.update_temp_dir)
             .map_err(|error| internal("无法确定更新临时目录位置").with_source(error))?;
         let temp = UpdateTempDir::create(&temp_root)?;
-        let archive_path = temp.path().join(&archive.name);
+        let archive_path = temp.path().join("release.tar.gz");
         self.events
             .info(Some(operation_id), Some("download"), "开始下载更新包");
         download_file(
@@ -266,14 +254,8 @@ impl ProcessSystemOperations {
             .success(Some(operation_id), Some("download"), "更新包下载完成");
         self.events
             .info(Some(operation_id), Some("checksum"), "正在校验 checksum");
-        verify_checksum(
-            &archive_path,
-            &archive.name,
-            &checksum.browser_download_url,
-            checksum.size,
-            &self.config.github_api_base,
-        )
-        .await?;
+        // 安装包是最后一项远端资源，后续只使用已经固定的目标和校验值
+        verify_checksum(&archive_path, &expected_checksum)?;
         self.events
             .success(Some(operation_id), Some("checksum"), "checksum 校验通过");
         self.events
@@ -362,7 +344,10 @@ impl ProcessSystemOperations {
 #[async_trait]
 impl SystemOperations for ProcessSystemOperations {
     async fn version(&self) -> Result<SystemVersion, OperationError> {
-        let detail = self.update_detail(false, None).await?;
+        let detail = self
+            .release_cache
+            .local(&self.config, self.resolve_channel(None)?)
+            .await;
         Ok(SystemVersion {
             version: self.config.version.clone(),
             git_sha: self.config.git_sha.clone(),
@@ -380,25 +365,22 @@ impl SystemOperations for ProcessSystemOperations {
 
     async fn update_detail(
         &self,
-        refresh: bool,
+        check: SystemUpdateCheck,
         channel: Option<UpdateChannel>,
     ) -> Result<SystemUpdateDetail, OperationError> {
         let channel = self.resolve_channel(channel)?;
         match self
             .release_cache
-            .detail(&self.config, refresh, channel)
+            .detail(&self.config, channel, check, &self.diagnostics)
             .await
         {
             Ok(detail) => Ok(detail),
-            Err(error) => {
-                self.diagnostics.record("check_release", None, &error).await;
-                Ok(base_update_detail(
-                    &self.config,
-                    channel,
-                    self.config.update_support_error(),
-                    Some(error.message().to_owned()),
-                ))
-            }
+            Err(error) => Ok(base_update_detail(
+                &self.config,
+                channel,
+                self.config.update_support_error(),
+                Some(&error),
+            )),
         }
     }
 
@@ -559,15 +541,17 @@ impl SystemOperations for ProcessSystemOperations {
         {
             return Err(conflict("重启检查期间安装文件已变化，请重新确认"));
         }
-        let message = if self.config.deployment_mode == "docker" {
-            "已安排进程内重启"
+        let (message, replacement_input) = if self.config.deployment_mode == "docker" {
+            ("已安排进程内重启", None)
         } else {
-            spawn_replacement(&self.config)?;
-            "已安排自重启"
+            ("已安排自重启", spawn_replacement(&self.config)?)
         };
         let operation_id = operation_id("restart");
         // 受理后直到旧服务释放，保留重启状态和跨进程锁；延迟关闭只用于送达响应
-        *operation = Some(file_lock);
+        *operation = Some(RestartGuard {
+            _file_lock: file_lock,
+            _replacement_input: replacement_input,
+        });
         let cancellation = self.cancellation.clone();
         drop(tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(500)).await;

@@ -2,8 +2,10 @@
 
 mod admin;
 mod credential;
+mod oauth_http;
 mod provider;
 mod reasoning_replay;
+mod secret;
 pub mod transport;
 
 use std::sync::Arc;
@@ -24,30 +26,33 @@ pub use transport::{XaiWireProfile, XaiWireProfileState};
 pub use credential::{
     AllowedRedirectUri, AuthorizationCallback, AuthorizationCodeGrant, CallbackRejection,
     ConfigError, CreateGrokCredential, DiscoveryDocument, DueGrokCredential,
-    FailClosedTokenVerifier, FailureClass, FormField, FormValue, GROK_FREE_ROLLING_WINDOW_SECONDS,
-    GrokAccountExport, GrokAccountProfile, GrokAccountSessionSelector, GrokBillingPresentation,
-    GrokCatalogCache, GrokCatalogCacheError, GrokCatalogScope, GrokCredentialAdmin,
-    GrokCredentialCatalogCache, GrokCredentialCatalogError, GrokCredentialCatalogSeed,
-    GrokCredentialCatalogService, GrokCredentialLifecycle, GrokCredentialQuotaService,
-    GrokCredentialRecord, GrokCredentialRecovery, GrokCredentialRecoveryOutcome,
-    GrokCredentialRefreshError, GrokCredentialRefreshOutcome, GrokCredentialRefreshService,
-    GrokCredentialRefresher, GrokCredentialRepository, GrokCredentialRepositoryError,
-    GrokOAuthClient, GrokOAuthConfig, GrokOAuthImportCandidate, GrokOAuthImportDocument,
-    GrokOAuthImportEntry, GrokOAuthImportError, GrokOAuthImportMetadata, GrokOAuthImportTokens,
-    GrokOAuthRefreshClient, GrokOAuthSecret, GrokPlanCatalog, GrokQuotaError, GrokQuotaPeriodKind,
-    GrokQuotaSnapshot, GrokRefreshFailure, GrokRefreshTokens, HttpHeader, HttpMethod, OAuthError,
-    OAuthErrorCode, OAuthHttpRequest, OAuthHttpResponse, OAuthHttpTransport, OAuthOperation,
-    OAuthPrincipal, OFFICIAL_CLIENT_ID, OFFICIAL_ISSUER, OFFICIAL_REDIRECT_URI, OFFICIAL_SCOPES,
+    FailClosedTokenVerifier, FailureClass, GROK_FREE_ROLLING_WINDOW_SECONDS, GrokAccountExport,
+    GrokAccountProfile, GrokAccountSessionSelector, GrokBillingPresentation, GrokCatalogCache,
+    GrokCatalogCacheError, GrokCatalogScope, GrokCredentialAdmin, GrokCredentialCatalogCache,
+    GrokCredentialCatalogError, GrokCredentialCatalogSeed, GrokCredentialCatalogService,
+    GrokCredentialLifecycle, GrokCredentialQuotaService, GrokCredentialRecord,
+    GrokCredentialRecovery, GrokCredentialRecoveryOutcome, GrokCredentialRefreshError,
+    GrokCredentialRefreshOutcome, GrokCredentialRefreshService, GrokCredentialRefresher,
+    GrokCredentialRepository, GrokCredentialRepositoryError, GrokOAuthClient, GrokOAuthConfig,
+    GrokOAuthImportCandidate, GrokOAuthImportDocument, GrokOAuthImportEntry, GrokOAuthImportError,
+    GrokOAuthImportMetadata, GrokOAuthImportTokens, GrokOAuthRefreshClient, GrokOAuthSecret,
+    GrokPlanCatalog, GrokQuotaError, GrokQuotaPeriodKind, GrokQuotaSnapshot, GrokRefreshFailure,
+    GrokRefreshTokens, OAuthError, OAuthErrorCode, OAuthOperation, OAuthPrincipal,
+    OFFICIAL_CLIENT_ID, OFFICIAL_ISSUER, OFFICIAL_REDIRECT_URI, OFFICIAL_SCOPES,
     PendingAuthorization, Pkce, PreparedGrokCredentialRotation,
     PreparedGrokCredentialRotationGuard, ProtocolViolation, RedirectUriAllowlist,
     RefreshTokenGrant, RefreshedTokenSet, ReqwestOidcTokenVerifier, RotateGrokCredential,
-    RotateManagedGrokCredential, SecretValue, TokenCandidate, TokenVerificationContext,
-    TokenVerifier, TransportFailure, TransportFailureKind, TransportFuture,
+    RotateManagedGrokCredential, TokenCandidate, TokenVerificationContext, TokenVerifier,
     UpdateGrokCredentialState, VerificationEvidence, VerificationFailure, VerificationFlow,
     VerificationFuture, VerificationMethod, VerifiedGrokAccount, VerifiedTokenSet,
     parse_oauth_error, parse_refresh_success,
 };
+pub use oauth_http::{
+    FormField, FormValue, HttpHeader, HttpMethod, OAuthHttpRequest, OAuthHttpResponse,
+    OAuthHttpTransport, TransportFailure, TransportFailureKind, TransportFuture,
+};
 pub use provider::GrokBuildProvider;
+pub use secret::SecretValue;
 pub use transport::profile::{
     GROK_CLI_RELEASE_URL, GrokCliReleaseError, GrokCliReleaseService, GrokCliReleaseSnapshot,
     GrokCliReleaseStatus, GrokCliReleaseTransport,

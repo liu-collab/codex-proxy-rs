@@ -8,76 +8,24 @@ use axum::{
 };
 use gateway_core::{
     engine::EngineError,
-    error::{GatewayError, GatewayErrorKind, ProviderErrorKind},
+    error::ProviderErrorKind,
     policy::{ClientVersionRejection, CodexClientKind},
 };
 use serde_json::{Value, json};
 
 pub use gateway_core::engine::execution::gateway_error_from_engine;
 
-use super::responses::ProtocolErrorBody;
+use crate::client_error::{ProtocolErrorBody, capacity_error_for_client};
 
-/// OpenAI 风格错误响应
-pub fn openai_error_response(
-    status: StatusCode,
-    message: &str,
-    error_type: &str,
-    code: &str,
-) -> (StatusCode, Json<Value>) {
-    let body = json!({
-        "error": {"message": message, "type": error_type, "code": code}
-    });
-    match capacity_error_for_client(&body) {
-        Some(body) => (StatusCode::SERVICE_UNAVAILABLE, Json(body)),
-        None => (status, Json(body)),
-    }
-}
-
-/// 无重试提示的容量拒绝及旧版 Codex 限流错误需要可重试投影
-/// 仅在交付边界转换，内部仍保留真实上游事实
-pub(super) fn client_error_code(code: &str) -> &str {
-    match code {
-        "server_is_overloaded" | "slow_down" => "server_error",
-        _ => code,
-    }
-}
-
-/// 为 HTTP 错误或流内失败保留原有字段，仅投影客户端需要的重试信号
-pub(super) fn capacity_error_for_client(data: &Value) -> Option<Value> {
-    const CODE_PATHS: [&str; 2] = ["/error/code", "/response/error/code"];
-    let capacity_code = |value: &Value| {
-        value
-            .as_str()
-            .is_some_and(|code| client_error_code(code) != code)
-    };
-    if !CODE_PATHS
-        .iter()
-        .any(|path| data.pointer(path).is_some_and(capacity_code))
-    {
-        return None;
-    }
-    let mut projected = data.clone();
-    for path in CODE_PATHS {
-        if let Some(code) = projected.pointer_mut(path)
-            && capacity_code(code)
-        {
-            *code = Value::String("server_error".to_owned());
-        }
-    }
-    // WS 包装错误按 HTTP 状态分类；保留 400/429 会使客户端终止重试
-    for field in ["status", "status_code"] {
-        if let Some(status) = projected.get_mut(field)
-            && status.is_number()
-        {
-            *status = json!(503);
-        }
-    }
-    Some(projected)
-}
+pub use crate::client_error::{
+    gateway_error_contract, gateway_error_response, openai_error_response,
+};
 
 /// 严格协议 decoder/encoder 返回的安全错误 body
 pub fn protocol_error_response(status: StatusCode, body: ProtocolErrorBody) -> Response {
-    (status, Json(body.into_value())).into_response()
+    let mut response = (status, Json(body.clone().into_value())).into_response();
+    response.extensions_mut().insert(body);
+    response
 }
 
 /// 下游 Client API Key 无效
@@ -151,32 +99,6 @@ pub fn model_not_found_response() -> (StatusCode, Json<Value>) {
     )
 }
 
-/// Gateway 错误的 OpenAI HTTP 表达
-pub fn gateway_error_response(error: &GatewayError) -> Response {
-    let (status, default_type, default_code) = gateway_error_contract(error.kind());
-    let mut response = openai_error_response(
-        status,
-        error.client_message(),
-        error.client_error_type().unwrap_or(default_type),
-        error.client_error_code().unwrap_or(default_code),
-    )
-    .into_response();
-    if let Some(delay) = error.retry_after()
-        && let Ok(value) = HeaderValue::from_str(
-            &delay
-                .as_secs()
-                .saturating_add(u64::from(delay.subsec_nanos() > 0))
-                .max(1)
-                .to_string(),
-        )
-    {
-        response
-            .headers_mut()
-            .insert(axum::http::header::RETRY_AFTER, value);
-    }
-    response
-}
-
 /// 在下游尚未提交时交付 Provider 的 HTTP 失败响应，并应用客户端容量恢复合同
 pub fn engine_error_response(error: &EngineError) -> Response {
     let capacity_unavailable = matches!(error, EngineError::Provider(error)
@@ -232,108 +154,4 @@ pub fn engine_error_response(error: &EngineError) -> Response {
         response.headers_mut().insert("x-request-id", value);
     }
     response
-}
-
-/// Gateway 错误稳定映射，供 HTTP、SSE 和 WebSocket 共用
-#[must_use]
-pub const fn gateway_error_contract(
-    kind: GatewayErrorKind,
-) -> (StatusCode, &'static str, &'static str) {
-    match kind {
-        GatewayErrorKind::InvalidRequest => (
-            StatusCode::BAD_REQUEST,
-            "invalid_request_error",
-            "invalid_request",
-        ),
-        GatewayErrorKind::Unsupported => (
-            StatusCode::BAD_REQUEST,
-            "invalid_request_error",
-            "unsupported_capability",
-        ),
-        GatewayErrorKind::Unauthorized => (
-            StatusCode::UNAUTHORIZED,
-            "invalid_request_error",
-            "invalid_api_key",
-        ),
-        GatewayErrorKind::PolicyDenied => (
-            StatusCode::FORBIDDEN,
-            "invalid_request_error",
-            "policy_denied",
-        ),
-        GatewayErrorKind::ModelNotFound => (
-            StatusCode::NOT_FOUND,
-            "invalid_request_error",
-            "model_not_found",
-        ),
-        GatewayErrorKind::NoAvailableProvider => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "server_error",
-            "no_available_provider",
-        ),
-        GatewayErrorKind::AccountCapacityUnavailable => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "server_error",
-            "account_capacity_unavailable",
-        ),
-        GatewayErrorKind::ProviderInfrastructureUnavailable => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "server_error",
-            "provider_infrastructure_unavailable",
-        ),
-        GatewayErrorKind::MiddlewareCapacityUnavailable => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "server_error",
-            "middleware_capacity_unavailable",
-        ),
-        GatewayErrorKind::ConcurrencyQueueFull => (
-            StatusCode::TOO_MANY_REQUESTS,
-            "rate_limit_error",
-            "concurrency_queue_full",
-        ),
-        GatewayErrorKind::ConcurrencyQueueTimeout => (
-            StatusCode::TOO_MANY_REQUESTS,
-            "rate_limit_error",
-            "concurrency_queue_timeout",
-        ),
-        GatewayErrorKind::RateLimited => (
-            StatusCode::TOO_MANY_REQUESTS,
-            "rate_limit_error",
-            "rate_limit_exceeded",
-        ),
-        GatewayErrorKind::BudgetExhausted => (
-            StatusCode::TOO_MANY_REQUESTS,
-            "usage_limit_reached",
-            "usage_limit_reached",
-        ),
-        GatewayErrorKind::UpstreamUnavailable => (
-            StatusCode::BAD_GATEWAY,
-            "server_error",
-            "upstream_unavailable",
-        ),
-        GatewayErrorKind::MessageTooBig => (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "invalid_request_error",
-            "message_too_big",
-        ),
-        GatewayErrorKind::Timeout => (
-            StatusCode::GATEWAY_TIMEOUT,
-            "server_error",
-            "request_timeout",
-        ),
-        GatewayErrorKind::Cancelled => (
-            StatusCode::REQUEST_TIMEOUT,
-            "server_error",
-            "request_cancelled",
-        ),
-        GatewayErrorKind::Internal => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "server_error",
-            "internal_error",
-        ),
-        _ => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "server_error",
-            "internal_error",
-        ),
-    }
 }

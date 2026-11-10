@@ -8,6 +8,7 @@ use std::{
 
 mod admin_adapter;
 mod authorization;
+mod core_adapter;
 mod cost_totals;
 mod deletion;
 mod protection_revision;
@@ -509,6 +510,10 @@ async fn profile_changes_survive_inflight_background_and_manual_token_refresh() 
     assert_eq!(upgraded.plan_type(), Some("pro"));
     assert_eq!(upgraded.revision(), original.revision());
     assert_eq!(current_revision(&database.pool).await, config_revision);
+    let mut saved_quota = repository
+        .get_quotas(std::slice::from_ref(&id))
+        .await
+        .unwrap();
 
     // 刷新已准备好旧资料，CAS 提交仍须保留数据库中的新名称和套餐
     let refresh = CredentialCasUpdate::new(
@@ -542,6 +547,14 @@ async fn profile_changes_survive_inflight_background_and_manual_token_refresh() 
     let current = repository.get_account(&id).await.unwrap().unwrap();
     assert_eq!(current.plan_type(), Some("pro"));
     assert_eq!(current.name(), "renamed team");
+    saved_quota[0].expected_revision = current.revision();
+    assert_eq!(
+        repository
+            .get_quotas(std::slice::from_ref(&id))
+            .await
+            .unwrap(),
+        saved_quota
+    );
     let stale = QuotaObservation {
         expected_connection: None,
         plan_type: Some("free".to_owned()),
@@ -572,6 +585,14 @@ async fn profile_changes_survive_inflight_background_and_manual_token_refresh() 
     assert_eq!(refreshed.plan_type(), Some("pro"));
     assert_eq!(refreshed.name(), "renamed team");
     assert_eq!(refreshed.email(), original.email());
+    saved_quota[0].expected_revision = refreshed.revision();
+    assert_eq!(
+        repository
+            .get_quotas(std::slice::from_ref(&id))
+            .await
+            .unwrap(),
+        saved_quota
+    );
     let observed_at = SystemTime::now();
     repository
         .compare_and_swap_quota(QuotaObservation {
@@ -1520,6 +1541,7 @@ async fn account_notes_round_trip_and_survive_import_and_scheduling_updates() {
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                auto_use_quota_credits: None,
                 account_ids: vec!["acct_notes".to_owned()],
                 enabled: Some(false),
                 concurrency_limit: Some(None),
@@ -1758,6 +1780,7 @@ async fn account_enable_preserves_facts_and_explicit_recovery_clears_them() {
     let enabled = store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                auto_use_quota_credits: None,
                 account_ids: vec!["acct_recovery".to_owned()],
                 enabled: Some(true),
                 concurrency_limit: None,
@@ -1882,6 +1905,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
     let result = store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                auto_use_quota_credits: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
                 account_ids: account_ids.clone(),
@@ -1919,6 +1943,7 @@ async fn terminal_batch_update_replaces_state_and_groups_once_or_rolls_back_ever
     store
         .batch_update_accounts(
             BatchUpdateAccounts {
+                auto_use_quota_credits: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
                 account_ids: account_ids.clone(),
@@ -2658,6 +2683,7 @@ async fn provider_account_admin_mutations_are_scoped_audited_and_atomic() {
 
     let revision = repository
         .batch_update_provider_accounts_admin(BatchUpdateProviderAccountsAdmin {
+            auto_use_quota_credits: None,
             name: None,
             notes: None,
             model_access: Default::default(),
@@ -2982,7 +3008,7 @@ async fn provider_account_import_and_reauthorization_preserve_existing_membershi
 }
 
 #[tokio::test]
-async fn verified_credential_rotation_preserves_quota_exhaustion() {
+async fn quota_exhaustion_survives_rotation_only_for_the_same_upstream_identity() {
     let Some(database) = TestDatabase::create("provider_account_rotation_quota").await else {
         return;
     };
@@ -3018,7 +3044,7 @@ async fn verified_credential_rotation_preserves_quota_exhaustion() {
     repository
         .rotate_provider_account(RotateProviderAccount {
             settings: None,
-            scope,
+            scope: scope.clone(),
             profile: profile("acct_rotation_quota", "reauthorized account"),
             replacement_identity: None,
             credential: credential_update("acct_rotation_quota", 1, "reauthorized-secret"),
@@ -3038,6 +3064,28 @@ async fn verified_credential_rotation_preserves_quota_exhaustion() {
             .await
             .expect("load exhausted account after credential rotation");
     assert_eq!(quota_access_state, "exhausted".to_owned());
+
+    repository
+        .rotate_provider_account(RotateProviderAccount {
+            settings: None,
+            scope,
+            profile: profile("acct_rotation_quota", "reauthorized account"),
+            replacement_identity: Some(ProviderAccountIdentity::new(
+                "new-user".into(),
+                Some("new-workspace".into()),
+            )),
+            credential: credential_update("acct_rotation_quota", 2, "new-account-secret"),
+            audit: audit("audit_quota_rebind", "reauthorize", "acct_rotation_quota"),
+        })
+        .await
+        .unwrap();
+    let account = repository
+        .get_account(&ProviderAccountId::new("acct_rotation_quota").unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(account.upstream_account_id(), Some("new-workspace"));
+    assert_eq!(account.quota(), QuotaState::unknown());
 
     database.close().await;
 }
@@ -3673,6 +3721,7 @@ async fn model_access_only_batch_update_preserves_other_settings_and_survives_re
     .expect("policy");
     let store = admin_account_store(&database.pool);
     let command = BatchUpdateAccounts {
+        auto_use_quota_credits: None,
         account_ids: vec![input.id.clone()],
         enabled: None,
         concurrency_limit: None,
@@ -3791,5 +3840,85 @@ async fn connection_configuration_update_preserves_credential_health() {
         );
     }
     assert_eq!(after["credential_revision"], 2);
+    database.close().await;
+}
+
+#[tokio::test]
+async fn disabling_quota_credits_revokes_credit_only_access_even_with_a_late_observation() {
+    let Some(database) = TestDatabase::create("quota_credit_policy").await else {
+        return;
+    };
+    let repository = PgProviderAccountRepository::new(database.pool.clone());
+    let input = account("acct_credit_policy", "user-credit-policy");
+    repository
+        .insert_provider_account(input.clone())
+        .await
+        .expect("insert");
+    let id = ProviderAccountId::new(input.id.clone()).expect("id");
+    let before = repository.get_account(&id).await.unwrap().unwrap();
+    assert!(!before.auto_use_quota_credits());
+    let admin = admin_account_store(&database.pool);
+    let context = MutationContext {
+        actor: MutationActor::System,
+        request_id: "quota_credits".into(),
+    };
+    let set_policy = async |enabled| {
+        let command = BatchUpdateAccounts {
+            account_ids: vec![input.id.clone()],
+            auto_use_quota_credits: Some(enabled),
+            enabled: None,
+            concurrency_limit: None,
+            weight: None,
+            model_access: None,
+            group_ids: None,
+            outbound_proxy: None,
+        };
+        admin
+            .batch_update_accounts(command, &context)
+            .await
+            .unwrap();
+    };
+    let observe = async |state: QuotaState| {
+        let observation = QuotaObservation {
+            expected_connection: None,
+            plan_type: None,
+            account_id: id.clone(),
+            expected_revision: before.revision(),
+            quota: OpaqueProviderData::new(Default::default()),
+            observed_at: state.observed_at().unwrap(),
+            state,
+        };
+        assert_eq!(
+            repository
+                .compare_and_swap_quota(observation)
+                .await
+                .unwrap(),
+            QuotaWriteOutcome::Updated
+        );
+    };
+    let access = async || {
+        repository
+            .get_account(&id)
+            .await
+            .unwrap()
+            .unwrap()
+            .quota()
+            .access()
+    };
+
+    set_policy(true).await;
+    observe(QuotaState::credits_only(SystemTime::now(), None)).await;
+    assert_eq!(access().await, QuotaAccessState::Allowed);
+
+    set_policy(false).await;
+    assert_eq!(access().await, QuotaAccessState::Exhausted);
+    observe(QuotaState::credits_only(SystemTime::now(), None)).await;
+    assert_eq!(access().await, QuotaAccessState::Exhausted);
+
+    set_policy(true).await;
+    assert_eq!(access().await, QuotaAccessState::Exhausted);
+    observe(QuotaState::allowed(SystemTime::now())).await;
+    set_policy(false).await;
+    assert_eq!(access().await, QuotaAccessState::Allowed);
     database.close().await;
 }

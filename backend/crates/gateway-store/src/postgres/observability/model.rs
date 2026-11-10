@@ -252,7 +252,7 @@ pub struct ProviderAccountUsageObservation {
 pub struct ProviderAccountModelUsageObservation {
     pub model: String,
     pub request_count: u64,
-    pub success_count: u64,
+    pub health: admin_observability::RequestHealth,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub cached_input_tokens: Option<u64>,
@@ -265,7 +265,7 @@ pub struct ProviderAccountModelUsageObservation {
     pub total_tokens: Option<u64>,
     pub cost_coverage: CostCoverage,
     pub costs: Vec<CurrencyCostTotal>,
-    pub last_used_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -388,7 +388,9 @@ pub struct DiagnosticObservation {
     pub average_latency_ms: Option<u64>,
     pub latency_p95_ms: Option<u64>,
     pub first_token_p95_ms: Option<u64>,
-    pub non_completion_count: u64,
+    pub cancelled_count: u64,
+    pub incomplete_count: u64,
+    pub caller_error_count: u64,
     pub retry_count: u64,
     pub retried_request_count: u64,
     pub cost_coverage: CostCoverage,

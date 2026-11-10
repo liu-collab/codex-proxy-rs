@@ -9,7 +9,7 @@ use std::time::{Duration, Instant, SystemTime};
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::{StreamExt, future::BoxFuture};
-use gateway_core::account::{AccountFeedbackStats, ProviderAccount};
+use gateway_core::account::{AccountAffinity, AccountFeedbackStats, ProviderAccount};
 use gateway_core::engine::continuation::{ContinuationBinding, NativeContinuationScope};
 use gateway_core::engine::middleware::MiddlewareHeader;
 use gateway_core::engine::provider::{
@@ -60,13 +60,13 @@ use crate::credential::{
     CodexCredentialRefreshService, CodexCredentialRepository, CodexCredentialSelector,
     CodexCyberPolicyScope, CodexQuotaRefreshPolicy, CodexSessionAffinity, CredentialSelectionError,
     RuntimeCodexCookie, SelectCodexCredential, SelectCodexProviderEndpointCredential,
-    derive_codex_cyber_policy_session_key, derive_codex_endpoint_session_affinity,
-    derive_codex_session_affinity, derive_codex_transport_key,
-    derive_endpoint_affinity_with_headers, derive_live_session_affinity,
-    derive_previous_response_id_hash, derive_turn_alias,
+    derive_cache_preference, derive_codex_cyber_policy_session_key,
+    derive_codex_endpoint_session_affinity, derive_codex_session_affinity,
+    derive_codex_transport_key, derive_endpoint_affinity_with_headers,
+    derive_live_session_affinity, derive_previous_response_id_hash, derive_turn_alias,
 };
 use crate::request_identity::{account_session_with_headers, turn_id_with_headers};
-use crate::session_transport::CodexSessionTransportRecovery;
+use crate::session_transport::{CodexSessionTransportRecovery, WS_PAYLOAD_LIMIT};
 use crate::transport::canonical::{
     CodexCanonicalDecoder, CodexCanonicalError, CodexCanonicalOutcome,
 };
@@ -127,13 +127,9 @@ const PROVIDER_NAME: &str = "openai";
 const HTTP_SSE_TRANSPORT: &str = "http_sse";
 const HTTP_JSON_TRANSPORT: &str = "http_json";
 const WEBSOCKET_TRANSPORT: &str = "websocket";
-// 在已观测到的 Codex OAuth 上游 16 MiB 附近消息边界前留出传输 metadata 余量
-const WEBSOCKET_HTTP_FALLBACK_THRESHOLD_BYTES: usize = 15 * 1024 * 1024;
 const MAX_COOKIE_HEADER_BYTES: usize = 16 * 1024;
 // 额度拒绝后的 usage 补查自身执行时长上限；结算等待的随机延迟见 jitter 模块
 const QUOTA_FAILURE_REFRESH_TIMEOUT: Duration = Duration::from_secs(5);
-pub const OFFICIAL_CODEX_BASE_PATH: &str = "/backend-api";
-pub const OFFICIAL_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CodexProviderTransport {
@@ -566,6 +562,7 @@ impl Provider for CodexProvider {
 
     async fn query_client_model_catalog(
         &self,
+        client_api_key_id: &gateway_core::policy::ClientApiKeyId,
         scope: &gateway_core::account::scope::FrozenAccountScope,
         protocol: &str,
         client_version: &str,
@@ -577,7 +574,7 @@ impl Provider for CodexProvider {
             return Ok(None);
         }
         self.catalog
-            .client_model_catalog(scope, client_version)
+            .client_model_catalog(client_api_key_id, scope, client_version)
             .await
             .map(Some)
             .map_err(|_| gateway_core::routing::ProviderCatalogUnavailable)
@@ -712,6 +709,19 @@ impl Provider for CodexProvider {
         if let Some(prepared) = preselection.as_ref() {
             prepared.checked_native_continuation_scope(&context)?;
         }
+        let cache_preference = preselection
+            .as_ref()
+            .filter(|prepared| {
+                prepared.session_affinity.is_none()
+                    && prepared.previous_session.is_none()
+                    && context.account_selection_policy().openai_account_affinity()
+                        != AccountAffinity::Relaxed
+                    && context.continuation_attempt() == ContinuationAttempt::None
+                    && !guardian
+            })
+            .and_then(|prepared| {
+                derive_cache_preference(&prepared.upstream, context.client_api_key_ref())
+            });
         let (selection_session_affinity, selection_cyber_policy_key, requires_websocket) =
             preselection.map_or(adapter_affinity.unwrap_or((None, None, false)), |prepared| {
                 let requires_websocket =
@@ -728,6 +738,10 @@ impl Provider for CodexProvider {
                     requires_websocket,
                 )
             });
+        // 内容亲和只交给选号器；中间件复验、轮次关联和原生续接仍只认真实会话
+        let account_affinity = selection_session_affinity
+            .as_ref()
+            .or(cache_preference.as_ref());
         let selection_started_at = Instant::now();
         let selection = async {
             self.selector
@@ -736,12 +750,10 @@ impl Provider for CodexProvider {
                         upstream_model: upstream_model.as_str(),
                         request_url: &self.responses_url,
                         attempt: &context,
-                        session_affinity_key: selection_session_affinity
-                            .as_ref()
-                            .map(|affinity| affinity.key()),
+                        session_affinity_key: account_affinity.map(CodexSessionAffinity::key),
                     },
                     selection_cyber_policy_key.as_ref(),
-                    selection_session_affinity.as_ref(),
+                    account_affinity,
                     requires_websocket,
                     guardian,
                 )
@@ -904,15 +916,24 @@ impl CodexProvider {
         }
         let provider_kind = ProviderKind::new(PROVIDER_NAME)
             .map_err(|_| provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent))?;
+        let oauth_identity = matches!(
+            lease.authentication(),
+            crate::credential::CodexRuntimeAuthentication::OAuth(_)
+        )
+        .then(|| crate::credential::oauth_identity_key(lease.account()));
         let native_owner = context.continuation().and_then(ContinuationBinding::pinned);
         let state_owner_cross_account = native_owner
             .is_some_and(|owner| !owner.matches(&provider_kind, lease.account_id()))
             || context
                 .account_state_owner()
                 .is_some_and(|owner| !owner.matches(&provider_kind, lease.account_id()))
-            || previous_session
-                .as_ref()
-                .is_some_and(|state| state.account_id != lease.account_id().as_str());
+            || previous_session.as_ref().is_some_and(|state| {
+                state.account_id != lease.account_id().as_str()
+                    || state
+                        .oauth_identity
+                        .as_ref()
+                        .is_some_and(|identity| Some(identity) != oauth_identity.as_ref())
+            });
         let has_explicit_state_owner = context.account_state_owner().is_some()
             || previous_session.is_some()
             || native_owner.is_some();
@@ -986,18 +1007,16 @@ impl CodexProvider {
         .flatten()
         .and_then(|response_id| {
             self.guardian_routing
-                .get(
-                    context.client_api_key_ref(),
-                    lease.account_id(),
-                    response_id,
-                )
+                .get(context.client_api_key_ref(), lease.account(), response_id)
                 .map(|affinity| (response_id.to_owned(), affinity))
         });
-        scope_request_to_account(
-            &mut upstream_request,
+        let client = self.client_for_request(&context)?;
+        let installation_id = client.profile_state().effective_installation_id(
+            context.client_api_key_ref(),
+            lease.account_id(),
             lease.installation_id(),
-            account_scope,
         );
+        scope_request_to_account(&mut upstream_request, &installation_id, account_scope);
         // 父响应的可信关联只恢复此字段，不把首次 Guardian 请求的其他账号状态视为可信
         if let Some((response_id, _)) = &guardian_parent
             && let Some(Value::Object(metadata)) =
@@ -1117,6 +1136,7 @@ impl CodexProvider {
         } else {
             requested_transport
         };
+        let mut oversized_http = false;
         if codex_oauth
             && transport == CodexProviderTransport::PreferWebSocket
             && (matches!(
@@ -1131,12 +1151,12 @@ impl CodexProvider {
                 websocket_response_create_payload_len(&upstream_request).map_err(|_| {
                     provider_error(ProviderErrorKind::Protocol, UpstreamSendState::NotSent)
                 })?;
-            if payload_bytes >= WEBSOCKET_HTTP_FALLBACK_THRESHOLD_BYTES {
-                if requirement == TransportRequirement::ExactWebSocketContinuation {
+            if requirement == TransportRequirement::ExactWebSocketContinuation {
+                if payload_bytes >= WS_PAYLOAD_LIMIT {
                     tracing::info!(
                         request_id = context.request_id().as_str(),
                         payload_bytes,
-                        threshold_bytes = WEBSOCKET_HTTP_FALLBACK_THRESHOLD_BYTES,
+                        threshold_bytes = WS_PAYLOAD_LIMIT,
                         continuation_recovery_action = "client_replay_required",
                         "OpenAI oversized WebSocket continuation requires full client input before send"
                     );
@@ -1144,12 +1164,16 @@ impl CodexProvider {
                         "transport_payload_too_large",
                     ));
                 }
+            } else if self
+                .session_transport_recovery
+                .http_for_full_payload(session_transport_key.as_ref(), payload_bytes)
+            {
                 transport = CodexProviderTransport::HttpOnly;
+                oversized_http = true;
                 tracing::info!(
                     request_id = context.request_id().as_str(),
                     payload_bytes,
-                    threshold_bytes = WEBSOCKET_HTTP_FALLBACK_THRESHOLD_BYTES,
-                    "OpenAI oversized new-chain request selected HTTP before WebSocket send"
+                    "OpenAI full request selected HTTP by WebSocket payload size"
                 );
             }
         }
@@ -1192,6 +1216,7 @@ impl CodexProvider {
         let session_capture =
             (!continuation_requested || previous_session.is_some()).then(|| OpenAiSessionCapture {
                 account_id: lease.account_id().as_str().to_owned(),
+                oauth_identity,
                 credential_revision: matches!(
                     lease.authentication(),
                     crate::credential::CodexRuntimeAuthentication::ApiKey(_)
@@ -1208,6 +1233,7 @@ impl CodexProvider {
                     )
                     .reasoning_effort_override,
                 response_store,
+                oversized_http,
                 continuation_scope: None,
             });
         let allows_account_state_mutation = lease.allows_account_state_mutation();
@@ -1219,10 +1245,10 @@ impl CodexProvider {
             AttemptTransport::Default | AttemptTransport::Fallback => 0,
         };
         let events = cold_response_stream(ColdResponse {
-            client: self
-                .client_for_request(&context)?
+            installation_id,
+            client: client
                 .for_account(lease.account())
-                .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
+                .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, None).error)?
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
                 .with_routing_affinity(guardian_parent.map(|(_, affinity)| affinity))
                 .with_connection_budget(context.connection_budget().clone())

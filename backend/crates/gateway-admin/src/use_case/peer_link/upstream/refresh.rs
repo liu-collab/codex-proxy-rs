@@ -43,6 +43,9 @@ impl PeerInfoService {
     }
 
     pub(super) fn refresh_due(&self, connection: &UpstreamConnection) -> bool {
+        if self.unsupported(connection) {
+            return false;
+        }
         let state = self.refresh_state(connection);
         state.try_lock().is_ok_and(|state| {
             state.connection != *connection || Instant::now() >= state.next_attempt
@@ -91,18 +94,19 @@ impl PeerInfoService {
             .ok_or_else(|| ProviderAdminError::new(ProviderAdminErrorKind::Unsupported))?;
         let slot = self.refresh_state(&connection);
         let mut state = slot.lock().await;
-        if state.connection == connection
-            && Instant::now()
-                < if manual {
-                    state.manual_after
-                } else {
-                    state.next_attempt
-                }
+        if !manual && self.unsupported(&connection)
+            || state.connection == connection
+                && Instant::now()
+                    < if manual {
+                        state.manual_after
+                    } else {
+                        state.next_attempt
+                    }
         {
             let error = state.last_error;
             drop(state);
-            if let Some(error) = error {
-                return Err(refresh_error(error));
+            if let Some(error) = error.and_then(refresh_error) {
+                return Err(error);
             }
             return self
                 .read_quota(id)
@@ -126,25 +130,38 @@ impl PeerInfoService {
         let failure = result.as_ref().err().copied();
         let delay = match failure {
             None => Duration::from_secs(240 + stable_jitter(id.as_str())),
-            Some(UpstreamInfoFailure::Unauthorized | UpstreamInfoFailure::Unsupported) => {
+            Some(UpstreamInfoFailure::Unauthorized | UpstreamInfoFailure::SharingDisabled) => {
                 Duration::from_secs(1800)
             }
             Some(_) => Duration::from_secs(30),
         }
         .max(retry_after.unwrap_or_default());
         state.next_attempt = Instant::now() + delay;
-        state.manual_after = Instant::now()
-            + if failure.is_some() {
-                delay
-            } else {
-                Duration::from_secs(15)
-            };
+        // 管理员修复授权后可主动复核，不继承自动重试的长退避，仍遵守上游限流
+        state.manual_after =
+            Instant::now() + Duration::from_secs(15).max(retry_after.unwrap_or_default());
         state.last_error = failure;
         let document = match result {
             Ok(document) => Some(document),
-            // 空观测清除已撤销内容，并用共有观察时间阻止更早请求重新写回
-            Err(UpstreamInfoFailure::Unauthorized) => {
-                Some(OpaqueProviderData::new(Default::default()))
+            Err(UpstreamInfoFailure::Unsupported) => Some(snapshot::unsupported(&connection)),
+            Err(error @ UpstreamInfoFailure::SharingDisabled) => {
+                Some(snapshot::unavailable(&connection, error))
+            }
+            Err(error @ UpstreamInfoFailure::Unauthorized) => {
+                let discovered = self
+                    .read_summary(id)
+                    .await
+                    .map_err(store_error)?
+                    .and_then(|quota| quota.upstream)
+                    .is_some_and(|info| {
+                        info.connection_revision == connection.revision && info.discovered
+                    });
+                // 首次探测失败不能证明对方是互联节点；已确认的连接只留下无共享内容的识别记录
+                Some(if discovered {
+                    snapshot::unavailable(&connection, error)
+                } else {
+                    OpaqueProviderData::new(Default::default())
+                })
             }
             Err(_) => None,
         };
@@ -185,8 +202,9 @@ impl PeerInfoService {
             );
         }
         drop(state);
-        if let Some(error) = failure {
-            return Err(refresh_error(error));
+        // 不支持协议是正常发现结果，管理端保留分类，后台不重复报警
+        if let Some(error) = failure.and_then(refresh_error) {
+            return Err(error);
         }
         self.read_quota(id)
             .await
@@ -201,12 +219,13 @@ fn stable_jitter(id: &str) -> u64 {
     }) % 60
 }
 
-fn refresh_error(error: UpstreamInfoFailure) -> ProviderAdminError {
-    ProviderAdminError::new(ProviderAdminErrorKind::BadGateway).with_public_message(match error {
+fn refresh_error(error: UpstreamInfoFailure) -> Option<ProviderAdminError> {
+    let message = match error {
         UpstreamInfoFailure::Unauthorized => "上游未授权读取互联信息",
-        UpstreamInfoFailure::Unsupported => "上游不支持互联信息查询",
+        UpstreamInfoFailure::Unsupported | UpstreamInfoFailure::SharingDisabled => return None,
         UpstreamInfoFailure::RateLimited => "上游互联查询已限流",
         UpstreamInfoFailure::InvalidResponse => "上游互联响应无效",
         UpstreamInfoFailure::Unavailable => "上游互联服务暂不可用",
-    })
+    };
+    Some(ProviderAdminError::new(ProviderAdminErrorKind::BadGateway).with_public_message(message))
 }

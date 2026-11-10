@@ -18,8 +18,8 @@ use tokio::sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, oneshot, watch}
 
 use super::{
     CallbackHandler, RpcError, RpcLimits, RpcReply, RpcSessionLoad, admission::ExecutionCapacity,
+    stream::StreamIngress,
 };
-use crate::stream::StreamIngress;
 
 pub(crate) struct Shared {
     state: Mutex<State>,

@@ -1,6 +1,4 @@
-import type { AxiosRequestConfig } from 'axios'
-import type { RequestContext, RequestNext, RequestPlugin } from './plugins'
-import type { RawResponse, RawResponseOptions } from './plugins/raw'
+import type { RawResponse, RawResponseOptions, RequestConfig, RequestContext, RequestNext, RequestPlugin } from './types'
 import axios from 'axios'
 import { API_BASE_URL, API_TIMEOUT_MS } from '../constants'
 import { errorPlugin } from './plugins/error'
@@ -10,21 +8,8 @@ import { retryPlugin } from './plugins/retry'
 import { sessionPlugin } from './plugins/session'
 
 export { ApiError } from './plugins/error'
-export type { RawResponse, RawResponseMeta, RawResponseOptions } from './plugins/raw'
 export { resetUnauthorizedHandling, setSessionRecoveryHandler, setUnauthorizedHandler } from './plugins/session'
-
-export interface RequestOptions {
-  // 静默只关闭提示，不吞掉异常或绕过会话恢复
-  silent?: boolean
-  signal?: AbortSignal
-  timeout?: number
-  // 读取默认重试，写操作须由调用方确认幂等后开启
-  retry?: boolean
-  // 认证接口自身跳过会话恢复，避免循环等待
-  skipSessionRecovery?: boolean
-}
-
-export type RequestConfig = AxiosRequestConfig & RequestOptions
+export type { RawResponse, RawResponseMeta, RawResponseOptions, RequestConfig, RequestOptions } from './types'
 
 const http = axios.create({
   baseURL: API_BASE_URL,

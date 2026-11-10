@@ -5,8 +5,10 @@ mod calls;
 mod contract;
 mod dispatch;
 mod session;
+mod stream;
 
 pub(crate) use calls::Shared;
 pub use contract::{CallbackHandler, RpcError, RpcLimits, RpcReply};
 pub(crate) use contract::{RpcSessionDiagnostic, RpcSessionLifecycle, RpcSessionLoad};
 pub use session::RpcSession;
+pub use stream::RpcStream;

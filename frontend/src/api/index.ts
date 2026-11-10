@@ -24,3 +24,7 @@ export * from './modules/settings'
 
 // 使用记录
 export * from './modules/usage'
+
+// 跨模块共享的接口类型
+export type { RequestLocation, RequestLocationDetection } from './types/location'
+export type { RelativeTimeView } from './types/time'

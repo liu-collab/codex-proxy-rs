@@ -29,6 +29,8 @@ use crate::openai::service::OpenAiService;
 
 pub mod admin;
 pub mod auth;
+mod client_error;
+mod diagnostics;
 mod health;
 mod key_usage;
 mod middleware;
@@ -39,6 +41,26 @@ mod session_cookie;
 mod time;
 
 pub use time::{RequestBucketView, TimePresenter};
+
+/// HTTP wire 字段校验错误；只携带稳定字段名，不回显输入值
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WireValidationError {
+    field: &'static str,
+}
+
+impl WireValidationError {
+    /// 构造字段校验错误
+    #[must_use]
+    pub const fn new(field: &'static str) -> Self {
+        Self { field }
+    }
+
+    /// 返回未通过校验的字段名
+    #[must_use]
+    pub const fn field(self) -> &'static str {
+        self.field
+    }
+}
 
 /// API-owned HTTP 与静态资源配置
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -195,6 +217,7 @@ pub fn initialize(
     };
     let index = config.asset_directory.join("index.html");
     let mut router = Router::new()
+        .route("/readyz", get(health::readyz))
         .route("/healthz", get(health::healthz))
         .merge(openai::router::router())
         .merge(provider::router())
@@ -258,6 +281,10 @@ pub fn initialize(
             headers_ms = latency.as_millis(), "HTTP response headers ready");
     });
     let router = router
+        .layer(axum::middleware::from_fn_with_state(
+            diagnostics.clone(),
+            diagnostics::record_ingress,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             diagnostics,
             admin::diagnostics::record_failure,

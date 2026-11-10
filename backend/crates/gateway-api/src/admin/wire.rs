@@ -9,25 +9,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-/// 管理端 wire 字段校验错误；只携带稳定字段名，不回显输入值
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WireValidationError {
-    field: &'static str,
-}
-
-impl WireValidationError {
-    /// 构造字段校验错误
-    #[must_use]
-    pub const fn new(field: &'static str) -> Self {
-        Self { field }
-    }
-
-    /// 返回未通过校验的字段名
-    #[must_use]
-    pub const fn field(self) -> &'static str {
-        self.field
-    }
-}
+pub use crate::WireValidationError;
 
 /// 成功响应的稳定业务码
 pub const ADMIN_OK_CODE: u32 = 200;

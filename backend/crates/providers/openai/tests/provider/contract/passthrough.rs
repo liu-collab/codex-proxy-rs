@@ -3,6 +3,82 @@
 use super::*;
 
 #[tokio::test]
+async fn responses_options_follow_the_selected_upstream_on_both_transports() {
+    let oauth_omissions = json!({
+        "frequency_penalty": 0, "presence_penalty": 0, "top_p": 1,
+        "chat_template_kwargs": {"enable_thinking": false}, "user": "example",
+        "metadata": {"source": "example"}, "safety_identifier": "example",
+        "truncation": "disabled", "stop_sequences": [], "prompt_cache_options": {}
+    });
+    let mut body = json!({
+        "model": "gpt-5.4", "input": "hello", "max_tokens": 16,
+        "stream_options": {"include_usage": true, "reasoning_summary_delivery": "sequential_cutoff"},
+        "client_metadata": {"user": "keep"},
+        "tools": [{"type": "function", "name": "sample", "parameters": {
+            "type": "object", "properties": {"top_p": {"type": "number"}}
+        }}]
+    });
+    let omissions = oauth_omissions.as_object().unwrap();
+    body.as_object_mut().unwrap().extend(omissions.clone());
+    // 顶层调用方身份与 Codex/OAuth 选项省略是两条规则：前者对任何上游都剥离，
+    // 后者只作用于 Codex/OAuth，API Key 上游仍保留其余采样与流式选项
+    for api_key in [false, true] {
+        for websocket in [false, true] {
+            let sent = capture_downstream_request(body.clone(), api_key, websocket, false).await;
+            for (field, value) in omissions {
+                let expected = if ["user", "safety_identifier"].contains(&field.as_str()) {
+                    None
+                } else {
+                    api_key.then_some(value)
+                };
+                assert_eq!(
+                    sent.get(field),
+                    expected,
+                    "{field}, api_key={api_key}, websocket={websocket}"
+                );
+            }
+            if api_key {
+                assert_eq!(sent["stream_options"], body["stream_options"]);
+                assert_eq!(sent["max_tokens"], 16);
+                assert!(sent.get("max_output_tokens").is_none());
+            } else {
+                assert_eq!(
+                    sent["stream_options"],
+                    json!({"reasoning_summary_delivery": "sequential_cutoff"})
+                );
+                assert_eq!(sent["max_output_tokens"], 16);
+                assert!(sent.get("max_tokens").is_none());
+            }
+            assert_eq!(sent["client_metadata"]["user"], "keep");
+            assert_eq!(sent["tools"], body["tools"]);
+        }
+    }
+}
+
+#[tokio::test]
+async fn codex_oauth_keeps_explicit_limits_and_context_options() {
+    for (native, completion, expected) in [
+        (json!(16), json!(32), json!(16)),
+        (Value::Null, json!(32), json!(32)),
+        (Value::Null, Value::Null, json!(64)),
+    ] {
+        let body = json!({
+            "model": "gpt-5.4", "input": "hello", "max_output_tokens": native,
+            "max_completion_tokens": completion, "max_tokens": 64,
+            "truncation": "auto", "stop_sequences": ["end"],
+            "prompt_cache_options": {"future_option": true}
+        });
+        let sent = capture_downstream_request(body.clone(), false, false, false).await;
+        assert_eq!(sent["max_output_tokens"], expected);
+        assert!(sent.get("max_completion_tokens").is_none());
+        assert!(sent.get("max_tokens").is_none());
+        for key in ["truncation", "stop_sequences", "prompt_cache_options"] {
+            assert_eq!(sent[key], body[key]);
+        }
+    }
+}
+
+#[tokio::test]
 async fn effort_values_reach_upstream_before_and_after_middleware() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_provider_contract").await;
@@ -85,6 +161,13 @@ async fn independent_endpoints_send_opaque_headers_without_client_identity() {
     let entries: Vec<_> = [
         ("x-future-business", "first"),
         ("x-future-business", "second"),
+        ("x-codex-installation-id", "client-installation"),
+        ("x-openai-account-routing-override", "client-route"),
+        ("x-openai-fedramp", "true"),
+        ("traceparent", "client-trace"),
+        ("tracestate", "vendor=client"),
+        ("sentry-trace", "sentry-client-trace"),
+        ("baggage", "environment=synthetic"),
         ("authorization", "Bearer client-secret"),
         ("chatgpt-account-id", "client-account"),
         ("x-stainless-runtime", "client-runtime"),
@@ -134,6 +217,21 @@ async fn independent_endpoints_send_opaque_headers_without_client_identity() {
         let requests = server.received_requests().await.unwrap();
         let sent = requests.last().unwrap();
         assert_eq!(sent.url.path(), endpoint);
+        uuid::Uuid::parse_str(sent.headers["x-codex-installation-id"].to_str().unwrap()).unwrap();
+        assert!(
+            !sent
+                .headers
+                .contains_key("x-openai-account-routing-override")
+        );
+        for (name, expected) in [
+            ("x-openai-fedramp", "true"),
+            ("traceparent", "client-trace"),
+            ("tracestate", "vendor=client"),
+            ("sentry-trace", "sentry-client-trace"),
+            ("baggage", "environment=synthetic"),
+        ] {
+            assert_eq!(sent.headers[name], expected);
+        }
         if endpoint.ends_with("search") {
             assert_scoped_search_body(&sent.body, &raw);
         } else {

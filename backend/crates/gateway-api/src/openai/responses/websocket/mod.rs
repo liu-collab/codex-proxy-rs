@@ -179,6 +179,10 @@ async fn serve_responses_websocket(socket: Socket, session: ResponsesWebSocketSe
         crate::middleware::websocket::CancelOnDrop(Some(cancellation.clone()));
     let request_headers =
         request_headers.with_downstream_websocket_connection_id(connection_id.clone());
+    // 帧中间件可能改写终态，此时不能据原始响应关闭下游连接
+    let reconnect_for_replay = !middleware
+        .as_ref()
+        .is_some_and(FrozenMiddlewarePlan::has_websocket);
     let mut connection = ResponsesWebSocketConnection::new(
         socket,
         connection_id,
@@ -197,7 +201,8 @@ async fn serve_responses_websocket(socket: Socket, session: ResponsesWebSocketSe
                 event
             }
             event = response_control.receive() => {
-                if forward_control_event(&mut connection, &response_control, event).await == ForwardOutcome::Disconnect {
+                let outcome = forward_control_event(&mut connection, &response_control, event).await;
+                if disconnect_after_forward(&mut connection, outcome, reconnect_for_replay).await {
                     break;
                 }
                 continue;
@@ -401,7 +406,7 @@ async fn serve_responses_websocket(socket: Socket, session: ResponsesWebSocketSe
                 continue;
             }
         };
-        if forward_response(
+        let outcome = forward_response(
             &mut connection,
             response,
             request_id,
@@ -410,9 +415,8 @@ async fn serve_responses_websocket(socket: Socket, session: ResponsesWebSocketSe
             validation,
             &response_control,
         )
-        .await
-            == ForwardOutcome::Disconnect
-        {
+        .await;
+        if disconnect_after_forward(&mut connection, outcome, reconnect_for_replay).await {
             break;
         }
         if connection.is_expired() {
@@ -422,6 +426,18 @@ async fn serve_responses_websocket(socket: Socket, session: ResponsesWebSocketSe
     }
 
     connection.log_summary(request_count);
+}
+
+async fn disconnect_after_forward(
+    connection: &mut ResponsesWebSocketConnection,
+    outcome: ForwardOutcome,
+    reconnect_for_replay: bool,
+) -> bool {
+    outcome == ForwardOutcome::Disconnect
+        || (outcome == ForwardOutcome::ReconnectIfIdle
+            && reconnect_for_replay
+            && !connection.is_expired()
+            && connection.close_for_replay_if_idle().await)
 }
 
 // 尚未建立模型请求的拒绝也保留原文入口，用返回给客户端的 correlation ID 检索

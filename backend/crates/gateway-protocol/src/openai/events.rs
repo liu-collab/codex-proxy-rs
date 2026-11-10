@@ -361,6 +361,20 @@ pub fn parse_rate_limit_headers(headers: &[(String, String)]) -> Option<ParsedRa
     })
 }
 
+/// Images 端点有时仅用 active-limit 标明通用窗口属于哪个图片计量项
+pub fn parse_image_rate_limit_headers(headers: &[(String, String)]) -> Option<ParsedRateLimits> {
+    let mut parsed = parse_rate_limit_headers(headers)?;
+    if let Some(active) = &parsed.active_limit
+        && active != "codex"
+        && !parsed.limits.contains_key(active)
+        && let Some(mut details) = parsed.limits.remove("codex")
+    {
+        details.limit_id.clone_from(active);
+        parsed.limits.insert(active.clone(), details);
+    }
+    Some(parsed)
+}
+
 /// 判断响应头是否属于可被动同步的限流领域
 pub fn is_rate_limit_header_name(name: &str) -> bool {
     let normalized = name.to_ascii_lowercase();

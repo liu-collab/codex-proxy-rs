@@ -6,6 +6,11 @@
       "globalConfiguration": "Global configuration",
       "customConfiguration": "Custom configuration",
       "enterIntegerFromTo": "Enter an integer from 1 to {version}",
+      "installationSeed": "Installation seed",
+      "generateInstallationSeed": "Generate installation seed",
+      "installationSeedHelp": "Derives a stable installation identity for each key and upstream account without sending the seed upstream, changing the seed changes the identity",
+      "installationSeedPlaceholder": "Leave blank to use the upstream account’s installation ID",
+      "invalidInstallationSeed": "Enter a hyphenated UUID",
       "clientDefault": "Client default",
       "useCustomUserAgent": "Use a custom user agent",
       "cliEntry": "CLI entry",
@@ -175,7 +180,7 @@
         "preferred": "Preferred",
         "strict": "Strict",
         "relaxedHelp": "Relaxed: use the scheduling policy without preferring the session's primary account",
-        "preferredHelp": "Preferred: reuse the primary account, route elsewhere temporarily if busy or unavailable, and keep the session binding",
+        "preferredHelp": "Preferred: reuse the primary account, spill over during brief congestion, and migrate the session binding if disabled or persistently unavailable",
         "strictHelp": "Strict: use one account per session, child threads wait and follow the parent thread's account switches"
       },
       "title": "Session affinity",
@@ -240,8 +245,12 @@
       "enterNewPasswordAgain": "Enter new password again",
       "saveAndLogInAgain": "Save and log in again"
     },
+    "units": {
+      "seconds": "seconds",
+      "inSeconds": "{label} (seconds)"
+    },
     "concurrency": {
-      "title": "Concurrency",
+      "title": "Concurrency and retries",
       "accountLimit": {
         "label": "Default account concurrency",
         "help": "Used unless overridden, 0 means unlimited"
@@ -250,15 +259,27 @@
       "keyQueueHelp": "Per API key, 0 disables queuing",
       "accountQueueCapacity": "Account queue capacity",
       "accountQueueHelp": "Per account, 0 disables queuing",
-      "queueTimeoutLabel": "Queue timeout (s)",
-      "queueTimeoutHelp": "Shared by both queues, 1–120 seconds",
+      "keyTimeout": "API key queue timeout",
+      "keyTimeoutHelp": "Maximum wait for a key slot before returning an error",
+      "accountTimeout": "Account queue timeout",
+      "accountTimeoutHelp": "Starts on first account queue entry and continues across retries",
+      "queueFailure": "When the account queue is full or times out",
+      "queueFailureHelp": "Try another account with room. If switching is not possible, return the queue error.",
+      "queueFailureHelpTitle": "Account switching rules",
+      "queueFailureDetails": "Check once without queuing again. Requests pinned to an account, native continuations, and requests bound to a parent session cannot switch on their own.",
+      "returnError": "Return error",
+      "trySwitch": "Try another account",
       "autoReview": {
         "label": "Reserved auto review slots",
         "description": "Extra slots per Codex account, 0 shares regular concurrency",
         "helpTitle": "About auto review concurrency"
       },
-      "queueTimeoutHelpTitle": "About queue timeout",
-      "queueTimeoutDetails": "The API key and account queues share this timeout, measured from the first queue entry"
+      "retryAfter": {
+        "label": "Upstream retry wait limit",
+        "help": "Try another account above the limit",
+        "helpTitle": "About upstream retry waits",
+        "details": "Defaults to 240 seconds. Limits each Retry-After wait, not the total request duration. Above the limit, try another account; return the error if none is available. Set to 0 to reject positive waits. Account rotation still follows the rotation limit and request replay conditions."
+      }
     },
     "modelMapping": "Model mapping",
     "routing": {
@@ -322,7 +343,7 @@
     },
     "tokenRefresh": {
       "title": "Credential refresh",
-      "leadTimeLabel": "Refresh lead time (s)",
+      "leadTimeLabel": "Refresh lead time",
       "leadTimeHelp": "Refresh access tokens before they expire",
       "concurrencyLabel": "Refresh concurrency limit",
       "concurrencyHelp": "Concurrent refresh limit, lower to reduce rate limiting"
@@ -597,7 +618,8 @@
       "warmupModelRequired": "Select a model to enable warmup",
       "invalidWarmupModel": "Warmup model name must not exceed 128 characters",
       "settingsSaved": "Settings saved",
-      "invalidProtectionSettings": "Use a failure threshold of 2–1,000, count validity of 60–3,600 seconds, and a cooldown of 300–604,800 seconds"
+      "invalidProtectionSettings": "Use a failure threshold of 2–1,000, count validity of 60–3,600 seconds, and a cooldown of 300–604,800 seconds",
+      "invalidRetryAfterLimit": "Upstream retry wait limit must be an integer from 0 to 4,294,967,295"
     },
     "page": {
       "tabs": {
@@ -607,7 +629,7 @@
         "access": "Security",
         "backups": "Backups"
       },
-      "description": "Manage scheduling, upstreams, pricing, security, history retention, and backups",
+      "description": "Manage scheduling, upstreams, pricing, security, retention and backups",
       "sectionsLabel": "Settings sections",
       "undoAllBasicSettingsChanges": "Undo all basic settings changes",
       "unsavedChanges": {
@@ -629,7 +651,6 @@
       "countValidity": "Count validity",
       "windowHelp": "Each matching failure renews the count, a successful call clears it",
       "countValiditySeconds": "Count validity in seconds",
-      "seconds": "seconds",
       "cooldownTime": "Cooldown duration",
       "cooldownHelp": "A failed probe starts another cooldown",
       "cooldownTimeInSeconds": "Cooldown duration in seconds",

@@ -11,11 +11,11 @@ mod freeze_recovery;
 mod import_tasks;
 mod observability;
 mod peer_link;
-mod plugin_update;
 mod plugins;
 mod proxies;
 mod settings;
 mod system;
+mod system_preflight;
 mod usage_data;
 
 use std::{
@@ -1186,7 +1186,7 @@ impl SystemOperations for UnavailableSystem {
 
     async fn update_detail(
         &self,
-        _: bool,
+        _: gateway_admin::model::system::SystemUpdateCheck,
         _: Option<gateway_admin::model::system::SystemUpdateChannel>,
     ) -> Result<SystemUpdateDetail, SystemOperationError> {
         Err(unavailable_system())

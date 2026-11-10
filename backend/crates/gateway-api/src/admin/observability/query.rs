@@ -2,6 +2,8 @@
 
 use super::*;
 
+pub use crate::time::parse_datetime;
+
 /// 观测列表默认页大小
 pub const DEFAULT_PAGE_SIZE: u16 = 50;
 /// 观测列表允许的最大页大小
@@ -254,16 +256,6 @@ impl DiagnosticDimension {
             Self::Status => "status",
         }
     }
-}
-
-/// 解析 RFC3339 时间；错误不回显原始值
-pub fn parse_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>, WireValidationError> {
-    let Some(value) = trimmed(value) else {
-        return Ok(None);
-    };
-    DateTime::parse_from_rfc3339(value)
-        .map(|value| Some(value.with_timezone(&Utc)))
-        .map_err(|_| WireValidationError::new("timeRange"))
 }
 
 /// 解析 HTTP 状态码

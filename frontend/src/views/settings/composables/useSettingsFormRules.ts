@@ -38,7 +38,9 @@ export function useSettingsFormRules(form: () => SettingsForm) {
     'openaiSessionAffinityTtlHours': integer(1, 720, t('settings.form.invalidAffinityDuration')),
     'maxWaitingPerKey': integer(0, 1000, t('settings.form.invalidQueueSettings')),
     'maxWaitingPerAccount': integer(0, 1000, t('settings.form.invalidQueueSettings')),
-    'concurrencyWaitTimeoutSeconds': integer(1, 120, t('settings.form.invalidQueueSettings')),
+    'keyQueueTimeoutSeconds': integer(1, 120, t('settings.form.invalidQueueSettings')),
+    'accountQueueTimeoutSeconds': integer(1, 120, t('settings.form.invalidQueueSettings')),
+    'maxRetryAfterSeconds': integer(0, 4_294_967_295, t('settings.form.invalidRetryAfterLimit')),
     'responsesMaxDecompressedBodyMiB': integer(1, Math.floor(Number.MAX_SAFE_INTEGER / 1024 / 1024), t('settings.form.invalidBodyLimit')),
     'resetCreditLeadMinutes': integer(1, 1440, t('settings.form.invalidResetLeadTime')),
     'resetCreditMaxWeeklyRemainingPercent': {
@@ -86,7 +88,8 @@ export function useSettingsFormRules(form: () => SettingsForm) {
       },
     ],
     'accountErrorProtection.rules': {
-      trigger: 'change',
+      // 子字段保留输入校验，整组完整性只在提交时检查
+      trigger: [],
       validator: () => {
         const error = protectionPolicyError(form().accountErrorProtection)
         return error

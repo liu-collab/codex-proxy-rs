@@ -53,7 +53,7 @@ fn host_config_should_reject_empty_update_asset_directory() {
 }
 
 #[test]
-fn host_config_resolves_only_host_owned_relative_paths() {
+fn host_config_resolves_resource_paths_relative_to_configuration() {
     let mut config = valid_config();
     config
         .resolve_and_validate(
@@ -66,34 +66,10 @@ fn host_config_resolves_only_host_owned_relative_paths() {
         config.logging.file.directory,
         PathBuf::from("/srv/gateway/.runtime/logs")
     );
-}
-
-#[test]
-fn host_config_resolves_runtime_data_dir_relative_to_configuration() {
-    let mut config = valid_config();
-    config
-        .resolve_and_validate(
-            std::path::Path::new("/srv/gateway"),
-            std::path::Path::new("/srv/gateway/web/dist"),
-        )
-        .expect("valid host config");
-
     assert_eq!(
         config.runtime_data_dir(),
         PathBuf::from("/srv/gateway/runtime-data")
     );
-}
-
-#[test]
-fn host_config_derives_update_paths_from_runtime_data_dir() {
-    let mut config = valid_config();
-    config
-        .resolve_and_validate(
-            std::path::Path::new("/srv/gateway"),
-            std::path::Path::new("/srv/gateway/web/dist"),
-        )
-        .expect("valid host config");
-
     assert_eq!(
         (
             config.system_update.update_state_file,
@@ -124,23 +100,19 @@ fn host_config_rejects_zero_worker_shutdown_window() {
 }
 
 #[test]
-fn logging_rejects_zero_retention_windows() {
-    for request_dump in [false, true] {
-        let mut config = valid_config();
-        if request_dump {
-            config.logging.request_dump_retention_days = 0.0;
-        } else {
-            config.logging.file.retention_days = 0;
-        }
-        assert!(
-            config
-                .resolve_and_validate(
-                    std::path::Path::new("/srv/gateway"),
-                    std::path::Path::new("/srv/gateway/web/dist"),
-                )
-                .is_err()
-        );
-    }
+fn file_logging_rejects_zero_retention() {
+    let mut config = valid_config();
+    config.logging.file.retention_days = 0;
+    let error = config
+        .resolve_and_validate(
+            std::path::Path::new("/srv/gateway"),
+            std::path::Path::new("/srv/gateway/web/dist"),
+        )
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        gateway_host::ConfigError::InvalidField("host.logging.file.retention_days")
+    ));
 }
 
 #[test]

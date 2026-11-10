@@ -106,7 +106,8 @@ struct TestRequest {
 struct ProbeRequest {
     #[serde(default)]
     detect_location: bool,
-    /// 完整 URL，或带 `proxyProtocol` 的 `主机:端口:用户名:密码` 简写。
+    /// 空串表示探测本机直连出口；其他值为完整 URL，
+    /// 或带 `proxyProtocol` 的 `主机:端口:用户名:密码` 简写。
     proxy_url: String,
     proxy_protocol: Option<String>,
 }
@@ -543,12 +544,20 @@ async fn probe<S>(
 where
     S: SessionState + Send + Sync,
 {
-    let proxy = parse_proxy_address(&request.proxy_url, request.proxy_protocol.as_deref())
-        .map_err(AdminError::bad_request)?;
+    // 空串表示探测本机直连出口；非空值按完整 URL 或带协议的简写解析。
+    // 解析失败沿用地址校验的 400，与创建、更新两条写入路径一致。
+    let proxy = if request.proxy_url.is_empty() {
+        None
+    } else {
+        Some(
+            parse_proxy_address(&request.proxy_url, request.proxy_protocol.as_deref())
+                .map_err(AdminError::bad_request)?,
+        )
+    };
     let result = state
         .admin_services()
         .proxies()
-        .probe(Some(&proxy), request.detect_location)
+        .probe(proxy.as_ref(), request.detect_location)
         .await
         .map_err(map_error)?;
     Ok(AdminResponse::new(

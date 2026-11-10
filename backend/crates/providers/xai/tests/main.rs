@@ -2,6 +2,8 @@
 
 mod admin;
 mod credential;
+mod oauth_http;
 mod provider;
+mod secret;
 mod support;
 mod transport;

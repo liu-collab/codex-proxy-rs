@@ -6,7 +6,7 @@
 
 | 任务 | 入口 |
 | --- | --- |
-| 安装与启动 | [手动安装](#手动安装) · [启动](#启动) · [公网访问](#公网访问) |
+| 安装与启动 | [手动安装](#手动安装) · [Windows 二进制部署](#windows-二进制部署) · [启动](#启动) · [公网访问](#公网访问) |
 | 接入客户端 | [客户端配置](#客户端配置) · [时区与客户端环境信息](#时区与客户端环境信息) · [登录与生图排查](#登录与生图排查) |
 | 日常运维 | [运行设置](#启动后的运行设置) · [小内存优化](#小内存优化) · [持久化与日志](#持久化与备份) · [请求排查](#请求错误排查) · [密码轮换](#密码语义) |
 | 更新与恢复 | [镜像升级](#镜像升级与源码构建) · [在线更新](#管理端在线更新) · [备份与恢复](#备份与恢复) · [停止与重启](#停止与重启) |
@@ -19,7 +19,7 @@
 | 位置 | 内容 | 修改方式 |
 | --- | --- | --- |
 | `deploy/config.yaml` | 监听、数据库/Redis 连接、部署凭据、时区、日志与可选内存分配策略等启动配置 | 从模板创建，已有部署合并修改，不覆盖原文件 |
-| `deploy/compose.yaml` | 镜像、容器网络、端口、挂载与资源限制 | 调整 Compose 并重建受影响容器 |
+| `deploy/compose.yaml` | 镜像、容器网络、端口、挂载、PostgreSQL 启动参数与资源限制 | 调整 Compose 并重建受影响容器 |
 | PostgreSQL | 账号、Key、运行设置、上游身份、插件配置等业务数据 | 管理端或管理 API |
 | 浏览器本地 | 主题和界面偏好 | 当前浏览器的主题设置 |
 
@@ -58,6 +58,21 @@ host:
 
 ### 小内存优化
 
+1 GB 内存、网关与 PostgreSQL / Redis 同机、低并发部署可从本节参数开始评估。
+这些值是调优起点，不是整机内存上限或容量保证；先记录实际负载下的内存峰值，优先缩小数据库连接池和缓冲，再按需调整 Redis 与应用空闲内存回收
+
+| 调整对象 | 配置入口 | 生效方式 |
+| --- | --- | --- |
+| 应用空闲内存回收 | `config.yaml` → `services.app-runtime.environment.GLIBC_TUNABLES` | 重建应用容器 |
+| 应用 PostgreSQL 连接池 | `config.yaml` → `store.pool.max_connections` | 重启应用；Compose 可按下文重建 |
+| PostgreSQL 内存与连接预算 | `compose.yaml` → `services.postgres.command` | 重建 PostgreSQL 容器 |
+| Redis 持久化与内存预算 | `config.yaml` → `services.redis-credentials.command` | 重建 Redis 容器 |
+
+以下 YAML 片段合并到已有节点，不要重复创建顶层 `store` / `services`，也不要覆盖凭据、挂载和健康检查。
+这些参数没有管理端热更新入口；二进制部署沿用 `store.pool`，PostgreSQL / Redis 参数则配置到各自服务的配置文件或启动命令，应用不会读取 `services` 桥接区来修改外部数据库
+
+#### 应用空闲内存回收
+
 Linux/glibc 部署可选择更积极地归还请求结束后的空闲内存，适合内存紧张且请求后 RSS 长时间偏高的机器。
 该选项默认关闭，官方 Linux 镜像支持；更频繁的映射与回收可能增加 CPU 开销，应结合实际负载观察
 
@@ -71,7 +86,7 @@ services:
 ```
 
 Compose 从 `services.app-runtime` 取得参数；不开启优化时保留该段并将值设为 `''`。
-PostgreSQL 和 Redis 的凭据桥接配置与该段并列，无需在 `compose.yaml` 重复填写参数
+PostgreSQL 和 Redis 的凭据桥接配置与该段并列，无需在 `compose.yaml` 重复填写 `GLIBC_TUNABLES`
 
 校验并重建应用容器使配置生效；`docker compose restart` 不会更新容器环境变量：
 
@@ -93,6 +108,114 @@ GLIBC_TUNABLES=glibc.malloc.mmap_threshold=131072:glibc.malloc.trim_threshold=13
 
 该变量由 glibc 在进程启动时读取，不支持管理端热更新。
 它不设置内存上限，不释放仍被请求或连接持有的缓冲，也不处理容器文件缓存；观察时分别比较进程 RSS、cgroup 的 `anon` 与 `file`
+
+#### PostgreSQL 与应用连接池
+
+在 `deploy/config.yaml` 的 `store` 下设置连接池上限，未列出的池参数保留默认值：
+
+```yaml
+store:
+  pool:
+    max_connections: 5
+```
+
+应用默认上限为 20，允许的最小值为 2；降低上限可以限制实际数据库连接数，但也会增加请求、后台写入与管理查询之间的等待。
+如果出现连接获取超时，应结合数据库负载调大池容量，不要仅延长等待时间
+
+将 `deploy/compose.yaml` 中 `services.postgres.command` 替换为以下列表，保留 UTC 参数：
+
+```yaml
+command:
+  - postgres
+  - -c
+  - timezone=UTC
+  - -c
+  - log_timezone=UTC
+  - -c
+  - shared_buffers=64MB
+  - -c
+  - max_connections=30
+  - -c
+  - work_mem=2MB
+  - -c
+  - maintenance_work_mem=32MB
+  - -c
+  - autovacuum_work_mem=16MB
+  - -c
+  - max_parallel_workers_per_gather=0
+```
+
+`shared_buffers` 缩小共享缓冲；服务端 `max_connections` 限制整个数据库的连接数，应覆盖所有应用池，并为备份、维护和其他客户端留余量。
+它与应用连接池上限是两个配置，调小服务端上限不会主动回收应用池里的空闲连接
+
+`work_mem` 是每个排序或哈希操作的基础预算，哈希还受 `hash_mem_multiplier` 影响，一条 SQL 可以同时使用多份预算。
+`maintenance_work_mem` 限制维护操作内存，`autovacuum_work_mem` 按自动清理进程分别计；保持自动清理开启。
+关闭并行查询、缩小这些预算可能增加临时文件 I/O，并延长统计、索引创建与维护时间
+
+参数定义见 [PostgreSQL 18 内存与并行查询](https://www.postgresql.org/docs/18/runtime-config-resource.html)和[连接设置](https://www.postgresql.org/docs/18/runtime-config-connection.html)
+
+#### Redis 持久化与内存预算
+
+项目默认开启 AOF，未显式设置 `maxmemory` 和定时 RDB 快照规则。
+小内存部署可保留 AOF，关闭定时 RDB 快照以减少快照期间的 fork / 写时复制峰值；代价是少一份独立的 RDB 快照，AOF 重写仍需要预留额外内存
+
+在已有 `deploy/config.yaml` 中替换 `services.redis-credentials.command`，复用同一文件内的密码锚点，保留该服务的 `healthcheck`：
+
+```yaml
+services:
+  redis-credentials:
+    command:
+      - redis-server
+      - --appendonly
+      - 'yes'
+      - --save
+      - ''
+      - --requirepass
+      - *redis_password
+      # 当前用量和负载峰值明显低于 64 MiB 时，再取消以下注释
+      # - --maxmemory
+      # - 64mb
+      # - --maxmemory-policy
+      # - noeviction
+```
+
+`--save` 后的空字符串必须保留，它表示关闭定时快照。持久化取舍见 [Redis 文档](https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/)
+
+设置内存上限前先查看 `INFO memory` 的 `used_memory`、`used_memory_peak` 和 `used_memory_rss`，为业务增长、分配器和持久化峰值留余量。
+`maxmemory 64mb` 只是可选起点，未达到上限时不会因此降低 RSS，也不是进程或容器的总内存上限。
+达到上限后，`noeviction` 会拒绝需要增加内存的写入，可能影响登录与请求调度，应调大预算或减少负载
+
+Redis 保存租约、冷却和登录会话等[协调状态](../docs/architecture.md#8-状态所有权)，不要使用 `allkeys-lru`、`volatile-lru` 等提前淘汰键的策略。
+预算与策略定义见 [Redis 内存限制](https://redis.io/docs/latest/develop/reference/eviction/)
+
+#### 使配置生效与检查效果
+
+只调整应用配置时，按[应用空闲内存回收](#应用空闲内存回收)中的命令重建应用容器。
+调整 PostgreSQL / Redis 启动参数需要短暂停服，在维护窗口执行；只改其中一个服务时，数据库重建命令只列出该服务：
+
+```bash
+docker compose -f deploy/compose.yaml config --quiet
+docker compose -f deploy/compose.yaml stop codex-proxy-rs
+docker compose -f deploy/compose.yaml up -d --no-build --no-deps --force-recreate --wait postgres redis
+docker compose -f deploy/compose.yaml up -d --no-build --no-deps --force-recreate --wait codex-proxy-rs
+```
+
+数据库健康检查通过后再执行最后一条命令；`restart` 不会更新容器启动命令或环境变量。
+外部数据库需通过其管理方式应用参数，不能用本地 Compose 命令代替
+
+通过交互提示输入对应数据库密码，核对实际生效值与内存占用，避免将密码写入命令行：
+
+```bash
+docker compose -f deploy/compose.yaml exec postgres psql -U codex_proxy -d codex_proxy -W \
+  -c 'SHOW shared_buffers; SHOW max_connections; SHOW work_mem; SHOW maintenance_work_mem; SHOW autovacuum_work_mem; SHOW max_parallel_workers_per_gather;'
+docker compose -f deploy/compose.yaml exec redis redis-cli --askpass CONFIG GET appendonly save maxmemory maxmemory-policy
+docker compose -f deploy/compose.yaml exec redis redis-cli --askpass INFO memory
+docker compose -f deploy/compose.yaml stats --no-stream
+```
+
+在相同负载下比较空闲、请求峰值与后台统计 / 维护期间的占用，并检查实际模型请求、管理查询是否正常，有无连接获取超时、Redis OOM 或容器重启。
+不要把 PostgreSQL 各进程的 RSS 直接相加，共享页会重复计数；容器文件缓存也应与匿名内存区分。
+容器硬内存上限不能代替这些预算，过紧会导致 OOM；需要回退时恢复调整前的参数，按同样流程重建对应容器
 
 ## 部署结构
 
@@ -190,6 +313,42 @@ store:
 `redis://u1@redis-host:6379/0`，其中主机名必须能从应用容器访问；只改 `config.yaml` 不会生效。
 默认 Compose Redis 服务使用密码认证，不会自动创建 ACL 用户
 
+## Windows 二进制部署
+
+发行包提供 Windows x64（`windows_amd64`）和 ARM64（`windows_arm64`）版本，按运行机器的 CPU 架构选择。
+需先准备可访问的 PostgreSQL 和 Redis，创建数据库及用户；使用数据库备份功能时，还需将匹配服务端版本的 `pg_dump` 加入 `PATH`
+
+从 [Release 附件](https://github.com/zyycn/codex-proxy-rs/releases) 下载对应的
+`codex-proxy-rs_<version>_windows_<arch>.tar.gz`，解压后保留 `codex-proxy-rs.exe`、`web/dist`、`deploy` 和 `plugins/official` 的目录关系。
+在解压后的 `codex-proxy-rs` 目录中打开 PowerShell，首次安装时创建配置：
+
+```powershell
+Copy-Item .\deploy\config.example.yaml .\deploy\config.yaml
+```
+
+编辑 `deploy/config.yaml`，填写 `store.database`、`store.redis` 的连接地址和独立密码，以及 `admin.default_password`。
+密码格式沿用模板要求；将已有的 `api.asset_directory` 改为 `../web/dist`，在 `host` 下合并以下更新与重启配置：
+
+```yaml
+host:
+  system_update:
+    deployment_mode: binary
+    self_restart_enabled: true
+api:
+  asset_directory: '../web/dist'
+```
+
+从安装目录启动：
+
+```powershell
+.\codex-proxy-rs.exe serve
+```
+
+启动成功后访问 `http://127.0.0.1:8080`，使用配置中的管理员账号登录；在运行终端按 `Ctrl+C` 停止服务。
+官方构建支持管理端[在线更新、重启与回滚](#管理端在线更新)，安装目录与 `.runtime` 必须可写。
+手动更换版本时先停止进程并备份当前发行文件，再整体替换 EXE、`web/dist` 和 `plugins/official`，
+保留 `deploy/config.yaml` 与 `.runtime`，按新版本模板合并配置后重新启动
+
 ## 启动
 
 ```bash
@@ -199,16 +358,19 @@ docker compose -f deploy/compose.yaml up -d --no-build --wait
 docker compose -f deploy/compose.yaml ps
 ```
 
-健康检查：
+Consul 或负载均衡器用 `GET /readyz` 决定是否接入流量。升级后先在实例上确认返回 `204`，
+再把服务注册中的检查路径切到 `/readyz`。如果路由还依赖 Docker 容器健康状态，
+也要将应用容器的 `healthcheck.test` 指向 `/readyz`
 
 ```bash
-curl -i http://127.0.0.1:8080/healthz
+curl -i http://127.0.0.1:8080/readyz
 ```
 
-`204 No Content` 表示应用、PostgreSQL、Redis 和后台任务的健康检查通过，不代表每个上游账号都可用
+用独立监控定期请求 `GET /healthz`，对文件日志故障、账号解冻等关键后台任务异常告警。镜像和 Compose 默认使用这项综合检查。
+两个接口的状态码见[健康检查 API](../docs/api.md#2-健康检查)
 
-`503 Service Unavailable` 的失败组件与原因保存在运维错误记录中，组件为 `health`，关联标识以
-`probe:` 或 `worker:` 开头；探针超时也会指明组件。连续相同故障去重，恢复后再次失败重新记录，
+`/healthz` 返回 `503` 时，失败组件与原因保存在运维错误记录中，组件为 `health`，关联标识以
+`probe:` 或 `worker:` 开头。Worker 事件的错误详情包含任务状态和 `last_error`。连续相同故障去重，恢复后再次失败重新记录，
 应用日志记录故障与恢复摘要。健康响应保持空正文，详情沿用有界观测队列，队列或存储故障时可能缺失
 
 HTTP 在数据库迁移和初始化完成后才监听。迁移期间启动日志每 15 秒报告已等待时间，
@@ -226,30 +388,33 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 
 | 设置 | 入口与边界 |
 | --- | --- |
-| 上游客户端身份 | “系统设置 → 上游配置 → 客户端身份”；Key 可按 Provider 覆盖，支持自动或固定版本 |
+| 上游客户端身份 | “系统设置 → 上游配置 → 客户端身份”；Key 可按 Provider 覆盖，OpenAI Key 可独立配置[安装身份种子](../docs/api.md#key-客户端身份) |
+| 并发与排队 | “系统设置 → 运行设置”；Key 与账号分别设置排队容量和超时，可选择账号排队失败后换号，见[排队规则](../docs/api.md#并发与排队) |
+| 账号错误保护 | “系统设置 → 运行设置 → 错误保护”；默认关闭，按[自定义规则](../docs/api.md#账号错误保护)暂停账号调度 |
 | 全局请求位置 | “系统设置 → 上游配置 → 请求位置覆盖”；默认关闭，不从 YAML 导入 |
 | 代理位置 | “代理管理”；优先于全局位置，全局关闭时仍可独立生效 |
 
 位置覆盖只影响 OpenAI 请求中受支持的位置与时区信息，不改变上下文日期、真实出口 IP、epoch 时间戳或系统时区。
 `openai.residency` 和 `openai.account_routing_override` 是独立于客户端身份的启动配置，
 分别指定 `x-openai-internal-codex-residency` 和 `x-openai-account-routing-override` 请求头。
-两项均为可选字符串，填写值原样发送，不校验地域或路由枚举；省略或设为 `null` 时删除对应的下游请求头且不补发。
-示例配置均填写 `us`，修改后重启应用生效。身份与位置字段见 [运行设置 API](../docs/api.md#8-运行设置)
+两项均为可选字符串，配置值原样发送并覆盖客户端同名头，支持自定义地域或路由值。
+省略或设为 `null` 时删除对应请求头。
+修改后重启应用生效。身份与位置字段见 [运行设置 API](../docs/api.md#8-运行设置)
 后台账号操作使用 Provider 自己的官方画像；发布资料刷新不改写用户选择或 `config.yaml`
 
 ### CPR 互联
 
-在上游的「API 密钥」中为专用 Key 选择账号分组并开启「CPR 互联」，按需公开账号池、额度和套餐信息。
+在上游的「API 密钥」中为专用密钥选择账号分组并开启「CPR 互联」，即可共享密钥预算、并发上限和 RPM，并按需公开账号池、账号额度和套餐信息。
 共享 Key 的实际推理只使用这些分组中的直连 OAuth 账号；分组内的 API Key 转供账号不会参与
 
 在下游导入或编辑 OpenAI API Key 账号，填写上游 API 地址和该 Key，后台自动发现 CPR 互联能力。
 地址包含自定义前缀时保留完整前缀，后台在该地址下请求 `cpr/link`。
-列表与详情显示已保存的观测，手动刷新提交后台任务；旧观测和查询失败分别提示，不要求上游实时可用
+列表与详情显示已保存的观测。展开账号可查看上游密钥限制，普通账号并发留空时跟随上游有效的正数上限。启用的 OpenAI API Key 账号可点击「刷新额度」重新识别。上游明确关闭共享或不支持互联时，账号显示为 API，重新识别成功后显示 CPR
 
 第三方网关通过插件实现相同协议也可被识别，不按软件名称判定兼容。
 上游明确返回 Key 预算耗尽时，下游暂停该账号；后续同步确认允许使用后自动恢复，普通限流冷却独立保留。
-金额只供展示，缺少访问状态时不根据余额推断恢复。账号池额度观测作为 Smart 选择的参考，不能保证下一次请求成功；
-协议和公开边界见 [CPR 互联 API](../docs/api.md#cpr-互联只读协议)
+金额只供展示，缺少访问状态时不根据余额推断恢复。账号池额度观测作为 Smart 选择的参考，不能保证下一次请求成功
+互联两端均须使用 CPR Link v3；协议、第三方接入与公开边界见 [CPR 互联 API](../docs/api.md#cpr-互联只读协议)
 
 ### 批量维护代理
 
@@ -266,6 +431,13 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 格式错误、重复或配置冲突不覆盖已有代理，也不阻止其他条目处理。
 “修改未添加项”只带回明确未添加的条目；连接测试失败的代理已经保存，可在列表中重新测试。
 请求中断或结果无法确认时暂停后续提交，添加结果待确认的条目可能已保存，应先刷新列表核对，不能直接重复添加
+
+创建或编辑账号时，在“出站隧道”选择直连或已保存的代理，点击右侧的“测试出口”图标。
+耗时显示在对应选项右侧，悬浮可查看 IPv4 / IPv6，测试失败通过通知提示。
+禁用代理的账号使用服务器直连出口。出口测试不保存账号设置，也不验证账号权限或额度；账号可用性使用账号连接测试
+
+在代理列表点击关联账号数量，再点击“分配账号”，搜索并跨页勾选账号后点击右上角的“分配”，一次最多 1000 个。
+已使用此代理的账号不可重复选择；所选账号原有代理会被替换，凭据、分组与调度设置保留。禁用代理须先启用
 
 ### 插件命令行
 
@@ -504,6 +676,9 @@ metrics_exporter = "none"
 WebSocket 会话完成，进程退出时强制断开剩余连接。已入队的观测写入与后台清理保留
 `host.worker_shutdown_timeout_seconds`（默认 30 秒）的收尾预算；客户端在新进程就绪后重新连接
 
+正常关闭会在后台收尾预算内释放本实例的账号并发占位，租约清理最多等待 2 秒。
+强制终止、清理超时或 Redis 清理失败时，占位由最后一次续期后的 10 分钟 TTL 回收，不影响其他实例的租约
+
 管理端重启受理后，到进程退出期间，更新、回滚和再次重启均被拒绝；可继续查询更新状态
 
 Compose 的 `stop_grace_period` 为 75 秒，覆盖默认 30 秒后台收尾及进程清理余量。
@@ -596,7 +771,7 @@ OAuth 恢复开关为 `host.logging.oauth_recovery`，默认关闭，与普通�
 2. 收集响应中的 `x-gateway-request-id`、`x-request-id` / `x-oai-request-id`；配置了
    `api.request_id_header` 时也记录该入口头。WebSocket 合成错误的关联头位于本条错误的 `headers`。
    在管理端错误列表按 ID 和时间搜索；检查平台条件并主动刷新，翻页不会推进查询时间。
-   只有入口 ID 时，改用入口日志和时间定位
+   只有入口 ID 时，在运维错误中按该 ID 搜索，并结合入口日志和时间定位
 3. 打开错误详情，核对上游/客户端状态、发送状态、attempt、失败阶段及后续恢复关联。
    下载诊断包作为反馈材料，先检查 `availability.gaps`、`exportTruncated` 以及尝试和时间线的完整性。
    该包包含经服务端脱敏的已存上游错误与时间线，分享前仍应检查业务内容及内部信息
@@ -607,11 +782,15 @@ OAuth 恢复开关为 `host.logging.oauth_recovery`，默认关闭，与普通�
    时，普通日志才按级别输出到 stdout；专用 dump/OAuth 恢复通道不会混入
 5. 查不到请求记录时，先用模型执行 ID 在“全部平台”下搜索：已进入执行会话的建流前失败也会记录，
    但其 attempt 为零，尚未确认的 Provider/账号/传输为空，不会命中具体平台或账号筛选。
-   再检查观测队列丢弃/写入失败告警及 `file_logging` 健康状态。鉴权、解析、路由和准入等入口拒绝
-   仍不保证进入错误列表；应结合入口状态与日志，不能据此认定请求未发生。异步投影有延迟，
+   鉴权、解析、未知路由、方法错误和执行前中间件失败记录为 `api/http_ingress` 运维事件，
+   路由、权限、取消和准入拒绝由执行层记录；它们没有模型请求或用量，不应按 Provider/账号筛选。
+   再检查观测队列丢弃/写入失败告警及 `file_logging` 健康状态。异步投影有延迟，
    刷新后仍需核对缺口，而不是反复重放可能已发送的请求
 6. 仅在上述信息不足且能够控制访问范围时临时开启 `host.logging.request_dump` 复现一次。
-   它会记录完整凭据与用户正文，应限定访问、摘取最小片段并人工脱敏；复现后关闭开关，
+   `ingress.request`、`ingress.request.headers` 与 `ingress.request.body` 按入口 ID 关联原始请求，
+   `ingress.response` 与对应 headers/body 记录响应；`ingress.body.finished` 的 `complete: false`
+   表示正文未读完或读取失败，不能当作完整转储。网关不会为日志读取尚未消费的正文。
+   转储含凭据与用户正文，应限定访问、摘取最小片段并人工脱敏；复现后关闭开关，
    按配置的保留窗口及组织的数据处理要求管理已生成文件。不要为普通请求排查开启 OAuth 恢复记录，
    也不要直接上传整个日志目录或完整转储
 
@@ -672,21 +851,11 @@ CPR_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 docker compose -f deploy/compose.yaml build codex-proxy-rs
 ```
 
-### 账号名称迁移
+### 升级前检查
 
-OAuth 账号仍使用默认授权名称（如「Codex 账号」「OpenAI 账号」「xAI 账号」）且保存了邮箱时，
-升级会清空默认名称，账号列表按邮箱前缀和完整邮箱分两行展示。
-自定义名称、已有改名审计记录的账号、无邮箱账号及 API Key 名称保留原值
-
-### 错误保护配置升级
-
-使用 `accountAutoFreeze*` 运行参数的部署升级时，数据库迁移删除全部旧保护设置，不转换规则或继承参数。
-`accountErrorProtection` 与新安装使用相同默认值：关闭保护、规则为空，其余参数见[错误保护 API](../docs/api.md#账号错误保护)。
-需要保护时，在「系统设置 → 运行设置 → 错误保护」重新配置规则并启用，
-使用管理 API 的客户端须同步改用[新的设置对象](../docs/api.md#账号错误保护)，旧字段写入会被拒绝
-
-已有活动冻结保留当前冷却截止时间，保护关闭时到期解除，未冻结的旧计数不沿用。通用错误保护仅暂停账号调度，不再自动下调并发；
-已经保存的账号并发上限保持原值，需要恢复时在账号设置中手动调整
+- OpenAI 或 xAI 授权使用已保存代理，且代理的 WebSocket 连接上限非零：升级或回退后，重新发起尚未完成的授权，不复用旧回调或授权码。上限为 `0` 的在途授权和已保存的账号、凭据不受影响
+- Key 配置含 `installationId`：数据库自动转换为 `installationSeed`，API 调用方须使用[当前字段](../docs/api.md#key-客户端身份)。出站安装身份及关联的会话、缓存标识会变化，已有 WebSocket 精确续写需重发完整上下文
+- 数据库或备份含 `accountAutoFreeze*` 设置：升级后错误保护关闭、规则为空，需在管理端重新配置并启用；API 调用方使用 [`accountErrorProtection`](../docs/api.md#账号错误保护)。已有冻结到当前冷却截止后解除，账号并发上限保留，需调整时手动设置
 
 ### 版本命名与升级规则
 
@@ -706,6 +875,13 @@ OAuth 账号仍使用默认授权名称（如「Codex 账号」「OpenAI 账号�
 切换通道不会降级，Stable 候选也必须高于当前运行版本。
 下载、安装或待重启期间不能切换通道
 
+更新器读取更新仓库 `main` 分支的 `release/version.yaml`。`version` 是源码构建版本，只有 `published` 中当前大版本和通道对应的版本才参与更新检查
+
+自定义更新仓库须提供这份清单和候选版本的公开 Release。发布工作流在安装包公开并通过校验后更新 `published`，需要具有写入 `main` 的权限
+
+提示有更新前会按精确 tag 核对候选 Release、当前平台包和校验文件，无需配置 GitHub 令牌。GitHub 限流时按提示稍后重试；
+也可从[发行页](https://github.com/zyycn/codex-proxy-rs/releases)下载平台归档，按[手动安装](#手动安装)升级
+
 同一 `X.Y.Z-exp.N` 系列只用于同一轮实验，不能混用不同实验分支；变更基线即进入另一实验线，需手动迁移。
 exp 不进入正式版、alpha、beta 或 rc，普通实例也不能选择 Exp。
 从 exp 切换正式版时需先备份，在目标版本的独立数据库中迁移业务数据，不能直接复用或整库还原实验数据库
@@ -722,7 +898,7 @@ alpha、beta、rc、exp 在 GitHub 标记为 Pre-release，不覆盖 GitHub Late
 
 在线更新要求官方构建且起始版本不低于 **v3.18.1**，版本选择遵循上述规则；源码等非官方构建返回不支持原因，不提供可用更新。
 不满足在线更新条件时，使用完整发行包或镜像[手动部署](#镜像升级与源码构建)。
-点击「下载并更新」后，操作日志显示下载、校验与安装过程，完成后显示「待重启」及待生效版本，重启后才使用新程序。
+点击「下载更新」后，操作日志显示下载、校验与安装过程，完成后显示「待重启」及待生效版本。点击「立即重启」后才使用新程序。
 「当前版本」始终表示正在运行的版本，「通道最新」表示所选通道的检查结果
 
 手动更换镜像或程序后，更新器会核对安装文件并校准历史状态，不以旧成功记录推断需要重启。
@@ -760,10 +936,10 @@ Compose 提供以下在线更新运行参数：
 
 管理端自重启遵循统一的[停止与重启](#停止与重启)策略，客户端需在新进程完成迁移与初始化后重新连接
 
-Release 必须提供当前 OS/架构的 `codex-proxy-rs_<version>_<os>_<arch>.tar.gz` 与
-`checksums.txt`。服务会在替换前再次查询远端最新版本，校验下载 host、声明大小、SHA-256 和
-归档路径；二进制或静态资源任一替换失败时恢复旧文件。成功后的旧二进制和旧静态目录分别保留为
-`*.backup`，管理端 rollback 会交换当前文件与这份备份。更新状态和跨进程锁可在以下位置排查：
+Release 必须提供当前 OS/架构的 `codex-proxy-rs_<version>_<os>_<arch>.tar.gz` 与 `checksums.txt`。
+服务在下载安装包前复核通道、目标版本及下载地址并取得 SHA-256，校验文件大小、摘要、归档路径和发行身份；
+后续安装与重启不依赖 GitHub。文件替换失败时恢复整组发行文件，成功后保留 `*.backup` 供管理端回滚。
+更新状态和跨进程锁可在以下位置排查：
 
 ```text
 .runtime/data/update-state.json
@@ -778,7 +954,7 @@ Release 必须提供当前 OS/架构的 `codex-proxy-rs_<version>_<os>_<arch>.ta
 
 | 文件或目录 | 用途 |
 | --- | --- |
-| `plugin-release-manifest.json` | 固定宿主版本、提交、平台与支持的插件合同；插件列表当前为空 |
+| `plugins/official/plugin-release-manifest.json` | 随平台安装包和镜像分发，记录宿主版本、提交与支持的插件合同 |
 | 可执行文件同目录的 `plugins/official` | 随受信宿主发行物部署的只读目录，与二进制、Web 资源成套更新或恢复 |
 
 - 下载更新时校验发行身份，插件合同不兼容不阻止安装。点击重启时检查已安装目标版本，列出不兼容插件的名称和原因；确认后重启，不兼容实例保持未启动，启用配置、绑定、密钥和私有数据保留
@@ -790,7 +966,7 @@ Release 必须提供当前 OS/架构的 `codex-proxy-rs_<version>_<os>_<arch>.ta
 宿主范围或能力版本不匹配时，可在插件页确认风险后尝试本次启动；清单、RPC、平台或包完整性错误不能绕过。具体操作见[插件故障处理](../docs/plugins.md#故障处理)
 
 部署须保留完整的二进制、Web 资源与官方插件目录；不要手动修改制品元数据或迁移 checksum 绕过校验。
-macOS arm64 提供构建产物；部署前需验证目标平台的插件运行与上游调用，不能只以打包成功判断可用
+插件安装包必须匹配宿主 OS 和架构，部署前需验证目标平台的插件运行与上游调用，不能只以打包成功判断可用
 
 ## 备份与恢复
 

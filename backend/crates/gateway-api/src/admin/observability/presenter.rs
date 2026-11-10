@@ -260,6 +260,11 @@ pub(crate) fn usage_list_record_view(
     UsageListRecordView {
         error_code: record.error_code,
         error_message: record.error_message,
+        error_kind: record.error_kind,
+        websocket_close_code: record.websocket_close_code,
+        continuation_unavailable_reason: record.continuation_unavailable_reason,
+        upstream_connection_exit_reason: record.upstream_connection_exit_reason,
+        recovered: record.recovered,
         logical_outcome: record.outcome.as_str().to_owned(),
         client_api_key_name: record.client_api_key_name,
         id: record.id,
@@ -271,6 +276,7 @@ pub(crate) fn usage_list_record_view(
         account_notes: record.provider_account_notes,
         account_plan_type: record.provider_account_plan_type,
         account_plan_type_display: record.provider_account_plan_type_display,
+        account_upstream_peer: record.provider_account_upstream_peer,
         route: record.endpoint,
         model,
         requested_model: record.requested_model_id,
@@ -356,6 +362,23 @@ pub(crate) fn usage_record_view(
         .or_else(|| record.requested_model_id.clone());
     let metadata = provider_metadata_fields(record.provider_metadata_json.as_deref());
     UsageRecordView {
+        upstream_error: record
+            .upstream_error
+            .map(|error| super::wire::UsageUpstreamErrorView {
+                code: error.code,
+                error_type: error.error_type,
+                message: error.message,
+                param: error.param,
+                close_reason: error.close_reason,
+                last_event_type: error.last_event_type,
+            }),
+        retry_after_ms: record.retry_after_ms,
+        error_code: record.provider_error_code,
+        error_kind: record.error_kind,
+        websocket_close_code: record.websocket_close_code,
+        continuation_unavailable_reason: record.continuation_unavailable_reason,
+        upstream_connection_exit_reason: record.upstream_connection_exit_reason,
+        recovered: record.recovered,
         id: record.id.clone(),
         request_id: record.id,
         client_api_key_id: Some(record.client_api_key_ref),
@@ -678,8 +701,8 @@ pub(crate) fn trend_point_view(
         cached_input_tokens_value: point.metrics.cached_input_tokens,
         cache_hit_rate_value: point.cached_token_rate,
         tokens_value: point.metrics.total_tokens,
-        errors: format_compact_number(point.service_failure_count),
-        errors_value: point.service_failure_count,
+        errors: format_compact_number(point.error_count),
+        errors_value: point.error_count,
         latency_value: point.average_latency_ms,
         success_rate: success_rate_value
             .map_or_else(|| "—".to_owned(), |value| format!("{value:.1}%")),
@@ -742,7 +765,7 @@ pub(crate) fn trend_summary_view(
         TrendKind::Errors => vec![
             TrendSummaryView {
                 metric: TrendMetric::Errors,
-                value: format_compact_number(summary.service_failure_count),
+                value: format_compact_number(summary.error_count),
                 ratio: None,
             },
             TrendSummaryView {
@@ -1351,6 +1374,7 @@ pub(crate) fn diagnostics_view(
                 request_count: item.request_count,
                 account_plan_type: item.account_plan_type,
                 account_plan_type_display: item.account_plan_type_display,
+                account_upstream_peer: item.account_upstream_peer,
                 success_count: item.success_count,
                 error_count: item.error_count,
                 error_rate: item.error_rate,

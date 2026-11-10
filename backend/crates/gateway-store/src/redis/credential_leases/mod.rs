@@ -7,7 +7,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use futures::future::join_all;
 use gateway_core::account::{AccountRuntimeSignals, ProviderAccountId};
 use gateway_core::lifecycle::REQUEST_LEASE_TTL;
 use gateway_core::policy::ClientApiKeyId;
@@ -24,9 +23,12 @@ use crate::{Revision, StoreError, StoreResult, redis_unavailable, require_nonemp
 
 use super::{MAX_REDIS_EXACT_INTEGER, namespace, resource_fingerprint};
 
+mod cleanup;
 mod details;
 
 const SIGNAL_TTL_MILLIS: u64 = 24 * 60 * 60 * 1_000;
+// 限制单次脚本处理的账号数，避免大池查询长时间占用 Redis
+const RUNTIME_SIGNAL_BATCH_SIZE: usize = 128;
 const OAUTH_REFRESH_LEASE_TTL: Duration = Duration::from_secs(5 * 60);
 const OAUTH_REFRESH_CAPACITY_RESOURCE: &str = "oauth-refresh-global";
 
@@ -109,10 +111,14 @@ return removed
 const SIGNAL_SCRIPT: &str = r#"
 local clock = redis.call('TIME')
 local now_ms = (tonumber(clock[1]) * 1000) + math.floor(tonumber(clock[2]) / 1000)
-redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now_ms)
-local in_flight = redis.call('ZCARD', KEYS[1])
-local last_started = redis.call('GET', KEYS[2]) or '0'
-return {tostring(in_flight), tostring(last_started)}
+local signals = {}
+for i = 1, #KEYS, 2 do
+  redis.call('ZREMRANGEBYSCORE', KEYS[i], '-inf', now_ms)
+  local in_flight = redis.call('ZCARD', KEYS[i])
+  local last_started = redis.call('GET', KEYS[i + 1]) or '0'
+  signals[#signals + 1] = {tostring(in_flight), tostring(last_started)}
+end
+return signals
 "#;
 
 const ADVANCE_SCHEDULING_CURSOR_SCRIPT: &str = r#"
@@ -250,6 +256,17 @@ impl CredentialLeaseGuard {
         deadline: gateway_core::lifecycle::Deadline,
         cancellation: gateway_core::lifecycle::CancellationToken,
     ) -> StoreResult<impl gateway_core::provider_ports::ProviderLeaseGuard> {
+        Ok(RenewingSchedulingLease {
+            _renewal: self.renewal(deadline, cancellation)?,
+            _guard: self,
+        })
+    }
+
+    fn renewal(
+        &self,
+        deadline: gateway_core::lifecycle::Deadline,
+        cancellation: gateway_core::lifecycle::CancellationToken,
+    ) -> StoreResult<crate::lease_renewal::LeaseRenewal> {
         let repository = self.repository.clone();
         let lease_request = self.request.clone();
         let grant = self
@@ -260,7 +277,7 @@ impl CredentialLeaseGuard {
                 entity: "credential lease",
                 message: "lease has already been released".to_owned(),
             })?;
-        let renewal = crate::lease_renewal::LeaseRenewal::spawn(
+        Ok(crate::lease_renewal::LeaseRenewal::spawn(
             deadline,
             Some((
                 cancellation,
@@ -278,11 +295,7 @@ impl CredentialLeaseGuard {
                         .map(|grant| grant.is_some())
                 })
             },
-        );
-        Ok(RenewingSchedulingLease {
-            _renewal: renewal,
-            _guard: self,
-        })
+        ))
     }
 
     #[must_use]
@@ -528,45 +541,56 @@ impl RedisCredentialLeaseRepository {
             require_nonempty("credential runtime signal", "resource_id", resource_id)?;
         }
         let mut signals = Vec::with_capacity(resource_ids.len());
-        for ids in resource_ids.chunks(super::ACCOUNT_STATE_READ_CONCURRENCY) {
-            let batch = join_all(ids.iter().cloned().map(|id| self.load_signal(id, pool))).await;
-            signals.extend(batch.into_iter().collect::<StoreResult<Vec<_>>>()?);
+        for ids in resource_ids.chunks(RUNTIME_SIGNAL_BATCH_SIZE) {
+            signals.extend(self.load_signals(ids, pool).await?);
         }
         Ok(signals)
     }
 
-    async fn load_signal(
+    async fn load_signals(
         &self,
-        resource_id: String,
+        resource_ids: &[String],
         pool: ProviderConcurrencyPool,
-    ) -> StoreResult<CredentialRuntimeSignal> {
-        let request = CredentialLeaseRequest {
-            scope: CredentialLeaseScope::scheduling(pool),
-            resource_id: resource_id.clone(),
-            owner_id: "signal-reader".to_owned(),
-            ttl: Duration::from_secs(1),
-        };
-        let keys = self.keys(&request)?;
+    ) -> StoreResult<Vec<CredentialRuntimeSignal>> {
+        let script = Script::new(SIGNAL_SCRIPT);
+        let mut invocation = script.prepare_invoke();
+        for resource_id in resource_ids {
+            let request = CredentialLeaseRequest {
+                scope: CredentialLeaseScope::scheduling(pool),
+                resource_id: resource_id.clone(),
+                owner_id: "signal-reader".to_owned(),
+                ttl: Duration::from_secs(1),
+            };
+            let keys = self.keys(&request)?;
+            invocation.key(&keys[0]).key(&keys[2]);
+        }
         let mut connection = self.connection.clone();
-        let (in_flight, last_started): (String, String) = Script::new(SIGNAL_SCRIPT)
-            .key(&keys[0])
-            .key(&keys[2])
+        let signals: Vec<(String, String)> = invocation
             .invoke_async(&mut connection)
             .await
-            .map_err(|source| redis_unavailable("load credential runtime signal", source))?;
-        let in_flight = in_flight.parse::<u32>().map_err(|source| {
-            invalid("Redis returned an invalid in-flight count").with_source(source)
-        })?;
-        let last_started_at = if last_started == "0" {
-            None
-        } else {
-            Some(timestamp(&last_started)?)
-        };
-        Ok(CredentialRuntimeSignal {
-            resource_id,
-            in_flight,
-            last_started_at,
-        })
+            .map_err(|source| redis_unavailable("load credential runtime signals", source))?;
+        if signals.len() != resource_ids.len() {
+            return Err(invalid("Redis returned an invalid runtime signal count"));
+        }
+        resource_ids
+            .iter()
+            .zip(signals)
+            .map(|(resource_id, (in_flight, last_started))| {
+                let in_flight = in_flight.parse::<u32>().map_err(|source| {
+                    invalid("Redis returned an invalid in-flight count").with_source(source)
+                })?;
+                let last_started_at = if last_started == "0" {
+                    None
+                } else {
+                    Some(timestamp(&last_started)?)
+                };
+                Ok(CredentialRuntimeSignal {
+                    resource_id: resource_id.clone(),
+                    in_flight,
+                    last_started_at,
+                })
+            })
+            .collect()
     }
 }
 
@@ -575,6 +599,7 @@ pub(crate) struct RedisProviderLeaseCoordinator {
     repository: RedisCredentialLeaseRepository,
     process_id: String,
     sequence: AtomicU64,
+    cleanup: cleanup::SchedulingLeaseCleanup,
 }
 
 impl RedisProviderLeaseCoordinator {
@@ -584,7 +609,12 @@ impl RedisProviderLeaseCoordinator {
             repository,
             process_id: format!("gateway_{}", Uuid::now_v7().simple()),
             sequence: AtomicU64::new(0),
+            cleanup: cleanup::SchedulingLeaseCleanup::default(),
         }
+    }
+
+    pub(crate) fn cleanup_worker(&self) -> impl gateway_core::task::DaemonTask + use<> {
+        self.cleanup.clone()
     }
 
     fn owner_id(&self, operation: &str) -> String {
@@ -646,6 +676,12 @@ impl RedisProviderLeaseCoordinator {
         &self,
         request: &ProviderSchedulingLeaseRequest,
     ) -> Result<ProviderLeaseAcquisition, ProviderStoreError> {
+        let _acquisition = self.cleanup.acquire().await.ok_or_else(|| {
+            ProviderStoreError::new(
+                ProviderStoreErrorKind::Unavailable,
+                "account lease coordinator is shutting down",
+            )
+        })?;
         let ttl = request.deadline().bounded(REQUEST_LEASE_TTL);
         if ttl.is_zero() {
             return Err(ProviderStoreError::new(
@@ -669,13 +705,18 @@ impl RedisProviderLeaseCoordinator {
             .map_err(|source| crate::provider_unavailable("acquire scheduling lease", source))?;
         Ok(match acquisition {
             CredentialBoundedLeaseAcquisition::Acquired(guard) => {
-                ProviderLeaseAcquisition::Acquired(Box::new(
-                    guard
-                        .maintain(request.deadline(), request.cancellation())
-                        .map_err(|source| {
-                            crate::provider_unavailable("maintain scheduling lease", source)
-                        })?,
-                ))
+                let renewal = guard
+                    .renewal(request.deadline(), request.cancellation())
+                    .map_err(|source| {
+                        crate::provider_unavailable("maintain scheduling lease", source)
+                    })?;
+                ProviderLeaseAcquisition::Acquired(Box::new(self.cleanup.track(
+                    request.cancellation(),
+                    async move {
+                        drop(renewal);
+                        guard.release().await
+                    },
+                )))
             }
             CredentialBoundedLeaseAcquisition::Busy { retry_after } => {
                 ProviderLeaseAcquisition::Busy { retry_after }

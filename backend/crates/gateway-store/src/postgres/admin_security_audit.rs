@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use gateway_admin::model::MutationContext;
 use sqlx::{PgPool, Postgres, Transaction};
 
 use crate::{Revision, StoreError, StoreResult, postgres_unavailable, require_nonempty};
@@ -76,6 +77,32 @@ impl AdminAuditEvent {
             ));
         }
         Ok(())
+    }
+}
+
+pub(crate) fn mutation_audit(
+    context: &MutationContext,
+    operation: gateway_admin::model::audit::MutationAuditOperation,
+    entity_ref: &str,
+    changed_fields: Vec<String>,
+) -> AdminAuditEvent {
+    let event = gateway_admin::model::audit::MutationAuditIntent {
+        operation,
+        entity_ref,
+    }
+    .event(context, changed_fields);
+    AdminAuditEvent {
+        id: event.id,
+        actor_kind: event.actor_kind.into(),
+        actor_admin_user_id: event.actor_admin_user_id,
+        actor_ref: event.actor_ref,
+        admin_request_id: event.request_id,
+        action: event.action,
+        entity_kind: event.entity_kind,
+        entity_ref: event.entity_ref,
+        config_revision: None,
+        changed_fields: event.changed_fields,
+        created_at: event.occurred_at,
     }
 }
 

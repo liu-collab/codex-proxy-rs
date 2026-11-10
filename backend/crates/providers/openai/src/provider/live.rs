@@ -367,7 +367,7 @@ impl CodexProvider {
             client: self
                 .client_for_request(&context)?
                 .for_account(lease.account())
-                .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, false).error)?
+                .map_err(|error| map_client_error(error, UpstreamSendState::NotSent, None).error)?
                 .with_responses_api_base_url(lease.authentication().responses_api_base_url())
                 .with_middleware_headers(middleware_headers)
                 .with_outbound_middleware(outbound_middleware),
@@ -418,11 +418,13 @@ fn cold_live_call_stream(request: ColdLiveCall) -> EventStream {
         let allows_account_state_mutation = request.lease.allows_account_state_mutation();
         let failure_context = OpenAiFailureContext {
             client: &client,
+            image_endpoint: false,
             selector: &request.selector,
             quota: &request.quota,
             response_origin: &request.response_origin,
             cyber_policy_scope: None,
             allows_account_state_mutation,
+            upstream_model: None,
         };
         let active_account = request.lease.account().clone();
         let authorization = request
@@ -432,13 +434,18 @@ fn cold_live_call_stream(request: ColdLiveCall) -> EventStream {
             .map_err(|_| {
                 provider_error(ProviderErrorKind::Unauthorized, UpstreamSendState::NotSent)
             })?;
+        let installation_id = profile.effective_installation_id(
+            request.context.client_api_key_ref(),
+            request.lease.account_id(),
+            request.lease.installation_id(),
+        );
         let request_id = request.context.request_id().as_str().to_owned();
         let trace = request.context.trace();
         let mut request_context = CodexRequestContext::auxiliary(
             authorization.expose_secret(),
             active_account.upstream_account_id(),
             &request_id,
-            Some(request.lease.installation_id()),
+            Some(&installation_id),
         );
         request_context.trace = Some(&trace);
         request_context.account_selection = CodexAccountSelectionTelemetry::new(
@@ -472,7 +479,7 @@ fn cold_live_call_stream(request: ColdLiveCall) -> EventStream {
                 error,
             );
         }
-        let response = match attempt.map_err(map_handshake_attempt_error) {
+        let response = match attempt.map_err(|error| map_handshake_attempt_error(error, &active_account)) {
             Ok(response) => response,
             Err(mut failure) => {
                 if let Some(observation) = failure.observation.take() {
@@ -649,7 +656,7 @@ fn map_live_http_error(error: CodexClientError) -> LiveGatewayError {
 
 fn local_live_error(error: CodexClientError, message: &'static str) -> LiveGatewayError {
     // 本地传输异常可能包含 URL 或代理上下文；客户端提示与现有安全诊断各自保留
-    if let Some(diagnostic) = super::failure::client_diagnostic(&error) {
+    if let Some(diagnostic) = super::failure::client_diagnostic(&error, false) {
         tracing::warn!(
             stage = diagnostic.stage(),
             code = diagnostic.code(),
@@ -680,6 +687,11 @@ impl LiveGateway for CodexLiveGateway {
             let claim = LiveCallClaim::new(Arc::clone(&self.registry), request.call_id.to_owned());
             let (account, authorization, installation_id) =
                 self.load_pinned_credential(&account_id).await?;
+            let installation_id = profile.effective_installation_id(
+                request.client_api_key_id,
+                &account_id,
+                &installation_id,
+            );
             if !account.enabled() {
                 return Err(LiveGatewayError::new(
                     LiveGatewayErrorKind::OwnerMismatch,
@@ -738,6 +750,11 @@ impl LiveGateway for CodexLiveGateway {
                 })?;
             let (account, authorization, installation_id) =
                 self.load_pinned_credential(&account_id).await?;
+            let installation_id = profile.effective_installation_id(
+                request.client_api_key_id,
+                &account_id,
+                &installation_id,
+            );
             // hangup 与引导同源：必须走钉住账号的出口代理与连接池，
             // 不能使用共享 client 直连发出。
             let client = self

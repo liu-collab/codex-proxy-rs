@@ -28,7 +28,34 @@ use gateway_core::lifecycle::CancellationToken;
 use gateway_core::lifecycle::ConnectionLifecycle;
 use gateway_core::task::{WorkerContribution, WorkerLeaderLeasePort};
 
-pub use config::{ConfigError, HostConfig, LoadableConfig, load_config};
+pub use config::{HostConfig, LoadableConfig, load_config};
+
+/// Host 配置加载与各能力配置校验共用的脱敏错误
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("配置文件 {path} 的字段 {field:?} 不合法")]
+    InvalidValue {
+        path: std::path::PathBuf,
+        field: String,
+    },
+    #[error("current directory is unavailable")]
+    CurrentDirectory,
+    #[error("deploy/config.yaml was not found")]
+    ConfigFileNotFound,
+    #[error("configuration path is invalid")]
+    InvalidConfigPath,
+    #[error("configuration document is invalid: {path}")]
+    InvalidDocument { path: std::path::PathBuf },
+    #[error("配置文件 {path} 缺少必填字段 {field:?}")]
+    MissingField {
+        path: std::path::PathBuf,
+        field: String,
+    },
+    #[error("configuration field is invalid: {0}")]
+    InvalidField(&'static str),
+    #[error("environment variable is invalid: {0}")]
+    InvalidEnvironment(&'static str),
+}
 
 use self::client_distribution::RgAdguardClientDistribution;
 use self::logging::{LogGuard, initialize_logging};

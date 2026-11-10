@@ -4,35 +4,32 @@ use chrono::{DateTime, Utc};
 use gateway_admin::model::peer_link::{PeerLinkExport, PeerModelState as ModelState};
 use gateway_core::metering::Decimal;
 use gateway_protocol::peer::{
-    OBJECT, PeerBudgetWindow, PeerComponentStatus, PeerKeyUsage, PeerLink, PeerModelAvailability,
-    PeerModelCoverage, PeerModelState, PeerPlanCount, PeerPool, PeerPoolDisclosure, PeerPoolStates,
-    PeerQuota, PeerQuotaAccount, PeerQuotaDisclosure, PeerQuotaWindow, PeerUsage, SCHEMA_VERSION,
+    OBJECT, PeerBudgetWindow, PeerComponentStatus, PeerKeyLimits, PeerKeyUsage, PeerLink,
+    PeerModelAvailability, PeerModelCoverage, PeerModelState, PeerPlanCount, PeerPool,
+    PeerPoolStates, PeerQuota, PeerQuotaAccount, PeerQuotaWindow, PeerUsage, SCHEMA_VERSION,
 };
 use std::time::SystemTime;
 
 pub(super) fn response(export: PeerLinkExport) -> PeerLink {
-    let mut capabilities = vec!["key_usage".to_owned()];
-    let pool = export.pool.map_or_else(PeerPool::default, |pool| {
+    let mut capabilities = vec!["key_usage".to_owned(), "key_limits".to_owned()];
+    let pool = export.pool.map(|pool| {
         capabilities.push("pool_summary".to_owned());
         PeerPool {
-            disclosure: PeerPoolDisclosure::Summary,
             observed_at: Some(export.observed_at.to_rfc3339()),
-            account_count: Some(
-                pool.ready
-                    + pool.cooldown
-                    + pool.exhausted
-                    + pool.disabled
-                    + pool.error
-                    + pool.unknown,
-            ),
-            states: Some(PeerPoolStates {
+            account_count: pool.ready
+                + pool.cooldown
+                + pool.exhausted
+                + pool.disabled
+                + pool.error
+                + pool.unknown,
+            states: PeerPoolStates {
                 ready: pool.ready,
                 cooldown: pool.cooldown,
                 exhausted: pool.exhausted,
                 disabled: pool.disabled,
                 error: pool.error,
                 unknown: pool.unknown,
-            }),
+            },
             plans: pool.plans.map(|plans| {
                 plans
                     .into_iter()
@@ -41,10 +38,9 @@ pub(super) fn response(export: PeerLinkExport) -> PeerLink {
             }),
         }
     });
-    let quota = export.quota.map_or_else(PeerQuota::default, |accounts| {
+    let quota = export.quota.map(|accounts| {
         capabilities.extend(["quota_windows".to_owned(), "model_availability".to_owned()]);
         PeerQuota {
-            disclosure: PeerQuotaDisclosure::Accounts,
             accounts: accounts
                 .into_iter()
                 .map(|account| PeerQuotaAccount {
@@ -57,8 +53,8 @@ pub(super) fn response(export: PeerLinkExport) -> PeerLink {
                         .into_iter()
                         .map(|window| PeerQuotaWindow {
                             key: window.key,
-                            group: window.group,
-                            label: window.label,
+                            group: Some(window.group),
+                            label: Some(window.label),
                             limit_id: window.limit_id,
                             limit_name: window.limit_name,
                             role: window.role.map(|role| role.as_str().to_owned()),
@@ -78,26 +74,38 @@ pub(super) fn response(export: PeerLinkExport) -> PeerLink {
         capabilities,
         observed_at: export.observed_at.to_rfc3339(),
         expires_at: export.expires_at.to_rfc3339(),
-        usage: PeerUsage {
+        key_limits: Some(PeerKeyLimits {
+            max_concurrency: Some(export.key_limits.max_concurrency),
+            requests_per_minute: Some(export.key_limits.requests_per_minute),
+        }),
+        usage: Some(PeerUsage {
             status: PeerComponentStatus::Available,
             observed_at: Some(export.budget_observed_at.to_rfc3339()),
             data: Some(PeerKeyUsage {
-                unit: "USD".to_owned(),
+                unit: Some("USD".to_owned()),
                 allowed: Some(export.budget_access.allowed()),
-                daily: budget_window(
-                    export.budget.limits.daily_usd,
-                    export.budget.daily_used_usd,
-                    export.budget.daily_resets_at,
-                    export.budget_access.daily_limit_reached,
-                ),
-                weekly: budget_window(
-                    export.budget.limits.weekly_usd,
-                    export.budget.weekly_used_usd,
-                    export.budget.weekly_resets_at,
-                    export.budget_access.weekly_limit_reached,
-                ),
+                windows: vec![
+                    budget_window(
+                        "daily",
+                        "日额度",
+                        86400,
+                        export.budget.limits.daily_usd,
+                        export.budget.daily_used_usd,
+                        export.budget.daily_resets_at,
+                        export.budget_access.daily_limit_reached,
+                    ),
+                    budget_window(
+                        "weekly",
+                        "周额度",
+                        604800,
+                        export.budget.limits.weekly_usd,
+                        export.budget.weekly_used_usd,
+                        export.budget.weekly_resets_at,
+                        export.budget_access.weekly_limit_reached,
+                    ),
+                ],
             }),
-        },
+        }),
         pool,
         quota,
         models: export
@@ -123,6 +131,9 @@ pub(super) fn response(export: PeerLinkExport) -> PeerLink {
 }
 
 fn budget_window(
+    key: &str,
+    label: &str,
+    window_seconds: u64,
     total: Decimal,
     used: Decimal,
     resets_at: Option<SystemTime>,
@@ -130,10 +141,13 @@ fn budget_window(
 ) -> PeerBudgetWindow {
     let limited = total != Decimal::ZERO;
     PeerBudgetWindow {
+        key: key.to_owned(),
+        label: Some(label.to_owned()),
+        window_seconds: Some(window_seconds),
         limit_reached: Some(limit_reached),
         total: limited.then(|| total.canonical()),
         used: used.canonical(),
         remaining: limited.then(|| total.saturating_sub(used).canonical()),
-        resets_at: resets_at.map(|time| DateTime::<Utc>::from(time).to_rfc3339()),
+        reset_at: resets_at.map(|time| DateTime::<Utc>::from(time).to_rfc3339()),
     }
 }

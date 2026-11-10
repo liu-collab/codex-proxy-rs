@@ -6,7 +6,8 @@ fn metadata() -> Value {
     json!({"session_id":"source-session", "thread_id":"source-thread", "turn_id":"source-turn",
         "parent_thread_id":"source-session", "forked_from_thread_id":"source-session",
         "parent_turn_id":"source-turn", "root_turn_id":"source-turn",
-        "window_id":"source-window", "context_window_id":"source-window", "future":{"keep":true}})
+        "window_id":"source-window", "context_window_id":"source-window", "future":{"keep":true},
+        "sentry-trace":"source-trace", "baggage":"sentry-environment=synthetic"})
 }
 
 fn payload(websocket: bool) -> ProtocolPayload {
@@ -43,7 +44,9 @@ fn payload(websocket: bool) -> ProtocolPayload {
             "x-codex-window-id":"source-window", "x-codex-parent-thread-id":"source-session",
             "x-codex-turn-metadata":full.to_string(),
             "ws_request_header_traceparent":"00-11111111111111111111111111111111-2222222222222222-01",
-            "ws_request_header_tracestate":"vendor=source"
+            "ws_request_header_tracestate":"vendor=source",
+            "ws_request_header_sentry-trace":"source-trace",
+            "ws_request_header_baggage":"sentry-environment=synthetic"
         }
     }).as_object().unwrap().clone()).unwrap().with_context(Map::from_iter([
         ("use_websocket".into(), json!(websocket)),
@@ -53,7 +56,10 @@ fn payload(websocket: bool) -> ProtocolPayload {
         ("opaque_request_headers".into(), json!([
             ["x-client-turn-id",STANDARD.encode("source-turn")],
             ["traceparent",STANDARD.encode("00-11111111111111111111111111111111-2222222222222222-01")],
-            ["tracestate",STANDARD.encode("vendor=source")]
+            ["tracestate",STANDARD.encode("vendor=source")],
+            ["Sentry-Trace",STANDARD.encode("source-trace")],
+            ["baggage",STANDARD.encode("sentry-environment=synthetic")],
+            ["baggage",STANDARD.encode("sentry-release=synthetic")]
         ])),
     ]))
 }
@@ -130,11 +136,35 @@ async fn account_correlation_preserves_turns_across_transports_and_account_switc
                 event.unwrap();
             }
             let (headers, body) = capture.await;
-            assert!(!headers.contains_key("traceparent"));
-            assert!(!headers.contains_key("tracestate"));
+            assert_eq!(
+                headers["traceparent"],
+                "00-11111111111111111111111111111111-2222222222222222-01"
+            );
+            assert_eq!(headers["tracestate"], "vendor=source");
+            assert_eq!(headers["sentry-trace"], "source-trace");
+            assert_eq!(
+                headers
+                    .get_all("baggage")
+                    .iter()
+                    .map(|value| value.to_str().unwrap())
+                    .collect::<Vec<_>>(),
+                ["sentry-environment=synthetic", "sentry-release=synthetic"]
+            );
             let flat = &body["client_metadata"];
-            assert!(flat.get("ws_request_header_traceparent").is_none());
-            assert!(flat.get("ws_request_header_tracestate").is_none());
+            assert_eq!(
+                flat["ws_request_header_traceparent"],
+                headers["traceparent"].to_str().unwrap()
+            );
+            assert_eq!(flat["ws_request_header_tracestate"], "vendor=source");
+            assert_eq!(flat["ws_request_header_sentry-trace"], "source-trace");
+            assert_eq!(
+                flat["ws_request_header_baggage"],
+                "sentry-environment=synthetic"
+            );
+            assert_eq!(
+                headers["x-codex-installation-id"].to_str().unwrap(),
+                flat["x-codex-installation-id"]
+            );
             let header: Value =
                 serde_json::from_str(headers["x-codex-turn-metadata"].to_str().unwrap()).unwrap();
             let full: Value =
@@ -153,6 +183,8 @@ async fn account_correlation_preserves_turns_across_transports_and_account_switc
             assert_eq!(flat["x-client-turn-id"], "source-turn");
             assert_eq!(flat["turn_id"], "source-turn");
             for metadata in [&header, &full] {
+                assert_eq!(metadata["sentry-trace"], "source-trace");
+                assert_eq!(metadata["baggage"], "sentry-environment=synthetic");
                 assert_eq!(metadata["turn_id"], "source-turn");
                 assert_eq!(metadata["parent_turn_id"], "source-turn");
                 assert_eq!(metadata["root_turn_id"], "source-turn");

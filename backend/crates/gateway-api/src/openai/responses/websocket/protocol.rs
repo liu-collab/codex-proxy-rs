@@ -1,5 +1,7 @@
 //! Responses WebSocket 入站请求与下行事件的纯协议映射
 
+use crate::client_error::capacity_error_for_client;
+
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use gateway_core::engine::EngineError;
 use gateway_core::error::ProviderErrorKind;
@@ -7,9 +9,7 @@ use gateway_core::event::ProviderResponseHeader;
 use serde_json::{Map, Value, json};
 use thiserror::Error;
 
-use crate::openai::error::{
-    capacity_error_for_client, gateway_error_contract, gateway_error_from_engine,
-};
+use crate::openai::error::{gateway_error_contract, gateway_error_from_engine};
 
 use super::super::{
     DecodedResponsesRequest, ProtocolErrorBody, RequestDecodeError,

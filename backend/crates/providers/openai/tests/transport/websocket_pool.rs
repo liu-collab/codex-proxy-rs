@@ -289,6 +289,21 @@ async fn exact_continuation_reuses_owning_socket_after_connection_profile_update
         profile.clone(),
     )
     .with_websocket_pool(Arc::new(CodexWebSocketPool::new(Duration::from_mins(1))));
+    let account = |user: &str| {
+        use gateway_core::account::{CredentialRevision, ProviderAccount, ProviderAccountId};
+        ProviderAccount::new(
+            ProviderAccountId::new("acct_shared_slot").unwrap(),
+            gateway_core::routing::ProviderKind::new("openai").unwrap(),
+            String::new(),
+            Some(user.to_owned()),
+            "oauth".to_owned(),
+            CredentialRevision::new(1).unwrap(),
+            None,
+        )
+        .with_profile(None, Some("chatgpt-account".into()), None)
+    };
+    let replacement = backend.for_account(&account("user-b")).unwrap();
+    let backend = backend.for_account(&account("user-a")).unwrap();
     let first_request = pooled_websocket_request("wire-profile-continuation");
     let first = backend
         .create_response(
@@ -309,6 +324,26 @@ async fn exact_continuation_reuses_owning_socket_after_connection_profile_update
     let mut continuation = first_request;
     continuation.set_previous_response_id(Some("resp_connection_local".to_owned()));
     continuation.previous_response_scope = Some(PreviousResponseScope::ConnectionLocal);
+    assert!(
+        replacement
+            .create_response(
+                &continuation,
+                request_context("req_reauthorized", Some("chatgpt-account"))
+            )
+            .await
+            .is_err(),
+        "同一工作区的另一个用户不能续用旧账号的连接"
+    );
+    let changed_installation = backend
+        .create_response(
+            &continuation,
+            CodexRequestContext {
+                installation_id: Some("3b11bc82-c666-417d-b9ff-2a34fd040385"),
+                ..request_context("req_other_installation", Some("chatgpt-account"))
+            },
+        )
+        .await;
+    assert!(changed_installation.is_err(), "不同安装身份不能续用原握手");
     let second = backend
         .create_response(
             &continuation,
@@ -1123,9 +1158,9 @@ async fn concurrent_pool_transport_counts(max_connecting: usize) -> (usize, usiz
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
         let mut websocket_streams = Vec::new();
-        let mut http_count = 0;
+        let mut http_streams = Vec::new();
         for _ in 0..REQUEST_COUNT {
-            let (mut stream, _) = listener.accept().await.unwrap();
+            let (stream, _) = listener.accept().await.unwrap();
             let method = timeout(Duration::from_secs(2), async {
                 let mut prefix = [0_u8; 4];
                 loop {
@@ -1141,13 +1176,17 @@ async fn concurrent_pool_transport_counts(max_connecting: usize) -> (usize, usiz
             if method == *b"GET " {
                 websocket_streams.push(stream);
             } else {
-                let request = read_http_request(&mut stream).await;
-                assert!(request.starts_with("POST /codex/responses HTTP/1.1"));
-                write_completed_sse_response(&mut stream).await;
-                http_count += 1;
+                http_streams.push(stream);
             }
         }
 
+        // 收齐建连尝试后再响应，避免 HTTP 连接复用或重试干扰 opening 名额断言
+        let http_count = http_streams.len();
+        for mut stream in http_streams {
+            let request = read_http_request_with_body(&mut stream).await;
+            assert!(request.starts_with(b"POST /codex/responses HTTP/1.1"));
+            write_completed_sse_response(&mut stream).await;
+        }
         let websocket_count = websocket_streams.len();
         for (index, stream) in websocket_streams.into_iter().enumerate() {
             let mut websocket = accept_codex_test_websocket(stream).await;

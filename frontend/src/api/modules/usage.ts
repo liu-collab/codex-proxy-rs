@@ -80,9 +80,17 @@ export interface UsageRecordMetadata {
 
 export type UsageRecordStatus = 'success' | 'error' | 'all'
 
-export interface UsageListRecord {
-  logicalOutcome: string
+export interface UsageErrorFacts {
   errorCode: string | null
+  errorKind: string | null
+  websocketCloseCode: number | null
+  continuationUnavailableReason: string | null
+  upstreamConnectionExitReason: string | null
+  recovered: boolean
+}
+
+export interface UsageListRecord extends UsageErrorFacts {
+  logicalOutcome: string
   errorMessage: string | null
   clientApiKeyName: string | null
   id: string
@@ -94,6 +102,7 @@ export interface UsageListRecord {
   accountNotes: string | null
   accountPlanType: string | null
   accountPlanTypeDisplay: string | null
+  accountUpstreamPeer: boolean | null
   route: string
   model: string | null
   requestedModel: string | null
@@ -116,7 +125,16 @@ export interface UsageListRecord {
   userAgent: string | null
 }
 
-export interface UsageRecord {
+export interface UsageRecord extends UsageErrorFacts {
+  upstreamError: {
+    code: string | null
+    errorType: string | null
+    message: string | null
+    param: string | null
+    closeReason: string | null
+    lastEventType: string | null
+  } | null
+  retryAfterMs: number | null
   id: string
   requestId: string
   clientApiKeyId: string | null
@@ -239,7 +257,7 @@ export interface UsageOverviewHealthPoint {
   cancelledRequests: number
   incompleteRequests: number
   callerErrorRequests: number
-  errorRate: number
+  errorRate: number | null
 }
 
 export interface UsageOverviewHealth {
@@ -249,7 +267,7 @@ export interface UsageOverviewHealth {
   cancelledRequests: number
   incompleteRequests: number
   callerErrorRequests: number
-  successRate: number
+  successRate: number | null
   completionRate: number
   requestChangeRate: number | null
   successRateChange: number | null
@@ -364,10 +382,11 @@ export interface UsageDiagnosticItem {
   authenticationKind: string | null
   accountPlanType: string | null
   accountPlanTypeDisplay: string | null
+  accountUpstreamPeer: boolean | null
   requestCount: number
   successCount: number
   errorCount: number
-  errorRate: number
+  errorRate: number | null
   requestShare: number
   averageLatencyMs: number | null
   latencyP95Ms: number | null

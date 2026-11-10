@@ -1,4 +1,4 @@
-import type { RequestContext, RequestNext } from './index'
+import type { RequestContext, RequestNext } from '../types'
 import { notification as ZNotification } from '@/utils/notification'
 import { ApiError, isSessionRequired } from './error'
 

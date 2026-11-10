@@ -2,6 +2,7 @@
 
 mod reset_credit_automation;
 
+use gateway_core::engine::probe::AccountProbeTarget;
 use std::{
     collections::BTreeMap,
     str::FromStr as _,
@@ -1190,7 +1191,10 @@ impl SettingsStore for StaticSettingsStore {
                 max_concurrent_per_account: 1,
                 max_waiting_per_key: 0,
                 max_waiting_per_account: 0,
-                concurrency_wait_timeout_seconds: 30,
+                key_queue_timeout_seconds: 30,
+                account_queue_timeout_seconds: 30,
+                switch_account_on_queue_failure: false,
+                max_retry_after_seconds: 240,
                 openai_guardian_reserved_concurrency: 0,
                 openai_account_affinity: gateway_core::account::AccountAffinity::Relaxed,
                 max_account_rotations: 3,
@@ -1359,7 +1363,9 @@ async fn connection_test_should_probe_unavailable_account() {
     let events = services
         .accounts()
         .test_connection(
-            ProviderAccountId::new("acct_test").expect("account ID"),
+            AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_test").expect("account ID"),
+            ),
             gateway_core::routing::UpstreamModelId::new("grok-4.5").expect("model"),
         )
         .await
@@ -1396,7 +1402,9 @@ async fn connection_test_rate_limited_probe_returns_provider_failure() {
     let events = services
         .accounts()
         .test_connection(
-            ProviderAccountId::new("acct_test").expect("account ID"),
+            AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_test").expect("account ID"),
+            ),
             gateway_core::routing::UpstreamModelId::new("grok-4.5").expect("model"),
         )
         .await
@@ -1429,7 +1437,9 @@ async fn connection_test_should_preserve_disabled_account_status() {
     let events = services
         .accounts()
         .test_connection(
-            ProviderAccountId::new("acct_test").expect("account ID"),
+            AccountProbeTarget::ConnectionTest(
+                ProviderAccountId::new("acct_test").expect("account ID"),
+            ),
             gateway_core::routing::UpstreamModelId::new("grok-4.5").expect("model"),
         )
         .await
@@ -1923,6 +1933,7 @@ async fn accounts_batch_update_should_commit_once_and_notify_each_provider() {
         .batch_update(
             &context("batch-update-request"),
             BatchUpdateAccounts {
+                auto_use_quota_credits: None,
                 model_access: Default::default(),
                 outbound_proxy: None,
                 account_ids: vec!["acct_openai".to_owned(), "acct_xai".to_owned()],
@@ -2710,12 +2721,15 @@ async fn peer_account_usage_should_follow_budget_windows_without_borrowing_pool_
     for longest in [86_400, 604_800] {
         let provider = FakeProviderAdmin::new("openai", events());
         let mut account = account_record("openai");
+        account.concurrency_limit = None;
         account.authentication_kind = "api_key".to_owned();
         account.created_at = Utc::now() - TimeDelta::days(60);
         let store = FakeAccountStore::with_account(account, events());
         let reset_at = Utc::now() + TimeDelta::hours(1);
         let mut quota = empty_quota();
         quota.upstream = Some(ProviderUpstreamInfo {
+            max_concurrency: Some(7),
+            requests_per_minute: Some(60),
             discovered: true,
             observed_at: Some(Utc::now()),
             stale: false,
@@ -2786,6 +2800,8 @@ async fn peer_account_usage_should_follow_budget_windows_without_borrowing_pool_
             page.items[0].usage.as_ref().unwrap().total_tokens,
             Some(1_234)
         );
+        assert_eq!(page.items[0].capacity.total_slots, Some(7));
+        assert_eq!(page.items[0].account.concurrency_limit, None);
         let queries = store.quota_window_queries();
         assert_eq!(queries.len(), window_usage.len());
         for (query, expected) in queries.iter().zip(&window_usage) {
@@ -3408,6 +3424,7 @@ fn quota_local_usage(account_id: &str, total_tokens: u64) -> AccountUsage {
 pub(super) fn account_record(kind: &str) -> AccountRecord {
     let now = Utc::now();
     AccountRecord {
+        auto_use_quota_credits: false,
         outbound_proxy_id: None,
         outbound_proxy_enabled: true,
         notes: None,

@@ -49,6 +49,69 @@ fn cancelling_a_middle_waiter_preserves_fifo_and_reclaims_capacity() {
 }
 
 #[test]
+fn non_head_waiters_resume_on_promotion_without_waiting_for_the_recheck_timer() {
+    for periodic in [false, true] {
+        let queue = ConcurrencyWaitQueue::default();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let head = queue.enqueue(&["account"], 2, deadline).unwrap();
+        let budget = ConcurrencyWaitBudget::default();
+        let mut waiting = CapacityWait::new(
+            &queue,
+            ConcurrencyQueuePolicy {
+                max_waiting: 2,
+                timeout: Duration::from_secs(2),
+            },
+            None,
+            &budget,
+        )
+        .with_periodic_recheck(periodic);
+        assert!(waiting.wait(&["account"]).now_or_never().is_none());
+        assert_eq!(waiting.queued_key(), Some(&"account"));
+        let retry = waiting.wait(&["account"]);
+        futures::pin_mut!(retry);
+        assert!(retry.as_mut().now_or_never().is_none());
+        drop(head);
+        assert_eq!(retry.as_mut().now_or_never(), Some(Ok(())));
+    }
+}
+
+#[test]
+fn non_head_binding_rechecks_preserve_position_and_shared_deadline() {
+    block_on(async {
+        let queue = ConcurrencyWaitQueue::default();
+        let head = queue
+            .enqueue(&["account"], 2, Instant::now() + Duration::from_secs(2))
+            .unwrap();
+        let budget = ConcurrencyWaitBudget::default();
+        let mut waiting = CapacityWait::new(
+            &queue,
+            ConcurrencyQueuePolicy {
+                max_waiting: 2,
+                timeout: Duration::from_millis(750),
+            },
+            None,
+            &budget,
+        )
+        .with_periodic_recheck(true);
+        let started = Instant::now();
+        waiting.wait(&["account"]).await.unwrap();
+        assert!(started.elapsed() >= Duration::from_millis(500));
+        assert_eq!(waiting.queued_key(), Some(&"account"));
+        assert!(!waiting.can_try(&"account"));
+        assert!(matches!(
+            queue.enqueue(&["account"], 2, Instant::now() + Duration::from_secs(2)),
+            Err(QueueRejection::Full)
+        ));
+        assert_eq!(
+            waiting.wait(&["account"]).await,
+            Err(QueueRejection::Timeout)
+        );
+        drop((head, waiting));
+        assert!(!queue.has_waiters(&"account"));
+    });
+}
+
+#[test]
 fn wait_deadline_applies_before_and_after_becoming_head() {
     block_on(async {
         let queue = ConcurrencyWaitQueue::default();
@@ -109,9 +172,8 @@ fn request_deadline_bounds_waiting_and_dropped_future_releases_its_ticket() {
 }
 
 #[test]
-fn new_layers_and_retries_cannot_restart_a_requests_wait_budget() {
+fn account_reselection_and_retries_share_the_account_wait_budget() {
     block_on(async {
-        let keys = ConcurrencyWaitQueue::default();
         let accounts = ConcurrencyWaitQueue::default();
         let policy = ConcurrencyQueuePolicy {
             max_waiting: 1,
@@ -119,11 +181,11 @@ fn new_layers_and_retries_cannot_restart_a_requests_wait_budget() {
         };
         let request_deadline = SystemTime::now() + Duration::from_secs(5);
         let budget = ConcurrencyWaitBudget::default();
-        let mut key_wait = CapacityWait::new(&keys, policy, request_deadline, &budget);
-        key_wait.wait(&["key"]).await.unwrap();
-        drop(key_wait);
+        let mut first = CapacityWait::new(&accounts, policy, request_deadline, &budget);
+        first.wait(&["first_account"]).await.unwrap();
+        drop(first);
 
-        // 第一层已取得重试机会，后续准备跨过总时限后不能在账号层重新排队
+        // 第一次账号等待已启动时限，重试或改选其他账号都不能重新计时
         futures_timer::Delay::new(policy.timeout).await;
         let next_attempt_budget = budget.clone();
         let mut account_wait =

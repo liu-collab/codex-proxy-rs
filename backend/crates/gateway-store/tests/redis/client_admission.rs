@@ -96,7 +96,8 @@ async fn explicit_deadline_releases_capacity_without_becoming_cancellation() {
     let Some((repository, mut connection, namespace)) = repository().await else {
         return;
     };
-    let first = admission_request("req_timed", "key-timed", Duration::from_secs(1));
+    // 初始租约长于等待上限，确保容量由显式截止释放，而非原始 TTL 自然到期
+    let first = admission_request("req_timed", "key-timed", Duration::from_secs(30));
     assert_eq!(
         repository.admit_client_request(&first).await.unwrap(),
         ClientAdmissionDecision::Granted
@@ -108,14 +109,22 @@ async fn explicit_deadline_releases_capacity_without_becoming_cancellation() {
         (std::time::SystemTime::now() + Duration::from_millis(300)).into(),
         cancellation.clone(),
     );
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(!cancellation.is_cancelled());
     let mut next = admission_request("req_next", "key-timed", Duration::from_secs(1));
     next.limits.max_concurrency = 1;
-    assert_eq!(
-        repository.admit_client_request(&next).await.unwrap(),
-        ClientAdmissionDecision::Granted
-    );
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            match repository.admit_client_request(&next).await.unwrap() {
+                ClientAdmissionDecision::Granted => break,
+                ClientAdmissionDecision::Rejected(ClientAdmissionRejection::ConcurrencyLimited) => {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                decision => panic!("unexpected admission decision: {decision:?}"),
+            }
+        }
+    })
+    .await
+    .expect("explicit deadline releases admission capacity");
+    assert!(!cancellation.is_cancelled());
     drop(renewal);
     delete_namespace_keys(&mut connection, &namespace).await;
 }

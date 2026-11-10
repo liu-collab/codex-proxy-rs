@@ -15,7 +15,8 @@ use gateway_core::{
 use gateway_protocol::openai::sse::{DONE_SSE_FRAME, SseEvent, SseEventDecoder, sse_frame_is_done};
 use serde_json::Value;
 
-use crate::openai::{middleware::error_response, responses::ProtocolErrorBody};
+use crate::client_error::ProtocolErrorBody;
+use crate::openai::middleware::error_response;
 
 use super::response::{ChatIdentity, ChatStreamEncoder, project_response};
 

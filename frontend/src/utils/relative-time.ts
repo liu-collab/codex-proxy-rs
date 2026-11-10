@@ -1,4 +1,4 @@
-import type { RelativeTimeView } from '@/api/time'
+import type { RelativeTimeView } from '@/api'
 import { t } from '@/i18n'
 
 export function formatRelativeTime(value: RelativeTimeView | null | undefined) {

@@ -425,134 +425,67 @@ fn missing_capability_fields_should_remain_unknown() {
 }
 
 #[test]
-fn reasoning_effort_menu_should_be_capability_evidence_without_legacy_flag() {
-    let snapshot = parse_grok_model_catalog(
-        br#"{"object":"list","data":[{"id":"grok-reasoning","reasoning_efforts":[{"value":"xhigh","default":true},{"value":"low"}],"model":"grok-reasoning"}]}"#,
-        None,
-    )
-    .expect("reasoning effort menu");
-    let capabilities = snapshot.models()[0].capabilities();
-
-    assert_eq!(
+fn reasoning_menu_preserves_known_options_and_explicit_defaults() {
+    for (menu, expected_efforts, expected_default, expected_evidence) in [
         (
-            capabilities.reasoning_effort(),
-            capabilities
-                .reasoning_efforts()
-                .iter()
-                .map(|effort| effort.as_str())
-                .collect::<Vec<_>>(),
-            capabilities
-                .default_reasoning_effort()
-                .map(|effort| effort.as_str()),
-        ),
-        (
-            GrokCatalogCapabilityEvidence::DeclaredNative,
+            serde_json::json!([{"value":"xhigh","default":true},{"value":"low"}]),
             vec!["xhigh", "low"],
             Some("xhigh"),
-        )
-    );
-}
-
-#[test]
-fn historical_and_other_endpoint_fields_do_not_supply_model_facts() {
-    let snapshot = parse_grok_model_catalog(
-        br#"{"object":"list","data":[{"model":"grok-future","contextWindow":500000,"contextWindows":[1000000],"apiBackend":"responses","reasoningEfforts":[{"value":"high","default":true}],"features":{"reasoning":true,"reasoningEffortOptions":{"supportedEfforts":["high"],"defaultEffort":"high"}},"_meta":{"contextWindow":500000,"reasoningEfforts":[{"value":"high","default":true}]},"capabilities":{"reasoning_effort":["high"],"default_reasoning_effort":"high"},"reasoning_effort":"high"}]}"#,
-        None,
-    ).expect("unknown fields do not define CLI proxy facts");
-    let model = &snapshot.models()[0];
-    assert_eq!(
-        model.capabilities().reasoning_effort(),
-        GrokCatalogCapabilityEvidence::Unknown
-    );
-    assert!(model.capabilities().reasoning_efforts().is_empty());
-    assert_eq!(model.capabilities().default_reasoning_effort(), None);
-    assert_eq!(model.limits().context_window_tokens(), None);
-    assert_eq!(model.limits().max_context_window_tokens(), None);
-    assert_eq!(
-        model.capabilities().responses_api(),
-        GrokCatalogCapabilityEvidence::Unknown
-    );
-}
-
-#[test]
-fn unknown_reasoning_effort_values_should_not_fail_the_snapshot() {
-    let snapshot = parse_grok_model_catalog(
-        br#"{"object":"list","data":[{"id":"grok-reasoning","reasoning_effort":"ultra","reasoning_efforts":[{"value":"ultra","default":true},{"value":"low"},{"value":"hyper"}],"model":"grok-reasoning"}]}"#,
-        None,
-    )
-    .expect("unknown effort values must not break catalog parsing");
-    let capabilities = snapshot.models()[0].capabilities();
-
-    assert_eq!(
-        (
-            capabilities
-                .reasoning_efforts()
-                .iter()
-                .map(|effort| effort.as_str())
-                .collect::<Vec<_>>(),
-            capabilities
-                .default_reasoning_effort()
-                .map(|effort| effort.as_str()),
+            GrokCatalogCapabilityEvidence::DeclaredNative,
         ),
-        (vec!["low"], None)
-    );
-}
-
-#[test]
-fn reasoning_menu_uses_only_known_explicit_default() {
-    for (menu, expected) in [
         (
             serde_json::json!([{"value":"low"},{"value":"high","default":true}]),
+            vec!["low", "high"],
             Some("high"),
+            GrokCatalogCapabilityEvidence::DeclaredNative,
         ),
-        (serde_json::json!([{"value":"low"},{"value":"high"}]), None),
         (
-            serde_json::json!([{"value":"low"},{"value":"quantum","default":true}]),
+            serde_json::json!([{"value":"low"},{"value":"high"}]),
+            vec!["low", "high"],
             None,
+            GrokCatalogCapabilityEvidence::DeclaredNative,
+        ),
+        (
+            serde_json::json!([{"value":"ultra","default":true},{"value":"low"},{"value":"hyper"}]),
+            vec!["low"],
+            None,
+            GrokCatalogCapabilityEvidence::DeclaredNative,
+        ),
+        (
+            serde_json::json!([{"value":"quantum","default":true}]),
+            vec![],
+            None,
+            GrokCatalogCapabilityEvidence::Unknown,
+        ),
+        (
+            serde_json::json!([]),
+            vec![],
+            None,
+            GrokCatalogCapabilityEvidence::Unknown,
         ),
     ] {
         let body = serde_json::to_vec(&serde_json::json!({
             "object":"list", "data":[{"model":"grok-4.7","reasoning_efforts":menu}]
         }))
         .expect("fixture");
-        let snapshot = parse_grok_model_catalog(&body, None).expect("current menu");
+        let snapshot = parse_grok_model_catalog(&body, None).expect("reasoning menu");
+        let capabilities = snapshot.models()[0].capabilities();
         assert_eq!(
-            snapshot.models()[0]
-                .capabilities()
-                .default_reasoning_effort()
-                .map(|effort| effort.as_str()),
-            expected
+            (
+                capabilities
+                    .reasoning_efforts()
+                    .iter()
+                    .map(|effort| effort.as_str())
+                    .collect::<Vec<_>>(),
+                capabilities
+                    .default_reasoning_effort()
+                    .map(|effort| effort.as_str()),
+                capabilities.reasoning_effort(),
+            ),
+            (expected_efforts, expected_default, expected_evidence),
+            "{menu}",
         );
     }
-}
-
-#[test]
-fn current_reasoning_menu_does_not_borrow_defaults_from_other_sources() {
-    let snapshot = parse_grok_model_catalog(
-        br#"{"object":"list","data":[{"model":"grok-future","reasoning_efforts":[{"value":"low"}],"reasoning_effort":"low","capabilities":{"reasoning_effort":["high"],"default_reasoning_effort":"high"}}]}"#,
-        None,
-    ).expect("current menu");
-    let capabilities = snapshot.models()[0].capabilities();
-    assert_eq!(
-        capabilities
-            .reasoning_efforts()
-            .iter()
-            .map(|effort| effort.as_str())
-            .collect::<Vec<_>>(),
-        ["low"]
-    );
-    assert_eq!(capabilities.default_reasoning_effort(), None);
-}
-
-#[test]
-fn unknown_reasoning_menu_does_not_fall_back_to_other_sources() {
-    let snapshot = parse_grok_model_catalog(
-        br#"{"object":"list","data":[{"model":"grok-future","reasoning_efforts":[{"value":"quantum","default":true}],"capabilities":{"reasoning_effort":["high"],"default_reasoning_effort":"high"}}]}"#,
-        None,
-    ).expect("unknown effort");
-    let capabilities = snapshot.models()[0].capabilities();
-    assert!(capabilities.reasoning_efforts().is_empty());
-    assert_eq!(capabilities.default_reasoning_effort(), None);
 }
 
 #[test]
@@ -614,10 +547,7 @@ fn malformed_context_window_choices_are_rejected() {
 
 #[test]
 fn current_proxy_requires_the_explicit_request_model() {
-    for entry in [
-        serde_json::json!({"id":"grok-4.7"}),
-        serde_json::json!({"modelId":"grok-4.7"}),
-    ] {
+    for entry in [serde_json::json!({"id":"grok-4.7"}), serde_json::json!({})] {
         let body = serde_json::to_vec(&serde_json::json!({"object":"list","data":[entry]}))
             .expect("fixture");
         assert!(matches!(

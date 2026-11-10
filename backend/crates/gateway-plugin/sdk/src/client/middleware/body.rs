@@ -16,7 +16,7 @@ use super::super::session::{
     HostClient, PullResponseFuture, PullResponseStream, ResponseStream, SessionError, StreamSender,
 };
 use super::invalid_input;
-use crate::client::read::PendingRead;
+use crate::client::pending_read::PendingRead;
 
 const MAXIMUM_MAPPED_FRAMES_PER_SOURCE: usize = 64;
 const MAXIMUM_MAPPED_BYTES_PER_SOURCE: usize = 8 * 1024 * 1024;

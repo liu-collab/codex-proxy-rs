@@ -4,6 +4,7 @@ mod admin;
 mod affinity;
 mod api_key;
 mod catalog;
+mod codec;
 mod cookie;
 mod eligibility;
 mod oauth;
@@ -12,13 +13,13 @@ mod quota;
 mod recovery_log;
 mod refresh;
 mod repository;
-mod security;
+mod scheduling_projection;
 mod selector;
 pub mod token_client;
 mod types;
 
 pub(crate) use affinity::{
-    CodexSessionAffinity, derive_codex_cyber_policy_session_key,
+    CodexSessionAffinity, derive_cache_preference, derive_codex_cyber_policy_session_key,
     derive_codex_endpoint_session_affinity, derive_codex_session_affinity,
     derive_codex_transport_key, derive_endpoint_affinity_with_headers,
     derive_live_session_affinity, derive_previous_response_id_hash, derive_turn_alias,
@@ -35,11 +36,15 @@ pub use admin::{
     CodexCprExportDocument, CodexCredentialAdmin, CodexCredentialAdminError,
     CodexCredentialAdminService, ExportManagedCodexCredential, ImportCodexOAuthCredential,
     PreparedCodexAccountImport, PreparedCodexCredentialRotation,
-    PreparedCodexCredentialRotationGuard, RotateManagedCodexCredential,
+    PreparedCodexCredentialRotationGuard,
 };
 pub use catalog::{
     CodexCatalogScope, CodexCredentialCatalogError, CodexCredentialCatalogService,
     CodexCredentialCatalogSnapshot, CodexPlanCatalog,
+};
+pub use codec::{
+    CodexCredentialCodec, CodexCredentialDataError, CodexRuntimeAuthentication,
+    CodexRuntimeCredential,
 };
 pub use cookie::{CodexCookiePolicy, CookiePolicyError};
 pub use oauth::{
@@ -62,15 +67,12 @@ pub use refresh::{
     DueCodexCredential,
 };
 pub use repository::{CodexCredentialRepository, CredentialRepositoryError};
-pub use security::{
-    CodexCredentialCodec, CodexCredentialDataError, CodexRuntimeAuthentication,
-    CodexRuntimeCredential,
-};
 pub use selector::{
     CodexAccountFailure, CodexCredentialLease, CodexCredentialSelector, CredentialSelectionError,
     SelectCodexCredential,
 };
 pub(crate) use selector::{CodexCyberPolicyScope, SelectCodexProviderEndpointCredential};
+pub(crate) use types::oauth_identity_key;
 pub use types::{
     CODEX_AUTHENTICATION_KIND_OAUTH, CodexAccountProfile, CodexCookie, CodexCookieCaptureOutcome,
     CodexCredentialData, CodexCredentialPrincipal, CodexOAuthCredentialData, CodexOAuthSecret,

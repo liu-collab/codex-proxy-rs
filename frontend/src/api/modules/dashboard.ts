@@ -1,5 +1,5 @@
 import type { RequestOptions } from '../request'
-import type { RelativeTimeView } from '../time'
+import type { RelativeTimeView } from '../types/time'
 import type { AccountQuotaWindow, AccountUpstream } from './accounts'
 import type { AnalyticsMetadata } from './analytics'
 import type { UsageListRecord } from './usage'

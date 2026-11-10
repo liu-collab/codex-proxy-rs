@@ -3,9 +3,8 @@
 use serde::Deserialize;
 use url::Url;
 
+use crate::oauth_http::MAX_OAUTH_RESPONSE_BYTES;
 use crate::{GrokOAuthConfig, OAuthError, OAuthOperation, ProtocolViolation};
-
-pub(crate) const MAX_OAUTH_RESPONSE_BYTES: usize = 64 * 1024;
 
 /// issuer 与端点均已通过官方 Grok Build origin 策略校验的发现文档
 #[derive(Debug, Clone, PartialEq, Eq)]

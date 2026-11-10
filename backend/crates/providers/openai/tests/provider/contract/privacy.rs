@@ -282,16 +282,18 @@ async fn privacy_rewrites_websocket_handshake_and_frame_once() {
 }
 
 #[tokio::test]
-async fn privacy_header_change_uses_a_new_websocket_pool_connection() {
+async fn privacy_header_change_isolates_websocket_then_reuses_stable_headers() {
     let store = Arc::new(MemoryAccountStore::default());
     create_account(&store, "acct_provider_contract").await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let captured = tokio::spawn(async move {
         let mut sockets = Vec::new();
-        for expected in [
-            "Bearer first-synthetic-token",
-            "Bearer second-synthetic-token",
+        let mut cache_keys = Vec::new();
+        let mut session_headers = Vec::new();
+        for (expected, trace, requests) in [
+            ("Bearer first-synthetic-token", "first-trace", 1),
+            ("Bearer second-synthetic-token", "second-trace", 2),
         ] {
             let (stream, _) = timeout(Duration::from_secs(5), listener.accept())
                 .await
@@ -300,35 +302,84 @@ async fn privacy_header_change_uses_a_new_websocket_pool_connection() {
             let mut socket =
                 crate::transport::accept_codex_test_websocket_with(stream, |request, response| {
                     assert_eq!(request.headers()["authorization"], expected);
+                    assert_eq!(request.headers()["sentry-trace"], trace);
+                    assert_eq!(
+                        request.headers()["baggage"],
+                        format!("sentry-trace_id={trace}")
+                    );
+                    session_headers.push(request.headers()["session-id"].clone());
                     response.headers_mut().insert(
                         "sec-websocket-extensions",
                         "permessage-deflate".parse().unwrap(),
                     );
                 })
                 .await;
-            let frame = socket.next().await.unwrap().unwrap().into_text().unwrap();
-            assert_eq!(
-                serde_json::from_str::<Value>(&frame).unwrap()["input"][0]["content"][0]["text"],
-                "hellohello"
-            );
-            socket.send(Message::Text(json!({"type":"response.completed","response":{"id":"resp_privacy_pool","model":"gpt-5.4","status":"completed","output":[]}}).to_string().into())).await.unwrap();
+            for _ in 0..requests {
+                let frame = timeout(Duration::from_secs(5), socket.next())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap()
+                    .into_text()
+                    .unwrap();
+                let body: Value = serde_json::from_str(&frame).unwrap();
+                assert_eq!(body["input"][0]["content"][0]["text"], "hellohello");
+                cache_keys.push(body["prompt_cache_key"].as_str().unwrap().to_owned());
+                socket.send(Message::Text(json!({"type":"response.completed","response":{"id":format!("resp_privacy_pool_{}",cache_keys.len()),"model":"gpt-5.4","status":"completed","output":[]}}).to_string().into())).await.unwrap();
+            }
             // 保留第一条连接，确保下一次握手是池隔离的结果而非断线重连
             sockets.push(socket);
         }
+        assert_eq!(session_headers[0], session_headers[1]);
+        assert_eq!(cache_keys.len(), 3);
+        assert!(cache_keys.iter().all(|key| key == &cache_keys[0]));
         sockets
     });
     let provider = provider_with_base_url(&store, format!("http://{address}"));
-    for token in [
-        "Bearer first-synthetic-token",
-        "Bearer second-synthetic-token",
+    for (token, trace) in [
+        ("Bearer first-synthetic-token", Some("first-trace")),
+        ("Bearer second-synthetic-token", Some("second-trace")),
+        ("Bearer second-synthetic-token", None),
     ] {
         let mut config = outbound_policy(true);
         config.rules[0].steps[0].value = json!(token);
-        let operation = Operation::Generate(generate_with_session_context(
-            "privacy-pool",
-            Some("privacy-thread"),
-            None,
-        ));
+        let original = generate_with_session_context("privacy-pool", Some("privacy-thread"), None);
+        let mut body = original.protocol_payload().body().clone();
+        body.insert("prompt_cache_key".into(), json!("privacy-pool-cache"));
+        let mut context = original.protocol_payload().context().clone();
+        if let Some(trace) = trace {
+            context.insert(
+                "opaque_request_headers".into(),
+                json!([
+                    ["sentry-trace", STANDARD.encode(trace)],
+                    [
+                        "baggage",
+                        STANDARD.encode(format!("sentry-trace_id={trace}"))
+                    ]
+                ]),
+            );
+        }
+        let operation = Operation::Generate(
+            GenerateRequest::from_protocol_payload(
+                ProtocolPayload::json_object("openai", body)
+                    .unwrap()
+                    .with_context(context),
+            )
+            .with_provider_session_state(
+                ProviderSessionState::new(
+                    "openai",
+                    json!({
+                        "account_id":"acct_provider_contract",
+                        "conversation_id":"privacy-pool",
+                        "continuation_scope":"persisted"
+                    })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                )
+                .unwrap(),
+            ),
+        );
         let mut stream = provider
             .clone()
             .execute(

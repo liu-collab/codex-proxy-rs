@@ -156,7 +156,7 @@ impl MetricState {
             }
         }
         let client_status: Option<i32> = get(row, "client_status_code")?;
-        if client_status.is_some_and(|value| (400..=499).contains(&value)) {
+        if outcome == "failed" && client_status.is_some_and(|value| (400..=499).contains(&value)) {
             self.increment("caller_error_count", 1)?;
         }
         let attempts = u64::try_from(get::<i32>(row, "attempt_count")?)
@@ -320,6 +320,16 @@ impl MetricState {
             p99_ms: percentile(0.99)?,
         })
     }
+    pub fn request_health(&self) -> admin_observability::RequestHealth {
+        admin_observability::RequestHealth::from_counts(
+            self.count("success_count"),
+            self.count("failure_count"),
+            self.count("cancelled_count"),
+            self.count("incomplete_count"),
+            self.count("caller_error_count"),
+        )
+    }
+
     pub fn request_summary_metrics(&self) -> admin_observability::RequestSummaryMetrics {
         admin_observability::RequestSummaryMetrics {
             request_count: self.count("request_count"),

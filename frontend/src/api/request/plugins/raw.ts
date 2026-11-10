@@ -1,23 +1,6 @@
-import type { RequestContext, RequestNext } from './index'
+import type { RawResponse, RawResponseMeta, RequestContext, RequestNext } from '../types'
 import { t } from '@/i18n'
 import { ApiError, normalizeApiResponseError } from './error'
-
-export interface RawResponseMeta {
-  status: number
-  header: (name: string) => string | undefined
-}
-
-export interface RawResponse {
-  status: number
-  contentType: string
-  body: ArrayBuffer
-}
-
-export interface RawResponseOptions {
-  // 原始字节或宿主错误的正文上限；成功流由消费方约束，不在请求层缓冲
-  maximumBytes: number
-  accept: (response: RawResponseMeta) => boolean
-}
 
 export async function rawPlugin(context: RequestContext, next: RequestNext) {
   const options = context.raw

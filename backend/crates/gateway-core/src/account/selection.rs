@@ -6,6 +6,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
+use futures::FutureExt;
+
 use crate::concurrency::{CapacityWait, ConcurrencyQueuePolicy, QueueRejection};
 use crate::identity::ProviderKind;
 
@@ -92,6 +94,7 @@ pub struct AccountSelectionPolicy {
     queue_policy: ConcurrencyQueuePolicy,
     openai_guardian_reserved_concurrency: u32,
     openai_account_affinity: AccountAffinity,
+    switch_account_on_queue_failure: bool,
     max_account_rotations: u32,
     openai_session_affinity_ttl: Duration,
 }
@@ -108,6 +111,7 @@ impl AccountSelectionPolicy {
             max_concurrent_per_account: max_concurrent_per_account.into(),
             openai_guardian_reserved_concurrency: 0,
             openai_account_affinity: AccountAffinity::default(),
+            switch_account_on_queue_failure: false,
             max_account_rotations: 3,
             openai_session_affinity_ttl: Duration::from_secs(24 * 3600),
             queue_policy: ConcurrencyQueuePolicy {
@@ -126,6 +130,45 @@ impl AccountSelectionPolicy {
     #[must_use]
     pub const fn openai_account_affinity(self) -> AccountAffinity {
         self.openai_account_affinity
+    }
+
+    #[must_use]
+    pub const fn with_switch_account_on_queue_failure(mut self, enabled: bool) -> Self {
+        self.switch_account_on_queue_failure = enabled;
+        self
+    }
+
+    /// 原队位由首次选号释放。仅对允许换号的请求调用，重选不排队，也不延长请求总期限
+    pub async fn reselect_after_queue_rejection<
+        T,
+        E: From<QueueRejection>,
+        F: Future<Output = Result<T, E>>,
+    >(
+        self,
+        rejection: QueueRejection,
+        remaining: Option<Duration>,
+        select: impl FnOnce(ConcurrencyQueuePolicy) -> F,
+        no_account_available: impl FnOnce(&E) -> bool,
+    ) -> Result<T, E> {
+        if !self.switch_account_on_queue_failure || remaining.is_some_and(|time| time.is_zero()) {
+            return Err(rejection.into());
+        }
+        let queue = ConcurrencyQueuePolicy {
+            max_waiting: 0,
+            ..self.queue_policy
+        };
+        let selection = select(queue);
+        let result = match remaining {
+            Some(limit) => futures::select_biased! {
+                () = futures_timer::Delay::new(limit).fuse() => return Err(rejection.into()),
+                result = selection.fuse() => result,
+            },
+            None => selection.await,
+        };
+        match result {
+            Err(error) if no_account_available(&error) => Err(rejection.into()),
+            result => result,
+        }
     }
 
     #[must_use]
@@ -470,6 +513,8 @@ impl AccountQuotaSignals {
 /// 账号持久事实与可重建运行信号的请求级组合
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AccountCandidate {
+    /// 本次选号已确认的上游默认上限，与本地可编辑覆盖独立
+    pub inherited_concurrency: Option<super::AccountConcurrencyLimit>,
     pub account: ProviderAccount,
     pub signals: AccountRuntimeSignals,
 }
@@ -525,11 +570,16 @@ pub struct AccountSelectionContext {
 impl AccountSelectionContext {
     /// 本请求在该账号上可使用的并发上限；资格判断、租约与策略投影必须共用这一口径
     #[must_use]
-    pub fn concurrency_limit(&self, account: &ProviderAccount) -> AccountConcurrency {
+    pub fn concurrency_limit(&self, candidate: &AccountCandidate) -> AccountConcurrency {
         if self.reserved_concurrency > 0 {
             AccountConcurrency::new(self.reserved_concurrency)
         } else {
-            account.effective_concurrency(self.policy.max_concurrent_per_account())
+            let default = candidate
+                .inherited_concurrency
+                .map_or(self.policy.max_concurrent_per_account(), |limit| {
+                    limit.into_non_zero().into()
+                });
+            candidate.account.effective_concurrency(default)
         }
     }
 }
@@ -544,12 +594,23 @@ pub enum AccountEligibilityPolicy {
     #[default]
     Enforce,
     BypassForDiagnostic,
+    FreezeRecovery,
 }
 
 impl AccountEligibilityPolicy {
     #[must_use]
     pub const fn bypasses_local_eligibility(self) -> bool {
-        matches!(self, Self::BypassForDiagnostic)
+        !matches!(self, Self::Enforce)
+    }
+
+    /// 恢复探测只验证上游结果，不能通过回写 Cookie 或刷新凭据提前解除冻结
+    #[must_use]
+    pub const fn allows_account_state_mutation(self, enabled: bool) -> bool {
+        match self {
+            Self::Enforce => true,
+            Self::BypassForDiagnostic => enabled,
+            Self::FreezeRecovery => false,
+        }
     }
 }
 
@@ -671,8 +732,7 @@ impl AccountSelector {
                 )
             })
             .try_fold((0_u64, 0_u64), |(used, total), candidate| {
-                let capacity =
-                    u64::from(context.concurrency_limit(&candidate.account).limit()?.get());
+                let capacity = u64::from(context.concurrency_limit(candidate).limit()?.get());
                 Some((
                     used.saturating_add(u64::from(candidate.signals.in_flight)),
                     total.saturating_add(capacity),
@@ -868,7 +928,7 @@ impl AccountSelector {
             return Some(AccountSchedulingBlocker::ConcurrencyLimit);
         }
         if context
-            .concurrency_limit(&candidate.account)
+            .concurrency_limit(candidate)
             .limit()
             .is_some_and(|limit| candidate.signals.in_flight >= limit.get())
         {
@@ -885,7 +945,7 @@ const SMART_RESET_HALF_SCORE_SECONDS: f64 = 3_600.0;
 
 fn capacity_utilization(candidate: &AccountCandidate, context: &AccountSelectionContext) -> f64 {
     context
-        .concurrency_limit(&candidate.account)
+        .concurrency_limit(candidate)
         .limit()
         .map_or(0.0, |limit| {
             f64::from(candidate.signals.in_flight) / f64::from(limit.get())

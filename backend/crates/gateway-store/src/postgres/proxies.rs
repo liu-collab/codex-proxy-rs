@@ -781,7 +781,12 @@ impl ProxyStore for PgProxyRepository {
             .bind(command.enabled).bind(command.max_websocket_connections.map(i64::from))
             .execute(&mut *transaction).await.map_err(|source| store_error(unavailable(source)))?;
         if changed.rows_affected() != 1 {
-            return Err(store_error(conflict(&command.id)));
+            // 返回版本冲突前释放事务锁，避免误挡紧接着的导入预留
+            let error = match transaction.rollback().await {
+                Ok(()) => conflict(&command.id),
+                Err(cleanup) => conflict(&command.id).with_cleanup(cleanup),
+            };
+            return Err(store_error(error));
         }
         if let Some(location) = &command.location {
             save_location(&mut transaction, &command.id, location.as_ref())
@@ -852,7 +857,12 @@ impl ProxyStore for PgProxyRepository {
         .await
         .map_err(|source| store_error(unavailable(source)))?;
         if locked.is_none() {
-            return Err(store_error(conflict(id)));
+            // 返回版本冲突前释放事务锁，避免误挡紧接着的删除或编辑
+            let error = match transaction.rollback().await {
+                Ok(()) => conflict(id),
+                Err(cleanup) => conflict(id).with_cleanup(cleanup),
+            };
+            return Err(store_error(error));
         }
         let account_ids: Vec<String> = sqlx::query_scalar(
             "update provider_accounts set outbound_proxy_id = null, outbound_proxy_url = null, provider_quota_json = null, quota_observed_at = null,

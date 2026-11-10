@@ -695,6 +695,8 @@ impl LimitedProxy {
                 tokio::select! {
                     accepted = listener.accept() => {
                         let (mut stream, _) = accepted.unwrap();
+                        // 容量测试不测 TCP 合包，立即发送短帧避免每次握手等待延迟 ACK
+                        stream.set_nodelay(true).unwrap();
                         let (slots, active, peak, opened) = (slots.clone(), a.clone(), p.clone(), o.clone());
                         let (connect_gate, response_gate, requests) = (connect_gate.clone(), response_gate.clone(), recorded.clone());
                         let reject_connects = rejects.clone();

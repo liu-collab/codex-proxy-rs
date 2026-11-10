@@ -8,7 +8,7 @@ use std::{
 use serde::Deserialize;
 
 use super::{OperationError, conflict, internal};
-use crate::config::ConfigError;
+use crate::ConfigError;
 
 const APP_BINARY_NAME: &str = "codex-proxy-rs";
 const DEFAULT_GITHUB_API_BASE: &str = "https://api.github.com/repos";

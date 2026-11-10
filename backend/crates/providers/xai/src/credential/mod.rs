@@ -4,16 +4,14 @@ mod authorization_code;
 mod catalog;
 mod client;
 mod config;
-pub(crate) mod discovery;
+mod discovery;
 mod error;
-mod http;
 mod import;
 mod oidc_verifier;
 mod pkce;
 mod quota;
 mod refresh;
 mod repository;
-mod secret;
 mod selector;
 mod token;
 mod types;
@@ -36,10 +34,6 @@ pub use error::{
     CallbackRejection, ConfigError, FailureClass, OAuthError, OAuthErrorCode, OAuthOperation,
     ProtocolViolation, VerificationFailure,
 };
-pub use http::{
-    FormField, FormValue, HttpHeader, HttpMethod, OAuthHttpRequest, OAuthHttpResponse,
-    OAuthHttpTransport, TransportFailure, TransportFailureKind, TransportFuture,
-};
 pub use import::{
     GrokOAuthImportCandidate, GrokOAuthImportDocument, GrokOAuthImportEntry, GrokOAuthImportError,
     GrokOAuthImportMetadata, GrokOAuthImportTokens,
@@ -59,7 +53,6 @@ pub use repository::{
     GrokAccountExport, GrokCredentialAdmin, GrokCredentialLifecycle, GrokCredentialRepository,
     GrokCredentialRepositoryError, VerifiedGrokAccount,
 };
-pub use secret::SecretValue;
 pub use selector::GrokAccountSessionSelector;
 pub use token::{
     OAuthPrincipal, RefreshTokenGrant, RefreshedTokenSet, VerifiedTokenSet, parse_oauth_error,

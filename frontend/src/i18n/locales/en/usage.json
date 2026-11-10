@@ -16,14 +16,14 @@
       "serviceSuccessRate": "Service success",
       "notCompleted": "Incomplete",
       "requestVolume": "Requests",
-      "noServiceResult": "No service result",
       "title": "Health",
       "description": "Request outcomes",
       "descriptionWithGranularity": "Request outcomes · {granularityText}",
-      "completionRate": "Completion",
-      "abnormalEnd": "Abnormal",
       "loading": "Loading requests",
-      "empty": "No requests in this range"
+      "empty": "No requests in this range",
+      "errors": "Errors",
+      "noSamples": "No samples",
+      "completionRate": "Completion"
     },
     "billing": {
       "serviceLevel": "Service tier",
@@ -111,13 +111,13 @@
       "reasoningEffort": "Effort",
       "endpoint": "Endpoint",
       "upstream": "Upstream",
-      "access": "Access",
       "cost": "Cost",
       "latency": "Latency",
       "time": "Time",
       "keyName": "Key",
       "subscription": "Plan",
-      "platformType": "Provider"
+      "platformType": "Provider",
+      "transport": "Transport"
     },
     "outputThroughput": "Rate",
     "noValidSample": "No valid sample",
@@ -184,7 +184,6 @@
     },
     "records": {
       "requestLog": "Request log",
-      "currentRequestRecord": "Current request record",
       "noRecordsMatchTheseFilters": "No records match these filters"
     },
     "page": {
@@ -192,7 +191,6 @@
       "loadingUsage": "Loading usage",
       "usageSummaryLoading": "Usage summary loading",
       "usageTrends": "Trends",
-      "changesInUsageOverTime": "Changes in usage over time",
       "requestHealthTimeline": "Request health",
       "updated": "Updated {asOfDisplay}",
       "description": "View usage, performance trends, and request errors",
@@ -215,9 +213,6 @@
       "cacheHit": "Cache hit",
       "empty": "No requests in the selected range"
     },
-    "configuration": {
-      "copiedToClipboard": "Copied to clipboard"
-    },
     "metrics": {
       "notPriced": "Not priced",
       "newInput": "Uncached input",
@@ -238,13 +233,13 @@
       "diagnosticDimension": "Diagnostic dimension",
       "noDiagnosticDataYet": "No diagnostic data yet",
       "successful": "Successful: {count}",
-      "failed": "Failed: {count}",
-      "failureRate": "Failure rate: {rate}",
       "retryRate": "Retry rate: {rate}",
       "retries": "Retries: {count}",
       "loading": "Loading diagnostics",
       "empty": "No diagnostics in this range",
-      "download": "Download"
+      "download": "Download",
+      "errors": "Errors: {count}",
+      "errorRate": "Error rate: {rate}"
     },
     "cost": {
       "savings": "Savings",
@@ -295,7 +290,27 @@
       "attempt": "Attempt {index}",
       "diagnosticData": "Diagnostic data",
       "responseContent": "Response content",
-      "metadata": "Metadata"
+      "metadata": "Metadata",
+      "recovered": "Subsequently recovered",
+      "summary": {
+        "upstreamRestart": "Upstream closed the connection (service restart)",
+        "upstreamBusy": "Upstream closed the connection (try again later)",
+        "messageTooLarge": "Upstream closed the connection because the message was too large",
+        "upstreamClosed": "Upstream closed the connection before the response completed",
+        "processInterrupted": "Request execution was interrupted without a recorded final result",
+        "continuationExpired": "Continuation connection expired, resend the full context",
+        "continuationUnavailable": "Continuation state is unavailable, resend the full context",
+        "connectionLimit": "Upstream connection reached its time limit, reconnect to continue",
+        "contextTooLong": "Context exceeds the model limit",
+        "quotaExceeded": "Upstream quota is insufficient",
+        "rateLimited": "Upstream request rate limit reached",
+        "serverOverloaded": "Upstream service is overloaded"
+      },
+      "websocketCloseCode": "WS close code",
+      "lastEventType": "Last event",
+      "retryAfter": "Retry after",
+      "closeReason": "Close reason",
+      "gatewayMessage": "Gateway summary"
     },
     "insights": {
       "useStatisticalObservations": "Use statistical observations"
@@ -332,7 +347,8 @@
       "incompleteDetails": "Incomplete details",
       "total": "Total",
       "requestContent": "Request content",
-      "inProgress": "In progress"
+      "inProgress": "In progress",
+      "loadingDetails": "Loading request details"
     },
     "successfulRequest": "Successful requests",
     "withinFilterRange": "Within filter range",
@@ -342,6 +358,7 @@
     "averageTimeTaken": "Average latency",
     "successfulRequestAverage": "Successful requests only",
     "usageOverview": "Usage overview",
-    "noUsageRecords": "No usage records"
+    "noUsageRecords": "No usage records",
+    "transportDirection": "Upstream {upstream} · Client {client}"
   }
 }

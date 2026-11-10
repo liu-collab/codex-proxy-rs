@@ -11,11 +11,15 @@ use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use gateway_core::{
     lifecycle::CancellationToken,
-    task::{DaemonTask, WorkerDaemonContext, WorkerTaskError},
+    task::{
+        DaemonRestartPolicy, DaemonTask, WorkerContribution, WorkerDaemonContext, WorkerId,
+        WorkerKind, WorkerRegistration, WorkerRunnable, WorkerTaskError,
+    },
 };
 use tracing::{info, warn};
 
 use crate::{
+    model::AdminError,
     model::backup::{
         BackupError, BackupObjectMetadata, BackupRecord, BackupStatus, BackupStatusTransition,
         BackupStorageConfig, BackupTriggerKind, build_backup_seed, code,
@@ -33,6 +37,8 @@ impl From<BackupError> for WorkerTaskError {
 }
 
 use super::policy::{BackupSchedule, decide_retention};
+
+const BACKUP_WORKER_OWNER: &str = "backup";
 
 /// 循环间隔：管理员修改 Cron 后该时长内生效；无工作时可取消等待
 const BACKUP_LOOP_INTERVAL: Duration = Duration::from_secs(30);
@@ -71,6 +77,22 @@ impl BackupTask {
     pub fn with_timezone(mut self, timezone: gateway_core::time::DeploymentTimeZone) -> Self {
         self.timezone = timezone;
         self
+    }
+
+    pub(crate) fn into_worker(self) -> Result<WorkerContribution, AdminError> {
+        let id = WorkerId::try_new(WorkerKind::Backup, BACKUP_WORKER_OWNER)
+            .map_err(|_| AdminError::internal("备份 Worker ID 不合法"))?;
+        let restart = DaemonRestartPolicy::try_new(Duration::from_secs(1), Duration::from_secs(60))
+            .map_err(|_| AdminError::internal("备份 Worker 重启策略不合法"))?;
+        let registration = WorkerRegistration::try_new(
+            id,
+            WorkerRunnable::Daemon {
+                restart,
+                task: Box::new(self),
+            },
+        )
+        .map_err(|_| AdminError::internal("备份 Worker 注册信息不合法"))?;
+        Ok(WorkerContribution::Registration(registration))
     }
 }
 

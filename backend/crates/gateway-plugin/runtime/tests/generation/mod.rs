@@ -3,11 +3,16 @@
 mod authentication;
 mod configuration;
 mod data;
+mod diagnostics;
+mod instance;
 mod maintenance;
+mod management;
 mod observer;
 mod policy;
-mod prepare;
 mod private_state;
+mod runtime;
+mod set;
+mod snapshot;
 mod upstream_adapter;
 
 use gateway_admin::{
@@ -25,6 +30,7 @@ use gateway_plugin_sdk::Contributions;
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use crate::support::store::Store;
@@ -113,4 +119,14 @@ async fn wait_until_empty(cache: &std::path::Path) {
     })
     .await
     .unwrap();
+}
+
+async fn wait_until_unready(reference: &gateway_core::routing::extensions::ExtensionSetReference) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while reference.is_ready() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker exit observed");
 }

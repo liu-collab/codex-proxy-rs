@@ -472,6 +472,90 @@ impl CostCoverage {
     }
 }
 
+/// 请求健康计数与服务成功率，调用方错误和取消不计入有效样本
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RequestHealth {
+    pub success_requests: u64,
+    pub failed_requests: u64,
+    pub cancelled_requests: u64,
+    pub incomplete_requests: u64,
+    pub caller_error_requests: u64,
+}
+
+impl RequestHealth {
+    #[must_use]
+    pub fn from_counts(
+        success: u64,
+        failed: u64,
+        cancelled: u64,
+        incomplete: u64,
+        caller_error: u64,
+    ) -> Self {
+        Self {
+            success_requests: success,
+            failed_requests: failed.saturating_sub(caller_error),
+            cancelled_requests: cancelled,
+            incomplete_requests: incomplete,
+            caller_error_requests: caller_error,
+        }
+    }
+
+    pub(crate) fn from_metrics(metrics: &RequestMetrics) -> Self {
+        Self::from_counts(
+            metrics.success_count,
+            metrics.failure_count,
+            metrics.cancelled_count,
+            metrics.incomplete_count,
+            metrics.caller_error_count,
+        )
+    }
+
+    /// 账号与健康时间线使用百分数，洞察接口使用 0 到 1 的比例
+    #[must_use]
+    pub fn success_rate(self) -> Option<f64> {
+        self.success_ratio().map(|ratio| ratio * 100.0)
+    }
+
+    pub(crate) fn success_ratio(self) -> Option<f64> {
+        let total = self.eligible_requests();
+        (total > 0).then(|| self.success_requests as f64 / total as f64)
+    }
+
+    pub(crate) fn error_ratio(self) -> Option<f64> {
+        let total = self.eligible_requests();
+        (total > 0).then(|| self.non_success_requests() as f64 / total as f64)
+    }
+
+    // 未完成保留交付终态，但上游失败、超时和进程中断都不能视为服务成功
+    pub(crate) fn non_success_requests(self) -> u64 {
+        self.failed_requests
+            .saturating_add(self.incomplete_requests)
+    }
+
+    pub(crate) fn eligible_requests(self) -> u64 {
+        self.success_requests
+            .saturating_add(self.non_success_requests())
+    }
+
+    pub(crate) fn add_metrics(&mut self, metrics: &RequestMetrics) {
+        self.add_window(Self::from_metrics(metrics));
+    }
+
+    pub(crate) fn add_window(&mut self, other: Self) {
+        self.success_requests = self.success_requests.saturating_add(other.success_requests);
+        self.failed_requests = self.failed_requests.saturating_add(other.failed_requests);
+        self.cancelled_requests = self
+            .cancelled_requests
+            .saturating_add(other.cancelled_requests);
+        self.incomplete_requests = self
+            .incomplete_requests
+            .saturating_add(other.incomplete_requests);
+        self.caller_error_requests = self
+            .caller_error_requests
+            .saturating_add(other.caller_error_requests);
+    }
+}
+
 /// 请求级聚合指标
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RequestMetrics {
@@ -622,7 +706,7 @@ pub struct AccountPoolMetrics {
 pub struct AccountModelUsage {
     pub model: String,
     pub request_count: u64,
-    pub success_count: u64,
+    pub health: RequestHealth,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
     pub cached_input_tokens: Option<u64>,
@@ -635,7 +719,7 @@ pub struct AccountModelUsage {
     pub total_tokens: Option<u64>,
     pub cost_coverage: CostCoverage,
     pub costs: Vec<CurrencyCost>,
-    pub last_used_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
 }
 
 /// 账号在单小时窗口内的请求数
@@ -684,8 +768,10 @@ pub struct DashboardAccountUsage {
 }
 
 /// Dashboard 当前账号池的可重建运行时槽位事实
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DashboardRuntimeSlots {
+    /// 仅未设置本地覆盖的账号可能继承有效互联观测
+    pub inherited_versions: Vec<gateway_core::account::QuotaObservationVersion>,
     /// 继承运行参数默认并发上限的可调度账号数
     pub inherited_accounts: u64,
     /// 已配置账号级并发上限的可调度账号槽位总数
@@ -724,6 +810,11 @@ pub struct UsageListRecord {
     pub outcome: RequestOutcome,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub error_kind: Option<String>,
+    pub websocket_close_code: Option<u16>,
+    pub continuation_unavailable_reason: Option<String>,
+    pub upstream_connection_exit_reason: Option<String>,
+    pub recovered: bool,
     pub client_status_code: Option<u16>,
     pub client_api_key_name: Option<String>,
     pub id: String,
@@ -739,6 +830,8 @@ pub struct UsageListRecord {
     /// 请求选号时冻结的账号套餐
     pub provider_account_plan_type: Option<String>,
     pub provider_account_plan_type_display: Option<String>,
+    /// 查询时的互联识别结果，缺少当前摘要时为未知
+    pub provider_account_upstream_peer: Option<bool>,
     pub provider_account_authentication_kind: Option<String>,
     pub upstream_model_id: Option<String>,
     pub upstream_transport: Option<String>,
@@ -780,6 +873,23 @@ pub struct UsageListRecord {
     pub started_at: DateTime<Utc>,
 }
 
+/// 受控请求详情中的上游错误字段，不参与错误分类或普通日志输出
+#[derive(Clone, PartialEq)]
+pub struct UsageUpstreamError {
+    pub code: Option<String>,
+    pub error_type: Option<String>,
+    pub message: Option<String>,
+    pub param: Option<String>,
+    pub close_reason: Option<String>,
+    pub last_event_type: Option<String>,
+}
+
+impl std::fmt::Debug for UsageUpstreamError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("UsageUpstreamError(<restricted>)")
+    }
+}
+
 /// 一次完整模型请求的公共观测记录
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageRecord {
@@ -818,6 +928,11 @@ pub struct UsageRecord {
     pub error_kind: Option<String>,
     pub provider_error_code: Option<String>,
     pub error_message: Option<String>,
+    pub upstream_error: Option<UsageUpstreamError>,
+    pub websocket_close_code: Option<u16>,
+    pub continuation_unavailable_reason: Option<String>,
+    pub upstream_connection_exit_reason: Option<String>,
+    pub recovered: bool,
     pub retry_after_ms: Option<u64>,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
@@ -976,7 +1091,9 @@ pub struct DiagnosticObservation {
     pub average_latency_ms: Option<u64>,
     pub latency_p95_ms: Option<u64>,
     pub first_token_p95_ms: Option<u64>,
-    pub non_completion_count: u64,
+    pub cancelled_count: u64,
+    pub incomplete_count: u64,
+    pub caller_error_count: u64,
     pub retry_count: u64,
     pub retried_request_count: u64,
     pub cost_coverage: CostCoverage,
@@ -1064,7 +1181,7 @@ pub struct TrendPoint {
     pub bucket_start: DateTime<Utc>,
     pub granularity: Granularity,
     pub metrics: RequestMetrics,
-    pub service_failure_count: u64,
+    pub error_count: u64,
     pub average_latency_ms: Option<u64>,
     pub average_first_token_latency_ms: Option<u64>,
     pub cached_token_rate: f64,
@@ -1082,7 +1199,7 @@ pub struct TrendSummary {
     pub output_tokens: u64,
     pub cached_input_tokens: u64,
     pub total_tokens: u64,
-    pub service_failure_count: u64,
+    pub error_count: u64,
     pub average_latency_ms: Option<u64>,
     pub max_latency_ms: Option<u64>,
     pub min_latency_ms: Option<u64>,
@@ -1246,7 +1363,7 @@ pub struct UsageInsightsHealthPoint {
     pub cancelled_requests: u64,
     pub incomplete_requests: u64,
     pub caller_error_requests: u64,
-    pub error_rate: f64,
+    pub error_rate: Option<f64>,
 }
 
 /// 洞察健康汇总；失败数已排除调用方错误
@@ -1258,7 +1375,7 @@ pub struct UsageInsightsHealth {
     pub cancelled_requests: u64,
     pub incomplete_requests: u64,
     pub caller_error_requests: u64,
-    pub success_rate: f64,
+    pub success_rate: Option<f64>,
     pub completion_rate: f64,
     pub points: Vec<UsageInsightsHealthPoint>,
 }
@@ -1439,11 +1556,13 @@ pub struct DiagnosticsItem {
     pub name: String,
     pub account_authentication_kind: Option<String>,
     pub account_plan_type: Option<String>,
+    /// 仅账号维度补充当前互联识别结果
+    pub account_upstream_peer: Option<bool>,
     pub account_plan_type_display: Option<String>,
     pub request_count: u64,
     pub success_count: u64,
     pub error_count: u64,
-    pub error_rate: f64,
+    pub error_rate: Option<f64>,
     pub request_share: f64,
     pub average_latency_ms: Option<u64>,
     pub latency_p95_ms: Option<u64>,

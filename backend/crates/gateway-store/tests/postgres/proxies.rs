@@ -333,7 +333,12 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
         );
         assert_eq!(proxies.get(&saved.id).await.unwrap().enabled, enabled);
         let reservation = proxies.reserve_import(&saved.id).await;
-        assert_eq!(reservation.is_ok(), enabled);
+        assert_eq!(
+            reservation.is_ok(),
+            enabled,
+            "import reservation failed: {:?}",
+            reservation.as_ref().err()
+        );
         drop(reservation);
         if !enabled {
             let error = admin
@@ -350,6 +355,7 @@ async fn disabled_proxy_projects_direct_while_preserving_bindings_and_credential
             let error = admin
                 .batch_update_accounts(
                     BatchUpdateAccounts {
+                        auto_use_quota_credits: None,
                         account_ids: vec![
                             "acct_enabled_openai".to_owned(),
                             "acct_enabled_xai".to_owned(),
@@ -730,8 +736,8 @@ async fn rejected_import_reservations_release_proxy_lock_before_returning() {
 }
 
 #[tokio::test]
-async fn stale_proxy_test_releases_lock_before_next_update() {
-    let Some(database) = TestDatabase::create("stale_proxy_test_lock").await else {
+async fn stale_proxy_mutations_release_locks_before_next_update() {
+    let Some(database) = TestDatabase::create("stale_proxy_mutation_lock").await else {
         return;
     };
     let store = PgProxyRepository::new(database.pool.clone());
@@ -757,52 +763,63 @@ async fn stale_proxy_test_releases_lock_before_next_update() {
         .unwrap()
         .record;
 
-    // 暂停连接归还时的后台清理，确保锁由返回错误前的显式回滚释放
-    let release_gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
-    let rejected_pool = database
-        .pool
-        .options()
-        .clone()
-        .max_connections(1)
-        .after_release({
-            let release_gate = release_gate.clone();
-            move |_, _| {
+    for mutation in ["record_test", "update", "delete"] {
+        // 暂停连接归还时的后台清理，确保锁由返回错误前的显式回滚释放
+        let release_gate = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        let rejected_pool = database
+            .pool
+            .options()
+            .clone()
+            .max_connections(1)
+            .after_release({
                 let release_gate = release_gate.clone();
-                Box::pin(async move {
-                    let _permit = release_gate.acquire().await.unwrap();
-                    Ok(true)
-                })
-            }
-        })
-        .connect_with((*database.pool.connect_options()).clone())
-        .await
-        .unwrap();
-    let stale_writer = PgProxyRepository::new(rejected_pool.clone());
-    let error = stale_writer
-        .record_test(&saved.id, stale_revision, success(), &context)
-        .await
-        .unwrap_err();
-    let update = store
-        .update(
-            UpdateProxy {
-                max_websocket_connections: None,
-                enabled: None,
-                id: saved.id.clone(),
-                revision: saved.revision,
-                name: saved.name.clone(),
-                proxy: None,
-                auto_location: None,
-                location: None,
-                test: None,
-            },
-            &context,
-        )
-        .await;
-    release_gate.add_permits(1);
-    rejected_pool.close().await;
+                move |_, _| {
+                    let release_gate = release_gate.clone();
+                    Box::pin(async move {
+                        let _permit = release_gate.acquire().await.unwrap();
+                        Ok(true)
+                    })
+                }
+            })
+            .connect_with((*database.pool.connect_options()).clone())
+            .await
+            .unwrap();
+        let stale_writer = PgProxyRepository::new(rejected_pool.clone());
+        let command = |revision| UpdateProxy {
+            max_websocket_connections: None,
+            enabled: None,
+            id: saved.id.clone(),
+            revision,
+            name: saved.name.clone(),
+            proxy: None,
+            auto_location: None,
+            location: None,
+            test: None,
+        };
+        let error = match mutation {
+            "record_test" => stale_writer
+                .record_test(&saved.id, stale_revision, success(), &context)
+                .await
+                .unwrap_err(),
+            "update" => stale_writer
+                .update(command(stale_revision), &context)
+                .await
+                .unwrap_err(),
+            "delete" => stale_writer
+                .delete(&saved.id, stale_revision, &context)
+                .await
+                .unwrap_err(),
+            _ => unreachable!(),
+        };
+        let update = store.update(command(saved.revision), &context).await;
+        release_gate.add_permits(1);
+        rejected_pool.close().await;
+        assert_eq!(error.kind(), AdminStoreErrorKind::Conflict);
+        saved = update
+            .unwrap_or_else(|error| panic!("过期 {mutation} 不应阻挡后续编辑: {error:?}"))
+            .record;
+    }
     database.close().await;
-    assert_eq!(error.kind(), AdminStoreErrorKind::Conflict);
-    assert!(update.is_ok(), "过期检测结果不应阻挡后续编辑: {update:?}");
 }
 
 #[tokio::test]
@@ -1164,6 +1181,7 @@ async fn legacy_urls_join_one_catalog_entry_and_invalid_batch_rolls_back() {
         admin
             .batch_update_accounts(
                 BatchUpdateAccounts {
+                    auto_use_quota_credits: None,
                     model_access: Default::default(),
                     account_ids: vec!["acct_one".to_owned(), "acct_missing".to_owned()],
                     enabled: Some(false),

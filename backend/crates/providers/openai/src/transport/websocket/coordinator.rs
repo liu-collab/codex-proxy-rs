@@ -154,6 +154,7 @@ pub(crate) async fn prepare_response_create_request_with_pool(
         .acquire(
             &key,
             required_response_id,
+            request.codex_search_declared == Some(true),
             request.connection().outbound_proxy.as_ref(),
             downstream_cancellation,
         )
@@ -439,7 +440,7 @@ fn start_pooled_websocket_connect(
 fn opening_failure_reason(error: &CodexWebSocketExchangeError) -> &'static str {
     match error.classified() {
         CodexWebSocketExchangeError::InvalidRequest(_) => "request_build_failure",
-        CodexWebSocketExchangeError::Connect(error)
+        CodexWebSocketExchangeError::Connect { source: error, .. }
         | CodexWebSocketExchangeError::Transport(error) => transport_metric_reason(error),
         CodexWebSocketExchangeError::ConnectTimeout { .. } => "connect_timeout",
         CodexWebSocketExchangeError::Upstream(_) => "upgrade_rejected",
@@ -504,6 +505,7 @@ async fn connect_websocket_connection(
             metadata: websocket_connection_metadata(&response, connection),
             continuation: WebSocketContinuationState::default(),
             created_at: tokio::time::Instant::now(),
+            initial_search_declared: None,
         },
         started_at.elapsed(),
     ))
@@ -614,6 +616,7 @@ pub(crate) async fn execute_prepared_response_create_request_stream(
         metadata,
         continuation,
         created_at,
+        initial_search_declared,
     } = connection;
     trace.record("upstream.connection", serde_json::json!({
         "connectionId": websocket.connection_id().to_string(), "reused": reused,
@@ -660,6 +663,8 @@ pub(crate) async fn execute_prepared_response_create_request_stream(
         lease,
         created_at,
         continuation,
+        initial_search_declared: initial_search_declared
+            .unwrap_or(request.codex_search_declared.unwrap_or(false)),
     });
     let mut exchange = stream_websocket_response(
         websocket,

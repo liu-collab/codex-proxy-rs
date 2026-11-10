@@ -94,7 +94,9 @@ const {
   openaiSessionAffinityTtlHoursValue,
   maxWaitingPerKeyValue,
   maxWaitingPerAccountValue,
-  concurrencyWaitTimeoutSecondsValue,
+  keyQueueTimeoutSecondsValue,
+  accountQueueTimeoutSecondsValue,
+  maxRetryAfterSecondsValue,
   responsesMaxDecompressedBodyMiBValue,
   usageRetentionDaysValue,
   resetCreditLeadMinutesValue,
@@ -209,7 +211,10 @@ watch(section, (value) => {
             v-model:max-concurrent-per-account="maxConcurrentPerAccountValue"
             v-model:max-waiting-per-key="maxWaitingPerKeyValue"
             v-model:max-waiting-per-account="maxWaitingPerAccountValue"
-            v-model:concurrency-wait-timeout-seconds="concurrencyWaitTimeoutSecondsValue"
+            v-model:key-queue-timeout-seconds="keyQueueTimeoutSecondsValue"
+            v-model:account-queue-timeout-seconds="accountQueueTimeoutSecondsValue"
+            v-model:switch-account-on-queue-failure="form.switchAccountOnQueueFailure"
+            v-model:max-retry-after-seconds="maxRetryAfterSecondsValue"
             v-model:openai-guardian-reserved-concurrency="openaiGuardianReservedConcurrencyValue"
           />
           <AccountErrorProtectionCard v-model="form.accountErrorProtection" :disabled="disabled" />

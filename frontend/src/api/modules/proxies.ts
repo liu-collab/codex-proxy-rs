@@ -1,14 +1,8 @@
 import type { RequestOptions } from '../request'
+import type { RequestLocation, RequestLocationDetection } from '../types/location'
 import type { AccountUpstream } from './accounts'
 import type { AccountGroupRef } from './groups'
-import type { RequestLocation } from './settings'
 import request from '../request'
-
-export type ProxyLocationDetection
-  = | { status: 'notRequested' }
-    | { status: 'detected', location: RequestLocation }
-    | { status: 'failed', message: string }
-    | { status: 'conflict' }
 
 export interface DetectedProxyLocation {
   location: RequestLocation
@@ -18,7 +12,7 @@ export interface DetectedProxyLocation {
 }
 
 export interface OutboundProxyTest {
-  location: ProxyLocationDetection
+  location: RequestLocationDetection
   success: boolean
   latencyMs: number
   exitIp: string | null
@@ -212,11 +206,12 @@ export function testProxy(data: ProxyTestParam[], options: RequestOptions = {}) 
   })
 }
 
-export function probeProxy(data: ProxyProbeParam) {
+export function probeProxy(data: ProxyProbeParam, options: RequestOptions = {}) {
   return request<OutboundProxyTest>({
     url: '/api/admin/proxies/probe',
     method: 'POST',
     data,
     timeout: 25000,
+    ...options,
   })
 }

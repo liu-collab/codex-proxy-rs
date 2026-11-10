@@ -62,15 +62,16 @@ use crate::{
     policy::{ClientApiKeyId, ClientPolicy},
     provider_ports::{ProviderSessionAffinityPort, ProviderStoreErrorKind},
     routing::{
-        FrozenAccountScope, ProviderCatalogUnavailable, PublicModelDescriptor, PublicModelId,
-        RoutingContext, RuntimeSnapshot, UpstreamModelId, request_settings::RequestSettings,
+        FrozenAccountScope, ProviderCatalogUnavailable, ProviderModelContent,
+        PublicModelDescriptor, PublicModelId, RoutingContext, RuntimeSnapshot, UpstreamModelId,
+        request_settings::RequestSettings,
     },
     runtime::{RuntimeSnapshotHandle, RuntimeSnapshotPublisher},
 };
 use futures::{FutureExt as _, future::BoxFuture, pin_mut, select_biased};
 use futures_timer::Delay;
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     sync::{Arc, Weak},
     time::{Instant, SystemTime},
 };
@@ -410,23 +411,7 @@ impl DefaultExecutionService {
         started_at: SystemTime,
         request_id: Option<ModelRequestId>,
     ) -> Result<StartedExecution, GatewayError> {
-        crate::engine::image_generation::check_image_generation(
-            authorization.account_scope.allows_image_generation(),
-            &request.operation,
-        )?;
         let request_id = request_id.map_or_else(new_request_id, Ok)?;
-        if authorization.cancellation.is_cancelled() {
-            return Err(GatewayError::new(
-                GatewayErrorKind::Cancelled,
-                "Parent request was cancelled.",
-            ));
-        }
-        if authorization.deadline_at.is_elapsed() {
-            return Err(GatewayError::new(
-                GatewayErrorKind::Timeout,
-                "Request deadline elapsed.",
-            ));
-        }
         let account_group_ids = authorization
             .account_scope
             .routing_snapshot()
@@ -493,6 +478,22 @@ impl DefaultExecutionService {
         let budget_key_id = request.client.policy.key_id().clone();
         let mut entered_execution = false;
         let result = async {
+            crate::engine::image_generation::check_image_generation(
+                authorization.account_scope.allows_image_generation(),
+                &request.operation,
+            )?;
+            if authorization.cancellation.is_cancelled() {
+                return Err(GatewayError::new(
+                    GatewayErrorKind::Cancelled,
+                    "Parent request was cancelled.",
+                ));
+            }
+            if authorization.deadline_at.is_elapsed() {
+                return Err(GatewayError::new(
+                    GatewayErrorKind::Timeout,
+                    "Request deadline elapsed.",
+                ));
+            }
             if request_policy.is_some() {
                 start_guard = Some(self.prepare_execution_start(&request, &request_id, &mut authorization).await?);
             }
@@ -679,7 +680,7 @@ impl DefaultExecutionService {
                 request_id = request_id.as_str(),
                 key_id = budget_key_id.as_str(),
                 failure_kind = error.kind().as_str(),
-                "请求在路由或准入阶段被拒绝"
+                "请求在执行前被拒绝"
             );
             let rejection = crate::engine::EntryRejection {
                 request_id: request_id.clone(),
@@ -723,7 +724,6 @@ impl DefaultExecutionService {
         request_id: &ModelRequestId,
         authorization: &mut AuthorizedExecution,
     ) -> Result<ExecutionStartGuard, GatewayError> {
-        let concurrency_wait_budget = ConcurrencyWaitBudget::default();
         let (admission, admission_decision_ms) = if authorization.nested.is_some() {
             let permit = authorization.nested_permit.take().ok_or_else(|| {
                 GatewayError::new(
@@ -740,7 +740,6 @@ impl DefaultExecutionService {
                     request_id,
                     authorization.deadline_at,
                     authorization.cancellation.clone(),
-                    &concurrency_wait_budget,
                 )
                 .await?;
             let admission = if let Some(permit) = authorization.nested_permit.take() {
@@ -773,7 +772,6 @@ impl DefaultExecutionService {
         Ok(ExecutionStartGuard {
             admission,
             active_request,
-            concurrency_wait_budget,
             admission_decision_ms,
         })
     }
@@ -801,7 +799,6 @@ impl DefaultExecutionService {
         let ExecutionStartGuard {
             admission,
             active_request,
-            concurrency_wait_budget,
             admission_decision_ms,
         } = start_guard;
         let observation = plan
@@ -883,7 +880,7 @@ impl DefaultExecutionService {
             )
             .await
         {
-            Ok(core) => core.with_concurrency_wait_budget(concurrency_wait_budget),
+            Ok(core) => core,
             Err(error) => {
                 if let Some(budget) = &self.budget {
                     settle_budget(
@@ -1244,13 +1241,13 @@ impl DefaultExecutionService {
         request_id: &ModelRequestId,
         deadline_at: Deadline,
         cancellation: CancellationToken,
-        budget: &ConcurrencyWaitBudget,
     ) -> Result<AdmissionLease, GatewayError> {
         let policy = client.snapshot.client_queue_policy();
         let limits = client.policy.limits();
         let key = client.policy.key_id();
+        let budget = ConcurrencyWaitBudget::default();
         let mut waiting =
-            CapacityWait::new(&self.admission_waiting, policy, deadline_at.at(), budget);
+            CapacityWait::new(&self.admission_waiting, policy, deadline_at.at(), &budget);
         let mut admission = AdmissionLease {
             port: Arc::clone(&self.admissions),
             diagnostics: self.diagnostics.clone(),
@@ -1333,14 +1330,14 @@ impl DefaultExecutionService {
         frozen: Option<Arc<crate::routing::RuntimeSnapshot>>,
     ) -> Result<AccountProbeResult, AccountProbeError> {
         let AccountProbeRequest {
-            account_id,
+            target,
             provider_kind,
             upstream_model,
             operation,
         } = request;
         let observed = ProbeObservation {
             provider_kind: provider_kind.clone(),
-            account_id: account_id.clone(),
+            account_id: target.account_id().clone(),
             upstream_model: upstream_model.clone(),
         };
         let snapshot = frozen
@@ -1401,7 +1398,7 @@ impl DefaultExecutionService {
                 new_request,
                 operation,
                 plan,
-                account_id,
+                target,
                 None,
                 CancellationToken::new(),
             )
@@ -1466,7 +1463,18 @@ impl DefaultExecutionService {
             }
             _ => (AccountProbeErrorSource::Gateway, None, None),
         };
+        let mut failure = AccountProbeError::new(
+            gateway_error_from_engine(error),
+            source,
+            send_state,
+            upstream_response,
+        );
         if let EngineError::Provider(provider_error) = error {
+            if source == AccountProbeErrorSource::Provider {
+                failure.proxy_hint = provider_error
+                    .diagnostic()
+                    .and_then(|diagnostic| diagnostic.proxy_hint());
+            }
             let latency = started_at.elapsed().unwrap_or_default();
             let latency_ms = u64::try_from(latency.as_millis()).unwrap_or(u64::MAX);
             tracing::warn!(
@@ -1502,12 +1510,7 @@ impl DefaultExecutionService {
                 );
             }
         }
-        AccountProbeError::new(
-            gateway_error_from_engine(error),
-            source,
-            send_state,
-            upstream_response,
-        )
+        failure
     }
 }
 
@@ -1565,7 +1568,12 @@ impl ExecutionService for DefaultExecutionService {
             for kind in scope.provider_kinds() {
                 let provider = providers.get(kind).ok_or(ProviderCatalogUnavailable)?;
                 let Some(models) = provider
-                    .query_client_model_catalog(scope, protocol, client_version)
+                    .query_client_model_catalog(
+                        client.policy.key_id(),
+                        scope,
+                        protocol,
+                        client_version,
+                    )
                     .await?
                 else {
                     for profile in client.snapshot.profiles_for_provider_scope(kind, scope) {
@@ -1575,11 +1583,27 @@ impl ExecutionService for DefaultExecutionService {
                     }
                     continue;
                 };
+                let contributions: Vec<_> = client
+                    .snapshot
+                    .contributed_models_for_scope(kind, scope)
+                    .collect();
+                let mut contributed_by_model = BTreeMap::new();
+                if !contributions.is_empty()
+                    && models
+                        .iter()
+                        .any(|entry| matches!(entry.content, ProviderModelContent::Adapted(_)))
+                {
+                    contributed_by_model.extend(
+                        contributions
+                            .iter()
+                            .map(|model| (&model.id, &model.presentation)),
+                    );
+                }
                 // 保留上游顺序；映射只选择完整的目标对象，不能跨账号/模型混拼字段
                 let by_id = models
                     .iter()
                     .map(|entry| (entry.model.as_str(), entry))
-                    .collect::<std::collections::BTreeMap<_, _>>();
+                    .collect::<BTreeMap<_, _>>();
                 for entry in &models {
                     let target = client.snapshot.mapped_model(entry.model.as_str());
                     if !scope.allows_provider_model(kind, &target) {
@@ -1598,7 +1622,11 @@ impl ExecutionService for DefaultExecutionService {
                         continue;
                     }
                     if seen.insert(model.clone()) {
-                        result.push(source.content.for_public_model(model));
+                        result.push(
+                            source
+                                .content
+                                .for_public_model(model, &contributed_by_model),
+                        );
                     }
                 }
                 for model in client.snapshot.public_models_for_provider(kind) {
@@ -1617,13 +1645,17 @@ impl ExecutionService for DefaultExecutionService {
                     }
                     if let Some(source) = by_id.get(target.as_str()) {
                         seen.insert(model.clone());
-                        result.push(source.content.for_public_model(model));
+                        result.push(
+                            source
+                                .content
+                                .for_public_model(model, &contributed_by_model),
+                        );
                     }
                 }
-                // 原生完整对象优先；只补入当前授权账号实际提供的独立适配画像
-                for profile in client.snapshot.contributed_profiles_for_scope(kind, scope) {
-                    if seen.insert(profile.model().clone()) {
-                        result.push(PublicModelDescriptor::Adapted(profile));
+                // 没有 Provider 目录条目的适配模型仍由当前授权账号贡献
+                for model in contributions {
+                    if seen.insert(model.id.clone()) {
+                        result.push(PublicModelDescriptor::Adapted(model.public_profile()));
                     }
                 }
             }
