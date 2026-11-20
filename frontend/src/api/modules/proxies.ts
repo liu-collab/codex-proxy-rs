@@ -125,6 +125,7 @@ interface ProxyTestParam extends ProxyIdParam {
 }
 
 interface ProxyProbeParam {
+  useDeploymentProxy?: boolean
   proxyUrl: string
   proxyProtocol?: string
   detectLocation?: boolean

@@ -415,14 +415,14 @@ impl From<(ClientKeyRecord, crate::time::TimePresenter)> for ClientKeyView {
             weekly_used_usd: record.budget.weekly_used_usd.canonical(),
             daily_resets_at_display: record
                 .budget
-                .daily_resets_at
+                .daily_resets_at()
                 .map(|value| time.datetime(&value.into())),
-            daily_resets_at: record.budget.daily_resets_at.map(DateTime::from),
+            daily_resets_at: record.budget.daily_resets_at().map(DateTime::from),
             weekly_resets_at_display: record
                 .budget
-                .weekly_resets_at
+                .weekly_resets_at()
                 .map(|value| time.datetime(&value.into())),
-            weekly_resets_at: record.budget.weekly_resets_at.map(DateTime::from),
+            weekly_resets_at: record.budget.weekly_resets_at().map(DateTime::from),
             created_at_display: time.datetime(&record.created_at),
             created_at: record.created_at,
             updated_at_display: time.datetime(&record.updated_at),
@@ -1092,7 +1092,7 @@ fn map_wire_error(error: WireValidationError) -> AdminError {
         "search" => "搜索内容过长或包含控制字符",
         "sortBy" => "排序字段不受支持",
         "sortDirection" => "排序方向必须为 asc（升序）或 desc（降序）",
-        _ => "API Key 请求参数不合法",
+        field => return AdminError::bad_request(format!("{field} 字段不合法")),
     };
     AdminError::bad_request(message)
 }

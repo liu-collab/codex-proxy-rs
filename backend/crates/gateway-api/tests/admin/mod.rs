@@ -670,6 +670,7 @@ impl SettingsStore for MemorySettingsStore {
                     .values
                     .responses_max_decompressed_body_bytes,
                 smart_scheduling: command.values.smart_scheduling,
+                quota_reset_window_weights: command.values.quota_reset_window_weights,
                 min_codex_desktop_version: command.values.min_codex_desktop_version,
                 min_codex_cli_version: command.values.min_codex_cli_version,
                 usage_retention_days: command.values.usage_retention_days,
@@ -677,9 +678,10 @@ impl SettingsStore for MemorySettingsStore {
                 audit_retention_days: command.values.audit_retention_days,
                 account_error_protection: command.values.account_error_protection,
                 account_warmup_enabled: false,
-                account_warmup_schedule_time: "08:00".to_owned(),
+                account_warmup_cron: "0 8 * * *".to_owned(),
                 account_warmup_model: None,
                 reset_credit_lead_minutes: 10,
+                reset_credit_on_low_weekly_quota: false,
                 reset_credit_max_weekly_remaining_percent: None,
             },
         };
@@ -896,6 +898,7 @@ impl AccountGroupStore for MemoryAccountGroupStore {
                 group_id: group_id(PRIMARY_GROUP_ID),
                 account_id: "acct_group_ready".to_owned(),
                 status: AccountStatusFacts {
+                    quota_paused: false,
                     enabled: true,
                     credential_state: CredentialState::Ready,
                     access_token_expires_at: None,
@@ -911,6 +914,7 @@ impl AccountGroupStore for MemoryAccountGroupStore {
                 group_id: group_id(PRIMARY_GROUP_ID),
                 account_id: "acct_group_disabled".to_owned(),
                 status: AccountStatusFacts {
+                    quota_paused: false,
                     enabled: false,
                     credential_state: CredentialState::Ready,
                     access_token_expires_at: None,
@@ -1022,6 +1026,32 @@ fn mutation(
 
 #[async_trait]
 impl ClientKeyStore for MemoryClientKeyStore {
+    async fn client_key_budget_window(
+        &self,
+        _: &gateway_core::policy::ClientApiKeyId,
+        _: gateway_admin::model::client_keys::ClientKeyBudgetWindowPeriod,
+    ) -> gateway_admin::ports::store::AdminStoreResult<
+        gateway_admin::model::client_keys::ClientKeyBudgetWindow,
+    > {
+        Err(gateway_admin::ports::store::AdminStoreError::new(
+            gateway_admin::ports::store::AdminStoreErrorKind::Unavailable,
+            "client key",
+            "unused budget window",
+        ))
+    }
+    async fn set_client_key_budget_window(
+        &self,
+        _: gateway_admin::model::client_keys::SetClientKeyBudgetWindow,
+        _: gateway_admin::model::client_keys::ClientKeyBudgetMutationOrigin,
+        _: &MutationContext,
+    ) -> gateway_admin::ports::store::AdminStoreResult<u64> {
+        Err(gateway_admin::ports::store::AdminStoreError::new(
+            gateway_admin::ports::store::AdminStoreErrorKind::Unavailable,
+            "client key",
+            "unused budget window",
+        ))
+    }
+
     async fn update_client_key_budget_limits(
         &self,
         _: gateway_admin::model::client_keys::UpdateClientKeyBudgetLimits,
@@ -1207,6 +1237,9 @@ impl AccountStore for UnusedStore {
                 summary: gateway_admin::model::accounts::AccountSummary {
                     total: 1,
                     normal: u64::from(status == gateway_core::account::AccountStatus::Normal),
+                    quota_paused: u64::from(
+                        status == gateway_core::account::AccountStatus::QuotaPaused,
+                    ),
                     quota_exhausted: u64::from(
                         status == gateway_core::account::AccountStatus::QuotaExhausted,
                     ),
@@ -1271,6 +1304,17 @@ impl AccountStore for UnusedStore {
                 .collect());
         }
         Err(unavailable("account quota window usage"))
+    }
+
+    async fn quota_documents(
+        &self,
+        _: &gateway_core::account::ProviderAccountId,
+        _: &gateway_core::routing::ProviderKind,
+        _: chrono::DateTime<chrono::Utc>,
+        _: gateway_admin::model::observability::TimeRange,
+        _: Option<&gateway_admin::model::quota_history::QuotaHistoryCursor>,
+    ) -> AdminStoreResult<gateway_admin::model::quota_history::QuotaDocumentPage> {
+        unreachable!("测试不读取历史额度文档")
     }
 
     async fn load_quota_forecast_history(
@@ -1378,6 +1422,7 @@ impl AccountStore for UnusedStore {
     async fn batch_update_accounts(
         &self,
         _: BatchUpdateAccounts,
+        _: gateway_admin::model::accounts::PreparedQuotaPauses,
         _: &MutationContext,
     ) -> AdminStoreResult<AccountsUpdateResult> {
         Err(unavailable("account batch update"))
@@ -1920,6 +1965,7 @@ fn test_runtime_settings() -> RuntimeSettings {
             openai_session_affinity_ttl_hours: 24,
             responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
             smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
+            quota_reset_window_weights: gateway_core::account::ResetWindowWeights::default(),
             min_codex_desktop_version: None,
             min_codex_cli_version: None,
             usage_retention_days: 31,
@@ -1927,9 +1973,10 @@ fn test_runtime_settings() -> RuntimeSettings {
             audit_retention_days: 90,
             account_error_protection: Default::default(),
             account_warmup_enabled: false,
-            account_warmup_schedule_time: "08:00".to_owned(),
+            account_warmup_cron: "0 8 * * *".to_owned(),
             account_warmup_model: None,
             reset_credit_lead_minutes: 10,
+            reset_credit_on_low_weekly_quota: false,
             reset_credit_max_weekly_remaining_percent: None,
         },
     }

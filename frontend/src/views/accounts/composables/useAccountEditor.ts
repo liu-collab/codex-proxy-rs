@@ -6,6 +6,7 @@ import { useAsyncAction } from '@/composables/useAsyncAction'
 import { useRequestState } from '@/composables/useRequestState'
 import { t } from '@/i18n'
 import { notification as ZNotification } from '@/utils/notification'
+import { errorMessage } from '@/utils/operation'
 import { accountNameUpdate } from '../utils/accountName'
 import { accountSchedulingValues, concurrencyLimitInput } from '../utils/schedulingForm'
 import { emptyApiKeyAccountForm, isOpenAiApiKeyAccount, isOpenAiOAuthAccount, parseApiKeyConfiguration } from '../utils/upstreamApiKey'
@@ -29,8 +30,8 @@ export function useAccountEditor(options: {
   const saveAction = useAsyncAction()
   const saving = saveAction.loading
   const apiKey = ref(emptyApiKeyAccountForm())
-  const configurationRequest = useRequestState(() => ZNotification.error({
-    message: t('accounts.editor.loadError'),
+  const configurationRequest = useRequestState(cause => ZNotification.error({
+    message: errorMessage(cause, t('accounts.editor.loadError')),
   }))
   const savedConfiguration = shallowRef<ApiKeyConfiguration>()
   const oauthTransport = shallowRef<ApiKeyConfiguration['transport'] | ''>('')
@@ -108,7 +109,7 @@ export function useAccountEditor(options: {
         notes: notes.value,
         outboundProxyId: proxyMode.value === 'preserve'
           ? undefined
-          : proxyMode.value === 'direct'
+          : proxyMode.value === 'deployment'
             ? ''
             : proxyId.value.trim(),
         enabled: schedulingEnabled.value,
@@ -122,6 +123,7 @@ export function useAccountEditor(options: {
       const connectionChanged = isApiKey && (
         apiKey.value.apiKey !== ''
         || apiKey.value.base_url.trim() !== savedConfiguration.value?.base_url
+        || apiKey.value.protocol !== savedConfiguration.value?.protocol
         || apiKey.value.transport !== savedConfiguration.value?.transport
       )
       await updateAccount({
@@ -129,6 +131,7 @@ export function useAccountEditor(options: {
         connection: connectionChanged && configuration
           ? {
               baseUrl: configuration.base_url.trim(),
+              protocol: configuration.protocol,
               transport: configuration.transport,
               apiKey: apiKey.value.apiKey || undefined,
             }

@@ -264,6 +264,7 @@ async fn turns_refresh_host_settings_and_key_identity_while_preserving_handshake
         ),
     );
     let router = gateway_api::initialize(
+        uuid::Uuid::nil(),
         gateway_api::ApiConfig {
             asset_directory: std::env::temp_dir(),
             cors_allowed_origins: vec![],
@@ -357,7 +358,7 @@ async fn rewrite_upgrade_and_control_active_response_keep_http_context_until_con
     );
     let (trace, mut socket, server) =
         start_active_response_with(Some(frozen), "/custom/websocket", "codex-tui/0.166.0").await;
-    // 升级后的默认会话仍持有入口上下文；101 正文结束不再提前取消它
+    // 101 响应完成后，WebSocket 会话继续持有入口上下文
     assert!(
         !plan
             .http_cancellation

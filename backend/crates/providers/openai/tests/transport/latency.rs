@@ -37,6 +37,155 @@ fn explicit_websocket_warmup_request(conversation_id: &str) -> CodexResponsesReq
     request
 }
 
+#[tokio::test]
+async fn advertised_websocket_limit_counts_final_utf8_bytes_and_allows_equality() {
+    let mut payload_len = 0;
+    for case in [
+        "absent", "invalid", "negative", "overflow", "equal", "below", "zero", "large",
+    ] {
+        let mut request = codex_request(
+            "gpt-5.5",
+            if case == "large" {
+                "x".repeat(17 * 1024 * 1024)
+            } else {
+                "中文\n\"\\".to_owned()
+            },
+            Vec::new(),
+        );
+        request.use_websocket = true;
+        request.local_conversation_id = Some("advertised-limit".to_owned());
+        let limit = match case {
+            "absent" => None,
+            "invalid" => Some("invalid".to_owned()),
+            "negative" => Some("-1".to_owned()),
+            "overflow" => Some("184467440737095516160".to_owned()),
+            "equal" => Some(payload_len.to_string()),
+            "below" => Some((payload_len - 1).to_string()),
+            "zero" => Some("0".to_owned()),
+            "large" => Some((128 * 1024 * 1024).to_string()),
+            _ => unreachable!(),
+        };
+        let fallback = matches!(case, "below" | "zero");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.unwrap();
+            let mut websocket = accept_codex_test_websocket_with(socket, |_, response| {
+                if let Some(limit) = limit {
+                    response.headers_mut().insert(
+                        "x-codex-websocket-max-message-bytes",
+                        limit.parse().unwrap(),
+                    );
+                }
+            })
+            .await;
+            if fallback {
+                while let Some(Ok(message)) = websocket.next().await {
+                    assert!(!message.is_text(), "oversized payload must not be uploaded");
+                }
+                let (mut http, _) = listener.accept().await.unwrap();
+                let request = read_http_request_with_body(&mut http).await;
+                assert!(request.starts_with(b"POST /codex/responses HTTP/1.1"));
+                write_completed_sse_response(&mut http).await;
+                0
+            } else {
+                let message = websocket.next().await.unwrap().unwrap();
+                let text = message.to_text().unwrap();
+                let length = text.len();
+                assert_eq!(
+                    serde_json::from_str::<Value>(text).unwrap()["type"],
+                    "response.create"
+                );
+                websocket
+                    .send(Message::Text(
+                        completed_websocket_response("resp_limit", 1, 1).into(),
+                    ))
+                    .await
+                    .unwrap();
+                length
+            }
+        });
+        let backend = CodexBackendClient::new(
+            reqwest::Client::builder().no_proxy().build().unwrap(),
+            format!("http://{addr}"),
+            test_wire_profile(),
+        );
+        let response = timeout(
+            Duration::from_secs(10),
+            backend.create_response(
+                &request,
+                request_context("req_advertised_limit", Some("chatgpt-account")),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            response.transport,
+            if fallback {
+                CodexBackendTransport::HttpSse
+            } else {
+                CodexBackendTransport::WebSocket
+            },
+            "{case}"
+        );
+        if fallback {
+            assert_eq!(
+                response.transport_metrics.decision,
+                Some(CodexTransportDecision::Http2WebSocketMessageTooLarge)
+            );
+        }
+        let actual_len = server.await.unwrap();
+        if case == "absent" {
+            payload_len = actual_len;
+        }
+        if case == "equal" {
+            assert_eq!(actual_len, payload_len);
+        }
+    }
+}
+
+#[tokio::test]
+async fn advertised_websocket_limit_rejects_warmup_without_http_fallback() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let mut websocket = accept_codex_test_websocket_with(socket, |_, response| {
+            response
+                .headers_mut()
+                .insert("x-codex-websocket-max-message-bytes", "1".parse().unwrap());
+        })
+        .await;
+        while let Some(Ok(message)) = websocket.next().await {
+            assert!(!message.is_text());
+        }
+        assert!(
+            timeout(Duration::from_millis(100), listener.accept())
+                .await
+                .is_err()
+        );
+    });
+    let backend = CodexBackendClient::new(
+        reqwest::Client::builder().no_proxy().build().unwrap(),
+        format!("http://{addr}"),
+        test_wire_profile(),
+    )
+    .with_websocket_pool(Arc::new(CodexWebSocketPool::default()));
+    let error = backend
+        .create_response(
+            &explicit_websocket_warmup_request("oversized-warmup"),
+            request_context("req_oversized_warmup", Some("chatgpt-account")),
+        )
+        .await
+        .unwrap_err();
+    std::assert_matches!(
+        error,
+        CodexClientError::WebSocket(CodexWebSocketExchangeError::MessageTooLarge)
+    );
+    server.await.unwrap();
+}
+
 async fn reject_websocket_openings(listener: &TcpListener, attempts: usize) {
     for _ in 0..attempts {
         let (mut opening, _) = listener.accept().await.unwrap();
@@ -192,6 +341,31 @@ async fn downstream_websocket_new_chain_should_preserve_continuation_after_slow_
 
 #[tokio::test]
 async fn external_continuation_should_wait_for_a_cold_websocket() {
+    assert_slow_opening_uses_websocket(
+        external_continuation_request("conversation-cross-account"),
+        CodexWebSocketPoolConfig::default(),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn configured_fast_path_budget_should_allow_slow_websocket_openings() {
+    let config = CodexWebSocketPoolConfig {
+        fast_path_budget: Duration::from_secs(3),
+        ..Default::default()
+    };
+    let mut persisted = new_chain_request("persisted");
+    persisted.set_previous_response_id(Some("resp_persisted".into()));
+    persisted.previous_response_scope = Some(PreviousResponseScope::Persisted);
+    for request in [new_chain_request("new-chain"), persisted] {
+        assert_slow_opening_uses_websocket(request, config).await;
+    }
+}
+
+async fn assert_slow_opening_uses_websocket(
+    request: CodexResponsesRequest,
+    config: CodexWebSocketPoolConfig,
+) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -201,12 +375,12 @@ async fn external_continuation_should_wait_for_a_cold_websocket() {
         let _payload = websocket.next().await.unwrap().unwrap();
         websocket
             .send(Message::Text(
-                completed_websocket_response("resp_cross_account", 2, 1).into(),
+                completed_websocket_response("resp_slow_opening", 2, 1).into(),
             ))
             .await
             .unwrap();
     });
-    let pool = Arc::new(CodexWebSocketPool::default());
+    let pool = Arc::new(CodexWebSocketPool::with_config(config));
     let backend = CodexBackendClient::new(
         reqwest::Client::builder().no_proxy().build().unwrap(),
         format!("http://{addr}"),
@@ -214,13 +388,16 @@ async fn external_continuation_should_wait_for_a_cold_websocket() {
     )
     .with_websocket_pool(Arc::clone(&pool));
 
-    let response = backend
-        .create_response(
-            &external_continuation_request("conversation-cross-account"),
-            request_context("req_cross_account", Some("chatgpt-account-b")),
-        )
-        .await
-        .expect("external continuation should complete over WebSocket");
+    let response = timeout(
+        Duration::from_secs(5),
+        backend.create_response(
+            &request,
+            request_context("req_slow_opening", Some("chatgpt-account-b")),
+        ),
+    )
+    .await
+    .expect("slow WebSocket opening should complete")
+    .unwrap();
     server.await.unwrap();
 
     assert_eq!(response.transport, CodexBackendTransport::WebSocket);

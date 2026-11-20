@@ -405,7 +405,7 @@ async fn inference_proxy_client_is_built_once_for_concurrent_same_binding() {
     for task in tasks {
         assert!(task.await.unwrap().iter().all(Result::is_ok));
     }
-    // 启动时的直连 client + 一个代理 client；不再先构建并丢弃另一个直连 client
+    // 一个启动时创建的直连客户端和一个并发请求共用的代理客户端
     assert_eq!(builds.load(Ordering::SeqCst), 2);
     assert!(origin_server.received_requests().await.unwrap().is_empty());
 }
@@ -918,6 +918,10 @@ async fn inference_transport_should_classify_free_usage_429_as_account_free_quot
         error.kind(),
         GrokInferenceTransportErrorKind::FreeQuotaExhausted
     );
+    assert_eq!(
+        error.diagnostic().unwrap().as_str(),
+        "上游账号免费额度已用完"
+    );
     assert_eq!(error.status(), Some(429));
     assert_eq!(
         error.upstream_code().map(|code| code.as_str()),
@@ -1417,4 +1421,43 @@ fn resolve_with_policy(
             Ok(addresses)
         }
     }
+}
+
+#[tokio::test]
+async fn official_xai_resolves_https_proxy_host_outside_the_direct_dns_allowlist() {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    if std::env::var_os("CPR_TEST_XAI_PROXY").is_some() {
+        let client = OfficialGrokEndpointPolicy
+            .build_oauth_client(Some(Duration::from_secs(2)), None)
+            .unwrap();
+        assert!(client.get("https://auth.x.ai/").send().await.is_err());
+        return;
+    }
+    let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+    command.args(["--exact", "transport::network::official_xai_resolves_https_proxy_host_outside_the_direct_dns_allowlist"])
+        .env("CPR_TEST_XAI_PROXY", "1")
+        .env("HTTPS_PROXY", format!("http://localhost:{}", server.local_addr().unwrap().port()))
+        .env("HTTP_PROXY", "").env("ALL_PROXY", "").env("NO_PROXY", "").env_remove("REQUEST_METHOD");
+    let observe = async {
+        let (socket, _) = server.accept().await.unwrap();
+        let mut socket = BufReader::new(socket);
+        let mut line = String::new();
+        socket.read_line(&mut line).await.unwrap();
+        assert_eq!(line, "CONNECT auth.x.ai:443 HTTP/1.1\r\n");
+        socket
+            .get_mut()
+            .write_all(b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n")
+            .await
+            .unwrap();
+    };
+    let (output, ()) = tokio::time::timeout(Duration::from_secs(5), async {
+        tokio::join!(
+            tokio::task::spawn_blocking(move || command.output()),
+            observe
+        )
+    })
+    .await
+    .unwrap();
+    assert!(output.unwrap().unwrap().status.success());
 }

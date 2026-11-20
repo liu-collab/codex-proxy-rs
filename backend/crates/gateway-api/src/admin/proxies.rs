@@ -9,12 +9,15 @@ use axum::{
     response::IntoResponse,
     routing::{get, post},
 };
-use gateway_admin::model::{
-    AdminError as ServiceError, PageSize, Revision,
-    proxies::{
-        NewProxy, ProxyAccountListQuery, ProxyBatchResult, ProxyListQuery, ProxyMutation,
-        ProxyRecord, ProxyTestResult, TestProxy, UpdateProxy, default_auto_location,
+use gateway_admin::{
+    model::{
+        AdminError as ServiceError, PageSize, Revision,
+        proxies::{
+            NewProxy, ProxyAccountListQuery, ProxyBatchResult, ProxyListQuery, ProxyMutation,
+            ProxyRecord, ProxyTestResult, TestProxy, UpdateProxy, default_auto_location,
+        },
     },
+    ports::proxy::ProbeRoute,
 };
 use serde::{Deserialize, Serialize};
 
@@ -104,6 +107,8 @@ struct TestRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProbeRequest {
+    #[serde(default)]
+    use_deployment_proxy: bool,
     #[serde(default)]
     detect_location: bool,
     /// 空串表示探测本机直连出口；其他值为完整 URL，
@@ -544,20 +549,31 @@ async fn probe<S>(
 where
     S: SessionState + Send + Sync,
 {
-    // 空串表示探测本机直连出口；非空值按完整 URL 或带协议的简写解析。
+    // 空串表示探测本机直连出口，`useDeploymentProxy` 改探部署默认出口，两者都不写库。
+    // 显式地址与部署默认出口互斥；地址按完整 URL 或带协议的简写解析，
     // 解析失败沿用地址校验的 400，与创建、更新两条写入路径一致。
     let proxy = if request.proxy_url.is_empty() {
         None
     } else {
+        if request.use_deployment_proxy {
+            return Err(AdminError::bad_request(
+                "指定代理地址时不能同时选择部署默认出口",
+            ));
+        }
         Some(
             parse_proxy_address(&request.proxy_url, request.proxy_protocol.as_deref())
                 .map_err(AdminError::bad_request)?,
         )
     };
+    let route = match (proxy.as_ref(), request.use_deployment_proxy) {
+        (Some(proxy), _) => ProbeRoute::Proxy(proxy),
+        (None, true) => ProbeRoute::Deployment,
+        (None, false) => ProbeRoute::Direct,
+    };
     let result = state
         .admin_services()
         .proxies()
-        .probe(proxy.as_ref(), request.detect_location)
+        .probe(route, request.detect_location)
         .await
         .map_err(map_error)?;
     Ok(AdminResponse::new(

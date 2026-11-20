@@ -32,8 +32,6 @@ use super::{
     pump::{PumpLogContext, PumpedWebSocket, transport_metric_reason},
 };
 
-pub(crate) const WEBSOCKET_FAST_PATH_BUDGET: Duration = Duration::from_millis(800);
-
 /// WebSocket 快路径的控制流结果；预算未命中不代表连接失败
 pub(crate) enum WebSocketFastPath<T> {
     /// 在前台预算内获得结果
@@ -92,6 +90,18 @@ impl PoolBinding {
 }
 
 impl PreparedWebSocket {
+    pub(crate) fn max_message_bytes(&self) -> Option<usize> {
+        self.connection.metadata.max_message_bytes
+    }
+
+    /// 本地预检拒绝后先释放连接和池租约，再开始其他传输
+    pub(crate) async fn discard(self) {
+        let (lease, _, _) = self.binding.into_parts();
+        let websocket = self.connection.websocket;
+        let observation = websocket.observation().with_exit_reason("request_not_sent");
+        discard_connection(websocket, lease, observation).await;
+    }
+
     pub(crate) fn pool_decision(&self) -> Option<WebSocketPoolDecision> {
         self.binding.decision()
     }
@@ -563,7 +573,7 @@ async fn wait_for_shared_connect(
     wait_for_fast_path(waiter.started_at(), fast_path_budget, waiter.wait()).await
 }
 
-// 同一次 opening 的所有等待者共享截止时间；后来的请求不会重置 800ms 预算
+// 同一次 opening 的所有等待者共享截止时间
 async fn wait_for_fast_path<F: Future>(
     started_at: TokioInstant,
     budget: Option<Duration>,
@@ -645,7 +655,7 @@ pub(crate) async fn execute_prepared_response_create_request_stream(
                 "reused": reused,
             }),
         );
-        discard_after_send(websocket, lease, observation.clone()).await;
+        discard_connection(websocket, lease, observation.clone()).await;
         let error = if not_started {
             if request.continuation().permits_fresh_connection() {
                 error
@@ -680,7 +690,7 @@ pub(crate) async fn execute_prepared_response_create_request_stream(
     Ok(exchange)
 }
 
-async fn discard_after_send(
+async fn discard_connection(
     websocket: PumpedWebSocket,
     lease: Option<WebSocketPoolLease>,
     observation: super::pump::WebSocketConnectionObservation,

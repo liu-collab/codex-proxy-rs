@@ -258,6 +258,9 @@ pub(crate) fn usage_list_record_view(
         .clone()
         .or_else(|| record.requested_model_id.clone());
     UsageListRecordView {
+        error_origin: record.error_origin().as_str(),
+        client_status_code: record.client_status_code,
+        upstream_status_code: record.upstream_status_code,
         error_code: record.error_code,
         error_message: record.error_message,
         error_kind: record.error_kind,
@@ -362,6 +365,7 @@ pub(crate) fn usage_record_view(
         .or_else(|| record.requested_model_id.clone());
     let metadata = provider_metadata_fields(record.provider_metadata_json.as_deref());
     UsageRecordView {
+        error_origin: record.error_origin().as_str(),
         upstream_error: record
             .upstream_error
             .map(|error| super::wire::UsageUpstreamErrorView {
@@ -1038,6 +1042,7 @@ pub(crate) fn dashboard_view(
         pool_summary: DashboardPoolSummaryView {
             total: provider_accounts.total,
             normal: provider_accounts.normal,
+            quota_paused: provider_accounts.quota_paused,
             quota_exhausted: provider_accounts.quota_exhausted,
             rate_limited: provider_accounts.rate_limited,
             disabled: provider_accounts.disabled,
@@ -1405,7 +1410,14 @@ pub(crate) fn map_wire_error(error: WireValidationError) -> AdminError {
         "dimension" => "诊断维度不合法",
         "id" => "用量记录 ID 不能为空",
         "cursor" => "观测数据游标不合法",
-        _ => "观测查询参数不合法",
+        "currentPage" => "页码须大于 0",
+        "pageSize" => {
+            return AdminError::bad_request(format!("每页数量须为 1 至 {}", DomainPageSize::MAX));
+        }
+        "status" => "请求状态须为 success、error 或 all",
+        "errorOrigin" => "错误来源须为 proxy、upstream、connection 或 unknown",
+        "errorOriginStatus" => "仅错误请求支持按错误来源筛选",
+        field => return AdminError::bad_request(format!("{field} 字段不合法")),
     };
     AdminError::bad_request(message)
 }

@@ -1,8 +1,6 @@
 # 部署与运维
 
-首次安装可按 [快速开始](../README.md#快速开始) 操作。
-本文补充客户端配置、权限、备份和升级；部署命令从安装目录 `codex-proxy-rs/` 执行，
-其中 `deploy/` 存放 Compose 文件和配置，`.runtime/` 存放持久化数据
+首次安装见[快速开始](../README.md#快速开始)。部署命令在安装目录 `codex-proxy-rs/` 执行。`deploy/` 存放 Compose 文件和配置，`.runtime/` 存放持久化数据
 
 | 任务 | 入口 |
 | --- | --- |
@@ -14,16 +12,15 @@
 
 ## 配置归属
 
-配置按职责保存，不都在 YAML 中：
-
 | 位置 | 内容 | 修改方式 |
 | --- | --- | --- |
 | `deploy/config.yaml` | 监听、数据库/Redis 连接、部署凭据、时区、日志与可选内存分配策略等启动配置 | 从模板创建，已有部署合并修改，不覆盖原文件 |
 | `deploy/compose.yaml` | 镜像、容器网络、端口、挂载、PostgreSQL 启动参数与资源限制 | 调整 Compose 并重建受影响容器 |
+| `frontend/.env` | 前端部署前缀 | 通过 `.env.local` 覆盖后重新构建，详见 [URL 子路径部署](#url-子路径部署) |
 | PostgreSQL | 账号、Key、运行设置、上游身份、插件配置等业务数据 | 管理端或管理 API |
 | 浏览器本地 | 主题和界面偏好 | 当前浏览器的主题设置 |
 
-项目不使用 `.env` 配置文件。Compose 环境变量用于容器地址、镜像选择和构建发布；
+后端不使用 `.env` 配置文件。Compose 环境变量用于容器地址、镜像选择和构建发布；
 可选的内存分配策略由 `config.yaml` 的 `services.app-runtime` 桥接到应用容器。
 配置加载会忽略未知字段，并在启动控制台提示字段名；不输出对应值。缺少必填字段时会指出缺项并停止启动，
 已知字段的类型和取值仍需合法；可选字段省略时使用默认值
@@ -122,6 +119,9 @@ store:
 应用默认上限为 20，允许的最小值为 2；降低上限可以限制实际数据库连接数，但也会增加请求、后台写入与管理查询之间的等待。
 如果出现连接获取超时，应结合数据库负载调大池容量，不要仅延长等待时间
 
+统计 Worker 重算分组时，若临时文件写入较多且数据库有内存余量，可在 `store.pool` 下设置 `analytics_projection_work_mem_mb: 8`（单位 MB）。
+默认省略，沿用 PostgreSQL 的 `work_mem`；显式设置仅影响增量投影和历史回填所在的事务，队列确认、整桶重建和在线查询继续沿用原值
+
 将 `deploy/compose.yaml` 中 `services.postgres.command` 替换为以下列表，保留 UTC 参数：
 
 ```yaml
@@ -219,6 +219,8 @@ docker compose -f deploy/compose.yaml stats --no-stream
 
 ## 部署结构
 
+PostgreSQL 最低版本为 16，默认 Compose 使用 PostgreSQL 18
+
 ```mermaid
 flowchart LR
   Client[客户端 / 管理浏览器] -->|HTTPS| Proxy[反向代理]
@@ -231,11 +233,29 @@ flowchart LR
 
 网关端口默认只绑定本机；数据库和 Redis 不对公网开放。插件以网关同一系统身份运行，不能作为不可信代码沙箱
 
+## 安装脚本选项
+
+[一键安装](../README.md#快速开始)需要当前用户能访问 Docker，并可通过 `sudo` 或 root 设置目录权限。脚本会启动网关、PostgreSQL 和 Redis，首次安装完成后输出访问地址和管理员密码
+
+运行 `bash install.sh` 时可设置以下环境变量：
+
+| 变量 | 用途 | 默认值 |
+| --- | --- | --- |
+| `INSTALL_DIR` | 安装目录，建议使用绝对路径 | 当前目录下的 `codex-proxy-rs/` |
+| `CPR_RELEASE_TAG` | 指定发布标签 | 最新正式版本 |
+| `ADMIN_PASSWORD` | 管理员初始密码，至少 12 位，不含 `$` 或控制字符，不能使用常见弱口令 | 随机生成 |
+
+例如，将服务安装到指定目录：
+
+```bash
+INSTALL_DIR="$HOME/services/codex-proxy-rs" bash install.sh
+```
+
+重复运行时使用同一安装目录。检测到 `deploy/config.yaml` 后，[脚本](install.sh)会保留现有配置与部署文件，忽略传入的管理员密码。版本升级见[镜像升级与源码构建](#镜像升级与源码构建)
+
 ## 手动安装
 
-本节适用于 Linux amd64/arm64，需准备 Docker Engine、Docker Compose Plugin、curl 和 OpenSSL，
-并确保当前用户能访问 Docker、可通过 `sudo` 或 root 设置目录权限。一键安装入口见
-[快速开始](../README.md#一键安装)，脚本会自动完成本节准备和服务启动
+Linux amd64/arm64 需要 Docker Engine、Docker Compose Plugin、curl 和 OpenSSL。当前用户须可访问 Docker，并能通过 `sudo` 或 root 设置目录权限
 
 下载同一正式 Release 的部署文件并设置目录权限：
 
@@ -316,7 +336,7 @@ store:
 ## Windows 二进制部署
 
 发行包提供 Windows x64（`windows_amd64`）和 ARM64（`windows_arm64`）版本，按运行机器的 CPU 架构选择。
-需先准备可访问的 PostgreSQL 和 Redis，创建数据库及用户；使用数据库备份功能时，还需将匹配服务端版本的 `pg_dump` 加入 `PATH`
+需先按[数据库版本要求](#部署结构)准备 PostgreSQL，创建数据库及用户，并确保 Redis 可访问。使用数据库备份功能时，还需将匹配服务端版本的 `pg_dump` 加入 `PATH`
 
 从 [Release 附件](https://github.com/zyycn/codex-proxy-rs/releases) 下载对应的
 `codex-proxy-rs_<version>_windows_<arch>.tar.gz`，解压后保留 `codex-proxy-rs.exe`、`web/dist`、`deploy` 和 `plugins/official` 的目录关系。
@@ -382,6 +402,12 @@ HTTP 在数据库迁移和初始化完成后才监听。迁移期间启动日志
 不要把未脱敏的 `docker compose config` 或 `docker inspect` 输出上传到工单；它们会包含
 PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 
+### 安装管理端应用
+
+用 Chrome、Edge 等支持 PWA 的浏览器通过 HTTPS、`http://localhost` 或 `http://127.0.0.1` 访问管理端，从地址栏或浏览器菜单安装。入口是否显示取决于浏览器、访问交互及安装状态
+
+应用在独立窗口打开首页，须联网并按原流程登录。Chrome 窗口右上角可隐藏标题栏名称，顶部空白区域仍可拖动窗口
+
 ### 启动后的运行设置
 
 在管理端修改以下设置，保存后对新请求生效，重启不会覆盖已保存的选择：
@@ -391,7 +417,7 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 | 上游客户端身份 | “系统设置 → 上游配置 → 客户端身份”；Key 可按 Provider 覆盖，OpenAI Key 可独立配置[安装身份种子](../docs/api.md#key-客户端身份) |
 | 并发与排队 | “系统设置 → 运行设置”；Key 与账号分别设置排队容量和超时，可选择账号排队失败后换号，见[排队规则](../docs/api.md#并发与排队) |
 | 账号错误保护 | “系统设置 → 运行设置 → 错误保护”；默认关闭，按[自定义规则](../docs/api.md#账号错误保护)暂停账号调度 |
-| 全局请求位置 | “系统设置 → 上游配置 → 请求位置覆盖”；默认关闭，不从 YAML 导入 |
+| 全局请求位置 | “系统设置 → 上游配置 → 请求位置覆盖”，默认关闭 |
 | 代理位置 | “代理管理”；优先于全局位置，全局关闭时仍可独立生效 |
 
 位置覆盖只影响 OpenAI 请求中受支持的位置与时区信息，不改变上下文日期、真实出口 IP、epoch 时间戳或系统时区。
@@ -405,7 +431,8 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 ### CPR 互联
 
 在上游的「API 密钥」中为专用密钥选择账号分组并开启「CPR 互联」，即可共享密钥预算、并发上限和 RPM，并按需公开账号池、账号额度和套餐信息。
-共享 Key 的实际推理只使用这些分组中的直连 OAuth 账号；分组内的 API Key 转供账号不会参与
+共享 Key 按所选分组正常调度，包括 OAuth 和 API Key 账号。请求回到已经过的 CPR 部署时停止转发；正常链路没有固定跳数上限。转发链上的代理须保留 `X-CPR-Route` 请求头。
+同库副本共用部署标记。如果从整库副本搭建独立节点，在新库执行 `UPDATE runtime_settings SET peer_routing_id = gen_random_uuid() WHERE id = 1` 后启动，以免被当作原部署
 
 在下游导入或编辑 OpenAI API Key 账号，填写上游 API 地址和该 Key，后台自动发现 CPR 互联能力。
 地址包含自定义前缀时保留完整前缀，后台在该地址下请求 `cpr/link`。
@@ -432,9 +459,21 @@ PostgreSQL/Redis 启动密码。日常校验使用 `config --quiet`
 “修改未添加项”只带回明确未添加的条目；连接测试失败的代理已经保存，可在列表中重新测试。
 请求中断或结果无法确认时暂停后续提交，添加结果待确认的条目可能已保存，应先刷新列表核对，不能直接重复添加
 
-创建或编辑账号时，在“出站隧道”选择直连或已保存的代理，点击右侧的“测试出口”图标。
+“部署默认出口”表示跟随网关进程的环境。账号上游请求、插件受管网络和网关下载优先使用业务指定的代理，只有未指定时才读取 `HTTP_PROXY`（HTTP/WS）或 `HTTPS_PROXY`（HTTPS/WSS）。缺少对应协议的代理时使用 `ALL_PROXY`；命中 `NO_PROXY` 或没有适用的代理时直连。环境变量支持小写，大写优先。选中的代理连接失败会报错，不会回退直连。
+
+使用 Docker Compose 时，把环境变量加到 `codex-proxy-rs` 服务已有的 `environment` 下，修改后重新创建该容器。无需修改 CPR 的 `config.yaml` 或 Docker daemon 的代理设置。例如，让网关通过代理访问外部 HTTPS 服务，同时直连公司内网域名：
+
+```yaml
+services:
+  codex-proxy-rs:
+    environment:
+      HTTPS_PROXY: "http://proxy.example:3128"
+      NO_PROXY: "localhost,127.0.0.1,::1,.corp.example"
+```
+
+创建或编辑账号时，在“出站隧道”选择部署默认出口或已保存的代理，点击右侧的“测试出口”图标。
 耗时显示在对应选项右侧，悬浮可查看 IPv4 / IPv6，测试失败通过通知提示。
-禁用代理的账号使用服务器直连出口。出口测试不保存账号设置，也不验证账号权限或额度；账号可用性使用账号连接测试
+禁用代理的账号使用部署默认出口。出口测试不保存账号设置，也不验证账号权限或额度；账号可用性使用账号连接测试
 
 在代理列表点击关联账号数量，再点击“分配账号”，搜索并跨页勾选账号后点击右上角的“分配”，一次最多 1000 个。
 已使用此代理的账号不可重复选择；所选账号原有代理会被替换，凭据、分组与调度设置保留。禁用代理须先启用
@@ -476,9 +515,9 @@ Compose 默认只绑定 `127.0.0.1`。从其他设备访问时，在应用前配
 HTTP 传输不加密，公网部署仍建议使用 HTTPS。
 会话 Cookie 合同见 [管理接口鉴权](../docs/api.md#管理接口)
 
-反向代理需要保留 `Authorization`，支持 `/v1/responses` 的 WebSocket Upgrade，
-并关闭 SSE 响应缓冲。读取超时应覆盖长时间生成任务。
-客户端使用部署地址下的 `/v1`，协议与部署一致，不要使用前端开发服务的 `5173/dev/v1`。
+反向代理应保留客户端发送的 `Authorization`、`x-api-key`、`anthropic-version` 和 `anthropic-beta` 请求头，
+支持 `/v1/responses` 的 WebSocket Upgrade，并关闭 SSE 响应缓冲。读取超时应覆盖长时间生成任务。
+客户端连接网关的部署地址，不要使用前端开发服务的 `5173/dev/v1`。
 当前应用只支持单副本，不能通过复制容器扩容
 
 Responses 流式请求完成准入后，每 15 秒无输出会发送一次 SSE 注释保活，覆盖首个业务事件前的等待，
@@ -505,6 +544,9 @@ OpenAI Responses 上游 WebSocket 每 25 秒发送 Ping 保活，并回应上游
 修改上限对后续请求生效，已存在的连接继续计数；调低上限不会强制中断在途或绑定下游 WS 的连接。
 预算仅覆盖宿主原生 OpenAI Responses 连接，插件自建连接及其他 HTTP/WS 流量仍需预留容量
 
+允许回退 HTTP 的 Responses 新链和持久化续接，由 `openai.ws_pool.fast_path_budget_ms` 控制前台等待上游 WS 建连的时长，默认 800 毫秒，可设为 1–15000 毫秒，重启应用后生效。
+超出预算时，本次请求走 HTTP/SSE，已启动的池化建连在后台继续。高延迟出口可调大该值，代价是仍需回退的请求会等得更久
+
 未绑定活跃客户端 WS 的池化连接，归池后按 `openai.ws_pool.idle_timeout_ms` 计时，默认 `300000`（5 分钟，必须大于零）。
 Ping/Pong 不延长空闲期限；默认每 5 秒扫描，通常在空闲 300～305 秒开始回收，复用前也检查是否到期。
 关闭先停止复用，最多等待 1 秒发送 Close，随后终止并等待 socket 释放，容量在物理连接释放后才归还。
@@ -520,15 +562,73 @@ Ping/Pong 不延长空闲期限；默认每 5 秒扫描，通常在空闲 300～
 SSE 注释保活用于防止传输链路空闲断开，不会重置 Codex 等待完整 SSE 事件的超时；
 若报错为 `idle timeout waiting for SSE`，再检查客户端的 `stream_idle_timeout_ms`
 
+### URL 子路径部署
+
+源码构建可通过 `CPR_WEB_BASE_PATH` 指定前端部署前缀，默认值为 `/`。
+管理端请求和生成的客户端地址沿用同一前缀，前缀以 `/` 开头和结尾，例如部署到 `https://example.com/proxy/`：
+
+```bash
+CPR_IMAGE=codex-proxy-rs:subpath CPR_WEB_BASE_PATH=/proxy/ \
+  docker compose -f deploy/compose.yaml build codex-proxy-rs
+CPR_IMAGE=codex-proxy-rs:subpath \
+  docker compose -f deploy/compose.yaml up -d --no-build --wait codex-proxy-rs
+```
+
+直接构建前端时，默认值来自所有模式共用的 `frontend/.env`。
+在不纳入 Git 的 `frontend/.env.local` 中配置以下内容，再执行 `pnpm --dir frontend build`：
+
+```dotenv
+CPR_WEB_BASE_PATH=/proxy/
+```
+
+进程环境中的同名变量优先于 env 文件，Docker 构建使用上方 Compose 构建参数。
+路径在构建时确定，修改运行时环境变量或只转发路径不会改变已发布镜像中的前端资源。
+
+后端仍按根路径提供服务，反向代理需要剥除请求前缀，并为登录和刷新 Cookie 的 `Path`、
+站内根相对 `Location` 补回前缀，保证 Realtime 客户端沿返回地址连接和挂断。
+以下 Caddy 示例适用于 Caddy 在宿主机、应用使用默认本机端口的部署：
+
+```caddyfile
+example.com {
+    redir /proxy /proxy/ 308
+
+    handle_path /proxy/* {
+        reverse_proxy 127.0.0.1:8080 {
+            header_down Set-Cookie "(?i)(;[[:space:]]*Path=)/([^;]*)" "${1}/proxy/${2}"
+            # 仅改写站内根相对路径，保留外部 URL
+            header_down Location "^/([^/].*)?$" "/proxy/${1}"
+            flush_interval -1
+        }
+    }
+}
+```
+
+Caddy 与应用同在容器网络时，将回源地址改为 `codex-proxy-rs:8080`。
+合并到已有站点时，将子路径处理放在兜底路由之前，保留浏览器的 `Origin` 和鉴权头。
+管理入口为 `/proxy/`，模型客户端使用 `/proxy/v1`。
+
+系统在线更新会替换前端资源。子路径部署在 `config.yaml` 的 `host` 下配置
+`system_update.update_repository: null`，通过重新构建镜像升级。
+验收时检查子页面刷新、登录续期、头像和插件资源、SSE 与 WebSocket，并保留默认根路径部署的验证。
+
 ## 客户端配置
 
-在管理端创建客户端密钥，打开「使用密钥」，按操作系统复制 `config.toml`。
+在管理端创建客户端密钥，将其填入 API 客户端的 API Key 字段。根据客户端自动追加的请求路径选择 Base URL，远程接入时将 `http://127.0.0.1:8080` 替换为网关的 HTTPS 地址
+
+| 客户端自动追加的路径 | Base URL（本机部署） |
+| --- | --- |
+| OpenAI Responses `/responses`、Chat Completions `/chat/completions` | `http://127.0.0.1:8080/v1` |
+| Anthropic Messages `/v1/messages` | `http://127.0.0.1:8080` |
+
+直接发送 HTTP 请求可参考 [Messages 示例](../docs/api.md#messages-请求)
+
+使用 Codex 时，打开「使用密钥」，按操作系统复制 `config.toml`。
 已有配置先备份，合并后完全退出并重启 Codex。代理密钥由 Provider 配置提供，
 不需要另写 `auth.json`，已有官方登录文件可以保留
 
 管理端生成的 CC Switch 一键导入包含连接信息和当前 Key 的日／周额度查询，默认每 30 分钟刷新。
 查询地址和凭据随导入生成，在 CC Switch 中修改 Provider 的地址或 Key 后，需重新导入以同步用量查询。
-导入不包含下方模板的远程压缩、原生生图、WebSocket 和语音设置。需要这些设置时，使用下方配置直连 CPR，
+导入不包含下方模板的远程压缩、异步压缩、原生生图、WebSocket 和语音设置。需要这些设置时，使用下方配置直连 CPR，
 避免 CC Switch 切换或接管后重写 Provider 配置
 
 Linux/macOS 默认目录为 `~/.codex/`，Windows 为 `%USERPROFILE%\.codex\`；
@@ -569,6 +669,8 @@ remote_compaction = "v2"
 X-OpenAI-Actor-Authorization = "proxy-managed"
 
 [features]
+api_key_model_discovery = true
+async_compaction = true
 image_generation = true
 goals = true
 # 客户端 0.156.0 起该开关默认关闭，显式打开才会使用上面的远端目录。
@@ -609,14 +711,12 @@ Codex OAuth 账号的上游传输方式默认 WS；固定为 SSE 的账号不承
 
 ### 语音通话
 
-Codex 0.164.0 的 `/voice` 通过 Provider 的 `base_url` 创建通话，控制连接另用顶层
-`experimental_realtime_ws_base_url`，不会自动继承 Provider 地址。两者应指向同一网关的 `/v1`，
-使用相同的代理密钥，并确保反向代理允许 WebSocket Upgrade。此设置独立于 Responses 的
-`supports_websockets` 开关
+使用 `/voice` 时，将 Provider 的 `base_url`（创建通话）和顶层 `experimental_realtime_ws_base_url`（控制连接）
+都设为同一网关的 `/v1`，使用同一把客户端密钥。若单独设置了 `experimental_realtime_webrtc_call_base_url`，也要指向该地址。
+顶层设置写在第一个 TOML 表之前，保存后完全退出并重启 Codex
 
-已有配置需把 `experimental_realtime_ws_base_url` 合并到第一个 TOML 表之前，修改后完全退出并重启
-Codex。创建通话成功后仍报 `realtime websocket handshake failed` 时，先检查客户端日志中的
-`connecting realtime websocket` 是否指向网关；若仍为 `api.openai.com`，说明控制连接未经过代理
+反向代理须允许 WebSocket Upgrade，Responses 的 `supports_websockets` 开关不影响语音。
+若通话已创建但报 `realtime websocket handshake failed`，检查客户端日志中 `connecting realtime websocket` 的目标是否为网关
 
 语音使用具备上游权限的 OAuth 账号，音频流由客户端与上游直接传输，路由与限制见
 [Codex Live 语音通话](../docs/api.md#codex-live-语音通话)
@@ -667,14 +767,14 @@ metrics_exporter = "none"
 - 地址包含 `5173/dev/v1`：这是开发代理地址，依赖 Vite 服务。日常使用改成后端或 HTTPS 地址；
   验证 WebSocket 时直接连接后端，当前 Vite 代理未显式开启 WebSocket 转发
 
-其他客户端使用 Responses API、`/v1` Base URL 和代理密钥即可，不需要 Actor 标记。
-路由与请求格式见 [API 参考](../docs/api.md#3-openai-数据面与模型目录)
-
 ## 停止与重启
 
 管理端重启、SIGTERM 和 SIGINT 使用同一关闭策略：停止接收新连接，不等待现有 HTTP、SSE、
-WebSocket 会话完成，进程退出时强制断开剩余连接。已入队的观测写入与后台清理保留
+WebSocket 会话完成，进程退出时强制断开剩余连接。待写费用、已入队的观测与后台清理保留
 `host.worker_shutdown_timeout_seconds`（默认 30 秒）的收尾预算；客户端在新进程就绪后重新连接
+
+费用被写入队列接管不等于已落库。数据库持续失败、收尾超时或进程强制退出时，未持久化费用与
+未写入的观测可能丢失，重启不会恢复这些内存队列。延长收尾预算不能保证费用不丢失
 
 正常关闭会在后台收尾预算内释放本实例的账号并发占位，租约清理最多等待 2 秒。
 强制终止、清理超时或 Redis 清理失败时，占位由最后一次续期后的 10 分钟 TTL 回收，不影响其他实例的租约
@@ -710,7 +810,7 @@ Compose 使用以下绑定目录：
 
 PostgreSQL 是账号、Client Key、运行设置、请求记录与审计的权威存储；账号 credential 按
 Provider schema 以明文 JSON 保存于 PostgreSQL。Redis 只保存可重建、可过期的协调状态，例如
-会话亲和、lease、cooldown、OAuth pending flow 与套餐模型目录 cache
+会话亲和、lease、cooldown、OAuth pending flow 与模型目录缓存
 
 备份应覆盖哪些目录、如何生成一致性数据库归档，见 [备份与恢复](#备份与恢复)
 
@@ -799,7 +899,7 @@ OAuth 恢复开关为 `host.logging.oauth_recovery`，默认关闭，与普通�
 
 ### 插件取文与 DNS
 
-插件受管 HTTP 由实际运行网关的主机或容器解析 DNS，再通过直连或账号代理访问目标。插件拥有完整网络访问能力，宿主不按插件身份限制私网、回环或保留地址
+插件受管 HTTP 由实际运行网关的主机或容器解析 DNS，再通过所选代理或部署默认出口访问目标。插件拥有完整网络访问能力，宿主不按插件身份限制私网、回环或保留地址
 
 域名解析失败时先核对网关运行环境的 DNS。Clash / Mihomo 的 Fake-IP 地址需要相应代理接管；无法连通时可让目标域名返回真实地址，并检查所选代理。代理失败不会自动回退直连
 
@@ -807,15 +907,9 @@ OAuth 恢复开关为 `host.logging.oauth_recovery`，默认关闭，与普通�
 
 ## 密码语义
 
-- `admin.default_password` 只在首次创建管理员时使用
-- 已有管理员在「系统设置 → 安全与访问 → 管理员密码」修改登录密码，需要验证当前密码；修改后所有管理员会话失效，使用新密码重新登录
-- PostgreSQL 官方镜像只在空数据目录初始化时使用 `database.password`
-- Redis 在每次容器创建时使用 `redis.password`
-
-已有 PostgreSQL 数据目录后，直接修改 `database.password` 不会修改数据库用户密码，只会导致
-应用无法连接。轮换时必须先在 PostgreSQL 中修改用户密码，再同步更新 `config.yaml`。Redis
-密码变更后需要用新配置重新创建 Redis 和应用容器，不需要删除 Redis 数据目录。
-安排维护窗口，避免应用和 Redis 在过渡期间使用不同密码
+- **管理员**：`admin.default_password` 只在创建首个管理员时使用。已有管理员在「系统设置 → 安全与访问 → 管理员密码」验证当前密码后修改，所有管理员会话须重新登录
+- **PostgreSQL**：镜像只在空数据目录初始化时设置 `database.password`。轮换须先修改数据库用户密码，再同步更新 `config.yaml`，否则应用无法连接
+- **Redis**：容器创建时读取 `redis.password`。在维护窗口更新配置并重新创建 Redis 和应用容器，保留数据目录
 
 ## 镜像升级与源码构建
 
@@ -853,15 +947,13 @@ docker compose -f deploy/compose.yaml build codex-proxy-rs
 
 ### 升级前检查
 
-- OpenAI 或 xAI 授权使用已保存代理，且代理的 WebSocket 连接上限非零：升级或回退后，重新发起尚未完成的授权，不复用旧回调或授权码。上限为 `0` 的在途授权和已保存的账号、凭据不受影响
-- Key 配置含 `installationId`：数据库自动转换为 `installationSeed`，API 调用方须使用[当前字段](../docs/api.md#key-客户端身份)。出站安装身份及关联的会话、缓存标识会变化，已有 WebSocket 精确续写需重发完整上下文
-- 数据库或备份含 `accountAutoFreeze*` 设置：升级后错误保护关闭、规则为空，需在管理端重新配置并启用；API 调用方使用 [`accountErrorProtection`](../docs/api.md#账号错误保护)。已有冻结到当前冷却截止后解除，账号并发上限保留，需调整时手动设置
+- OpenAI 或 xAI 的在途授权若因代理 WebSocket 连接上限与保存值不匹配而失败，须重新发起授权，使用新的回调和授权码
+- Key 配置含 `installationId` 时，迁移会将其转为 `installationSeed`。API 调用方使用[安装身份种子](../docs/api.md#key-客户端身份)。这些 Key 的安装身份、会话与缓存标识会变化，WebSocket 精确续写须重发完整上下文
+- 数据库或备份含 `accountAutoFreeze*` 设置时，迁移后错误保护默认关闭、规则为空。需要保护的部署须配置并启用 [`accountErrorProtection`](../docs/api.md#账号错误保护)。已有冻结到期解除，账号并发上限保留原值
 
 ### 版本命名与升级规则
 
-管理端「系统更新」可临时选择通道检查更新，不保存选择，不会自动下载或安装。
-每次打开弹窗按当前运行版本匹配通道：正式版为 Stable，预发行按版本后缀匹配。
-升级并重启后按新运行版本匹配；侧栏更新提示始终使用当前运行通道。预发行编号 `N` 从 1 开始递增
+侧栏按运行通道提示更新。「系统更新」弹窗默认使用该通道，可临时切换，检查不会触发下载或安装。预发行编号 `N` 从 1 开始递增
 
 | 通道 | 命名示例 | 接收的版本 |
 | --- | --- | --- |
@@ -871,9 +963,7 @@ docker compose -f deploy/compose.yaml build codex-proxy-rs
 | Alpha | `X.Y.Z-alpha.N` | Alpha、Beta、RC、正式版 |
 | Exp | `X.Y.Z-exp.N` | 同一轮实验中编号更高的 exp，仅实验实例可选 |
 
-普通通道在同一大版本内持续接收更高版本，包括后续小版本和补丁版本的预发行。
-切换通道不会降级，Stable 候选也必须高于当前运行版本。
-下载、安装或待重启期间不能切换通道
+普通通道只接收同一大版本内高于运行版本的候选，包括表中允许的小版本和补丁预发行。下载、安装或待重启期间不能切换通道
 
 更新器读取更新仓库 `main` 分支的 `release/version.yaml`。`version` 是源码构建版本，只有 `published` 中当前大版本和通道对应的版本才参与更新检查
 
@@ -886,13 +976,10 @@ docker compose -f deploy/compose.yaml build codex-proxy-rs
 exp 不进入正式版、alpha、beta 或 rc，普通实例也不能选择 Exp。
 从 exp 切换正式版时需先备份，在目标版本的独立数据库中迁移业务数据，不能直接复用或整库还原实验数据库
 
-版本大小遵循 [SemVer](https://semver.org/)，构建元数据 `+...` 不参与比较。未知预发行标识不提供在线更新。
-更新器先过滤不允许的目标，再选择版本最高的候选；其他通道或更高大版本领先，不影响当前发行线的更新。
-只有当前官方构建满足在线更新条件且存在允许安装的新版本时，才返回“有可用更新”。否则不显示更新标记、
-其他通道的版本及发布说明，手动检查显示“当前没有可用更新”。检查失败单独报告，不能当作没有更新
+更新器按 [SemVer](https://semver.org/) 选取允许的最高版本，忽略构建元数据 `+...`。未知预发行标识不支持在线更新。无候选时，手动检查显示“当前没有可用更新”，检查失败单独提示
 
 alpha、beta、rc、exp 在 GitHub 标记为 Pre-release，不覆盖 GitHub Latest 或镜像 `latest`。
-升级前核对目标版本的数据库要求；可连续升级的发行线与约束见[迁移冻结规则](../backend/migrations/README.md#冻结规则)
+升级前确认 PostgreSQL 满足目标版本的[部署要求](#部署结构)。可连续升级的发行线与约束见[迁移冻结规则](../backend/migrations/README.md#冻结规则)
 
 ### 管理端在线更新
 
@@ -957,27 +1044,21 @@ Release 必须提供当前 OS/架构的 `codex-proxy-rs_<version>_<os>_<arch>.ta
 | `plugins/official/plugin-release-manifest.json` | 随平台安装包和镜像分发，记录宿主版本、提交与支持的插件合同 |
 | 可执行文件同目录的 `plugins/official` | 随受信宿主发行物部署的只读目录，与二进制、Web 资源成套更新或恢复 |
 
-- 下载更新时校验发行身份，插件合同不兼容不阻止安装。点击重启时检查已安装目标版本，列出不兼容插件的名称和原因；确认后重启，不兼容实例保持未启动，启用配置、绑定、密钥和私有数据保留
-- 回滚同样在重启前提示插件兼容风险，启动时重新检查，不改写持久启用配置。更新或回滚期间的并发配置变更会阻止切换，文件替换失败或取消时恢复整组文件
+- 更新和回滚时校验发行身份。插件版本不兼容仍可安装，重启前列出受影响的插件和原因，由管理员确认。并发配置变更阻止切换，文件替换失败或取消时恢复整组文件
 - 非空官方清单中的包经身份、平台和摘要校验后幂等导入；导入不确认信任、不创建配置、不启用，也不删除旧包。管理员确认信任后才执行默认配置流程；重复摘要保留首次安装出处
 - `sealed` 是构建封口标记，不是密码学签名。普通上传、URL 或 GitHub 安装不能获得 `builtin` 身份，独立教学示例也不例外
 
-宿主启动检查覆盖管理页更新、Docker 与手工替换二进制。不兼容实例不挂载任何能力或故障占位，其额外认证和拦截停止生效，宿主原生认证继续执行。
-宿主范围或能力版本不匹配时，可在插件页确认风险后尝试本次启动；清单、RPC、平台或包完整性错误不能绕过。具体操作见[插件故障处理](../docs/plugins.md#故障处理)
+所有部署在启动时检查插件兼容性。不兼容实例保持未启动，保留配置、绑定、密钥和私有数据。原生认证继续执行，插件提供的认证和拦截不生效。可确认的版本风险与须更换包的错误见[插件故障处理](../docs/plugins.md#故障处理)
 
 部署须保留完整的二进制、Web 资源与官方插件目录；不要手动修改制品元数据或迁移 checksum 绕过校验。
 插件安装包必须匹配宿主 OS 和架构，部署前需验证目标平台的插件运行与上游调用，不能只以打包成功判断可用
 
 ## 备份与恢复
 
-管理端 S3/R2 提供业务备份；需要完整请求历史时，另做 PostgreSQL 整库备份或基础备份与 WAL 归档
-
-不要在 PostgreSQL 写入期间直接复制数据目录作为一致性备份
-
 | 需要保留的内容 | 备份方式 |
 | --- | --- |
 | 账号、Key、设置、插件、已用额度与用量汇总 | 管理端 S3/R2 业务备份 |
-| 完整请求、诊断和审计历史 | 独立整库备份，或停库后备份 `.runtime/postgres` |
+| 完整请求、诊断和审计历史 | PostgreSQL 整库备份、基础备份与 WAL 归档，或停库后备份 `.runtime/postgres` |
 | 部署配置与凭据 | 单独备份 `deploy/config.yaml` 及 Compose 自定义配置 |
 | 应用日志与已启用的 OAuth 恢复记录 | 单独备份 `.runtime/logs`，不包含在数据库归档中 |
 | 会话锚点与节点运行文件 | 按需备份 `.runtime/data` |
@@ -990,7 +1071,7 @@ OpenAI 主动额度重置卡及消费结果由上游持有，不属于本地备�
 ### 备份内容与限制
 
 业务归档为 `.sql.gz`，保留完整数据库结构和迁移记录，但不包含请求明细、诊断与审计日志、
-逐请求费用去重记录和可重建的统计明细。Key 当前日、周的已用额度独立保留
+逐请求费用去重记录和可重建的统计明细。归档保留 Key 当前日、周的窗口边界与已用额度。恢复后可沿用原窗口，更改边界须从恢复后的新周期开始
 
 原生用量按 UTC 小时保留全局请求数、成功/失败数、Token 和实际费用，每小时至多一行；
 插件维护的用量贡献按其原维度保留。原生汇总只覆盖备份快照中已发布且尚未被历史清理撤销的统计，
@@ -1002,7 +1083,7 @@ OpenAI 主动额度重置卡及消费结果由上游持有，不属于本地备�
 - 插件包体、固定来源、下载凭据、制品接受事实、实例配置、版本配置快照、敏感配置、功能范围绑定和私有状态都保存在
   PostgreSQL，随数据库一起备份。插件通过宿主回调读写的内置平台账号保存在同库的通用账号表。
   来源使用的出站代理及其认证也须随库恢复，不能只备份 `plugin_*` 表；来源代理与账号代理独立选择，
-  不依赖进程代理环境，故障时不会自动回退直连。
+  未指定时使用部署默认出口，故障时不会自动回退直连。
   包体单个上限为 32 MiB，需要计入数据库及备份容量；解压运行目录和 Redis 协调状态是可重建数据，
   不作为插件安装或制品接受事实。恢复时保留制品接受状态、实例配置、账号引用和状态代次的一致性；插件降级仍须
   通过状态兼容校验，不通过手工替换缓存目录回滚

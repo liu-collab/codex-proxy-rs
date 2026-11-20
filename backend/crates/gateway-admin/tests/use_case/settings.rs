@@ -60,7 +60,7 @@ async fn explicit_service_calls_freeze_empty_plan_and_cancel_before_entering_ter
             )
             .await
             .unwrap();
-        // 内部 pricing 不再单独进入插件链；显式调用只解析一次发布集合
+        // 每次显式调价只解析一次插件发布集合
         assert_eq!(resolutions.load(Ordering::SeqCst), expected);
     }
     store.updated.lock().unwrap().take();
@@ -343,6 +343,8 @@ async fn settings_should_reject_zero_refresh_margin_before_store_call() {
                     openai_session_affinity_ttl_hours: 24,
                     responses_max_decompressed_body_bytes: 64 * 1024 * 1024,
                     smart_scheduling: gateway_core::account::SmartSchedulingConfig::default(),
+                    quota_reset_window_weights: gateway_core::account::ResetWindowWeights::default(
+                    ),
                     min_codex_desktop_version: None,
                     min_codex_cli_version: None,
                     usage_retention_days: 31,
@@ -351,9 +353,10 @@ async fn settings_should_reject_zero_refresh_margin_before_store_call() {
                     account_error_protection:
                         gateway_core::account::AccountErrorProtection::default(),
                     account_warmup_enabled: false,
-                    account_warmup_schedule_time: "08:00".to_owned(),
+                    account_warmup_cron: "0 8 * * *".to_owned(),
                     account_warmup_model: None,
                     reset_credit_lead_minutes: 10,
+                    reset_credit_on_low_weekly_quota: false,
                     reset_credit_max_weekly_remaining_percent: None,
                 },
             },

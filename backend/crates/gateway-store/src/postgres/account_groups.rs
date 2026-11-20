@@ -242,7 +242,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
                     account.upstream_user_id, account.upstream_account_id, account.plan_type,
                     account.authentication_kind, account.credential_revision, account.outbound_proxy_id, account.outbound_proxy_url,
                     account.has_refresh_token, account.access_token_expires_at,
-                    account.next_refresh_at, account.enabled, account.auto_use_quota_credits, account.concurrency_limit,
+                    account.next_refresh_at, account.enabled, account.quota_settings, account.quota_paused, account.auto_use_quota_credits, account.concurrency_limit,
                     account.quota_observed_at, account.weight, account.model_access_json, account.credential_state, account.quota_access_state,
                     account.quota_evidence, account.quota_access_observed_at,
                     account.quota_reset_at, account.last_error_reason,
@@ -284,6 +284,7 @@ impl AccountGroupStore for PgAccountGroupRepository {
                     group_id,
                     account_id: account.id,
                     status: AccountStatusFacts {
+                        quota_paused: account.quota_paused,
                         enabled: account.enabled,
                         credential_state: account.credential_state,
                         access_token_expires_at: account.access_token_expires_at.map(Into::into),
@@ -453,7 +454,10 @@ impl AccountGroupStore for PgAccountGroupRepository {
                     .await
                     .map_err(|source| unavailable("check account group delete conflict", source))?;
                     if exists {
-                        Err(conflict(command.id.as_str()))
+                        Err(conflict(
+                            command.id.as_str(),
+                            ConflictKind::InvalidTransition,
+                        ))
                     } else {
                         Err(not_found_store(command.id.as_str()))
                     }
@@ -680,11 +684,15 @@ fn require_one(rows: u64, id: &str) -> StoreResult<()> {
 }
 
 fn map_group_write_error(error: sqlx::Error, id: &str) -> StoreError {
-    if error
-        .as_database_error()
-        .is_some_and(|database| database.is_unique_violation())
+    if let Some(database) = error.as_database_error()
+        && database.is_unique_violation()
     {
-        conflict(id)
+        let kind = if database.constraint() == Some("account_groups_name_uq") {
+            ConflictKind::DuplicateName
+        } else {
+            ConflictKind::InvalidTransition
+        };
+        conflict(id, kind)
     } else {
         unavailable("write account group", error)
     }
@@ -702,12 +710,12 @@ fn not_found_store(id: &str) -> StoreError {
     }
 }
 
-fn conflict(id: &str) -> StoreError {
+fn conflict(id: &str, kind: ConflictKind) -> StoreError {
     StoreError::Conflict {
         source: None,
         entity: ENTITY,
         id: id.to_owned(),
-        kind: ConflictKind::InvalidTransition,
+        kind,
     }
 }
 

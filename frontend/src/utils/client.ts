@@ -41,6 +41,8 @@ remote_compaction = "v2"
 X-OpenAI-Actor-Authorization = "proxy-managed"
 
 [features]
+api_key_model_discovery = true
+async_compaction = true
 image_generation = true
 goals = true
 # 客户端 0.156.0 起该开关默认关闭，显式打开才会使用上面的远端目录。

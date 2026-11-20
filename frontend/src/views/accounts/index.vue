@@ -143,7 +143,7 @@ const {
   connectionTestStartedAt,
   connectionTestFinishedAt,
   connectionTestDurationMs,
-  testingConnectionIds,
+  testingAccountId,
   loadingConnectionTestModels,
   refreshingConnectionTestModels,
   connectionTestSelectedModel,
@@ -313,6 +313,7 @@ const {
 
             <template #status="{ row }">
               <AccountStatusBadge
+                :quota="row.quota"
                 :status="row.status"
                 :error-reason="row.errorReason"
                 :error-message="row.errorMessage"
@@ -326,8 +327,8 @@ const {
             </template>
 
             <template #planType="{ row }">
-              <div class="flex min-w-0 justify-center">
-                <AccountPlanBadge :upstream="row.upstream" :authentication-kind="row.authenticationKind" :plan-type="row.planType" :plan-type-display="row.planTypeDisplay" />
+              <div class="-mx-3 flex min-w-0 justify-center">
+                <AccountPlanBadge wrap :upstream="row.upstream" :authentication-kind="row.authenticationKind" :plan-type="row.planType" :plan-type-display="row.planTypeDisplay" />
               </div>
             </template>
 
@@ -352,7 +353,7 @@ const {
                 :downloading-catalog="downloadingCatalogAccountIds.has(row.id)"
                 :recovering="recoveringAccountIds.has(row.id)"
                 :refreshing="refreshingAccountIds.has(row.id)"
-                :testing="testingConnectionIds.has(row.id)"
+                :testing="testingAccountId === row.id"
                 :toggling-scheduling="togglingSchedulingAccountIds.has(row.id)"
                 @edit="openAccountEdit"
                 @delete="requestDeleteAccount"

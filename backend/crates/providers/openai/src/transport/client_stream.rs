@@ -2,7 +2,10 @@
 
 use gateway_core::diagnostics::{StreamCapture, StreamFormat, TraceContext, diagnostic_json};
 
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 use futures::{StreamExt, TryStreamExt};
 use gateway_protocol::openai::{
@@ -32,8 +35,9 @@ use crate::transport::{
     },
     response_meta,
     websocket::{
-        CodexWebSocketConnection, CodexWebSocketExchangeError, CodexWebSocketPoolKey,
-        DEFAULT_STREAM_IDLE_TIMEOUT, WEBSOCKET_FAST_PATH_BUDGET, WebSocketFastPath,
+        CodexWebSocketConnection, CodexWebSocketExchangeError, CodexWebSocketPool,
+        CodexWebSocketPoolKey, DEFAULT_FAST_PATH_BUDGET_MS, DEFAULT_STREAM_IDLE_TIMEOUT,
+        PreviousResponseUnavailableReason, WebSocketFastPath,
         execute_prepared_response_create_request_stream, post_send_ambiguous,
         prepare_response_create_request_with_pool, websocket_audit_dir,
         write_websocket_audit_artifact_from_env,
@@ -344,6 +348,17 @@ impl CodexBackendClient {
             connection_profile.push('\0');
             connection_profile.push_str(&profile);
         }
+        // 上游按握手继承整条路径，不能把本轮请求交给其他路径建立的连接
+        if let Some((_, route)) = websocket_create
+            .connection()
+            .headers()
+            .iter()
+            .find(|(name, _)| name == gateway_protocol::peer::ROUTE_HEADER)
+        {
+            use sha2::{Digest, Sha256};
+            connection_profile.push_str("\0peer:");
+            connection_profile.push_str(&hex::encode(Sha256::digest(route.as_bytes())));
+        }
         let pool_key =
             self.websocket_pool_key(request, context, pool_account_id, &connection_profile);
         let pool_log_context = pool_key.as_ref().map(WebSocketPoolLogContext::from_key);
@@ -364,7 +379,10 @@ impl CodexBackendClient {
             .map(|pool| (pool, pool_key, downstream_cancellation));
         let fast_path_budget = match requirement {
             TransportRequirement::PersistedContinuation | TransportRequirement::NewChain => {
-                Some(WEBSOCKET_FAST_PATH_BUDGET)
+                Some(self.websocket_pool.as_deref().map_or(
+                    Duration::from_millis(DEFAULT_FAST_PATH_BUDGET_MS),
+                    CodexWebSocketPool::fast_path_budget,
+                ))
             }
             TransportRequirement::ExplicitWebSocketWarmup
             | TransportRequirement::WebSocketNewChain
@@ -448,6 +466,51 @@ impl CodexBackendClient {
             }
             Err(error) => return Err(websocket_exchange_error_to_client_error(error)),
         };
+        // 按最终出站帧的 UTF-8 字节数判断，握手上限只属于当前物理连接
+        if let Some(limit) = prepared.max_message_bytes()
+            && websocket_create.payload_text().len() > limit
+        {
+            let metrics = CodexTransportMetrics {
+                decision: Some(CodexTransportDecision::Http2WebSocketMessageTooLarge),
+                ws_connect_ms: prepared.connect_elapsed().map(elapsed_duration_millis),
+                transport_decision_wait_ms: Some(elapsed_duration_millis(
+                    prepared.decision_wait_elapsed(),
+                )),
+                ..CodexTransportMetrics::default()
+            };
+            prepared.discard().await;
+            let error = match requirement {
+                TransportRequirement::ExactWebSocketContinuation => {
+                    Some(CodexWebSocketExchangeError::ContinuationUnavailable {
+                        reason: PreviousResponseUnavailableReason::PayloadTooLarge,
+                    })
+                }
+                TransportRequirement::ExplicitWebSocketWarmup => {
+                    Some(CodexWebSocketExchangeError::MessageTooLarge)
+                }
+                TransportRequirement::HttpRequired
+                | TransportRequirement::WebSocketNewChain
+                | TransportRequirement::PersistedContinuation
+                | TransportRequirement::ExternalUnknown
+                | TransportRequirement::NewChain => None,
+            };
+            if let Some(error) = error {
+                return Err(websocket_exchange_error_to_client_error(error));
+            }
+            context.trace.cloned().unwrap_or_default().record(
+                "transport.fallback",
+                serde_json::json!({
+                    "to": "http_sse", "reason": "websocket_message_too_large",
+                    "requirement": requirement.as_str(), "limitBytes": limit,
+                    "payloadBytes": websocket_create.payload_text().len(),
+                }),
+            );
+            return Ok(PreparedResponseTransport {
+                requirement,
+                route: PreparedResponseRoute::Http,
+                metrics,
+            });
+        }
         let decision = websocket_success_decision(requirement, &prepared);
         context.trace.cloned().unwrap_or_default().record(
             "transport.prepared",

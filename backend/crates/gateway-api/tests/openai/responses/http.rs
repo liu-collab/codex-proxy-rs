@@ -1425,27 +1425,40 @@ async fn streaming_error_after_initial_keepalive_should_be_a_terminal_sse_failur
 }
 
 #[tokio::test(start_paused = true)]
-async fn streaming_late_upstream_error_should_preserve_extended_error_fields() {
+async fn streaming_bad_request_preserves_extended_error_fields_before_and_after_keepalive() {
     let mut error = json!({
         "type": "invalid_request_error", "code": "misalignment_policy_violation",
         "message": "synthetic policy error", "misalignment": {"category": "synthetic"},
         "extension": {"opaque": true}
     });
-    let failure = ProviderError::new(ProviderErrorKind::InvalidRequest, UpstreamSendState::Sent)
-        .with_client_visible_upstream_response(
-            ClientVisibleUpstreamResponse::new(
-                400,
-                Some(b"application/json".to_vec()),
-                Bytes::from(json!({"error": error}).to_string()),
+    let failure = || {
+        ProviderError::new(ProviderErrorKind::InvalidRequest, UpstreamSendState::Sent)
+            .with_client_visible_upstream_response(
+                ClientVisibleUpstreamResponse::new(
+                    400,
+                    Some(b"application/json".to_vec()),
+                    Bytes::from(json!({"error": error}).to_string()),
+                )
+                .with_headers(headers(&[("retry-after", "7")])),
             )
-            .with_headers(headers(&[("retry-after", "7")])),
-        );
-    error["headers"] = json!({"retry-after": "7"});
+    };
+    let immediate = FakeSession::streaming(
+        Arc::new(Trace::default()),
+        vec![NextStep::Error(EngineError::Provider(failure()))],
+    );
+    let response = stream_execution_response(Box::new(immediate), None).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.headers()[CONTENT_TYPE], "application/json");
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&bytes).unwrap(),
+        json!({"error": error})
+    );
     let session = FakeSession::streaming(
         Arc::new(Trace::default()),
         vec![NextStep::DelayedError(
             Duration::from_secs(30),
-            EngineError::Provider(failure),
+            EngineError::Provider(failure()),
         )],
     );
     let response = stream_execution_response(Box::new(session), None).await;
@@ -1457,6 +1470,7 @@ async fn streaming_late_upstream_error_should_preserve_extended_error_fields() {
         .find(|event| event.event.as_deref() == Some("response.failed"))
         .unwrap();
     let payload: Value = serde_json::from_str(&failed.data).unwrap();
+    error["headers"] = json!({"retry-after": "7"});
     assert_eq!(payload["response"]["error"], error);
     assert!(bytes.ends_with(b"data: [DONE]\n\n"));
 }
@@ -2211,13 +2225,14 @@ async fn streaming_upstream_wire_failure_should_not_be_rewritten_as_a_gateway_er
 
 #[tokio::test]
 async fn streaming_upstream_error_event_should_be_translated_to_response_failed_for_sse() {
-    for (error_type, code, client_code, kind, client_status) in [
+    for (error_type, code, client_code, kind, client_status, keeps_retry_after) in [
         (
             "service_unavailable_error",
             "server_is_overloaded",
             "server_error",
             ProviderErrorKind::UpstreamCapacityUnavailable,
             503,
+            false,
         ),
         (
             "rate_limit_error",
@@ -2225,13 +2240,14 @@ async fn streaming_upstream_error_event_should_be_translated_to_response_failed_
             "turn_rate_limit_exceeded",
             ProviderErrorKind::RateLimited,
             429,
+            true,
         ),
     ] {
         let trace = Arc::new(Trace::default());
         let error_data = json!({
             "type": "error",
             "status": 429,
-            "headers": {"Retry-After": "24"},
+            "headers": {"Retry-After": "24", "retry-after-ms": "24000", "x-request-id": "req_test"},
             "error": {
                 "type": error_type,
                 "code": code,
@@ -2301,6 +2317,31 @@ async fn streaming_upstream_error_event_should_be_translated_to_response_failed_
             .find(|event| event.event.as_deref() == Some("response.failed"))
             .expect("translated response.failed event");
         let failed: Value = serde_json::from_str(&failed.data).expect("response.failed JSON");
+        let mut expected = json!({
+            "type": "response.failed",
+            "status": client_status,
+            "headers": {"x-request-id": "req_test"},
+            "response": {
+                "id": "resp_test",
+                "model": "public-model",
+                "status": "failed",
+                "error": {
+                    "type": error_type,
+                    "code": client_code,
+                    "message": "Our servers are currently overloaded. Please try again later.",
+                    "param": null,
+                    "future_error_field": {"keep": true}
+                },
+                "future_response_field": {"keep": true}
+            },
+            "sequence_number": 2,
+            "future_event_field": {"keep": true}
+        });
+        if keeps_retry_after {
+            expected["headers"]["Retry-After"] = json!("24");
+            expected["headers"]["retry-after-ms"] = json!("24000");
+            expected["response"]["error"]["headers"] = json!({"retry-after": "24"});
+        }
 
         assert_eq!(
             (
@@ -2309,32 +2350,8 @@ async fn streaming_upstream_error_event_should_be_translated_to_response_failed_
                 body.contains("event: error\n"),
                 body.ends_with("data: [DONE]\n\n"),
             ),
-            (
-                json!({
-                    "type": "response.failed",
-                    "status": client_status,
-                    "headers": {"Retry-After": "24"},
-                    "response": {
-                        "id": "resp_test",
-                        "model": "public-model",
-                        "status": "failed",
-                        "error": {
-                            "type": error_type,
-                            "code": client_code,
-                            "message": "Our servers are currently overloaded. Please try again later.",
-                            "param": null,
-                            "future_error_field": {"keep": true},
-                            "headers": {"retry-after": "24"}
-                        },
-                        "future_response_field": {"keep": true}
-                    },
-                    "sequence_number": 2,
-                    "future_event_field": {"keep": true}
-                }),
-                1,
-                false,
-                true,
-            )
+            (expected, 1, false, true),
+            "{code}"
         );
     }
 }
@@ -2998,20 +3015,21 @@ struct SessionExecution {
 #[tokio::test]
 async fn official_core_clients_should_be_version_checked_before_starting_responses() {
     let admin = crate::admin::AdminTestFixture::new().await.services;
-    for product in [
-        "codex-tui",
-        "codex_exec",
-        "codex_vscode",
-        "codex_sdk_ts",
-        "codex_python_sdk",
+    for (product, client) in [
+        ("codex-tui", "codex-tui"),
+        ("codex_exec", "codex_exec"),
+        ("codex_vscode", "codex_vscode"),
+        ("codex_sdk_ts", "codex_sdk_ts"),
+        ("codex_python_sdk", "codex_python_sdk"),
+        ("Codex Desktop", "codex-tui"),
     ] {
-        for (version, allowed) in [("0.158.0", false), ("0.162.0", true)] {
+        for (version, allowed) in [("0.168.0", false), ("0.170.0", true)] {
             let trace = Arc::new(Trace::default());
             let execution = Arc::new(SessionExecution {
                 client: authenticated_client_with_min_versions(
                     "sk_version_test",
-                    None,
-                    Some("0.162.0"),
+                    Some("26.1023.51421"),
+                    Some("0.170.0"),
                 ),
                 session: Mutex::new(Some(Box::new(FakeSession::streaming(
                     Arc::clone(&trace),
@@ -3029,7 +3047,7 @@ async fn official_core_clients_should_be_version_checked_before_starting_respons
             let request = Request::post("/v1/responses")
                 .header(AUTHORIZATION, "Bearer sk_version_test")
                 .header("user-agent", format!(
-                    "{product}/{version} (Mac OS 26.6.2; arm64) Apple_Terminal ({product}; 0.165.0)"
+                    "{product}/{version} (Ubuntu 26.4.0; aarch64) xterm-256color ({client}; 0.169.0)"
                 ))
                 .body(Body::from(json!({"model": "model-a", "input": "synthetic", "stream": true}).to_string()))
                 .unwrap();
@@ -3050,8 +3068,9 @@ async fn official_core_clients_should_be_version_checked_before_starting_respons
                 assert_eq!(status, StatusCode::BAD_REQUEST, "{product}/{version}");
                 let value: Value = serde_json::from_slice(&body).unwrap();
                 assert_eq!(value["error"]["code"], "client_version_too_old");
+                assert_eq!(value["error"]["client"], "codex_cli");
                 assert_eq!(value["error"]["current_version"], version);
-                assert_eq!(value["error"]["min_version"], "0.162.0");
+                assert_eq!(value["error"]["min_version"], "0.170.0");
                 assert!(execution.session.lock().unwrap().is_some());
             }
         }
